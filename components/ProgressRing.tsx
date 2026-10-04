@@ -4,9 +4,10 @@
 import React from 'react';
 import { View, Text } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
+import { ON_MEDIA_INK } from '../constants/theme';
 
 export function ProgressRing({
-  progress, size = 46, stroke = 3, color = '#fff',
+  progress, size = 46, stroke = 3, color = ON_MEDIA_INK,
 }: { progress: number; size?: number; stroke?: number; color?: string }) {
   const p = Math.max(0, Math.min(1, progress));
   const r = (size - stroke) / 2;

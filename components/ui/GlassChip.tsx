@@ -10,6 +10,7 @@ import { StyleSheet, TouchableOpacity, View, type StyleProp, type ViewStyle } fr
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { GLASS, GLOW } from '../../constants/glass';
+import { GRADIENT_INK } from '../../constants/theme';
 import { useColors, useTheme } from '../../lib/theme';
 import { AppText } from './Text';
 
@@ -27,9 +28,11 @@ export interface GlassChipProps {
 export function GlassChip({ label, count, active = false, onPress, icon, style, testID }: GlassChipProps) {
   const c = useColors();
   const { scheme } = useTheme();
-  // White on the accent gradient is the deliberate contrast choice in both
-  // themes (the deep end is 4.5:1 against white); idle text is the dim token.
-  const fg = active ? '#FFFFFF' : c.textDim;
+  // White on the accent gradient (constants/theme GRADIENT_INK); idle text is
+  // the dim token. Light's flat accentDeep is 6.33:1. Dark's gradient starts at
+  // accentLight, where white is only 2.09:1 — pinned as "unchanged" by
+  // lib/sharedLightRendering.selftest.ts, so changing it is a coordinated edit.
+  const fg = active ? GRADIENT_INK : c.textDim;
   const showCount = typeof count === 'number' && count > 0;
   const inner = (
     <View style={styles.row}>

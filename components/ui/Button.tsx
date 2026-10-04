@@ -11,7 +11,7 @@ import {
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { BRAND_GRADIENT_CTA, RADIUS, SPACING, ELEVATION } from '../../constants/theme';
+import { BRAND_GRADIENT_CTA, DANGER_GRADIENT_CTA, GRADIENT_INK, RADIUS, SPACING, ELEVATION } from '../../constants/theme';
 import { glassShadow } from '../../constants/glass';
 import { useColors, useTheme } from '../../lib/theme';
 import { AppText } from './Text';
@@ -50,9 +50,10 @@ export function Button({
     variant === 'primary' ? Aurora.accentDeep
     : variant === 'danger' ? Aurora.danger
     : variant === 'secondary' ? Aurora.glass : 'transparent';
+  // Primary and danger draw on a gradient, not the solid token fill, so their
+  // ink is the gradients' own (AA on every stop), not onPrimary/onDanger.
   const fg =
-    variant === 'primary' ? '#FFFFFF'
-    : variant === 'danger' ? '#FFFFFF'
+    variant === 'primary' || variant === 'danger' ? GRADIENT_INK
     : (variant === 'ghost' || variant === 'outline') ? Aurora.accentOn : Aurora.text;
   const border =
     variant === 'secondary' ? Aurora.glassStroke
@@ -60,7 +61,7 @@ export function Button({
   const filled = variant === 'primary' || variant === 'danger';
   const gradient = variant === 'primary'
     ? BRAND_GRADIENT_CTA
-    : variant === 'danger' ? ['#FB7185', '#B42318'] as const : null;
+    : variant === 'danger' ? DANGER_GRADIENT_CTA : null;
 
   return (
     <TouchableOpacity

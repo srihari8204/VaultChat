@@ -1,8 +1,9 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import * as Sentry from '@sentry/react-native';
-// A plain constant (constants/theme imports nothing): no context is read here.
-import { FALLBACK_GROUND } from '../constants/theme';
+// Plain constants (constants/gatePalette imports only constants/theme, which
+// imports nothing): no context is read here.
+import { CRASH_SCREEN as P } from '../constants/gatePalette';
 
 interface Props {
   children: React.ReactNode;
@@ -61,9 +62,9 @@ export class ErrorBoundary extends React.Component<Props, State> {
 export default ErrorBoundary;
 
 const s = StyleSheet.create({
-  wrap:   { flex: 1, backgroundColor: FALLBACK_GROUND, alignItems: 'center', justifyContent: 'center', padding: 32 },
-  title:  { color: '#FF3C6E', fontSize: 20, fontWeight: 'bold', marginBottom: 12, textAlign: 'center' },
-  msg:    { color: '#888', fontSize: 14, textAlign: 'center', lineHeight: 22, marginBottom: 24 },
-  btn:    { backgroundColor: '#00E5FF', borderRadius: 10, paddingHorizontal: 24, paddingVertical: 12 },
-  btnTxt: { color: '#000', fontSize: 15, fontWeight: 'bold' },
+  wrap:   { flex: 1, backgroundColor: P.ground, alignItems: 'center', justifyContent: 'center', padding: 32 },
+  title:  { color: P.title, fontSize: 20, fontWeight: 'bold', marginBottom: 12, textAlign: 'center' },
+  msg:    { color: P.body, fontSize: 14, textAlign: 'center', lineHeight: 22, marginBottom: 24 },
+  btn:    { backgroundColor: P.button, borderRadius: 10, paddingHorizontal: 24, paddingVertical: 12 },
+  btnTxt: { color: P.onButton, fontSize: 15, fontWeight: 'bold' },
 });

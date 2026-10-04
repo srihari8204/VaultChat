@@ -22,6 +22,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { usePathname } from 'expo-router';
 
 import { SERVER_URL } from '../constants/server';
+import { TERMS_GATE as G } from '../constants/gatePalette';
 import { hasSession } from '../lib/api';
 import { isLockOrAuthRoute } from '../lib/pendingLink';
 // AUDIT F8. The first screen a new user sees is the worst place to be speaking
@@ -144,7 +145,7 @@ export function TermsGate({ children }: { children: React.ReactNode }) {
           and the accept button was pushed off the bottom with no way to reach it. */}
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
       <View style={styles.icon} accessibilityElementsHidden importantForAccessibility="no">
-        <Ionicons name={isUpdate ? 'refresh-circle' : 'document-text'} size={44} color="#fff" />
+        <Ionicons name={isUpdate ? 'refresh-circle' : 'document-text'} size={44} color={G.onAccent} />
       </View>
 
       <Text style={styles.title} accessibilityRole="header">
@@ -156,15 +157,15 @@ export function TermsGate({ children }: { children: React.ReactNode }) {
       </Text>
 
       <TouchableOpacity style={styles.link} onPress={() => open(termsHref)} accessibilityRole="link">
-        <Ionicons name="document-text-outline" size={18} color="#B48CE8" />
+        <Ionicons name="document-text-outline" size={18} color={G.linkIcon} />
         <Text style={styles.linkTxt}>{t('terms.read.terms')}</Text>
-        <Ionicons name="open-outline" size={15} color="#8A879B" />
+        <Ionicons name="open-outline" size={15} color={G.linkOpenIcon} />
       </TouchableOpacity>
 
       <TouchableOpacity style={styles.link} onPress={() => open(`${SERVER_URL}/privacy`)} accessibilityRole="link">
-        <Ionicons name="lock-closed-outline" size={18} color="#B48CE8" />
+        <Ionicons name="lock-closed-outline" size={18} color={G.linkIcon} />
         <Text style={styles.linkTxt}>{t('terms.read.privacy')}</Text>
-        <Ionicons name="open-outline" size={15} color="#8A879B" />
+        <Ionicons name="open-outline" size={15} color={G.linkOpenIcon} />
       </TouchableOpacity>
 
       {error && <Text style={styles.error} accessibilityLiveRegion="polite">{error}</Text>}
@@ -177,7 +178,7 @@ export function TermsGate({ children }: { children: React.ReactNode }) {
         accessibilityState={{ disabled: busy, busy }}
       >
         {busy
-          ? <ActivityIndicator color="#fff" />
+          ? <ActivityIndicator color={G.onAccent} />
           : <Text style={styles.buttonTxt}>{t('terms.agree')}</Text>}
       </TouchableOpacity>
 
@@ -192,51 +193,52 @@ export function TermsGate({ children }: { children: React.ReactNode }) {
 const styles = StyleSheet.create({
   // Always dark, like the other full-screen gates in this app — it is a system
   // surface shown before the themed shell exists, so it cannot depend on theme
-  // state having loaded. theme-exempt: deliberate system surface.
+  // state having loaded. The fixed palette and its contrast checks live in
+  // constants/gatePalette.ts.
   block: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#0F1115',   // theme-exempt: shown before the themed shell exists
+    backgroundColor: G.ground,
     zIndex: 9999,
   },
   scroll: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28, paddingVertical: 48 },
   icon: {
     width: 84, height: 84, borderRadius: 42,
-    backgroundColor: '#9D6FD0',
+    backgroundColor: G.accent,
     alignItems: 'center', justifyContent: 'center',
     marginBottom: 22,
   },
   // minHeight, never height: these strings grow with the system font scale and
   // a fixed height would clip them (see the test:layout guard).
   title: {
-    color: '#F2F2F6', fontSize: 22, fontWeight: '700',
+    color: G.title, fontSize: 22, fontWeight: '700',
     textAlign: 'center', minHeight: 28, marginBottom: 10,
   },
   body: {
-    color: '#A5A2B5', fontSize: 15, lineHeight: 22, minHeight: 22,   // theme-exempt: always-dark gate
+    color: G.body, fontSize: 15, lineHeight: 22, minHeight: 22,
     textAlign: 'center', marginBottom: 24, maxWidth: 420,
   },
   link: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     alignSelf: 'stretch', maxWidth: 420,
     paddingVertical: 14, paddingHorizontal: 16,
-    borderRadius: 10, borderWidth: 1, borderColor: '#242833',   // theme-exempt: always-dark gate
-    backgroundColor: '#171A21',   // theme-exempt: always-dark gate
+    borderRadius: 10, borderWidth: 1, borderColor: G.linkStroke,
+    backgroundColor: G.linkFill,
     marginBottom: 10,
   },
-  linkTxt: { color: '#E7E9EE', fontSize: 15, flex: 1, minHeight: 20 },   // theme-exempt: always-dark gate
+  linkTxt: { color: G.linkText, fontSize: 15, flex: 1, minHeight: 20 },
   error: {
-    color: '#F1737A', fontSize: 13.5, lineHeight: 19, minHeight: 19,
+    color: G.error, fontSize: 13.5, lineHeight: 19, minHeight: 19,
     textAlign: 'center', marginTop: 12, maxWidth: 420,
   },
   button: {
     marginTop: 22, alignSelf: 'stretch', maxWidth: 420,
-    backgroundColor: '#9D6FD0', borderRadius: 12,
+    backgroundColor: G.accent, borderRadius: 12,
     paddingVertical: 15, alignItems: 'center', minHeight: 50, justifyContent: 'center',
   },
   buttonBusy: { opacity: 0.7 },
-  buttonTxt: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  buttonTxt: { color: G.onAccent, fontSize: 16, fontWeight: '700' },
   foot: {
-    color: '#75728A', fontSize: 12.5, lineHeight: 18, minHeight: 18,   // theme-exempt: always-dark gate
+    color: G.foot, fontSize: 12.5, lineHeight: 18, minHeight: 18,
     textAlign: 'center', marginTop: 14, maxWidth: 420,
   },
 });

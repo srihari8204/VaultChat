@@ -3,7 +3,7 @@
 
 import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Pressable } from 'react-native';
-import type { Palette } from '../constants/theme';
+import { ELEVATION, type Palette } from '../constants/theme';
 import { useColors } from '../lib/theme';
 
 const EMOJIS = ['❤️', '😂', '👍', '😮', '😢', '🔥', '👏', '🙏'];
@@ -40,8 +40,8 @@ const makeS = (c: Palette) => StyleSheet.create({
     position: 'absolute', bottom: 120, alignSelf: 'center',
     flexDirection: 'row', backgroundColor: c.bg,
     borderRadius: 30, paddingHorizontal: 8, paddingVertical: 6,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4, shadowRadius: 8, elevation: 10,
+    // ELEVATION.md's colour, offset and radius, a little heavier for a floating picker.
+    ...ELEVATION.md, shadowOpacity: 0.4, elevation: 10,
     borderWidth: 1, borderColor: c.glassStroke,
   },
   emojiBtn: { padding: 6 },

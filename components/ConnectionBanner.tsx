@@ -8,7 +8,7 @@
 import React, { useMemo } from 'react';
 import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import { useConnectionState } from '../lib/socket';
-import { AuroraLight, type Palette } from '../constants/theme';
+import { AuroraLight, STATUS_STRIP_INK, type Palette } from '../constants/theme';
 import { useColors, useTheme } from '../lib/theme';
 
 export default function ConnectionBanner() {
@@ -19,7 +19,7 @@ export default function ConnectionBanner() {
   if (state === 'ONLINE') return null;
 
   const connecting = state === 'CONNECTING';
-  const ink = connecting && scheme === 'light' ? c.text : '#fff';
+  const ink = connecting && scheme === 'light' ? c.text : STATUS_STRIP_INK;
   return (
     // Android announces the strip as it appears and changes state.
     <View style={[styles.bar, connecting ? styles.connecting : styles.offline]} accessibilityLiveRegion="polite">
@@ -36,5 +36,5 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   // theme's brighter danger was ~3.8:1, under AA; on this one it is ~6.5:1.
   offline: { backgroundColor: AuroraLight.danger },
   spinner: { marginRight: 8 },
-  txt: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  txt: { color: STATUS_STRIP_INK, fontSize: 13, fontWeight: '600' },
 });

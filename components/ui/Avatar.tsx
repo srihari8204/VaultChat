@@ -13,6 +13,7 @@ import { avatarColor, avatarRing } from '../../constants/theme';
 import { useColors } from '../../lib/theme';
 import { AppText } from './Text';
 import { initialOf } from '../../lib/format';
+import { inkOn } from '../../lib/groups/catalog';
 
 export interface AvatarProps {
   /** Remote image URL (auth-gated /uploads etc). Falls back to initials if absent. */
@@ -54,6 +55,7 @@ export function Avatar({ uri, headers, name, size = 48, presence, style, anon, r
   const dim = { width: inner, height: inner, borderRadius: inner / 2 };
   const outer = { width: size, height: size, borderRadius: size / 2 };
   const dotSize = Math.max(10, Math.round(size * 0.28));
+  const discFill = ring ? c.groundDisc : avatarColor(name || initial);
 
   const art = (
     <>
@@ -76,11 +78,12 @@ export function Avatar({ uri, headers, name, size = 48, presence, style, anon, r
       ) : (
         // Ringed avatars put the colour in the ring, so the disc stays dark and
         // the initial keeps full contrast against it.
-        <View style={[dim, styles.center, { backgroundColor: ring ? c.groundDisc : avatarColor(name || initial) }]}>
+        <View style={[dim, styles.center, { backgroundColor: discFill }]}>
           {/* A ringed avatar's disc is `groundDisc`, which is WHITE in the light
               palette — a hardcoded white initial vanished on it. Unringed, the
-              disc is a saturated avatarColor where white is still correct. */}
-          <AppText style={{ fontSize: inner * 0.4, color: ring ? c.text : '#FFFFFF', fontWeight: '800' }}>{initial}</AppText>
+              disc is a saturated avatarColor: white or the night ink, whichever
+              reads better on it (white was 2.2–2.5:1 on the amber/cyan/teal ones). */}
+          <AppText style={{ fontSize: inner * 0.4, color: ring ? c.text : inkOn(discFill), fontWeight: '800' }}>{initial}</AppText>
         </View>
       )}
     </>

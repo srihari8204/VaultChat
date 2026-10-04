@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
-import { AuroraLight } from '../constants/theme';
+import { AuroraLight, STATUS_STRIP_INK } from '../constants/theme';
 
 export default function NetworkBanner() {
   const s = useMemo(() => makeS(), []);
@@ -23,9 +23,9 @@ export default function NetworkBanner() {
   );
 }
 
-// The light theme's danger in both schemes: white text on the old '#FF3C6E'
+// The light theme's danger in both schemes: white text on the old #FF3C6E
 // was ~3.3:1, under AA; on this one it is ~6.5:1.
 const makeS = () => StyleSheet.create({
   banner: { backgroundColor: AuroraLight.danger, paddingVertical: 6, alignItems: 'center' },
-  txt: { color: '#fff', fontSize: 12, fontWeight: '800' },
+  txt: { color: STATUS_STRIP_INK, fontSize: 12, fontWeight: '800' },
 });

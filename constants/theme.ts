@@ -183,6 +183,43 @@ export const BRAND_GRADIENT = [BRAND_CYAN, BRAND_ACCENT, BRAND_VIOLET] as const;
 export const BRAND_GRADIENT_CTA = [BRAND_BLUE, BRAND_VIOLET] as const;
 
 /**
+ * The danger CTA gradient (components/ui/Button variant="danger"), top-left →
+ * bottom-right. A gradient is only as readable as its lightest stop: the old
+ * light end #FB7185 was 2.69:1 under the white label. #E11D48 keeps the rose
+ * hue at 4.70:1; the deep end #B42318 (AuroraLight.danger) is 6.57:1. The
+ * `danger` palette token is unchanged — this is the button's fill only.
+ */
+export const DANGER_GRADIENT_CTA = ['#E11D48', '#B42318'] as const;
+
+/**
+ * Label/icon ink on the filled brand gradients: Button's primary
+ * (BRAND_GRADIENT_CTA) and danger (DANGER_GRADIENT_CTA) fills and the active
+ * GlassChip. Fixed white in both schemes and deliberately NOT `onPrimary` /
+ * `onDanger`: those are inks for the SOLID primary/danger fills, whose dark
+ * values await the owner's decision, and a near-black ink would be unreadable
+ * on these gradients' deep ends. constants/paletteContrast.selftest.ts holds
+ * the Button gradients' stops to AA (4.5:1) against it. (constants/brandCtaInk's
+ * BRAND_CTA_INK is the same white for the auth screens' CTAs.)
+ */
+export const GRADIENT_INK = '#FFFFFF';
+
+/**
+ * Ink on the connectivity strips (components/ConnectionBanner, NetworkBanner):
+ * the offline strip is AuroraLight.danger in both schemes (6.57:1) and the
+ * dark-scheme "Connecting…" strip is AuroraDark.surfaceSolid. Light-scheme
+ * "Connecting…" uses the theme's text instead. Checked in
+ * constants/paletteContrast.selftest.ts.
+ */
+export const STATUS_STRIP_INK = '#fff';
+
+/**
+ * Ink drawn on the dark scrim over a photo or video (components/ProgressRing's
+ * default — the download/upload rings in chat bubbles). Fixed white: the
+ * picture underneath has no theme, so the scrim, not the palette, carries it.
+ */
+export const ON_MEDIA_INK = '#FFFFFF';
+
+/**
  * The night the splash is lit against, and the ink the wordmark is set in.
  *
  * BRAND_NIGHT is the actual background of splashscreen.png. The auth screens use

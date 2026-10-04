@@ -23,6 +23,7 @@ import {
 } from '../lib/appVersion';
 // The catalog's update.* keys, as TermsGate uses terms.* (lib/i18n).
 import { t, useLang } from '../lib/i18n';
+import { UPDATE_GATE as G } from '../constants/gatePalette';
 
 /** Re-ask the server on foreground at most this often: a floor raised while the
  *  app sat in the background must still apply, without a request per resume. */
@@ -86,7 +87,7 @@ export function UpdateGate({ children }: { children: React.ReactNode }) {
   if (verdict === 'blocked') {
     return (
       <View style={styles.block}>
-        <View style={styles.icon} accessibilityElementsHidden importantForAccessibility="no"><Ionicons name="arrow-up-circle" size={44} color="#fff" /></View>
+        <View style={styles.icon} accessibilityElementsHidden importantForAccessibility="no"><Ionicons name="arrow-up-circle" size={44} color={G.onIconDisc} /></View>
         <Text style={styles.title} accessibilityRole="header">{t('update.blocked.title')}</Text>
         <Text style={styles.body}>
           {gate?.message?.trim() ? gate.message : t('update.blocked.body')}
@@ -110,14 +111,14 @@ export function UpdateGate({ children }: { children: React.ReactNode }) {
     <View style={{ flex: 1 }}>
       {verdict === 'advise' && !dismissed && (
         <View style={[styles.bar, { paddingTop: 9 + insets.top }]}>
-          <Ionicons name="arrow-up-circle-outline" size={17} color="#fff" />
+          <Ionicons name="arrow-up-circle-outline" size={17} color={G.onBar} />
           <Text style={styles.barTxt} numberOfLines={1}>{t('update.advise.body')}</Text>
           <TouchableOpacity onPress={openStore} accessibilityRole="button" accessibilityLabel={t('update.advise.label')} hitSlop={12}>
             <Text style={styles.barCta}>{t('update.advise.cta')}</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setDismissed(true)} accessibilityRole="button"
             accessibilityLabel={t('update.dismiss')} hitSlop={14}>
-            <Ionicons name="close" size={17} color="rgba(255,255,255,0.8)" />
+            <Ionicons name="close" size={17} color={G.onBarDim} />
           </TouchableOpacity>
         </View>
       )}
@@ -129,10 +130,10 @@ export function UpdateGate({ children }: { children: React.ReactNode }) {
 const styles = StyleSheet.create({
   // Fixed colours, not the app palette: this screen may be the only thing a
   // user ever sees from a broken build, so it must not depend on theme code
-  // that could itself be the thing that is out of date.
+  // that could itself be the thing that is out of date (constants/gatePalette).
   block: {
     flex: 1,
-    backgroundColor: '#0A0A0F',   // theme-exempt: see the note above — this screen must not depend on theme code that may itself be the out-of-date part
+    backgroundColor: G.ground,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 32,
@@ -140,28 +141,28 @@ const styles = StyleSheet.create({
   },
   icon: {
     width: 82, height: 82, borderRadius: 41,
-    backgroundColor: 'rgba(157,111,208,0.18)',
+    backgroundColor: G.iconDisc,
     alignItems: 'center', justifyContent: 'center',
     marginBottom: 4,
   },
-  title: { color: '#F6F7F9', fontSize: 22, fontWeight: '800', textAlign: 'center' },
+  title: { color: G.title, fontSize: 22, fontWeight: '800', textAlign: 'center' },
   body: {
-    color: 'rgba(246,247,249,0.72)', fontSize: 15, lineHeight: 21,
+    color: G.body, fontSize: 15, lineHeight: 21,
     textAlign: 'center', maxWidth: 340,
   },
   cta: {
     marginTop: 10, minHeight: 50, borderRadius: 14, paddingHorizontal: 40,
-    backgroundColor: '#9D6FD0', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: G.accent, alignItems: 'center', justifyContent: 'center',
   },
-  ctaTxt: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  meta: { color: 'rgba(246,247,249,0.38)', fontSize: 12, marginTop: 6, fontVariant: ['tabular-nums'] },
+  ctaTxt: { color: G.onAccent, fontSize: 16, fontWeight: '800' },
+  meta: { color: G.meta, fontSize: 12, marginTop: 6, fontVariant: ['tabular-nums'] },
 
   bar: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
-    backgroundColor: '#6D4AA8', paddingHorizontal: 14, paddingVertical: 9,
+    backgroundColor: G.bar, paddingHorizontal: 14, paddingVertical: 9,
   },
-  barTxt: { color: '#fff', fontSize: 13, flex: 1, minWidth: 0 },
-  barCta: { color: '#fff', fontSize: 13, fontWeight: '800' },
+  barTxt: { color: G.onBar, fontSize: 13, flex: 1, minWidth: 0 },
+  barCta: { color: G.onBar, fontSize: 13, fontWeight: '800' },
 });
 
 export default UpdateGate;
