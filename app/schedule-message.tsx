@@ -5,12 +5,14 @@
 //
 // Backend route: POST /user/scheduled-messages
 //   { chatId, sendAt, type: 'text', content }
-// A 30-second sweep loop in server.js delivers when sendAt <= NOW().
+// The Go jobs sweep (vaultchat-backend-go/internal/jobs, sweepScheduledMessages,
+// every 30 s) delivers when sendAt <= NOW().
 
 import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useRef, useState , useMemo} from 'react';
+import type { EventArg, NavigationAction } from '@react-navigation/native';
+import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
+import { useCallback, useEffect, useRef, useState , useMemo} from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
@@ -63,6 +65,24 @@ export default function ScheduleMessageScreen() {
   // before the disabled state re-renders.
   const busyRef = useRef(false);
 
+  // Leaving with a typed message asks first (header back, hardware back,
+  // swipe), as create-poll does. `sent` lets the post-schedule pop through;
+  // a prefilled `initial` the user has not changed is not worth a prompt.
+  const sent = useRef(false);
+  const dirtyRef = useRef(false);
+  dirtyRef.current = !!message.trim() && message !== initial;
+  const navigation = useNavigation();
+  // Typed by hand: with strictNullChecks off, the library's own event map
+  // resolves beforeRemove as not preventable (`undefined extends true`).
+  useEffect(() => navigation.addListener('beforeRemove', (e: EventArg<'beforeRemove', true, { action: NavigationAction }>) => {
+    if (sent.current || !dirtyRef.current) return;
+    e.preventDefault();
+    Alert.alert('Discard message?', 'Your message has not been scheduled and will be lost.', [
+      { text: 'Keep editing', style: 'cancel' },
+      { text: 'Discard', style: 'destructive', onPress: () => navigation.dispatch(e.data.action) },
+    ]);
+  }), [navigation]);
+
   // Reliable delivery via the SERVER sweep (fires even if the app is killed),
   // kept E2E-encrypted: content is sealed on-device before upload, so the server
   // only forwards ciphertext at send time. A local plaintext copy powers the tray.
@@ -77,6 +97,7 @@ export default function ScheduleMessageScreen() {
     try {
       const row = await scheduleEncryptedMessage(chatId as string, text, when.toISOString());
       if (row?.id) await putScheduledCopy(String(row.id), text);   // sender's tray preview
+      sent.current = true;
       Alert.alert(
         'Scheduled',
         `Your message will be delivered ${when.toLocaleString()}.\n\nIt's end-to-end encrypted and sent by the server — it goes even if the app is closed.`,
@@ -185,9 +206,12 @@ export default function ScheduleMessageScreen() {
         <Text style={S.note}>
           🔒 End-to-end encrypted before it leaves your device, then delivered by the server within
           ~30 seconds of the chosen time — so it sends even if the app is closed or swiped away.
-          Cancel any pending one from{' '}
-          <Text style={{ color: colors.primary }} accessibilityRole="link" onPress={() => router.push('/scheduled')}>Scheduled</Text>.
+          Cancel any pending one from Scheduled.
         </Text>
+        <TouchableOpacity style={S.linkBtn} onPress={() => router.push('/scheduled')} accessibilityRole="link" accessibilityLabel="Open scheduled messages">
+          <Ionicons name="time-outline" size={18} color={colors.primary} />
+          <Text style={S.linkTxt}>Scheduled messages</Text>
+        </TouchableOpacity>
       </ScrollView>
       {picker.element}
     </KeyboardSafe>
@@ -198,7 +222,7 @@ export default function ScheduleMessageScreen() {
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
-  backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  backBtn:       { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   title:         { color: c.text, fontSize: 22, fontWeight: '800' },
 
   label:         { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 8 },
@@ -213,11 +237,13 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   customBtn:     { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: c.glassSoft, borderColor: c.glassStroke, borderWidth: 1, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 16 },
   customTxt:     { flex: 1, color: c.text, fontSize: 15, fontWeight: '600' },
-  scheduleBtn:   { backgroundColor: c.primary, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 10 },
-  scheduleBtnTxt:{ color: c.bubbleOutText, fontSize: 15, fontWeight: '800' },
+  scheduleBtn:   { backgroundColor: c.primary, borderRadius: 12, paddingVertical: 14, minHeight: 48, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
+  scheduleBtnTxt:{ color: c.onPrimary, fontSize: 15, fontWeight: '800' },
 
   busy:          { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 16, justifyContent: 'center' },
   busyTxt:       { color: c.textDim, fontSize: 12 },
 
   note:          { color: c.textDim, fontSize: 12, lineHeight: 16, marginTop: 24 },
+  linkBtn:       { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, alignSelf: 'flex-start', marginTop: 4 },
+  linkTxt:       { color: c.primary, fontSize: 14, fontWeight: '700' },
 });

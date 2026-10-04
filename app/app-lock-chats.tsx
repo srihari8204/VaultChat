@@ -179,8 +179,8 @@ function LockConfigModal({
               style={s.confirmBtnGrad}
             >
               {saving
-                ? <ActivityIndicator color={colors.bubbleOutText} size="small" />
-                : <Ionicons name="lock-closed" size={16} color={colors.bubbleOutText} style={{ marginRight: 6 }} />}
+                ? <ActivityIndicator color={colors.onPrimary} size="small" />
+                : <Ionicons name="lock-closed" size={16} color={colors.onPrimary} style={{ marginRight: 6 }} />}
               <Text style={s.confirmBtnText}>Enable Lock</Text>
             </LinearGradient>
           </TouchableOpacity>
@@ -297,6 +297,10 @@ export default function AppLockChatsScreen() {
     } catch { if (mounted.current) setLoadErr(true); }
   };
 
+  // In-flight lock removal (see onToggle).
+  const togglingRef = useRef(false);
+  const [toggling, setToggling] = useState(false);
+
   const toggleLock = async (chat: ChatItem) => {
     const existing = lockedChats[chat.id];
     if (existing?.locked) {
@@ -341,6 +345,17 @@ export default function AppLockChatsScreen() {
     }
   };
 
+  // The Switch goes through this: one removal at a time, so a second flip during
+  // the biometric or PIN prompt cannot start a parallel removal.
+  const onToggle = async (chat: ChatItem) => {
+    if (!lockedChats[chat.id]?.locked) { await toggleLock(chat); return; }
+    if (togglingRef.current) return;
+    togglingRef.current = true;
+    setToggling(true);
+    try { await toggleLock(chat); }
+    finally { togglingRef.current = false; if (mounted.current) setToggling(false); }
+  };
+
   const closeConfig = () => { setConfigChat(null); setPinInput(''); setPinConfirm(''); };
 
   const confirmLockSetup = async (chatId: string, method: LockMethod, timer: AutoLockTimer, pin?: string) => {
@@ -368,7 +383,12 @@ export default function AppLockChatsScreen() {
     }
   };
 
-  const renderChatItem = ({ item }: { item: ChatItem }) => {
+  // The row reads the latest onToggle through a ref, so the memoised row
+  // renderer does not change on every render.
+  const toggleRef = useRef(onToggle);
+  toggleRef.current = onToggle;
+
+  const renderChatItem = useCallback(({ item }: { item: ChatItem }) => {
     const config = lockedChats[item.id];
     const isLocked = !!config?.locked;
 
@@ -406,15 +426,16 @@ export default function AppLockChatsScreen() {
 
         <Switch
           value={isLocked}
-          onValueChange={() => toggleLock(item)}
+          onValueChange={() => toggleRef.current(item)}
+          disabled={toggling}
           trackColor={{ false: colors.border, true: colors.primary }}
           thumbColor={isLocked ? colors.accent : colors.textFaint}
           accessibilityLabel={`Lock ${item.name}`}
-          accessibilityState={{ checked: isLocked }}
+          accessibilityState={{ checked: isLocked, disabled: toggling }}
         />
       </View>
     );
-  };
+  }, [s, colors, lockedChats, toggling]);
 
   const lockedCount = Object.values(lockedChats).filter(c => c.locked).length;
 
@@ -449,13 +470,13 @@ export default function AppLockChatsScreen() {
             known, and would invite the user to re-lock chats that are already
             locked. Say what actually happened (2026-09-17). */}
         {loadErr && (
-          <Text style={{ color: colors.danger, textAlign: 'center', marginHorizontal: 20, marginBottom: 12 }} accessibilityRole="alert">
+          <Text style={s.loadErrTxt} accessibilityRole="alert">
             Your chat lock settings could not be read, so the list below may be incomplete. Existing locks are still in force.
           </Text>
         )}
         {chatsState === 'error' && (
-          <TouchableOpacity onPress={loadChats} accessibilityRole="button" style={{ marginHorizontal: 20, marginBottom: 12, minHeight: 44, justifyContent: 'center' }}>
-            <Text style={{ color: colors.danger, textAlign: 'center' }}>
+          <TouchableOpacity onPress={loadChats} accessibilityRole="button" style={s.chatsErrBtn}>
+            <Text style={s.chatsErrTxt}>
               Your chats could not be loaded. Tap to try again.
             </Text>
           </TouchableOpacity>
@@ -469,7 +490,7 @@ export default function AppLockChatsScreen() {
           ListEmptyComponent={chatsState === 'loading'
             ? <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
             : chatsState === 'ok'
-              ? <Text style={{ color: colors.textDim, textAlign: 'center', marginTop: 40 }}>No chats yet</Text>
+              ? <Text style={s.emptyTxt}>No chats yet</Text>
               : null}
         />
       </Animated.View>
@@ -524,7 +545,7 @@ export default function AppLockChatsScreen() {
               {/* Was a confirmBtn with no background and #FFF text — invisible on
                   the light glass panel. Solid danger fill: this removes a lock. */}
               <TouchableOpacity style={s.removeBtn} onPress={submitUnlockPin} accessibilityRole="button" accessibilityLabel="Confirm PIN and remove the lock">
-                <Text style={s.confirmBtnText}>Remove lock</Text>
+                <Text style={s.removeBtnText}>Remove lock</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -684,5 +705,10 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     paddingVertical: 12,
   },
   // White on the accent gradient and on the danger fill, in both themes.
-  confirmBtnText: { fontSize: 14, fontWeight: '700', color: c.bubbleOutText },
+  confirmBtnText: { fontSize: 14, fontWeight: '700', color: c.onPrimary },
+  removeBtnText: { fontSize: 14, fontWeight: '700', color: c.onDanger },
+  loadErrTxt: { color: c.danger, textAlign: 'center', marginHorizontal: 20, marginBottom: 12 },
+  chatsErrBtn: { marginHorizontal: 20, marginBottom: 12, minHeight: 44, justifyContent: 'center' },
+  chatsErrTxt: { color: c.danger, textAlign: 'center' },
+  emptyTxt: { color: c.textDim, textAlign: 'center', marginTop: 40 },
 });

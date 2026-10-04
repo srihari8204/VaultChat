@@ -18,8 +18,8 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Notifications from 'expo-notifications';
-import { useCallback, useEffect, useState , useMemo} from 'react';
-import { ActivityIndicator, Alert, FlatList, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState , useMemo} from 'react';
+import { ActivityIndicator, Alert, FlatList, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { AuroraBackground } from '../components/ui';
@@ -28,6 +28,7 @@ import { getNotifPreview, notifContent } from '../lib/privacyPrefs';
 import { getCachedMessagesByIds } from '../lib/localDb';
 import { looksEncrypted } from '../lib/chatService';
 import { isChatLocked } from '../lib/chatLock';
+import { setPendingJump } from '../lib/chatJump';
 import { MESSAGE_REMINDER_BODY, isMessageReminderRequest } from '../lib/messageReminderReset';
 
 type Router = ReturnType<typeof useRouter>;
@@ -90,7 +91,7 @@ async function loadReminders(): Promise<ReminderRow[]> {
 
 // The message text for display, from the local message cache. Null when the
 // message is not cached or not readable.
-async function cachedText(r: ReminderRow): Promise<string | null> {
+async function cachedText(r: Pick<ReminderRow, 'chatId' | 'messageId'>): Promise<string | null> {
   try {
     const [m] = await getCachedMessagesByIds(r.chatId, [Number(r.messageId)]);
     // View-once / Invisible Ink text is never shown outside its bubble.
@@ -158,15 +159,28 @@ function Composer({
   const S = useS();
   const { colors } = useTheme();
   const [busy, setBusy] = useState(false);
+  // Synchronous twin of `busy`: two taps in one frame both see busy=false.
+  const busyRef = useRef(false);
+  // The text comes from the sealed local cache by id, like the list. The route
+  // param is only a fallback for a message the cache does not hold yet.
+  // ponytail: drop the `preview` param (components/chat/useMessageActions.ts)
+  // once that caller stops passing it — it puts message text in the route.
+  const [cached, setCached] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    cachedText({ chatId, messageId }).then(t => { if (alive) setCached(t); });
+    return () => { alive = false; };
+  }, [chatId, messageId]);
 
   const schedule = useCallback(async (mins: number) => {
-    if (busy) return;
+    if (busyRef.current) return;
     const when = whenFor(mins);
     if (when.getTime() <= Date.now()) {
       Alert.alert('Pick a future time', 'That preset has already passed today.');
       return;
     }
     // Busy BEFORE the permission awaits, so a double tap cannot schedule twice.
+    busyRef.current = true;
     setBusy(true);
     try {
       const perm = await Notifications.getPermissionsAsync();
@@ -205,7 +219,7 @@ function Composer({
         // A damaged list would refuse every new reminder: take this one back
         // out and offer the reset, then schedule again once it is cleared.
         await Notifications.cancelScheduledNotificationAsync(id).catch(() => {});
-        offerClearReminders(() => { schedule(mins); });
+        offerClearReminders(() => { void schedule(mins); });
         return;
       }
       try {
@@ -227,9 +241,10 @@ function Composer({
     } catch (e: any) {
       Alert.alert('Could not schedule', e?.message ?? 'Try again');
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
-  }, [busy, chatId, messageId, router]);
+  }, [chatId, messageId, router]);
 
   return (
     <View style={S.screen}>
@@ -244,7 +259,7 @@ function Composer({
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }}>
         <View style={S.previewCard}>
           <Text style={S.previewLabel}>MESSAGE</Text>
-          <Text style={S.previewBody} numberOfLines={4}>{preview || '(no preview)'}</Text>
+          <Text style={S.previewBody} numberOfLines={4}>{cached || preview || '(no preview)'}</Text>
         </View>
 
         <Text style={[S.previewLabel, { marginTop: 20 }]}>WHEN</Text>
@@ -292,6 +307,7 @@ function RemindersList({ router }: { router: Router }) {
   // Display-only message text, keyed by reminder id (never persisted).
   const [texts,   setTexts]   = useState<Record<string, string | null>>({});
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -321,6 +337,17 @@ function RemindersList({ router }: { router: Router }) {
   }, [load]);
 
   useEffect(() => { reload(); }, [reload]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true); await load(); setRefreshing(false);
+  }, [load]);
+
+  // Open the chat at the message (chat.tsx consumes the jump on focus and
+  // applies the chat's own lock).
+  const openChat = useCallback((r: ReminderRow) => {
+    if (Number(r.messageId) > 0) setPendingJump(r.chatId, Number(r.messageId));
+    router.push({ pathname: '/chat', params: { id: r.chatId } });
+  }, [router]);
 
   const cancel = useCallback((r: ReminderRow) => {
     Alert.alert('Cancel reminder?', 'You won\'t be notified at the chosen time.', [
@@ -377,37 +404,53 @@ function RemindersList({ router }: { router: Router }) {
           </TouchableOpacity>
         </View>
       ) : rows.length === 0 ? (
-        <View style={[S.center, { flex: 1, paddingHorizontal: 32 }]}>
+        <ScrollView
+          contentContainerStyle={[S.center, { flexGrow: 1, paddingHorizontal: 32 }]}
+          refreshControl={<RefreshControl tintColor={colors.primary} refreshing={refreshing} onRefresh={onRefresh} />}
+        >
           <Text style={S.emptyTitle}>No reminders set</Text>
           <Text style={S.emptySub}>
             Long-press any message in a chat → Remind, then pick a time.
           </Text>
-        </View>
+        </ScrollView>
       ) : (
         <FlatList
           data={rows}
           keyExtractor={(r) => r.id}
           contentContainerStyle={{ paddingBottom: 32 }}
+          refreshControl={<RefreshControl tintColor={colors.primary} refreshing={refreshing} onRefresh={onRefresh} />}
           renderItem={({ item: r }) => (
-            <TouchableOpacity
-              style={S.row}
-              onPress={() => cancel(r)}
-              activeOpacity={0.7}
-              accessibilityRole="button"
-              accessibilityLabel={`Reminder for ${new Date(r.when).toLocaleString()}: ${texts[r.id] || 'Message reminder'}`}
-              accessibilityHint="Cancels this reminder"
-            >
-              <View style={S.iconBox} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden><Text style={S.iconTxt}>⏰</Text></View>
-              <View style={{ flex: 1 }}>
-                <Text style={S.rowWhen} numberOfLines={1}>
-                  Fires {new Date(r.when).toLocaleString()}
-                </Text>
-                <Text style={S.rowPreview} numberOfLines={2}>
-                  {texts[r.id] || 'Message reminder'}
-                </Text>
-                <Text style={S.rowSub}>Tap to cancel</Text>
-              </View>
-            </TouchableOpacity>
+            <View style={S.row}>
+              <TouchableOpacity
+                style={S.rowMain}
+                onPress={() => openChat(r)}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={`Reminder for ${new Date(r.when).toLocaleString()}: ${texts[r.id] || 'Message reminder'}`}
+                accessibilityHint="Opens the chat at this message"
+                accessibilityActions={[{ name: 'cancelReminder', label: 'Cancel reminder' }]}
+                onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'cancelReminder') cancel(r); }}
+              >
+                <View style={S.iconBox} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden><Text style={S.iconTxt}>⏰</Text></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={S.rowWhen} numberOfLines={1}>
+                    Fires {new Date(r.when).toLocaleString()}
+                  </Text>
+                  <Text style={S.rowPreview} numberOfLines={2}>
+                    {texts[r.id] || 'Message reminder'}
+                  </Text>
+                  <Text style={S.rowSub}>Tap to open the chat</Text>
+                </View>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={S.cancelBtn}
+                onPress={() => cancel(r)}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel reminder"
+              >
+                <Ionicons name="close-circle-outline" size={24} color={colors.textDim} />
+              </TouchableOpacity>
+            </View>
           )}
         />
       )}
@@ -421,7 +464,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   center:       { justifyContent: 'center', alignItems: 'center' },
 
   header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
-  backBtn:      { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  backBtn:      { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   title:        { color: c.text, fontSize: 22, fontWeight: '800' },
 
   previewCard:  { backgroundColor: c.glassSoft, borderColor: c.glassStroke, borderWidth: 1, borderRadius: 12, padding: 12 },
@@ -441,11 +484,13 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   emptyTitle:   { color: c.text, fontSize: 16, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
   emptySub:     { color: c.textDim, fontSize: 13, lineHeight: 18, textAlign: 'center' },
   retryBtn:     { marginTop: 20, minHeight: 44, paddingHorizontal: 24, borderRadius: 12, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
-  retryTxt:     { color: c.bubbleOutText, fontWeight: '700' },
+  retryTxt:     { color: c.onPrimary, fontWeight: '700' },
   clearBtn:     { marginTop: 8, minHeight: 44, paddingHorizontal: 24, alignItems: 'center', justifyContent: 'center' },
   clearTxt:     { color: c.danger, fontWeight: '700' },
 
-  row:          { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
+  row:          { flexDirection: 'row', alignItems: 'center', paddingRight: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
+  rowMain:      { flex: 1, flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingLeft: 20, paddingRight: 4, paddingVertical: 14 },
+  cancelBtn:    { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   iconBox:      { width: 36, height: 36, borderRadius: 18, backgroundColor: c.glassSoft, alignItems: 'center', justifyContent: 'center' },
   iconTxt:      { fontSize: 18 },
   rowWhen:      { color: c.text, fontSize: 14, fontWeight: '700' },

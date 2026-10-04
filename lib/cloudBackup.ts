@@ -54,6 +54,7 @@ import {
   passwordProblem, type E2EEHeader, type BackupMode,
 } from './backupCrypto';
 import { exportAll, importAll } from './localDb';
+import { switchBackupSecret, type SecretPair, type SecretSlot } from './backupSecretSwitch';
 // getCachedUser is what app/(constants)/authService's getCurrentUserAsync
 // returned anyway — it is a one-line passthrough to this. Taken directly, so
 // lib no longer reaches up into app (2026-09-17).
@@ -126,19 +127,43 @@ async function storedE2EE(): Promise<{ secret: string; header: E2EEHeader } | nu
   } catch { return null; }
 }
 
+/** The stored pair for switchBackupSecret — unlike storedE2EE, a read failure throws. */
+const e2eeSlot: SecretSlot<E2EEHeader> = {
+  async get() {
+    const [secret, raw] = await Promise.all([
+      SecureStore.getItemAsync(E2EE_SECRET_STORE),
+      SecureStore.getItemAsync(E2EE_HEADER_STORE),
+    ]);
+    return secret && raw ? { secret, header: JSON.parse(raw) as E2EEHeader } : null;
+  },
+  async put({ secret, header }) {
+    await SecureStore.setItemAsync(E2EE_SECRET_STORE, secret);
+    await SecureStore.setItemAsync(E2EE_HEADER_STORE, JSON.stringify(header));
+  },
+  async clear() {
+    await SecureStore.deleteItemAsync(E2EE_SECRET_STORE);
+    await SecureStore.deleteItemAsync(E2EE_HEADER_STORE);
+  },
+};
+
 /** Which mode this device is currently backing up in. */
 export async function getBackupMode(): Promise<'account' | BackupMode> {
   return (await storedE2EE())?.header.mode ?? 'account';
 }
 
 /**
- * Turn on end-to-end encrypted backup and immediately re-upload under the new
- * key. Returns the recovery key when mode is 'key' — shown once, never stored
- * anywhere we could hand back later.
+ * Turn on end-to-end encrypted backup — or, while it is on, change the password
+ * or switch between password and key — and re-upload under the new key. Returns
+ * the recovery key when mode is 'key' — shown once, never stored anywhere we
+ * could hand back later.
  *
  * The re-upload is not optional. Leaving the previous account-encrypted blob in
  * place would mean switching this on changed nothing an attacker cares about:
  * the old copy is still there and the server can still read it.
+ *
+ * Transactional (lib/backupSecretSwitch): the new secret is stored only after
+ * the upload under it succeeds, so a failed upload leaves the device exactly as
+ * it was — still on its old password or key, or still account-managed.
  */
 export async function enableE2EEBackup(
   mode: BackupMode, password?: string,
@@ -149,19 +174,8 @@ export async function enableE2EEBackup(
     const problem = passwordProblem(userSecret);
     if (problem) throw new Error(problem);
   }
-  const secret = backupSecret(header, userSecret);
-  await SecureStore.setItemAsync(E2EE_SECRET_STORE, secret);
-  await SecureStore.setItemAsync(E2EE_HEADER_STORE, JSON.stringify(header));
-  try {
-    await uploadCloudBackup();
-  } catch (e) {
-    // Roll back rather than leave the device claiming a protection whose blob
-    // was never written — the next restore would ask for a secret that opens
-    // nothing, and the readable copy on the server would still be the old one.
-    await SecureStore.deleteItemAsync(E2EE_SECRET_STORE).catch(() => {});
-    await SecureStore.deleteItemAsync(E2EE_HEADER_STORE).catch(() => {});
-    throw e;
-  }
+  const next = { secret: backupSecret(header, userSecret), header };
+  await switchBackupSecret(e2eeSlot, next, async (using) => { await uploadCloudBackupUsing(using); });
   return mode === 'key' ? { recoveryKey: userSecret } : {};
 }
 
@@ -230,8 +244,12 @@ export async function getBackupKey(): Promise<string> {
   return (await writeSecret()).secret;
 }
 
-/** Gather everything + encrypt under the CURRENT key. Returns the opaque blob. */
-async function buildEncryptedBackup(): Promise<{ blob: string; messageCount: number; sizeBytes: number }> {
+/**
+ * Gather everything + encrypt under the CURRENT key. Returns the opaque blob.
+ * `using` overrides the key for one write (null = account key); only
+ * enableE2EEBackup passes it, to upload under a secret it has not stored yet.
+ */
+async function buildEncryptedBackup(using?: SecretPair<E2EEHeader> | null): Promise<{ blob: string; messageCount: number; sizeBytes: number }> {
   // 1. AsyncStorage prefs, minus keys that describe THIS INSTALL rather than the
   //    user. Restoring those onto another device makes it lie about its own
   //    state — e.g. carrying the media-migration flag across would convince a
@@ -303,7 +321,8 @@ async function buildEncryptedBackup(): Promise<{ blob: string; messageCount: num
   // destination (server, Drive, local file) then encrypts under the same key
   // automatically, and turning e2ee on cannot leave one of them still writing
   // under the account key because a caller was missed.
-  const { secret, header } = await writeSecret();
+  const { secret, header } = using === undefined ? await writeSecret()
+    : using ?? { secret: await accountBackupKey(), header: null };
   const payload = vaultEncrypt(secret, bundle);              // real AES-256-GCM
   const blob = header ? stampE2EEHeader(payload, header) : JSON.stringify(payload);
   return { blob, messageCount: local.messages.length, sizeBytes: bundle.length };
@@ -405,7 +424,13 @@ export async function cloudBackupMeta(): Promise<BackupMeta> {
 }
 
 export async function uploadCloudBackup(): Promise<{ messageCount: number; sizeBytes: number }> {
-  const { blob, messageCount, sizeBytes } = await buildEncryptedBackup();
+  return uploadCloudBackupUsing(undefined);
+}
+
+async function uploadCloudBackupUsing(
+  using: SecretPair<E2EEHeader> | null | undefined,
+): Promise<{ messageCount: number; sizeBytes: number }> {
+  const { blob, messageCount, sizeBytes } = await buildEncryptedBackup(using);
   // Prefer direct-to-object-storage (presigned PUT) so the blob never passes
   // through the API/DB — no size cap, no server memory spike. Inline fallback
   // only when object storage is off.

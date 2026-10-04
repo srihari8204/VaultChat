@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
-import { exportBody } from './chatExportFormat';
+import { exportBody, exportHtmlLine, exportTextHead, exportTextLine, escHtml } from './chatExportFormat';
 
 const isCipher = (s: string) => s.startsWith('GSK1:') || s.startsWith('{"v":"dr1"');
 const msg = (id: number, content: string | null, extra: { type?: string; deletedAt?: string | null } = {}) =>
@@ -47,7 +47,21 @@ async function main() {
   const SCREEN = readFileSync('app/chat-export.tsx', 'utf8');
   assert.ok(SCREEN.includes('hydrateMessages('), 'export decrypts through hydrateMessages like chat.tsx');
   assert.ok(/unionWithLocalHistoryAsc\([^)]*looksEncrypted\)/.test(SCREEN), 'export merge passes the ciphertext test');
-  assert.ok(/deleteAsync\(/.test(SCREEN), 'export file is deleted after sharing');
+  const FILE = readFileSync('components/chattools/chatExportFile.ts', 'utf8');
+  assert.ok(/deleteAsync\(/.test(FILE), 'export file is deleted after sharing');
+  assert.ok(/appendFile\(/.test(FILE) && /cancelled\(\)/.test(FILE), 'export file is written in chunks and stops on cancel');
+  assert.ok(/cancelRef\.current = true/.test(SCREEN), 'export screen has a Cancel and cancels on unmount');
+
+  // ── per-message file lines (the file is written in chunks of these) ──
+  const ctx = { label: (m: any) => (m.mine ? 'You' : 'Ann'), mine: (m: any) => !!m.mine, time: () => 'T', body: (m: any) => exportBody(m, isCipher) };
+  assert.equal(exportTextLine({ ...msg(1, 'hi'), createdAt: 'x' }, ctx), '[T] Ann: hi\n');
+  assert.equal(exportTextLine({ ...msg(1, 'hi'), createdAt: 'x', editedAt: 'y' }, ctx), '[T] Ann: hi\n  (edited)\n');
+  assert.ok(exportTextHead('Ann', 3, 'now').includes('Messages: 3'));
+  assert.equal(escHtml('<a&b>'), '&lt;a&amp;b&gt;');
+  const h = exportHtmlLine({ ...msg(1, '<b>x\ny'), createdAt: 'x', mine: true } as any, ctx);
+  assert.ok(h.startsWith('<div class="msg mine">') && !h.includes('class="sender"'), 'own message: no sender line');
+  assert.ok(h.includes('&lt;b&gt;x<br>y'), 'body escaped, newlines kept');
+  assert.ok(exportHtmlLine({ ...msg(1, 'GSK1:z'), createdAt: 'x' }, ctx).includes('[Encrypted message'), 'no ciphertext in HTML either');
 
   console.log('chatExportFormat selftest: ok');
 }

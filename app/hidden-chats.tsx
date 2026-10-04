@@ -10,7 +10,8 @@
 // PIN session is screen-scoped: leaving the screen, or sending the app to the
 // background, requires re-entering. Wrong PINs are counted in AsyncStorage
 // (same backoff schedule as the Device PIN), so leaving and re-entering does
-// not reset the limit.
+// not reset the limit. The server limit (5 wrong per 15 min, 423 + retryAfter)
+// is written but not deployed (fixes/R4BE.md C1); a 423 is shown as a real wait.
 
 import { useAuthHeader } from '../hooks/useAuthHeader';
 import { HEADER_TOP } from '../constants/layout';
@@ -18,7 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useRef, useState , useMemo} from 'react';
-import { ActivityIndicator, Alert, AppState, FlatList, Image, RefreshControl, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, AppState, FlatList, Image, Platform, RefreshControl, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { focusWithKeyboard, retryKeyboard } from '../lib/imeFocus';
@@ -29,7 +30,8 @@ import {
   verifyPin,
   type ChatSummary,
 } from '../lib/chatService';
-import { AuroraBackground } from '../components/ui';
+import { AuroraBackground, KeyboardSafe } from '../components/ui';
+import { isOfflineError, retryAfterSec } from '../lib/onboarding';
 import { initialOf } from '../lib/format';
 import { createPinAttemptTracker } from '../services/security/pinAttempts';
 
@@ -39,8 +41,9 @@ type Router = ReturnType<typeof useRouter>;
 // Persisted wrong-PIN streak for this gate. Its own key: this gate checks the
 // account MPIN on the server, so its failures must not throttle the Device PIN.
 // The tracker decays a streak after 15 quiet minutes and backs off between tries.
-// ponytail: /user/pin/verify has no server-side rate limit (backend handoff);
-// this client counter is the only throttle until the server enforces one.
+// ponytail: the server limit on /user/pin/verify (423 + retryAfter) is written
+// but not deployed; until it is, this client counter is the only throttle, and
+// clearing app storage resets it. Keep it after the deploy as the first line.
 const HIDDEN_PIN_FAIL_KEY = 'vc_hidden_chats_pin_fail';
 const pinAttempts = createPinAttemptTracker({
   get: () => AsyncStorage.getItem(HIDDEN_PIN_FAIL_KEY),
@@ -61,7 +64,8 @@ export default function HiddenChatsScreen() {
   // the app switcher or for whoever picks the phone up next.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (st) => {
-      if (st === 'background') setStage('pin');
+      // iOS takes the app-switcher snapshot at 'inactive', before 'background'.
+      if (st === 'background' || (Platform.OS === 'ios' && st === 'inactive')) setStage('pin');
     });
     return () => sub.remove();
   }, []);
@@ -70,6 +74,22 @@ export default function HiddenChatsScreen() {
     return <PinGate router={router} onPass={() => setStage('list')} />;
   }
   return <HiddenList router={router} />;
+}
+
+// What the gate says when verifying did not get a yes/no answer. A 423 is the
+// server's own attempt limit (R4BE C1): name the real wait, so the user stops
+// rather than spending more tries against a lock.
+function gateError(e: any): string {
+  if (e?.status === 423) {
+    const secs = retryAfterSec(e);
+    if (!secs) return 'Too many attempts. Wait a few minutes, then try again.';
+    const mins = Math.ceil(secs / 60);
+    return secs < 60
+      ? `Too many attempts. Try again in ${secs} s.`
+      : `Too many attempts. Try again in about ${mins} minute${mins === 1 ? '' : 's'}.`;
+  }
+  if (isOfflineError(e)) return "You're offline. Check your connection and try again.";
+  return 'Your PIN could not be checked. Try again.';
 }
 
 function PinGate({
@@ -81,6 +101,9 @@ function PinGate({
   const [busy,      setBusy]      = useState(false);
   const [error,     setError]     = useState<string | null>(null);
   const inputRef = useRef<TextInput | null>(null);
+  // Synchronous twin of `busy`: a second Enter in the same frame would spend
+  // a second attempt.
+  const busyRef = useRef(false);
 
   // A single timed focus() is one IME request and no second chance: if Android
   // refuses it (cold deep-link, window not focused yet) the input is left
@@ -90,11 +113,12 @@ function PinGate({
   useEffect(() => focusWithKeyboard(inputRef, 200), []);
 
   const submit = useCallback(async () => {
-    if (busy) return;
+    if (busyRef.current) return;
     if (!/^\d{4,8}$/.test(pin)) {
       setError('PIN must be 4–8 digits');
       return;
     }
+    busyRef.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -123,16 +147,19 @@ function PinGate({
         setError(`Incorrect PIN. ${MAX_ATTEMPTS - next} attempts left.`);
       }
     } catch (e: any) {
-      setError(e?.message ?? 'Verification failed');
+      setPin('');
+      setError(gateError(e));
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
-  }, [busy, pin, onPass, router]);
+  }, [pin, onPass, router]);
 
   return (
-    <View style={[S.screen, S.center, { paddingHorizontal: 32 }]}>
+    // KeyboardSafe: the centred PIN field would sit under the keyboard on small screens.
+    <KeyboardSafe style={[S.screen, S.center, { paddingHorizontal: 32 }]}>
       <AuroraBackground />
-      <Text style={S.gateIcon}>🔒</Text>
+      <Text style={S.gateIcon} accessible={false}>🔒</Text>
       <Text style={S.gateTitle}>Enter your PIN</Text>
       <Text style={S.gateSub}>Hidden chats are protected by your app PIN (the same MPIN you use to sign in).</Text>
 
@@ -167,10 +194,10 @@ function PinGate({
           style={[S.gateUnlock, (busy || pin.length < 4) && S.gateUnlockOff]}
           activeOpacity={0.85}
         >
-          {busy ? <ActivityIndicator color={colors.bubbleOutText} /> : <Text style={S.gateUnlockTxt}>Unlock</Text>}
+          {busy ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={S.gateUnlockTxt}>Unlock</Text>}
         </TouchableOpacity>
       </View>
-    </View>
+    </KeyboardSafe>
   );
 }
 
@@ -182,27 +209,34 @@ function HiddenList({ router }: { router: Router }) {
   const [refreshing, setRefreshing] = useState(false);
   const authHeader = useAuthHeader();
   const [error,      setError]      = useState<string | null>(null);
+  // Async results land only while the list is mounted (a background re-lock
+  // unmounts it mid-load).
+  const alive = useRef(true);
+  useEffect(() => () => { alive.current = false; }, []);
+  // Chat ids with an Unhide in flight, so a second tap does not send it twice.
+  const unhiding = useRef(new Set<string>());
 
   const load = useCallback(async () => {
     try {
       const list = await listChats({ includeHidden: true });
+      if (!alive.current) return;
       // The server returns hidden rows only for includeHidden=1; filter anyway
       // so an older server can never mix the regular list in here.
       setRows(list.filter(c => c.hidden));
       setError(null);
     } catch (e: any) {
-      setError(e?.message ?? 'Failed to load');
+      if (alive.current) setError(isOfflineError(e) ? "You're offline. Check your connection and try again." : 'The hidden chats could not be loaded. Try again.');
     }
   }, []);
 
   useEffect(() => {
-    (async () => { setLoading(true); await load(); setLoading(false); })();
+    (async () => { setLoading(true); await load(); if (alive.current) setLoading(false); })();
   }, [load]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await load();
-    setRefreshing(false);
+    if (alive.current) setRefreshing(false);
   }, [load]);
 
   const onOpen = useCallback((id: string) => {
@@ -216,17 +250,60 @@ function HiddenList({ router }: { router: Router }) {
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Unhide', onPress: async () => {
+            if (unhiding.current.has(c.id)) return;
+            unhiding.current.add(c.id);
             try {
               await setHidden(c.id, false);
-              setRows(prev => prev.filter(r => r.id !== c.id));
+              if (alive.current) setRows(prev => prev.filter(r => r.id !== c.id));
             } catch (e: any) {
-              Alert.alert('Failed', e?.message ?? 'Try again');
+              Alert.alert('Could not unhide the chat', isOfflineError(e) ? "You're offline. Check your connection and try again." : 'It is still hidden. Try again.');
+            } finally {
+              unhiding.current.delete(c.id);
             }
           }
         },
       ],
     );
   }, []);
+
+  const renderItem = useCallback(({ item: c }: { item: ChatSummary }) => {
+    const title = c.type === 'direct'
+      ? (c.peerName || c.name || 'Direct chat')
+      : (c.name || 'Group chat');
+    const photoId = c.type === 'direct' ? c.peerPhotoURL : c.photoURL;
+    return (
+      <TouchableOpacity
+        style={S.row}
+        accessibilityRole="button"
+        accessibilityLabel={c.unreadCount > 0 ? `${title}, ${c.unreadCount} unread` : title}
+        accessibilityHint="Opens the chat. Long-press or use actions to unhide."
+        accessibilityActions={[{ name: 'unhide', label: 'Unhide chat' }]}
+        onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'unhide') onUnhide(c); }}
+        onPress={() => onOpen(c.id)}
+        onLongPress={() => onUnhide(c)}
+        delayLongPress={300}
+        activeOpacity={0.7}
+      >
+        <View style={[S.avatar, c.type === 'group' && S.avatarGroup]}>
+          {photoId && authHeader ? (
+            <Image
+              source={{ uri: attachmentUrl(photoId), headers: { Authorization: authHeader } }}
+              style={S.avatarImg}
+            />
+          ) : (
+            <Text style={S.avatarTxt}>{initialOf(title, '#')}</Text>
+          )}
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={S.rowName} numberOfLines={1}>{title}</Text>
+          <Text style={S.rowSub} numberOfLines={1}>
+            {c.unreadCount > 0 ? `${c.unreadCount} unread · ` : ''}
+            long-press to unhide
+          </Text>
+        </View>
+      </TouchableOpacity>
+    );
+  }, [S, authHeader, onOpen, onUnhide]);
 
   if (loading) {
     return (
@@ -264,7 +341,7 @@ function HiddenList({ router }: { router: Router }) {
             style={S.retryBtn}
           >
             {refreshing
-              ? <ActivityIndicator color={colors.bubbleOutText} />
+              ? <ActivityIndicator color={colors.onPrimary} />
               : <Text style={S.gateUnlockTxt}>Try again</Text>}
           </TouchableOpacity>
         </View>
@@ -281,44 +358,7 @@ function HiddenList({ router }: { router: Router }) {
           keyExtractor={(c) => c.id}
           refreshControl={<RefreshControl tintColor={colors.primary} refreshing={refreshing} onRefresh={onRefresh} />}
           contentContainerStyle={{ paddingBottom: 32 }}
-          renderItem={({ item: c }) => {
-            const title = c.type === 'direct'
-              ? (c.peerName || c.name || 'Direct chat')
-              : (c.name || 'Group chat');
-            const photoId = c.type === 'direct' ? c.peerPhotoURL : c.photoURL;
-            return (
-              <TouchableOpacity
-                style={S.row}
-                accessibilityRole="button"
-                accessibilityLabel={c.unreadCount > 0 ? `${title}, ${c.unreadCount} unread` : title}
-                accessibilityHint="Opens the chat. Long-press or use actions to unhide."
-                accessibilityActions={[{ name: 'unhide', label: 'Unhide chat' }]}
-                onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'unhide') onUnhide(c); }}
-                onPress={() => onOpen(c.id)}
-                onLongPress={() => onUnhide(c)}
-                delayLongPress={300}
-                activeOpacity={0.7}
-              >
-                <View style={[S.avatar, c.type === 'group' && S.avatarGroup]}>
-                  {photoId && authHeader ? (
-                    <Image
-                      source={{ uri: attachmentUrl(photoId), headers: { Authorization: authHeader } }}
-                      style={S.avatarImg}
-                    />
-                  ) : (
-                    <Text style={S.avatarTxt}>{initialOf(title, '#')}</Text>
-                  )}
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={S.rowName} numberOfLines={1}>{title}</Text>
-                  <Text style={S.rowSub} numberOfLines={1}>
-                    {c.unreadCount > 0 ? `${c.unreadCount} unread · ` : ''}
-                    long-press to unhide
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            );
-          }}
+          renderItem={renderItem}
         />
       )}
     </View>
@@ -337,16 +377,16 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   pinInput:     { color: c.text, fontSize: 28, letterSpacing: 10, textAlign: 'center', backgroundColor: c.glassSoft, borderColor: c.glassStroke, borderWidth: 1, borderRadius: 12, paddingHorizontal: 20, paddingVertical: 14, width: '100%', maxWidth: 280 },
   errorTxt:     { color: c.danger, paddingHorizontal: 16, paddingTop: 12, fontSize: 12, textAlign: 'center' },
   gateBtnRow:   { flexDirection: 'row', gap: 12, marginTop: 24, width: '100%', maxWidth: 280 },
-  gateCancel:   { flex: 1, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, alignItems: 'center' },
+  gateCancel:   { flex: 1, padding: 14, minHeight: 48, justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, alignItems: 'center' },
   gateCancelTxt: { color: c.text, fontWeight: '700' },
-  gateUnlock:    { flex: 1, padding: 14, borderRadius: 12, backgroundColor: c.primary, alignItems: 'center' },
+  gateUnlock:    { flex: 1, padding: 14, minHeight: 48, justifyContent: 'center', borderRadius: 12, backgroundColor: c.primary, alignItems: 'center' },
   gateUnlockOff: { backgroundColor: c.surfaceSolid },
-  gateUnlockTxt: { color: c.bubbleOutText, fontWeight: '700' },
+  gateUnlockTxt: { color: c.onPrimary, fontWeight: '700' },
   retryBtn:      { marginTop: 20, minHeight: 44, minWidth: 140, paddingHorizontal: 20, borderRadius: 12, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
 
   // List
   header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
-  backBtn:      { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  backBtn:      { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   title:        { color: c.text, fontSize: 22, fontWeight: '800' },
   emptyTitle:   { color: c.text, fontSize: 16, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
   emptySub:     { color: c.textDim, fontSize: 13, lineHeight: 18, textAlign: 'center' },
@@ -355,7 +395,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   avatar:       { width: 52, height: 52, borderRadius: 26, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   avatarGroup:  { backgroundColor: c.success },
   avatarImg:    { width: '100%', height: '100%' },
-  avatarTxt:    { color: c.bubbleOutText, fontSize: 20, fontWeight: '700' },
+  avatarTxt:    { color: c.onPrimary, fontSize: 20, fontWeight: '700' },
   rowName:      { color: c.text, fontSize: 16, fontWeight: '600' },
   rowSub:       { color: c.textDim, fontSize: 12, marginTop: 4 },
 });

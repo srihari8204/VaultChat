@@ -3,7 +3,8 @@
 // Default (theme wallpaper), solid colors (bright + dark sets), gradient
 // presets, or a photo from the gallery. Live preview with real themed bubbles.
 // Saved per chatId in AsyncStorage (falls back to a global default). Theme-aware
-// in both light and dark. Consumed by app/chat.tsx via getWallpaper().
+// in both light and dark. Consumed by app/chat.tsx via getWallpaper()
+// (lib/chatWallpaperStore).
 
 import { HEADER_TOP } from '../constants/layout';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
@@ -22,6 +23,8 @@ import { AuroraBackground } from '../components/ui';
 import { permissionDenied } from '../lib/permissionDenied';
 import { resolveScoped, SCOPED_DEFAULT } from '../lib/scopedChoice';
 import { replacedWallpaperFile } from '../lib/wallpaperFile';
+import { WALLPAPER_GLOBAL_KEY, wallpaperKey, type WallpaperConfig } from '../lib/chatWallpaperStore';
+import type { EventArg, NavigationAction } from '@react-navigation/native';
 
 
 // WhatsApp-style solid wallpapers — a bright row then a dark row. These are
@@ -52,29 +55,12 @@ const GRADIENT_PRESETS = [
   { id: 'dawn',      name: 'Dawn',      colors: ['#dfe9f3', '#ffffff'] },
 ];
 
-export interface WallpaperConfig {
-  type: 'solid' | 'gradient' | 'image';
-  value: string;         // hex for solid, preset id for gradient, uri for image
-  colors?: string[];     // gradient colors
-}
-
-// Read the saved wallpaper for a chat (falls back to the global default).
-// Returns null = "default", so app/chat.tsx paints the theme's chat background.
-export async function getWallpaper(chatId: string): Promise<WallpaperConfig | null> {
-  try {
-    // A per-chat SCOPED_DEFAULT means "app default" even when a global
-    // wallpaper is set (lib/scopedChoice.ts).
-    const raw = resolveScoped(
-      await AsyncStorage.getItem(`vc_wallpaper_${chatId}`),
-      await AsyncStorage.getItem(GLOBAL_KEY),
-    );
-    return raw ? JSON.parse(raw) as WallpaperConfig : null;
-  } catch { return null; }
-}
+// app/chat.tsx still imports these from this route; they live in lib now.
+// ponytail: drop this re-export once chat.tsx imports from lib/chatWallpaperStore.
+export { getWallpaper, type WallpaperConfig } from '../lib/chatWallpaperStore';
 
 type Tab = 'solid' | 'gradient' | 'custom';
 
-const GLOBAL_KEY = 'vc_wallpaper_default';
 
 /** What a wallpaper is called, for "Same as all chats · <name>". */
 function wallpaperName(w: WallpaperConfig | null): string {
@@ -112,7 +98,7 @@ export default function ChatWallpaperScreen() {
   const { colors } = useTheme();
   const s = useMemo(() => makeStyles(colors, SW), [colors, SW]);
   const { chatId } = useLocalSearchParams<{ chatId: string }>();
-  const storageKey = `vc_wallpaper_${chatId || 'default'}`;
+  const storageKey = wallpaperKey(chatId);
 
   // null = default (theme wallpaper)
   const [selected, setSelected] = useState<WallpaperConfig | null>(null);
@@ -136,7 +122,7 @@ export default function ChatWallpaperScreen() {
     touched.current = false;
     (async () => {
       try {
-        const [raw, globalRaw] = await Promise.all([AsyncStorage.getItem(storageKey), AsyncStorage.getItem(GLOBAL_KEY)]);
+        const [raw, globalRaw] = await Promise.all([AsyncStorage.getItem(storageKey), AsyncStorage.getItem(WALLPAPER_GLOBAL_KEY)]);
         const loaded: WallpaperConfig | null = raw && raw !== SCOPED_DEFAULT ? JSON.parse(raw) : null;
         const inh = !!chatId && raw == null;
         if (chatId) {
@@ -155,9 +141,9 @@ export default function ChatWallpaperScreen() {
   dirtyRef.current = dirty;
   const leaving = useRef(false);
   const navigation = useNavigation();
-  useEffect(() => navigation.addListener('beforeRemove', (ev) => {
-    // beforeRemove is preventable at runtime; the generic navigation type says otherwise.
-    const e = ev as typeof ev & { preventDefault(): void };
+  // Typed by hand: with strictNullChecks off, the library's own event map
+  // resolves beforeRemove as not preventable (`undefined extends true`).
+  useEffect(() => navigation.addListener('beforeRemove', (e: EventArg<'beforeRemove', true, { action: NavigationAction }>) => {
     if (leaving.current || !dirtyRef.current) return;
     e.preventDefault();
     Alert.alert('Discard wallpaper change?', 'Tap "Set wallpaper" to keep it.', [
@@ -348,7 +334,7 @@ export default function ChatWallpaperScreen() {
           </View>
         )}
 
-        <TouchableOpacity activeOpacity={0.85} onPress={save} disabled={saving} style={[s.setBtn, saving && { opacity: 0.6 }]} accessibilityRole="button" accessibilityState={{ disabled: saving, busy: saving }}>
+        <TouchableOpacity activeOpacity={0.85} onPress={save} disabled={saving} style={[s.setBtn, saving && s.setBtnOff]} accessibilityRole="button" accessibilityState={{ disabled: saving, busy: saving }}>
           <Text style={s.setBtnText}>{saving ? 'Saving…' : 'Set wallpaper'}</Text>
         </TouchableOpacity>
       </ScrollView>
@@ -387,7 +373,7 @@ const makeStyles = (c: Palette, SW: number) => {
   tab: { flex: 1, minHeight: 44, paddingVertical: 10, alignItems: 'center', justifyContent: 'center', borderRadius: 9 },
   tabActive: { backgroundColor: c.primary },
   tabText: { color: c.textDim, fontSize: 14, fontWeight: '600' },
-  tabTextActive: { color: c.bubbleOutText },
+  tabTextActive: { color: c.onPrimary },
 
   colorGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   colorTile: { width: COLOR_SIZE, height: COLOR_SIZE, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, justifyContent: 'center', alignItems: 'center' },
@@ -405,7 +391,8 @@ const makeStyles = (c: Palette, SW: number) => {
   customCheckRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
   customCheckText: { fontSize: 13, fontWeight: '600' },
 
-  setBtn: { backgroundColor: c.primary, borderRadius: 26, paddingVertical: 15, alignItems: 'center', marginTop: 24 },
-  setBtnText: { color: c.bubbleOutText, fontSize: 16, fontWeight: '800' },
+  setBtn: { backgroundColor: c.primary, borderRadius: 26, paddingVertical: 15, minHeight: 50, alignItems: 'center', justifyContent: 'center', marginTop: 24 },
+  setBtnOff: { opacity: 0.6 },
+  setBtnText: { color: c.onPrimary, fontSize: 16, fontWeight: '800' },
 });
 }

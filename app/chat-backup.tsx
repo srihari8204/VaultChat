@@ -60,6 +60,8 @@ export default function ChatBackupScreen() {
   // lives only with the user, so the only way forward is to ask.
   const [askSecret, setAskSecret] = useState<'password' | 'key' | null>(null);
   const [secretInput, setSecretInput] = useState('');
+  // The secret is masked by default (shoulder-surfing); Show reveals it to check a long key.
+  const [showSecret, setShowSecret] = useState(false);
   const [busy, setBusy] = useState<'backup' | 'restore' | 'signin' | null>(null);
 
   const [loadErr, setLoadErr] = useState(false);
@@ -117,8 +119,8 @@ export default function ChatBackupScreen() {
       // chats back" was the one destination never written, and the screen
       // reported "Backup complete" regardless.
       let cloudOk = false;
-      try { await uploadCloudBackup(); cloudOk = true; }
-      catch (e) { console.warn('[backup] cloud upload failed:', (e as any)?.message); }
+      // Reported below as "Partly backed up" / "Backup failed".
+      try { await uploadCloudBackup(); cloudOk = true; } catch { /* reported below */ }
       await writeLocalBackup(new Date()).catch(() => {});
       let driveOk = false;
       try { await backupToGoogleDrive(true); driveOk = true; } catch { /* not signed in / cancelled */ }
@@ -168,7 +170,7 @@ export default function ChatBackupScreen() {
           n = await restoreLocalBackup(undefined, userSecret);
         }
       }
-      setAskSecret(null); setSecretInput('');
+      setAskSecret(null); setSecretInput(''); setShowSecret(false);
       // Restored rows go straight into the local store, which every chat reads
       // when it opens, and the Chats list re-reads itself on focus — so going
       // back to Chats shows them; no restart needed.
@@ -221,11 +223,11 @@ export default function ChatBackupScreen() {
     return (
       <View style={s.root}>
         {header}
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 }}>
+        <View style={s.loadBox}>
           {loadErr ? (
             <>
               <Text style={s.topDesc}>Backup settings could not be loaded.</Text>
-              <TouchableOpacity onPress={refresh} accessibilityRole="button" style={{ padding: 10, minHeight: 44, justifyContent: 'center' }}>
+              <TouchableOpacity onPress={refresh} accessibilityRole="button" style={s.linkBtn}>
                 <Text style={s.restoreLink}>Try again</Text>
               </TouchableOpacity>
             </>
@@ -266,10 +268,10 @@ export default function ChatBackupScreen() {
 
           <TouchableOpacity style={[s.backupBtn, busy && s.btnOff]} onPress={onBackUp} disabled={!!busy} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel="Back up now" accessibilityState={{ disabled: !!busy, busy: busy === 'backup' }}>
             {busy === 'backup'
-              ? <ActivityIndicator color={colors.bubbleOutText} />
+              ? <ActivityIndicator color={colors.onPrimary} />
               : <Text style={s.backupTxt}>BACK UP</Text>}
           </TouchableOpacity>
-          <TouchableOpacity onPress={onRestore} disabled={!!busy} style={{ paddingVertical: 10, minHeight: 44, justifyContent: 'center' }} accessibilityRole="button" accessibilityLabel="Restore from backup" accessibilityState={{ disabled: !!busy, busy: busy === 'restore' }}>
+          <TouchableOpacity onPress={onRestore} disabled={!!busy} style={s.linkBtn} accessibilityRole="button" accessibilityLabel="Restore from backup" accessibilityState={{ disabled: !!busy, busy: busy === 'restore' }}>
             <Text style={s.restoreLink}>{busy === 'restore' ? 'Restoring…' : 'Restore'}</Text>
           </TouchableOpacity>
         </View>
@@ -305,7 +307,7 @@ export default function ChatBackupScreen() {
               {mode === 'account'
                 ? 'Your backup is encrypted with a key stored by your account, so it can be restored automatically.'
                 : mode === 'key'
-                  ? 'Only your 64-digit key can unlock this backup.'
+                  ? 'Only your 64-character key can unlock this backup.'
                   : 'Only your password can unlock this backup.'}
             </Text>
           </View>
@@ -346,7 +348,7 @@ export default function ChatBackupScreen() {
           {mode === 'account'
             ? 'Backups are encrypted and restore automatically when you reinstall and sign in.'
             : 'Backups are end-to-end encrypted. You will need your ' +
-              (mode === 'key' ? '64-digit key' : 'password') + ' to restore them.'}
+              (mode === 'key' ? '64-character key' : 'password') + ' to restore them.'}
         </Text>
       </ScrollView>
 
@@ -354,32 +356,44 @@ export default function ChatBackupScreen() {
           this is exactly the moment a returning Android user hits — a fresh
           install with their whole history behind one secret. */}
       <Modal visible={askSecret !== null} transparent animationType="fade"
-             onRequestClose={() => { setAskSecret(null); setSecretInput(''); }}>
+             onRequestClose={() => { setAskSecret(null); setSecretInput(''); setShowSecret(false); }}>
         <KeyboardSafe keyboardOnly>
         <View style={s.modalWrap}>
           <View style={s.modalCard}>
             <Text style={s.modalTitle} accessibilityRole="header">
-              {askSecret === 'key' ? 'Enter your 64-digit key' : 'Enter your backup password'}
+              {askSecret === 'key' ? 'Enter your 64-character key' : 'Enter your backup password'}
             </Text>
             <Text style={s.modalBody}>
               This backup is end-to-end encrypted. It can only be unlocked with the
               {askSecret === 'key' ? ' key' : ' password'} you set when you turned it on.
             </Text>
             <TextInput
-              style={[s.modalInput, askSecret === 'key' && s.modalInputMono]}
+              style={[s.modalInput, askSecret === 'key' && s.modalInputMono, askSecret === 'key' && showSecret && s.modalInputTall]}
               value={secretInput}
               onChangeText={setSecretInput}
-              secureTextEntry={askSecret === 'password'}
+              // secureTextEntry cannot be multiline, so the key wraps only when shown.
+              secureTextEntry={!showSecret}
               autoFocus
-              multiline={askSecret === 'key'}
+              multiline={askSecret === 'key' && showSecret}
+              importantForAutofill="no"
+              autoComplete="off"
               placeholder={askSecret === 'key' ? '0000 0000 0000 …' : 'Password'}
               placeholderTextColor={colors.textFaint}
               autoCapitalize="none"
               autoCorrect={false}
-              accessibilityLabel={askSecret === 'key' ? '64-digit backup key' : 'Backup password'}
+              accessibilityLabel={askSecret === 'key' ? '64-character backup key' : 'Backup password'}
             />
+            <TouchableOpacity
+              onPress={() => setShowSecret(v => !v)}
+              style={s.showBtn}
+              accessibilityRole="switch"
+              accessibilityLabel={askSecret === 'key' ? 'Show key' : 'Show password'}
+              accessibilityState={{ checked: showSecret }}>
+              <Ionicons name={showSecret ? 'eye-off-outline' : 'eye-outline'} size={18} color={colors.primary} />
+              <Text style={s.restoreLink}>{showSecret ? 'Hide' : 'Show'}</Text>
+            </TouchableOpacity>
             <View style={s.modalBtns}>
-              <TouchableOpacity onPress={() => { setAskSecret(null); setSecretInput(''); }} disabled={!!busy} style={s.modalBtn} accessibilityRole="button">
+              <TouchableOpacity onPress={() => { setAskSecret(null); setSecretInput(''); setShowSecret(false); }} disabled={!!busy} style={s.modalBtn} accessibilityRole="button">
                 <Text style={s.modalCancel}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -415,7 +429,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   timeVal: { color: c.text, fontSize: 14, fontWeight: '600' },
   backupBtn: { backgroundColor: c.primary, borderRadius: 26, paddingVertical: 14, paddingHorizontal: 48, marginTop: 22, minWidth: 200, alignItems: 'center' },
   btnOff: { opacity: 0.6 },
-  backupTxt: { color: c.bubbleOutText, fontSize: 15, fontWeight: '800', letterSpacing: 0.5 },
+  backupTxt: { color: c.onPrimary, fontSize: 15, fontWeight: '800', letterSpacing: 0.5 },
   restoreLink: { color: c.primary, fontSize: 14, fontWeight: '700' },
 
   divider: { height: StyleSheet.hairlineWidth, backgroundColor: c.hairline, marginVertical: 12 },
@@ -434,7 +448,11 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     color: c.text, fontSize: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke,
     borderRadius: 10, paddingHorizontal: 14, paddingVertical: Platform.OS === 'ios' ? 14 : 10,
   },
-  modalInputMono: { minHeight: 92, textAlignVertical: 'top', letterSpacing: 1, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  modalInputMono: { letterSpacing: 1, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  modalInputTall: { minHeight: 92, textAlignVertical: 'top' },
+  showBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', minHeight: 44 },
+  loadBox: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },
+  linkBtn: { paddingVertical: 10, paddingHorizontal: 10, minHeight: 44, justifyContent: 'center' },
   modalBtns: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 12, marginTop: 18 },
   modalBtn: { minHeight: 44, minWidth: 64, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center' },
   modalCancel: { color: c.textDim, fontSize: 14, fontWeight: '700' },

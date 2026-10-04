@@ -7,6 +7,7 @@
 
 import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
+import type { EventArg, NavigationAction } from '@react-navigation/native';
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState , useMemo} from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Switch, TextInput, TouchableOpacity, View } from 'react-native';
@@ -36,6 +37,8 @@ export default function CreatePollScreen() {
   const [options,       setOptions]       = useState<{ id: number; text: string }[]>([{ id: 0, text: '' }, { id: 1, text: '' }]);
   const [allowMultiple, setAllowMultiple] = useState(false);
   const [posting,       setPosting]       = useState(false);
+  // Synchronous twin of `posting`: two taps in one frame both see false.
+  const postingRef = useRef(false);
 
   // Leaving with a typed poll asks first (header back, hardware back, swipe).
   // `sent` lets the post-send pop through.
@@ -44,9 +47,9 @@ export default function CreatePollScreen() {
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
   const navigation = useNavigation();
-  useEffect(() => navigation.addListener('beforeRemove', (ev) => {
-    // beforeRemove is preventable at runtime; the generic navigation type says otherwise.
-    const e = ev as typeof ev & { preventDefault(): void };
+  // Typed by hand: with strictNullChecks off, the library's own event map
+  // resolves beforeRemove as not preventable (`undefined extends true`).
+  useEffect(() => navigation.addListener('beforeRemove', (e: EventArg<'beforeRemove', true, { action: NavigationAction }>) => {
     if (sent.current || !dirtyRef.current) return;
     e.preventDefault();
     Alert.alert('Discard poll?', 'Your poll has not been sent and will be lost.', [
@@ -84,6 +87,8 @@ export default function CreatePollScreen() {
       return;
     }
 
+    if (postingRef.current) return;
+    postingRef.current = true;
     setPosting(true);
     try {
       await createPoll(chatId, q, cleaned, allowMultiple);
@@ -92,6 +97,7 @@ export default function CreatePollScreen() {
     } catch (e: any) {
       Alert.alert('Could not send poll', e?.message ?? 'Try again');
     } finally {
+      postingRef.current = false;
       setPosting(false);
     }
   }, [chatId, question, options, allowMultiple, router]);
@@ -116,7 +122,7 @@ export default function CreatePollScreen() {
           accessibilityLabel="Send poll"
           accessibilityState={{ disabled: posting, busy: posting }}
         >
-          {posting ? <ActivityIndicator color={colors.bubbleOutText} /> : <Text style={S.sendBtnTxt}>Send</Text>}
+          {posting ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={S.sendBtnTxt}>Send</Text>}
         </TouchableOpacity>
       </View>
 
@@ -149,7 +155,6 @@ export default function CreatePollScreen() {
             {options.length > MIN_OPTIONS && (
               <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Remove option ${i + 1}`}
                 onPress={() => removeOption(o.id)}
-                hitSlop={8}
                 style={S.removeBtn}
               >
                 <Ionicons name="close" size={20} color={colors.danger} />
@@ -180,6 +185,13 @@ export default function CreatePollScreen() {
             thumbColor={colors.card}
           />
         </View>
+
+        {/* lib/msgEnvelope: options ride inside the encrypted body; only
+            allowMultiple is on the server's public meta allow-list. */}
+        <Text style={S.privacy}>
+          🔒 The question and options are end-to-end encrypted. The server sees only whether
+          multiple answers are allowed, and stores votes by option number so it can count them.
+        </Text>
       </ScrollView>
     </KeyboardSafe>
   );
@@ -190,12 +202,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
 
   header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
-  backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  backBtn:       { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   title:         { color: c.text, fontSize: 22, fontWeight: '800' },
   sub:           { color: c.textDim, fontSize: 12 },
   sendBtn:       { backgroundColor: c.primary, paddingHorizontal: 16, paddingVertical: 10, minHeight: 44, justifyContent: 'center', borderRadius: 22 },
   sendBtnOff:    { opacity: 0.5 },
-  sendBtnTxt:    { color: c.bubbleOutText, fontWeight: '700' },
+  sendBtnTxt:    { color: c.onPrimary, fontWeight: '700' },
 
   label:         { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 8 },
 
@@ -204,11 +216,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   optionRow:     { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   optionInput:   { flex: 1, color: c.text, backgroundColor: c.glass, borderColor: c.glassStroke, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15 },
-  removeBtn:     { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: 18, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glass },
+  removeBtn:     { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glass },
   addBtn:        { flexDirection: 'row', justifyContent: 'center', padding: 12, minHeight: 44, borderRadius: 12, backgroundColor: c.glass, borderWidth: 1, borderColor: c.glassStroke, alignItems: 'center', marginTop: 4 },
   addBtnTxt:     { color: c.primary, fontWeight: '700' },
 
   toggleRow:     { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 24, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.glassStroke },
   toggleTitle:   { color: c.text, fontSize: 15, fontWeight: '600' },
   toggleSub:     { color: c.textDim, fontSize: 12, lineHeight: 16, marginTop: 2 },
+  privacy:       { color: c.textDim, fontSize: 12, lineHeight: 16, marginTop: 16 },
 });

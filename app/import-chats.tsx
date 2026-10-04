@@ -15,7 +15,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert,
+  View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Alert,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -24,19 +24,23 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as RNFS from '@dr.pogodin/react-native-fs';
 import { Buffer } from 'buffer';
 
-import { type Palette, SPACING, RADIUS, brandAlpha } from '../constants/theme';
+import { SPACING } from '../constants/theme';
 import { IMPORT_SOURCES, IMPORT_SOURCE, type ImportOrigin } from '../constants/importSources';
 import { useTheme } from '../lib/theme';
 import { Header, Card, Button, AuroraBackground } from '../components/ui';
 import {
   readExport, extractEntries, withDedupeKeys, parsedFail,
-  type ArchiveSource, type WaMessage, type WaFormat, type WaFailure,
+  type ArchiveSource, type WaFailure,
 } from '../lib/waImport';
 import { importMessages, getMeta, setMeta, type ImportRow } from '../lib/localDb';
 import { getChat, listChats, normalizePhoneForHash, type ChatDetail, type ChatSummary } from '../lib/chatService';
 import { getCachedContacts, findContactByVaultId } from '../lib/contactSync';
 import { APP_DOCS, ensureDir, toUri } from '../lib/storageRoots';
 import { getCurrentUserAsync } from './(constants)/authService';
+import {
+  Done, PickChat, Preview, PrivacyNote, Step, makeImportStyles,
+  type MatchLevel, type Outcome, type Parsed,
+} from '../components/chattools/importChatsParts';
 
 // The source list and its icons/tints come from constants/importSources, so the
 // picker and the mark drawn on every imported message can never disagree about
@@ -48,27 +52,6 @@ type Stage =
   | 'pick-chat' | 'pick-source' | 'pick-file'
   | 'reading' | 'matching' | 'preview' | 'importing'
   | 'done' | 'failed';
-
-/** How confident we are that this export belongs to the selected contact. */
-type MatchLevel = 'phone' | 'name' | 'unverified';
-
-interface Parsed {
-  messages: WaMessage[];
-  participants: string[];
-  format: WaFormat;
-  unsupported: number;
-  missingMedia: number;
-  mediaNames: Set<string>;
-  /** The export's counterpart — the person who is NOT the user. */
-  counterpart: string;
-  /** Sender label the user sends under, so alignment is right. */
-  selfLabel: string;
-}
-
-interface Outcome {
-  imported: number; duplicates: number; unsupported: number;
-  mediaCopied: number; mediaSkipped: number; partial: boolean;
-}
 
 const FAIL_COPY: Record<WaFailure, { title: string; body: string }> = {
   'not-an-archive':     { title: 'That file could not be read',
@@ -93,7 +76,7 @@ const SESSION_KEY = (chatId: string) => `vc_import_session_${chatId}`;
 
 export default function ImportChatsScreen() {
   const { colors } = useTheme();
-  const s = useMemo(() => makeStyles(colors), [colors]);
+  const s = useMemo(() => makeImportStyles(colors), [colors]);
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ chatId?: string; peerName?: string }>();
@@ -162,29 +145,6 @@ export default function ImportChatsScreen() {
   }, [stage, directChats, chatsErr]);
 
   // ── reading the export ────────────────────────────────────────────
-  const pickFile = useCallback(async () => {
-    try {
-      const res = await DocumentPicker.getDocumentAsync({
-        // copyToCacheDirectory:false — a WhatsApp export can be gigabytes, and
-        // copying one to make a second copy we then stream is exactly the waste
-        // this whole file is shaped to avoid.
-        type: ['application/zip', 'application/octet-stream', '*/*'],
-        multiple: false, copyToCacheDirectory: false,
-      });
-      if (res.canceled || !res.assets?.length) return;
-      const a = res.assets[0];
-      const path = decodeURI(String(a.uri).replace(/^file:\/\//, ''));
-      const st = await RNFS.stat(path).catch(() => null);
-      const size = Number(a.size ?? st?.size ?? 0);
-      if (!size) { setFailure({ reason: 'not-an-archive', detail: 'empty file' }); setStage('failed'); return; }
-      fileRef.current = { uri: path, name: a.name ?? 'export.zip', size };
-      await runParse(path, size);
-    } catch (e: any) {
-      setFailure({ reason: 'not-an-archive', detail: String(e?.message ?? e) });
-      setStage('failed');
-    }
-  }, [chatId, peerName]);
-
   const runParse = useCallback(async (path: string, size: number, forceOrder?: 'DMY' | 'MDY') => {
     const gen = ++parseGen.current;
     const stale = () => gen !== parseGen.current;
@@ -249,6 +209,29 @@ export default function ImportChatsScreen() {
     }
   }, [chatId, peerName]);
 
+  const pickFile = useCallback(async () => {
+    try {
+      const res = await DocumentPicker.getDocumentAsync({
+        // copyToCacheDirectory:false — a WhatsApp export can be gigabytes, and
+        // copying one to make a second copy we then stream is exactly the waste
+        // this whole file is shaped to avoid.
+        type: ['application/zip', 'application/octet-stream', '*/*'],
+        multiple: false, copyToCacheDirectory: false,
+      });
+      if (res.canceled || !res.assets?.length) return;
+      const a = res.assets[0];
+      const path = decodeURI(String(a.uri).replace(/^file:\/\//, ''));
+      const st = await RNFS.stat(path).catch(() => null);
+      const size = Number(a.size ?? st?.size ?? 0);
+      if (!size) { setFailure({ reason: 'not-an-archive', detail: 'empty file' }); setStage('failed'); return; }
+      fileRef.current = { uri: path, name: a.name ?? 'export.zip', size };
+      await runParse(path, size);
+    } catch (e: any) {
+      setFailure({ reason: 'not-an-archive', detail: String(e?.message ?? e) });
+      setStage('failed');
+    }
+  }, [runParse]);
+
   // Reading has no abort hook in the parser, so Cancel abandons the result:
   // the in-flight parse sees a newer generation and drops what it read.
   const cancelParse = useCallback(() => {
@@ -257,6 +240,15 @@ export default function ImportChatsScreen() {
   }, []);
 
   // ── writing ───────────────────────────────────────────────────────
+  const finishCancelled = useCallback(async () => {
+    await setMeta(SESSION_KEY(chatId), JSON.stringify({
+      state: 'partial', source, at: new Date().toISOString(),
+    })).catch(() => {});
+    setOutcome({ imported: doneRef.current, duplicates: 0, unsupported: 0,
+                 mediaCopied: 0, mediaSkipped: 0, partial: true });
+    setStage('done');
+  }, [chatId, source]);
+
   const runImport = useCallback(async () => {
     if (!parsed) return;
     if (!chat) {
@@ -382,16 +374,8 @@ export default function ImportChatsScreen() {
                    mediaCopied, mediaSkipped, partial: true });
       setStage('done');
     }
-  }, [parsed, chat, chatId, peerName, source, loadChat]);
+  }, [parsed, chat, chatId, peerName, source, loadChat, finishCancelled]);
 
-  const finishCancelled = useCallback(async () => {
-    await setMeta(SESSION_KEY(chatId), JSON.stringify({
-      state: 'partial', source, at: new Date().toISOString(),
-    })).catch(() => {});
-    setOutcome({ imported: doneRef.current, duplicates: 0, unsupported: 0,
-                 mediaCopied: 0, mediaSkipped: 0, partial: true });
-    setStage('done');
-  }, [chatId, source]);
 
   const cancel = useCallback(() => {
     cancelRef.current.cancelled = true;
@@ -592,315 +576,8 @@ async function verifyContact(
 }
 
 /** The person on the other side of a direct chat, however the row spells it. */
-function peerLabel(c: ChatSummary): string {
-  return (c.peerName?.trim() || c.name?.trim() || 'Unnamed contact');
-}
-
 /** Case-, accent- and whitespace-insensitive comparison for human names. */
 function fold(s: string): string {
   return (s ?? '').normalize('NFKD').replace(/[̀-ͯ]/g, '')
     .toLowerCase().replace(/\s+/g, ' ').trim();
 }
-
-// ─── Pieces ──────────────────────────────────────────────────────────
-
-type S = ReturnType<typeof makeStyles>;
-
-function PrivacyNote({ s, colors }: { s: S; colors: Palette }) {
-  return (
-    <View style={s.privacy}>
-      <Ionicons name="lock-closed" size={14} color={colors.success} />
-      <Text style={s.privacyTxt}>Your data stays on this device. Nothing is uploaded.</Text>
-    </View>
-  );
-}
-
-function Step({ s, n, text, last }: { s: S; n: number; text: string; last?: boolean }) {
-  return (
-    <View style={[s.step, last && { borderBottomWidth: 0 }]}>
-      <View style={s.stepNum}><Text style={s.stepNumTxt}>{n}</Text></View>
-      <Text style={s.stepTxt}>{text}</Text>
-    </View>
-  );
-}
-
-function Row({ s, k, v }: { s: S; k: string; v: string }) {
-  return (
-    <View style={s.kv}>
-      <Text style={s.kvK}>{k}</Text>
-      <Text style={s.kvV} numberOfLines={2}>{v}</Text>
-    </View>
-  );
-}
-
-function PickChat({ s, colors, chats, error, onRetry, onPick }: {
-  s: S; colors: Palette; chats: ChatSummary[] | null;
-  error: boolean; onRetry: () => void;
-  onPick: (chatId: string, name: string) => void;
-}) {
-  if (error) {
-    return (
-      <View style={s.center}>
-        <Text style={s.h1}>{"Couldn't load your chats"}</Text>
-        <Text style={s.sub} accessibilityRole="alert">Check your connection and try again.</Text>
-        <Button title="Try again" onPress={onRetry} />
-      </View>
-    );
-  }
-  if (!chats) return <View style={s.center}><ActivityIndicator color={colors.primary} accessibilityLabel="Loading chats" /></View>;
-  if (!chats.length) {
-    return (
-      <View style={s.center}>
-        <Text style={s.h1}>No conversations yet</Text>
-        <Text style={s.sub}>Start a chat with someone first, then import your history with them.</Text>
-      </View>
-    );
-  }
-  return (
-    <>
-      <Text style={s.h1}>Which conversation?</Text>
-      <Text style={s.sub}>Pick the contact whose history you want to bring across. One at a time.</Text>
-      <PrivacyNote s={s} colors={colors} />
-      {chats.map(c => {
-        // A DIRECT chat carries the other person in `peerName`; `name` is for
-        // groups and is null here. Reading `name` first made every row in this
-        // picker read "Unnamed" on a real device — a contact list with no
-        // contacts in it. Verified on the Honor before and after.
-        const who = peerLabel(c);
-        return (
-          <TouchableOpacity key={c.id} style={s.srcRow} activeOpacity={0.7}
-            onPress={() => onPick(c.id, who)} accessibilityRole="button" accessibilityLabel={`Import into chat with ${who}`}>
-            <View style={[s.srcIcon, { backgroundColor: brandAlpha(0.15) }]}>
-              <Ionicons name="person" size={20} color={colors.primary} />
-            </View>
-            <Text style={[s.srcLabel, s.flex]} numberOfLines={1}>{who}</Text>
-            <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
-          </TouchableOpacity>
-        );
-      })}
-    </>
-  );
-}
-
-function Preview({
-  s, colors, parsed, peerName, match, ack, setAck, dateOrder, answered, onPickOrder, onConfirm, onCancel,
-}: {
-  s: S; colors: Palette; parsed: Parsed; peerName: string;
-  match: { level: MatchLevel; because: string } | null;
-  ack: boolean; setAck: (v: boolean) => void;
-  dateOrder: 'DMY' | 'MDY'; answered: boolean; onPickOrder: (o: 'DMY' | 'MDY') => void;
-  onConfirm: () => void; onCancel: () => void;
-}) {
-  const times = parsed.messages.map(m => m.tsMs);
-  const range = times.length
-    ? `${fmtMonth(Math.min(...times))} – ${fmtMonth(Math.max(...times))}`
-    : '—';
-
-  // Two gates, and neither can be waved through by pressing the primary button:
-  // an unverified contact, and a date order the export itself could not settle.
-  const needsAck = match?.level === 'unverified';
-  const blocked = (needsAck && !ack) || (parsed.format.ambiguous && !answered);
-
-  return (
-    <>
-      <Text style={s.h1}>Import this conversation?</Text>
-
-      <Card style={s.summary}>
-        <Row s={s} k="Source" v="WhatsApp" />
-        <Row s={s} k="Contact" v={parsed.counterpart || peerName} />
-        <Row s={s} k="Messages" v={parsed.messages.length.toLocaleString()} />
-        <Row s={s} k="Time range" v={range} />
-        <Row s={s} k="Into" v={peerName} />
-      </Card>
-
-      {match && (
-        <View style={[s.match, match.level === 'phone' ? s.matchOk
-                    : match.level === 'name' ? s.matchMeh : s.matchBad]}>
-          <Ionicons
-            name={match.level === 'phone' ? 'checkmark-circle'
-                : match.level === 'name' ? 'information-circle' : 'alert-circle'}
-            size={16}
-            color={match.level === 'phone' ? colors.success
-                 : match.level === 'name' ? colors.primary : colors.danger}
-          />
-          <Text style={s.matchTxt}>{match.because}</Text>
-        </View>
-      )}
-
-      {needsAck && (
-        <TouchableOpacity style={s.ackRow} activeOpacity={0.8} onPress={() => setAck(!ack)} accessibilityRole="checkbox" accessibilityState={{ checked: ack }}>
-          <View style={[s.check, ack && s.checkOn]}>
-            {ack && <Ionicons name="checkmark" size={14} color={colors.bubbleOutText} />}
-          </View>
-          <Text style={s.ackTxt}>
-            Yes — this WhatsApp conversation with{' '}
-            <Text style={s.strong}>{parsed.counterpart || 'this person'}</Text> belongs in my
-            crazzychat chat with <Text numberOfLines={1} style={s.strong}>{peerName}</Text>.
-          </Text>
-        </TouchableOpacity>
-      )}
-
-      {parsed.format.ambiguous && (
-        <Card style={s.warnCard}>
-          <Text style={s.warnTitle}>Which date order does this export use?</Text>
-          <Text style={s.warnBody}>
-            Every date in this export could be read either way (e.g. 03/04 as 3 April or March 4),
-            so it cannot be worked out from the file. Choosing wrong shifts every message by months.
-          </Text>
-          <View style={s.pillRow}>
-            {([['DMY', 'Day first (03/04 = 3 Apr)'], ['MDY', 'Month first (03/04 = 4 Mar)']] as const).map(([o, label]) => {
-              const on = answered && dateOrder === o;
-              return (
-                <TouchableOpacity key={o} style={[s.pill, on && s.pillOn]} onPress={() => onPickOrder(o)} accessibilityRole="radio" accessibilityState={{ checked: on }}>
-                  <Text style={[s.pillTxt, on && s.pillTxtOn]}>{label}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </Card>
-      )}
-
-      {(parsed.unsupported > 0 || parsed.missingMedia > 0) && (
-        <Text style={s.note}>
-          {parsed.missingMedia > 0 && `${parsed.missingMedia} media file${parsed.missingMedia === 1 ? '' : 's'} referenced but not in this export`}
-          {parsed.missingMedia > 0 && parsed.unsupported > 0 && ' · '}
-          {parsed.unsupported > 0 && `${parsed.unsupported} line${parsed.unsupported === 1 ? '' : 's'} could not be read`}
-        </Text>
-      )}
-
-      <View style={s.privacy}>
-        <Ionicons name="lock-closed" size={14} color={colors.success} />
-        <Text style={s.privacyTxt}>Nothing will be uploaded. Import happens on this device.</Text>
-      </View>
-
-      <Button title="Import conversation" fullWidth disabled={blocked} onPress={onConfirm} />
-      <Button title="Cancel" variant="ghost" fullWidth style={s.gap} onPress={onCancel} />
-    </>
-  );
-}
-
-function Done({ s, colors, outcome, peerName, onOpen, onRetry }: {
-  s: S; colors: Palette; outcome: Outcome; peerName: string;
-  onOpen: () => void; onRetry: () => void;
-}) {
-  return (
-    <View style={s.center}>
-      <View style={[s.tick, outcome.partial && { borderColor: colors.primary }]}>
-        <Ionicons name={outcome.partial ? 'pause' : 'checkmark'} size={34} color={colors.primary} />
-      </View>
-      <Text style={s.h1}>{outcome.partial ? 'Import incomplete' : 'Conversation imported'}</Text>
-      <Text style={s.sub} numberOfLines={2}>{peerName} · WhatsApp</Text>
-
-      <Card style={s.summary}>
-        <Row s={s} k="Messages imported" v={outcome.imported.toLocaleString()} />
-        <Row s={s} k="Duplicates skipped" v={outcome.duplicates.toLocaleString()} />
-        <Row s={s} k="Unsupported items" v={outcome.unsupported.toLocaleString()} />
-        <Row s={s} k="Media copied" v={`${outcome.mediaCopied}${outcome.mediaSkipped ? ` (${outcome.mediaSkipped} too large)` : ''}`} />
-        <Row s={s} k="Timestamps" v="Preserved as exported" />
-      </Card>
-
-      {outcome.partial && (
-        <Text style={s.note}>
-          Everything imported so far is safe. Running the import again will only add what is missing.
-        </Text>
-      )}
-
-      <Button title="Open conversation" fullWidth onPress={onOpen} />
-      {outcome.partial && <Button title="Resume import" variant="ghost" fullWidth style={s.gap} onPress={onRetry} />}
-    </View>
-  );
-}
-
-function fmtMonth(ms: number): string {
-  try { return new Date(ms).toLocaleDateString(undefined, { month: 'short', year: 'numeric' }); }
-  catch { return ''; }
-}
-
-// ─── Styles ──────────────────────────────────────────────────────────
-//
-// No fixed heights on anything that holds text: the whole screen scrolls, rows
-// grow with dynamic type, and every name truncates rather than shoving the
-// primary action off a small display.
-
-const makeStyles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: 'transparent' },
-  flex:     { flex: 1 },
-  body:     { paddingHorizontal: SPACING.lg, paddingTop: SPACING.md },
-  center:   { alignItems: 'center', paddingTop: SPACING.xl },
-
-  h1:       { color: c.text, fontSize: 22, fontWeight: '900', textAlign: 'center', marginBottom: SPACING.sm },
-  sub:      { color: c.textDim, fontSize: 14, lineHeight: 20, textAlign: 'center', marginBottom: SPACING.md },
-  strong:   { color: c.text, fontWeight: '800' },
-  label:    { color: c.textFaint, fontSize: 11, fontWeight: '800', letterSpacing: 0.8,
-              marginTop: SPACING.lg, marginBottom: SPACING.sm },
-  note:     { color: c.textFaint, fontSize: 12, lineHeight: 17, textAlign: 'center', marginBottom: SPACING.md },
-  detail:   { color: c.textFaint, fontSize: 11, textAlign: 'center', marginBottom: SPACING.sm },
-  reassure: { color: c.success, fontSize: 13, fontWeight: '700', textAlign: 'center', marginBottom: SPACING.md },
-  gap:      { marginTop: SPACING.sm },
-
-  privacy:    { flexDirection: 'row', alignItems: 'center', gap: SPACING.xs, alignSelf: 'center',
-                backgroundColor: c.glassSoft, borderRadius: RADIUS.pill ?? 999,
-                paddingHorizontal: SPACING.md, paddingVertical: SPACING.xs, marginBottom: SPACING.lg },
-  privacyTxt: { color: c.textDim, fontSize: 12, flexShrink: 1 },
-
-  srcRow:   { flexDirection: 'row', alignItems: 'center', gap: SPACING.md,
-              backgroundColor: c.glassSoft, borderRadius: RADIUS.lg ?? 16, borderWidth: 1, borderColor: c.glassStroke,
-              paddingHorizontal: SPACING.md, paddingVertical: SPACING.md, marginBottom: SPACING.sm },
-  srcRowOff:{ opacity: 0.55 },
-  srcIcon:  { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
-  srcLabel: { color: c.text, fontSize: 16, fontWeight: '800' },
-  srcHint:  { color: c.textFaint, fontSize: 12, marginTop: 2, lineHeight: 16 },
-  soon:     { backgroundColor: c.glassSoft, borderRadius: 999, paddingHorizontal: SPACING.sm, paddingVertical: 3 },
-  soonTxt:  { color: c.textDim, fontSize: 11, fontWeight: '700' },
-
-  stepCard: { marginBottom: SPACING.lg },
-  step:     { flexDirection: 'row', alignItems: 'flex-start', gap: SPACING.md,
-              paddingVertical: SPACING.sm, borderBottomWidth: 1, borderBottomColor: c.hairline },
-  stepNum:  { width: 22, height: 22, borderRadius: 11, backgroundColor: brandAlpha(0.18),
-              alignItems: 'center', justifyContent: 'center', marginTop: 1 },
-  stepNumTxt:{ color: c.primary, fontSize: 11, fontWeight: '900' },
-  stepTxt:  { color: c.text, fontSize: 14, lineHeight: 20, flex: 1 },
-
-  busySrc:  { color: c.text, fontSize: 18, fontWeight: '800', marginTop: SPACING.lg },
-  busyNote: { color: c.textDim, fontSize: 14, marginTop: SPACING.xs, textAlign: 'center' },
-  busyCount:{ color: c.textFaint, fontSize: 12, marginTop: SPACING.xs },
-  bar:      { height: 6, borderRadius: 3, backgroundColor: c.glassSoft, width: '100%',
-              marginTop: SPACING.md, overflow: 'hidden' },
-  barFill:  { height: 6, borderRadius: 3, backgroundColor: c.primary },
-
-  summary:  { marginBottom: SPACING.md },
-  kv:       { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between',
-              gap: SPACING.md, paddingVertical: SPACING.sm },
-  kvK:      { color: c.textDim, fontSize: 13, flexShrink: 0 },
-  kvV:      { color: c.text, fontSize: 13, fontWeight: '700', flexShrink: 1, textAlign: 'right' },
-
-  match:    { flexDirection: 'row', alignItems: 'flex-start', gap: SPACING.xs, borderRadius: RADIUS.md ?? 12,
-              padding: SPACING.md, marginBottom: SPACING.md, borderWidth: 1 },
-  // Token + hex alpha (1A ≈ 10 %, 59 ≈ 35 %): follows the theme's success/danger.
-  matchOk:  { backgroundColor: c.success + '1A', borderColor: c.success + '59' },
-  matchMeh: { backgroundColor: brandAlpha(0.10), borderColor: brandAlpha(0.35) },
-  matchBad: { backgroundColor: c.danger + '1A',  borderColor: c.danger + '59' },
-  matchTxt: { color: c.text, fontSize: 13, lineHeight: 18, flex: 1 },
-
-  ackRow:   { flexDirection: 'row', alignItems: 'flex-start', gap: SPACING.md, marginBottom: SPACING.md },
-  check:    { width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: c.glassStroke,
-              alignItems: 'center', justifyContent: 'center', marginTop: 1 },
-  checkOn:  { backgroundColor: c.primary, borderColor: c.primary },
-  ackTxt:   { color: c.text, fontSize: 13, lineHeight: 19, flex: 1 },
-
-  warnCard: { marginBottom: SPACING.md, borderColor: brandAlpha(0.4) },
-  warnTitle:{ color: c.text, fontSize: 14, fontWeight: '800', marginBottom: SPACING.xs },
-  warnBody: { color: c.textDim, fontSize: 13, lineHeight: 19 },
-  pillRow:  { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm, marginTop: SPACING.md },
-  pill:     { borderWidth: 1, borderColor: c.glassStroke, borderRadius: 999, minHeight: 44, justifyContent: 'center',
-              paddingHorizontal: SPACING.md, paddingVertical: SPACING.xs },
-  pillOn:   { borderColor: c.primary, backgroundColor: brandAlpha(0.15) },
-  pillTxt:  { color: c.textDim, fontSize: 12, fontWeight: '700' },
-  pillTxtOn:{ color: c.text },
-
-  tick:     { width: 76, height: 76, borderRadius: 38, backgroundColor: brandAlpha(0.15),
-              borderWidth: 2, borderColor: c.success, alignItems: 'center', justifyContent: 'center',
-              marginBottom: SPACING.md },
-  failIcon: { width: 64, height: 64, borderRadius: 32, backgroundColor: c.danger + '1F',
-              alignItems: 'center', justifyContent: 'center', marginBottom: SPACING.md },
-});

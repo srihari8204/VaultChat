@@ -44,6 +44,8 @@ export default function InChatSearchScreen() {
   const [results, setResults] = useState<InChatMessageHit[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Bumped by Try again to re-run the same query.
+  const [retryKey, setRetryKey] = useState(0);
 
   // The chat's lock, satisfied before anything is searched.
   const [gate, setGate] = useState<'checking' | 'locked' | 'unreadable' | 'open'>('checking');
@@ -105,14 +107,16 @@ export default function InChatSearchScreen() {
       try {
         const hits = await searchInChat(chatId, term, 80);
         if (seq === reqSeq.current) { setResults(hits); setError(null); }
-      } catch (e: any) {
-        if (seq === reqSeq.current) { setError(e?.message ?? 'Search failed'); setResults([]); }
+      } catch {
+        // The local store failed (it is on-device, so not a network error);
+        // the raw SQLite message means nothing to the user.
+        if (seq === reqSeq.current) { setError('The messages saved on this device could not be searched.'); setResults([]); }
       } finally {
         if (seq === reqSeq.current) setLoading(false);
       }
     }, 300);
     return () => { if (debounce.current) clearTimeout(debounce.current); };
-  }, [query, chatId, gate]);
+  }, [query, chatId, gate, retryKey]);
 
   // Auto-focus the input once the chat is open to search.
   useEffect(() => {
@@ -290,7 +294,10 @@ export default function InChatSearchScreen() {
         <View style={s.center}>
           <Ionicons name="alert-circle-outline" size={56} color={colors.danger} />
           <Text style={s.emptyTitle}>Couldn’t search</Text>
-          <Text style={s.emptySubtitle}>{error}</Text>
+          <Text style={s.emptySubtitle} accessibilityRole="alert">{error}</Text>
+          <TouchableOpacity style={s.unlockBtn} onPress={() => setRetryKey(k => k + 1)} accessibilityRole="button">
+            <Text style={s.unlockTxt}>Try again</Text>
+          </TouchableOpacity>
         </View>
       ) : loading ? (
         <View style={s.center}>
@@ -385,7 +392,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   msgText: { color: c.textDim, fontSize: 14, lineHeight: 20 },
   highlight: { color: c.text, backgroundColor: brandAlpha(0.28), fontWeight: '700' },
   unlockBtn: { marginTop: 16, minHeight: 48, minWidth: 200, paddingHorizontal: 24, borderRadius: 12, backgroundColor: c.primary, justifyContent: 'center', alignItems: 'center' },
-  unlockTxt: { color: c.bubbleOutText, fontSize: 15, fontWeight: '700' },
+  unlockTxt: { color: c.onPrimary, fontSize: 15, fontWeight: '700' },
   pinInput: {
     marginTop: 16, minWidth: 200, minHeight: 48, borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke,
     backgroundColor: c.glassSoft, color: c.text, fontSize: 20, letterSpacing: 6, textAlign: 'center', paddingHorizontal: 12,

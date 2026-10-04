@@ -1399,6 +1399,8 @@ export interface ChannelPost {
   authorId:   string;
   authorName?: string | null;
   createdAt:  string;
+  /** Written server-side, not yet deployed (fixes/R4BE C4): absent on today's server. */
+  channelId?: string;
 }
 export async function listChannels(): Promise<Channel[]> {
   return api<Channel[]>('/channels');
@@ -1420,6 +1422,14 @@ export async function listChannelPosts(
 }
 export async function postToChannel(channelId: string, text: string): Promise<ChannelPost> {
   return api<ChannelPost>(`/channels/${encodeURIComponent(channelId)}/posts`, { method: 'POST', json: { text } });
+}
+/** Leave (unsubscribe). 409 for the channel's own admin. New route (R4BE C6). */
+export async function leaveChannel(channelId: string): Promise<void> {
+  await api(`/channels/${encodeURIComponent(channelId)}/leave`, { method: 'POST' });
+}
+/** Admin only: delete one post. New route (R4BE C5). */
+export async function deleteChannelPost(channelId: string, postId: number): Promise<void> {
+  await api(`/channels/${encodeURIComponent(channelId)}/posts/${postId}`, { method: 'DELETE' });
 }
 
 // ─── Profile / VaultID ──────────────────────────────────────────────
@@ -1753,13 +1763,20 @@ export async function addBookmark(
  */
 export async function removeBookmark(id: string, messageId?: number | null): Promise<void> {
   await api(`/user/bookmarks/${encodeURIComponent(id)}`, { method: 'DELETE' });
-  if (messageId && messageId > 0) {
-    try {
-      const { getLocalDb } = await import('./localDb');
-      const db = await getLocalDb();
-      await db.runAsync(`DELETE FROM kv WHERE k = ?`, [bookmarkKey(messageId)]);
-    } catch { /* best-effort: the server bookmark is already gone */ }
-  }
+  // Best-effort: the server bookmark is already gone.
+  if (messageId) await dropBookmarkPlaintext(messageId).catch(() => {});
+}
+
+/**
+ * Delete a bookmark's sealed local snapshot, keeping the bookmark. Used for
+ * view-once / Invisible Ink messages bookmarked before Star stopped
+ * snapshotting them: their copy must not outlive the bubble.
+ */
+export async function dropBookmarkPlaintext(messageId: number): Promise<void> {
+  if (!messageId || messageId <= 0) return;
+  const { getLocalDb } = await import('./localDb');
+  const db = await getLocalDb();
+  await db.runAsync(`DELETE FROM kv WHERE k = ?`, [bookmarkKey(messageId)]);
 }
 
 // ─── Stories (24-hour ephemeral posts) ──────────────────────────────

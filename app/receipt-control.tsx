@@ -11,7 +11,7 @@
 import { HEADER_TOP } from '../constants/layout';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
-  View, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, TextInput,
+  View, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, TextInput, RefreshControl,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,6 +20,7 @@ import { useTheme } from '../lib/theme';
 import { listChats, listGhostMode, setGhostMode, type GhostMode } from '../lib/chatService';
 import { AppText as Text, AuroraBackground } from '../components/ui';
 import { initialOf } from '../lib/format';
+import { tint } from '../lib/tintColor';
 
 interface Contact { userId: string; name: string }
 type Field = 'read' | 'typing' | 'lastSeen';
@@ -32,11 +33,12 @@ function useS() {
 // role=switch, not button: this is a two-state control, and a screen reader
 // should be able to say whether it is on without the user toggling it to
 // find out. The label names the setting; accessibilityState carries state.
-function Toggle({ on, icon, onPress, label }: {
+// Styles and colours come from the screen: one StyleSheet per screen, not
+// one per toggle (three per row).
+function Toggle({ on, icon, onPress, label, s, colors }: {
   on: boolean; icon: React.ComponentProps<typeof Ionicons>['name']; onPress: () => void; label: string;
+  s: ReturnType<typeof makeStyles>; colors: Palette;
 }) {
-  const { colors } = useTheme();
-  const s = useS();
   return (
     <TouchableOpacity
       style={[s.toggleBtn, on && s.toggleBtnOn]}
@@ -61,10 +63,18 @@ export default function ReceiptControlScreen() {
   const [error, setError] = useState<string | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  // Pull-to-refresh reloads under the list instead of swapping it for a spinner.
+  const [refreshing, setRefreshing] = useState(false);
+  const pulling = useRef(false);
+  const onRefresh = useCallback(() => {
+    pulling.current = true;
+    setRefreshing(true);
+    setReloadKey(k => k + 1);
+  }, []);
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
+    if (!pulling.current) setLoading(true);
     (async () => {
       try {
         const [chats, ghost] = await Promise.all([listChats(), listGhostMode()]);
@@ -86,7 +96,8 @@ export default function ReceiptControlScreen() {
       } catch (e: any) {
         if (active) { setError(e?.message ?? 'Failed to load contacts'); setLoadFailed(true); }
       } finally {
-        if (active) setLoading(false);
+        pulling.current = false;
+        if (active) { setLoading(false); setRefreshing(false); }
       }
     })();
     return () => { active = false; };
@@ -193,6 +204,7 @@ export default function ReceiptControlScreen() {
           <FlatList
             data={filtered}
             keyExtractor={c => c.userId}
+            refreshControl={<RefreshControl tintColor={colors.primary} refreshing={refreshing} onRefresh={onRefresh} />}
             renderItem={({ item }) => {
               const r = shownFor(rules[item.userId]);
               return (
@@ -200,9 +212,9 @@ export default function ReceiptControlScreen() {
                   <View style={s.avatar}><Text style={s.avatarTxt}>{initialOf(item.name, '#')}</Text></View>
                   <Text style={s.contactName} numberOfLines={1}>{item.name}</Text>
                   <View style={s.toggleGroup}>
-                    <Toggle label={`Read receipts for ${item.name}`} on={r.read} icon="checkmark-done" onPress={() => toggleRule(item.userId, 'read')} />
-                    <Toggle label={`Typing indicator for ${item.name}`} on={r.typing} icon="create-outline" onPress={() => toggleRule(item.userId, 'typing')} />
-                    <Toggle label={`Last seen for ${item.name}`} on={r.lastSeen} icon="time-outline" onPress={() => toggleRule(item.userId, 'lastSeen')} />
+                    <Toggle s={s} colors={colors} label={`Read receipts for ${item.name}`} on={r.read} icon="checkmark-done" onPress={() => toggleRule(item.userId, 'read')} />
+                    <Toggle s={s} colors={colors} label={`Typing indicator for ${item.name}`} on={r.typing} icon="create-outline" onPress={() => toggleRule(item.userId, 'typing')} />
+                    <Toggle s={s} colors={colors} label={`Last seen for ${item.name}`} on={r.lastSeen} icon="time-outline" onPress={() => toggleRule(item.userId, 'lastSeen')} />
                   </View>
                 </View>
               );
@@ -232,7 +244,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   legendRow: { flexDirection: 'row', gap: 16, marginBottom: 10, paddingLeft: 4 },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   legendTxt: { color: c.textDim, fontSize: 10 },
-  errorBar: { backgroundColor: c.danger + '1F', borderColor: c.danger + '66', borderWidth: 1, padding: 10, borderRadius: 10, marginBottom: 8 },
+  errorBar: { backgroundColor: tint(c.danger, 0.12), borderColor: tint(c.danger, 0.4), borderWidth: 1, padding: 10, borderRadius: 10, marginBottom: 8 },
   errorTxt: { color: c.danger, fontSize: 12 },
   retryBtn: { alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center', paddingHorizontal: 4, marginTop: 4 },
   retryTxt: { color: c.primary, fontSize: 14, fontWeight: '700' },

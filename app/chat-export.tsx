@@ -8,18 +8,19 @@
 // through the user-initiated share.
 
 import { HEADER_TOP } from '../constants/layout';
-import React, { useState , useMemo, useRef} from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Share, Modal, TextInput } from 'react-native';
+import React, { useEffect, useState , useMemo, useRef} from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Modal, TextInput } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as FileSystem from 'expo-file-system/legacy';
-import * as Sharing from 'expo-sharing';
 // BRAND_ACCENT styles the exported HTML file only (a fixed dark document), not the app UI.
 import { type Palette, BRAND_ACCENT } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { getChat, getMessages, hydrateMessages, looksEncrypted, type Message } from '../lib/chatService';
 import { unionWithLocalHistoryAsc } from '../lib/messageHistory';
-import { exportBody } from '../lib/chatExportFormat';
+import {
+  exportBody, exportHtmlHead, exportHtmlLine, exportTextHead, exportTextLine, EXPORT_HTML_TAIL, type ExportLineCtx,
+} from '../lib/chatExportFormat';
+import { ExportCancelled, shareExportFile, writeExportFile } from '../components/chattools/chatExportFile';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { getLock, pinRetryAfterMs, verifyBiometric, verifyPin, type LockedChat } from '../lib/chatLock';
 import { AuroraBackground } from '../components/ui';
@@ -27,6 +28,49 @@ import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 
 const PAGE = 200;
 const MAX_PAGES = 500;
+
+// Fetch every message (oldest→newest) by walking the keyset cursor, then
+// UNION the device's own cache.
+//
+// The server is not the whole history. delete-on-delivery sets content = NULL
+// once every recipient acks, so an export built from /chats/:id/messages
+// alone silently omits everything past the retention window — and an export
+// is exactly where a silent omission is worst, because the user believes
+// they now hold a complete archive. The local cache still has those bodies.
+//
+// Server rows are E2EE envelopes. The union prefers our readable local copy
+// over an envelope (isCipher), and whatever is still an envelope afterwards
+// goes through hydrateMessages — the chat screen's decrypt path — so the
+// export never contains ciphertext (exportBody also refuses to print it).
+// `cancelled` is checked between pages, so Cancel (or leaving) stops the walk.
+async function fetchAll(
+  chatId: string,
+  on: { count: (n: number) => void; phase: (p: string) => void; cancelled: () => boolean },
+): Promise<{ msgs: Message[]; truncated: boolean }> {
+  const all: Message[] = [];
+  let before: number | undefined;
+  let truncated = true;
+  for (let i = 0; i < MAX_PAGES; i++) {
+    if (on.cancelled()) throw new ExportCancelled();
+    const page = await getMessages(chatId, { before, limit: PAGE });
+    all.push(...page);
+    on.count(all.length);
+    if (page.length < PAGE) { truncated = false; break; }
+    before = page[page.length - 1].id; // oldest id in this (desc) page
+  }
+  if (on.cancelled()) throw new ExportCancelled();
+  const merged = await unionWithLocalHistoryAsc(chatId, all, undefined, looksEncrypted);
+  on.phase('Decrypting messages…');
+  // hydrateMessages expects newest-first.
+  const hydrated = (await hydrateMessages(chatId, [...merged].reverse())).reverse();
+  on.count(hydrated.length);
+  return { msgs: hydrated, truncated };
+}
+
+const fmtTime = (iso: string) => { try { return new Date(iso).toLocaleString(); } catch { return ''; } };
+const bodyOf = (m: Message): string => exportBody(m, looksEncrypted);
+const fileName = (peerName: string, ext: string) =>
+  'crazzychat_' + peerName.replace(/[^a-zA-Z0-9]/g, '_') + '_' + Date.now() + '.' + ext;
 
 function useS() {
   const { colors } = useTheme();
@@ -48,65 +92,22 @@ export default function ChatExportScreen() {
   // (async) lock/confirm gate, so a double tap could start two exports.
   const busyRef = useRef(false);
 
-  // Fetch every message (oldest→newest) by walking the keyset cursor, then
-  // UNION the device's own cache.
-  //
-  // The server is not the whole history. delete-on-delivery sets content = NULL
-  // once every recipient acks, so an export built from /chats/:id/messages
-  // alone silently omits everything past the retention window — and an export
-  // is exactly where a silent omission is worst, because the user believes
-  // they now hold a complete archive. The local cache still has those bodies.
-  //
-  // Server rows are E2EE envelopes. The union prefers our readable local copy
-  // over an envelope (isCipher), and whatever is still an envelope afterwards
-  // goes through hydrateMessages — the chat screen's decrypt path — so the
-  // export never contains ciphertext (exportBody also refuses to print it).
-  const fetchAll = async (): Promise<{ msgs: Message[]; truncated: boolean }> => {
-    const all: Message[] = [];
-    let before: number | undefined;
-    let truncated = true;
-    for (let i = 0; i < MAX_PAGES; i++) {
-      const page = await getMessages(chatId, { before, limit: PAGE });
-      all.push(...page);
-      setMsgCount(all.length);
-      if (page.length < PAGE) { truncated = false; break; }
-      before = page[page.length - 1].id; // oldest id in this (desc) page
-    }
-    const merged = await unionWithLocalHistoryAsc(chatId, all, undefined, looksEncrypted);
-    setProgress('Decrypting messages…');
-    // hydrateMessages expects newest-first.
-    const hydrated = (await hydrateMessages(chatId, [...merged].reverse())).reverse();
-    setMsgCount(hydrated.length);
-    return { msgs: hydrated, truncated };
-  };
-
-  const fmtTime = (iso: string) => { try { return new Date(iso).toLocaleString(); } catch { return ''; } };
+  // Cancel button and unmount both stop a running export between pages/chunks;
+  // `mounted` keeps a late step from setting state on a closed screen.
+  const cancelRef = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; cancelRef.current = true; }, []);
+  const cancelled = () => cancelRef.current;
+  const live = <T,>(set: (v: T) => void) => (v: T) => { if (mounted.current) set(v); };
 
   // Group exports name each sender; filled per export from the chat's members.
   const namesRef = useRef<Map<string, string>>(new Map());
-  const senderLabel = (m: Message, myId: string) =>
-    (m.senderId === myId ? 'You' : namesRef.current.get(m.senderId) || peerName);
-
-  const bodyOf = (m: Message): string => exportBody(m, looksEncrypted);
-
-  // The plaintext file is a temporary hand-off to the share sheet, not an
-  // archive: written to the cache directory and deleted once the sheet returns
-  // (shareAsync resolves after the receiving app has taken its copy).
-  const shareFile = async (filePath: string, mime: string, fallback: string) => {
-    try {
-      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(filePath, { mimeType: mime });
-      else await Share.share({ message: fallback });
-    } finally {
-      await FileSystem.deleteAsync(filePath, { idempotent: true }).catch(() => {});
-    }
-  };
-
-  const writeFile = async (ext: string, content: string) => {
-    const name = 'crazzychat_' + peerName.replace(/[^a-zA-Z0-9]/g, '_') + '_' + Date.now() + '.' + ext;
-    const filePath = FileSystem.cacheDirectory + name;
-    await FileSystem.writeAsStringAsync(filePath, content, { encoding: FileSystem.EncodingType.UTF8 });
-    return filePath;
-  };
+  const lineCtx = (myId: string): ExportLineCtx<Message> => ({
+    label: (m) => (m.senderId === myId ? 'You' : namesRef.current.get(m.senderId) || peerName),
+    mine: (m) => m.senderId === myId,
+    time: fmtTime,
+    body: bodyOf,
+  });
 
   // ── Export gate ───────────────────────────────────────────────────
   // An export turns a chat that is protected by biometrics/PIN into a plain
@@ -197,6 +198,7 @@ export default function ChatExportScreen() {
     if (!chatId) { Alert.alert('Export failed', 'Missing chat id.'); return; }
     if (busyRef.current) return;
     busyRef.current = true;
+    cancelRef.current = false;
     try {
       if (!(await authorizeExport())) return;
       setExporting(true);
@@ -207,65 +209,44 @@ export default function ChatExportScreen() {
         const detail = await getChat(chatId);
         namesRef.current = new Map(detail.members.map(mm => [mm.userId, mm.name || mm.email || '']));
       } catch { namesRef.current = new Map(); }   // names are cosmetic; peerName is the fallback
-      const { msgs, truncated } = await fetchAll();
+      const { msgs, truncated } = await fetchAll(chatId, {
+        count: live(setMsgCount), phase: live(setProgress), cancelled,
+      });
       // Say so BEFORE the file is shared, while the user can still decide.
       if (truncated && !(await confirm(
         'Export incomplete',
         `Only the newest ${MAX_PAGES * PAGE} messages from the server can be included, plus older ones saved on this device. Export anyway?`,
       ))) return;
-      setProgress('Formatting ' + msgs.length + ' messages…');
+      if (cancelled()) return;
+      live(setProgress)('Writing ' + msgs.length + ' messages…');
       await fn(msgs, me?.id ?? '');
-      setProgress('');
+      live(setProgress)('');
     } catch (e: any) {
-      Alert.alert('Export failed', e?.message ?? 'Something went wrong');
+      if (!(e instanceof ExportCancelled) && mounted.current) Alert.alert('Export failed', e?.message ?? 'Something went wrong');
     } finally {
       busyRef.current = false;
-      setExporting(false);
+      live(setExporting)(false);
     }
   };
 
   const exportAsText = () => guard(async (msgs, myId) => {
-    let text = 'crazzychat Export - ' + peerName + '\n';
-    text += 'Exported: ' + new Date().toLocaleString() + '\n';
-    text += 'Messages: ' + msgs.length + '\n' + '='.repeat(50) + '\n\n';
-    for (const m of msgs) {
-      text += '[' + fmtTime(m.createdAt) + '] ' + senderLabel(m, myId) + ': ' + bodyOf(m) + '\n';
-      if (m.editedAt) text += '  (edited)\n';
-    }
-    setProgress('Saving file…');
-    const filePath = await writeFile('txt', text);
-    await shareFile(filePath, 'text/plain', text);
+    const ctx = lineCtx(myId);
+    const uri = await writeExportFile(
+      fileName(peerName, 'txt'), exportTextHead(peerName, msgs.length, new Date().toLocaleString()),
+      msgs, (m) => exportTextLine(m, ctx), '', { cancelled },
+    );
+    // ponytail: the no-Sharing fallback (web) shares only a title now that the
+    // text is never one string; Sharing is available on Android and iOS.
+    await shareExportFile(uri, 'text/plain', 'crazzychat export');
   });
 
   const exportAsHTML = () => guard(async (msgs, myId) => {
-    const esc = (str: string) => str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    let html = '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">';
-    html += '<title>crazzychat Export</title><style>';
-    html += 'body{font-family:-apple-system,Segoe UI,sans-serif;background:#0A0A0F;color:#fff;max-width:600px;margin:0 auto;padding:16px}';
-    html += '.header{text-align:center;padding:20px;border-bottom:1px solid #222;margin-bottom:20px}';
-    html += `.header h1{color:${BRAND_ACCENT};margin:0}.header p{color:#888;font-size:12px}`;
-    html += '.msg{margin:4px 0;padding:8px 12px;border-radius:14px;max-width:80%;word-wrap:break-word}';
-    html += `.mine{background:${BRAND_ACCENT}22;margin-left:auto;border-bottom-right-radius:2px}`;
-    html += '.peer{background:#1a1a22;margin-right:auto;border-bottom-left-radius:2px}';
-    html += '.time{color:#666;font-size:10px;margin-top:4px;text-align:right}';
-    html += '.sender{color:#06B6D4;font-size:11px;font-weight:700;margin-bottom:2px}';
-    html += '.meta{color:#777;font-size:10px;font-style:italic}';
-    html += '</style></head><body>';
-    html += '<div class="header"><h1>crazzychat</h1><p>Chat with ' + esc(peerName) + '</p>';
-    html += '<p>' + msgs.length + ' messages | Exported ' + new Date().toLocaleString() + '</p></div>';
-    for (const m of msgs) {
-      const isMine = m.senderId === myId;
-      html += '<div class="msg ' + (isMine ? 'mine' : 'peer') + '">';
-      if (!isMine) html += '<div class="sender">' + esc(senderLabel(m, myId)) + '</div>';
-      html += '<div>' + esc(bodyOf(m)).replace(/\n/g, '<br>') + '</div>';
-      html += '<div class="time">' + fmtTime(m.createdAt) + '</div>';
-      if (m.editedAt) html += '<div class="meta">(edited)</div>';
-      html += '</div>';
-    }
-    html += '</body></html>';
-    setProgress('Saving file…');
-    const filePath = await writeFile('html', html);
-    await shareFile(filePath, 'text/html', 'crazzychat export');
+    const ctx = lineCtx(myId);
+    const uri = await writeExportFile(
+      fileName(peerName, 'html'), exportHtmlHead(peerName, msgs.length, new Date().toLocaleString(), BRAND_ACCENT),
+      msgs, (m) => exportHtmlLine(m, ctx), EXPORT_HTML_TAIL, { cancelled },
+    );
+    await shareExportFile(uri, 'text/html', 'crazzychat export');
   });
 
   return (
@@ -311,6 +292,9 @@ export default function ChatExportScreen() {
             <ActivityIndicator color={colors.primary} />
             <Text style={s.progressTxt}>{progress}</Text>
             {msgCount > 0 && <Text style={s.progressCount}>{msgCount} messages</Text>}
+            <TouchableOpacity style={s.cancelBtn} onPress={() => { cancelRef.current = true; setProgress('Cancelling…'); }} accessibilityRole="button" accessibilityLabel="Cancel export">
+              <Text style={s.cancelTxt}>Cancel</Text>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -350,7 +334,7 @@ export default function ChatExportScreen() {
                 accessibilityRole="button"
                 accessibilityState={{ disabled: pin.length < 4 }}
               >
-                <Text style={{ color: colors.bubbleOutText, fontWeight: '700' }}>Unlock</Text>
+                <Text style={{ color: colors.onPrimary, fontWeight: '700' }}>Unlock</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -377,6 +361,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   progressBox: { alignItems: 'center', padding: 20, marginTop: 10 },
   progressTxt: { color: c.textDim, fontSize: 13, marginTop: 8 },
   progressCount: { color: c.textFaint, fontSize: 11, marginTop: 4 },
+  cancelBtn: { minHeight: 44, minWidth: 120, marginTop: 8, paddingHorizontal: 20, alignItems: 'center', justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke },
+  cancelTxt: { color: c.text, fontWeight: '700' },
   noteBox: { marginTop: 24, backgroundColor: c.glassSoft, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: c.glassStroke },
   noteTitle: { color: c.danger, fontSize: 12, fontWeight: '800', marginBottom: 4 },
   noteDesc: { color: c.textDim, fontSize: 11, lineHeight: 18 },

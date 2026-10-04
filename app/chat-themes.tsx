@@ -3,7 +3,7 @@
 // Picks the color of YOUR (outgoing) message bubble; received bubbles always
 // follow the app theme. Live preview over the real chat background. Per-chat or
 // global. Theme-aware (light + dark). Consumed by app/chat.tsx via
-// getBubbleColors(), which returns null for "Default" (theme green).
+// getBubbleColors() (lib/chatBubbleTheme), which returns null for "Default".
 
 import { HEADER_TOP } from '../constants/layout';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
@@ -17,34 +17,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
 import { AuroraBackground } from '../components/ui';
+import { tint } from '../lib/tintColor';
+import { BUBBLE_KEY, BUBBLE_THEMES, GLOBAL_BUBBLE, idealText } from '../lib/chatBubbleTheme';
 
-const BUBBLE_KEY = 'vc_bubble_color_';
-const GLOBAL_BUBBLE = 'vc_global_bubble';
-
-interface BubbleTheme { id: string; name: string; color: string | null }
-
-const BUBBLE_THEMES: BubbleTheme[] = [
-  { id: 'default', name: 'Default', color: null },
-  { id: 'emerald', name: 'Emerald', color: '#10B981' },
-  { id: 'teal',    name: 'Teal',    color: '#0B6E63' },
-  { id: 'sky',     name: 'Sky',     color: '#0369A1' },
-  { id: 'blue',    name: 'Blue',    color: '#1E40AF' },
-  { id: 'indigo',  name: 'Indigo',  color: '#4338CA' },
-  { id: 'purple',  name: 'Purple',  color: '#6D28D9' },
-  { id: 'magenta', name: 'Magenta', color: '#9D2A6E' },
-  { id: 'rose',    name: 'Rose',    color: '#BE123C' },
-  { id: 'crimson', name: 'Crimson', color: '#B01E3C' },
-  { id: 'sunset',  name: 'Sunset',  color: '#B45309' },
-  { id: 'slate',   name: 'Slate',   color: '#334155' },
-];
-
-// Legible text (black/white) for a given background — matches chat.tsx idealText.
-function idealText(hex: string): string {
-  const h = hex.replace('#', '');
-  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
-  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  return lum > 0.6 ? '#111B21' : '#FFFFFF';
-}
+// app/chat.tsx still imports getBubbleColors from this route; it lives in lib now.
+// ponytail: drop this re-export once chat.tsx imports from lib/chatBubbleTheme.
+export { getBubbleColors } from '../lib/chatBubbleTheme';
 
 export default function ChatThemesScreen() {
   const router = useRouter();
@@ -61,6 +39,8 @@ export default function ChatThemesScreen() {
   const [globalId, setGlobalId] = useState<string | null>(null);
   // A tap made before the initial read resolves wins over that read.
   const touched = useRef(false);
+  // The saved choice could not be read: the screen shows the default, and says so.
+  const [loadErr, setLoadErr] = useState(false);
 
   useEffect(() => {
     touched.current = false;
@@ -70,7 +50,8 @@ export default function ChatThemesScreen() {
         if (touched.current) return;
         setStored(saved);
         setGlobalId(global);
-      } catch { /* keep the Default selection */ }
+        setLoadErr(false);
+      } catch { if (!touched.current) setLoadErr(true); }
     })();
   }, [key]);
 
@@ -78,6 +59,7 @@ export default function ChatThemesScreen() {
   // null removes the key (global: app default, per-chat: follow all chats).
   const apply = async (id: string | null) => {
     touched.current = true;
+    setLoadErr(false);
     const prev = stored;
     const next = id === SCOPED_DEFAULT && isGlobal ? null : id;
     setStored(next);
@@ -96,7 +78,8 @@ export default function ChatThemesScreen() {
   const current = BUBBLE_THEMES.find(t => t.id === effectiveId) || BUBBLE_THEMES[0];
   const mineBg = current.color ?? colors.bubbleOut;
   const mineText = current.color ? idealText(current.color) : colors.bubbleOutText;
-  const mineMeta = current.color ? (idealText(current.color) === '#FFFFFF' ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.45)') : colors.bubbleMetaOut;
+  // Meta (time, ticks) is the bubble's own ink, dimmed.
+  const mineMeta = current.color ? tint(mineText, 0.6) : colors.bubbleMetaOut;
 
   return (
     <View style={s.root}>
@@ -135,6 +118,11 @@ export default function ChatThemesScreen() {
           </View>
         </View>
 
+        {loadErr && (
+          <Text style={s.loadErr} accessibilityRole="alert">
+            {"Couldn't read your saved colour, so the default is shown. Picking a colour replaces it."}
+          </Text>
+        )}
         <Text style={s.sectionTitle}>YOUR BUBBLE COLOR</Text>
         {!isGlobal && (
           <TouchableOpacity
@@ -170,21 +158,6 @@ export default function ChatThemesScreen() {
   );
 }
 
-// Bubble colors chosen for a chat. Returns null for "Default" so chat.tsx keeps
-// the theme's green outgoing bubble. (peer is unused by chat.tsx now — received
-// bubbles always follow the theme — but kept for the existing call shape.)
-export async function getBubbleColors(chatId: string): Promise<{ mine: string; peer: string } | null> {
-  try {
-    const id = resolveScoped(
-      await AsyncStorage.getItem(BUBBLE_KEY + chatId),
-      await AsyncStorage.getItem(GLOBAL_BUBBLE),
-    );
-    const found = BUBBLE_THEMES.find(b => b.id === id);
-    if (!found || !found.color) return null;
-    return { mine: found.color, peer: found.color };
-  } catch { return null; }
-}
-
 const makeStyles = (c: Palette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingHorizontal: 12, paddingBottom: 12, backgroundColor: c.bg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke, gap: 8 },
@@ -202,6 +175,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   txt: { fontSize: 14, lineHeight: 19 },
   time: { fontSize: 10, alignSelf: 'flex-end', marginTop: 2 },
 
+  loadErr: { color: c.danger, fontSize: 13, lineHeight: 18, marginBottom: 12 },
   sectionTitle: { color: c.textDim, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 12 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, justifyContent: 'space-between' },
   cell: { width: '22%', alignItems: 'center', gap: 6 },

@@ -25,6 +25,7 @@ import {
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import {
+  dropBookmarkPlaintext,
   getBookmarkPlaintext,
   listBookmarks,
   looksEncrypted,
@@ -57,9 +58,12 @@ async function withBodies(rows: BookmarkRow[]): Promise<BookmarkRow[]> {
     const id = Number(b.message?.id ?? 0);
     if (!b.message || !id) return b;
     if (lockedIds.has(b.message.chatId)) return { ...b, message: { ...b.message, content: LOCKED_TEXT } };
-    // ponytail: hidden, not purged — chatService exports no snapshot delete
-    // short of removeBookmark; the sealed copy goes when the bookmark does.
-    if (isProtectedMessage(b.message.meta)) return { ...b, message: { ...b.message, content: PROTECTED_TEXT } };
+    // Hidden AND purged: a view-once / ink snapshot from before Star stopped
+    // taking them must not outlive the bubble. The bookmark itself stays.
+    if (isProtectedMessage(b.message.meta)) {
+      void dropBookmarkPlaintext(id).catch(() => {});
+      return { ...b, message: { ...b.message, content: PROTECTED_TEXT } };
+    }
     const local = await getBookmarkPlaintext(id);
     return { ...b, message: { ...b.message, content: bookmarkBody(b.message.content, local, looksEncrypted) } };
   }));
@@ -84,7 +88,10 @@ export default function BookmarksScreen() {
   const load = useCallback(async () => {
     // Local-first: paint cached bookmarks instantly, then fetch fresh.
     const cached = await readCache<BookmarkRow[]>('bookmarks');
-    if (cached) {
+    // An empty saved list is a cold load: a failure must show the error, not
+    // "Couldn't refresh" over "No bookmarks yet".
+    const hasCache = !!cached?.length;
+    if (cached && hasCache) {
       // Older builds cached decrypted bodies here; scrub them on first read.
       if (hasBodies(cached)) writeCache('bookmarks', withoutBodies(cached));
       setRows(await withBodies(withoutBodies(cached)));
@@ -104,7 +111,7 @@ export default function BookmarksScreen() {
       setStale(false);
     } catch (e: any) {
       // Keep cached rows for offline read, and say they are the saved copy.
-      if (cached) setStale(true);
+      if (hasCache) setStale(true);
       else setError(e?.message ?? 'Failed to load bookmarks');
     }
   }, []);
@@ -151,6 +158,39 @@ export default function BookmarksScreen() {
       ],
     );
   }, []);
+
+  const renderItem = useCallback(({ item: b }: { item: BookmarkRow }) => (
+    <TouchableOpacity
+      style={S.row}
+      onPress={() => onRow(b)}
+      onLongPress={() => onLongPress(b)}
+      delayLongPress={300}
+      activeOpacity={0.7}
+      accessibilityRole="button"
+      accessibilityLabel={`${b.message?.chatName || (b.message?.chatType === 'group' ? 'Group' : 'Direct chat')}: ${b.message
+        ? b.message.deletedAt ? 'message deleted by sender' : (b.message.content || typeLabel(b.message.type))
+        : 'message no longer available'}. Saved ${formatAgo(b.createdAt)}`}
+      accessibilityHint="Opens the chat at this message"
+      accessibilityActions={[{ name: 'remove', label: 'Remove bookmark' }]}
+      onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'remove') onLongPress(b); }}
+    >
+      <View style={S.iconBox}><Ionicons name="bookmark-outline" size={22} color={colors.primary} /></View>
+      <View style={{ flex: 1 }}>
+        <Text style={S.rowChat} numberOfLines={1}>
+          {b.message?.chatName
+            || (b.message?.chatType === 'group' ? 'Group' : 'Direct chat')}
+        </Text>
+        <Text style={S.rowContent} numberOfLines={2}>
+          {b.message
+            ? b.message.deletedAt
+              ? '(message deleted by sender)'
+              : (b.message.content || typeLabel(b.message.type))
+            : '(message no longer available)'}
+        </Text>
+        <Text style={S.rowWhen}>Saved {formatAgo(b.createdAt)}</Text>
+      </View>
+    </TouchableOpacity>
+  ), [S, colors.primary, onRow, onLongPress]);
 
   if (loading) {
     return <View style={[S.screen, S.center]}>
@@ -204,38 +244,7 @@ export default function BookmarksScreen() {
           keyExtractor={(b) => b.id}
           refreshControl={<RefreshControl tintColor={colors.primary} refreshing={refreshing} onRefresh={onRefresh} />}
           contentContainerStyle={{ paddingTop: 12, paddingBottom: SCREEN_BOTTOM + 16 }}
-          renderItem={({ item: b }) => (
-            <TouchableOpacity
-              style={S.row}
-              onPress={() => onRow(b)}
-              onLongPress={() => onLongPress(b)}
-              delayLongPress={300}
-              activeOpacity={0.7}
-              accessibilityRole="button"
-              accessibilityLabel={`${b.message?.chatName || (b.message?.chatType === 'group' ? 'Group' : 'Direct chat')}: ${b.message
-                ? b.message.deletedAt ? 'message deleted by sender' : (b.message.content || typeLabel(b.message.type))
-                : 'message no longer available'}. Saved ${formatAgo(b.createdAt)}`}
-              accessibilityHint="Opens the chat at this message"
-              accessibilityActions={[{ name: 'remove', label: 'Remove bookmark' }]}
-              onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'remove') onLongPress(b); }}
-            >
-              <View style={S.iconBox}><Ionicons name="bookmark-outline" size={22} color={colors.primary} /></View>
-              <View style={{ flex: 1 }}>
-                <Text style={S.rowChat} numberOfLines={1}>
-                  {b.message?.chatName
-                    || (b.message?.chatType === 'group' ? 'Group' : 'Direct chat')}
-                </Text>
-                <Text style={S.rowContent} numberOfLines={2}>
-                  {b.message
-                    ? b.message.deletedAt
-                      ? '(message deleted by sender)'
-                      : (b.message.content || typeLabel(b.message.type))
-                    : '(message no longer available)'}
-                </Text>
-                <Text style={S.rowWhen}>Saved {formatAgo(b.createdAt)}</Text>
-              </View>
-            </TouchableOpacity>
-          )}
+          renderItem={renderItem}
         />
       )}
     </View>
@@ -275,7 +284,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   staleTxt:     { color: c.textDim, paddingHorizontal: 16, paddingVertical: 8, fontSize: 12 },
   retryBtn:     { minHeight: 44, paddingHorizontal: 24, borderRadius: 12, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
-  retryTxt:     { color: c.bubbleOutText, fontWeight: '700' },
+  retryTxt:     { color: c.onPrimary, fontWeight: '700' },
   emptyTitle:   { color: c.text, fontSize: 16, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
   emptySub:     { color: c.textDim, fontSize: 13, lineHeight: 18, textAlign: 'center' },
 

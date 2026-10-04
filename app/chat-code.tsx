@@ -76,6 +76,19 @@ function countdownMark(s: number): string | null {
   return null;
 }
 
+// The share text's "expires in …", from the time actually left.
+function expiresIn(s: number): string {
+  if (s >= 60) return `${Math.floor(s / 60)} min ${s % 60 ? `${s % 60} s` : ''}`.trim();
+  return `${s} s`;
+}
+
+// The chat-code routes answer with copy written for people ("That code has
+// expired or was already used"). Anything without a status is the network or
+// the app, whose raw message ("Network request failed") is not.
+function codeError(e: any, fallback: string): string {
+  return typeof e?.status === 'number' && e?.message ? e.message : fallback;
+}
+
 export default function ChatCodeScreen() {
   const { colors } = useTheme();
   const S = useS();
@@ -132,14 +145,20 @@ export default function ChatCodeScreen() {
     if (mark) AccessibilityInfo.announceForAccessibility(mark);
   }, [mark]);
 
+  // Synchronous re-entry guards: `busy`/`joining` state lands a render late,
+  // so two taps in one frame would mint (and kill) two codes.
+  const busyRef = useRef(false);
+  const joiningRef = useRef(false);
+
   const mint = async () => {
-    if (busy) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     try {
       setLive(await createChatCode({ ttlSeconds: pick.ttl, keepContact: pick.keep }));
     } catch (e: any) {
-      Alert.alert('Could not create a code', e?.message ?? 'Try again.');
-    } finally { setBusy(false); }
+      Alert.alert('Could not create a code', codeError(e, 'Check your connection and try again.'));
+    } finally { busyRef.current = false; setBusy(false); }
   };
 
   // A new code kills the live one, which may already have been read out.
@@ -152,28 +171,30 @@ export default function ChatCodeScreen() {
   };
 
   const stop = async () => {
-    if (busy) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     try {
       await revokeChatCode();
       setLive(null);
     } catch (e: any) {
-      Alert.alert('Could not stop the code', e?.message ?? 'Try again.');
-    } finally { setBusy(false); }
+      Alert.alert('Could not stop the code', codeError(e, 'Check your connection and try again. The code still works until it expires.'));
+    } finally { busyRef.current = false; setBusy(false); }
   };
 
   // The server applies the code's timer to the chat before answering, so there
   // is nothing to set here — just open it.
   const join = async () => {
     const digits = typed.replace(/\D/g, '');
-    if (joining || digits.length !== 6) return;
+    if (joiningRef.current || digits.length !== 6) return;
+    joiningRef.current = true;
     setJoining(true);
     try {
       const res = await joinChatCode(digits);
       router.replace({ pathname: '/chat', params: { id: res.chatId } });
     } catch (e: any) {
-      Alert.alert('That code did not work', e?.message ?? 'Check it and try again.');
-    } finally { setJoining(false); }
+      Alert.alert('That code did not work', codeError(e, 'Check your connection and try again.'));
+    } finally { joiningRef.current = false; setJoining(false); }
   };
 
   return (
@@ -249,7 +270,7 @@ export default function ChatCodeScreen() {
                     activeOpacity={0.7}
                     accessibilityRole="button"
                     accessibilityLabel="Share code"
-                    onPress={() => Share.share({ message: `Chat with me on crazzychat. Code: ${live.code} (expires in 2 minutes)` })}>
+                    onPress={() => Share.share({ message: `Chat with me on crazzychat. Code: ${live.code} (expires in ${expiresIn(left)})` })}>
                     <Ionicons name="share-outline" size={20} color={colors.primary} />
                     <Text style={S.codeActionTxt}>Share</Text>
                   </TouchableOpacity>
@@ -288,7 +309,7 @@ export default function ChatCodeScreen() {
               activeOpacity={0.85}
               accessibilityRole="button"
               accessibilityState={{ disabled: busy, busy }}>
-              {busy ? <ActivityIndicator color={colors.bubbleOutText} />
+              {busy ? <ActivityIndicator color={colors.onPrimary} />
                     : <Text style={S.ctaTxt}>{live ? 'New code' : 'Generate code'}</Text>}
             </TouchableOpacity>
 
@@ -330,7 +351,7 @@ export default function ChatCodeScreen() {
               activeOpacity={0.85}
               accessibilityRole="button"
               accessibilityState={{ disabled: typed.length !== 6 || joining, busy: joining }}>
-              {joining ? <ActivityIndicator color={colors.bubbleOutText} /> : <Text style={S.ctaTxt}>Open chat</Text>}
+              {joining ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={S.ctaTxt}>Open chat</Text>}
             </TouchableOpacity>
           </>
         )}
@@ -354,7 +375,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   tab: { flex: 1, minHeight: 44, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: c.glassSoft },
   tabOn: { backgroundColor: c.primary },
   tabTxt: { color: c.textDim, fontSize: 14, fontWeight: '700' },
-  tabTxtOn: { color: c.bubbleOutText },
+  tabTxtOn: { color: c.onPrimary },
 
   body: { paddingHorizontal: 18, paddingBottom: 40 },
   lede: { color: c.textDim, fontSize: 13.5, lineHeight: 20, marginTop: 10 },
@@ -384,7 +405,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   cta: { marginTop: 22, minHeight: 50, paddingVertical: 10, borderRadius: 14, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
   ctaOff: { opacity: 0.4 },
-  ctaTxt: { color: c.bubbleOutText, fontSize: 16, fontWeight: '800' },
+  ctaTxt: { color: c.onPrimary, fontSize: 16, fontWeight: '800' },
 
   stop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 8, minHeight: 44 },
   stopTxt: { color: c.danger, fontSize: 13.5, fontWeight: '700' },

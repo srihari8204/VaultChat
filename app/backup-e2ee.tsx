@@ -2,7 +2,9 @@
 //
 // The default backup key is account-managed, so the server can read the blob.
 // This screen swaps it for a key derived from something only the user has: a
-// password they choose, or a generated 64-digit recovery key.
+// password they choose, or a generated 64-character recovery key. While it is on,
+// the password can be changed or swapped for a key (and back) — lib/cloudBackup's
+// enableE2EEBackup keeps the old secret until the upload under the new one lands.
 //
 // The copy here does not soften the trade. There is no escrow behind this (see
 // lib/backupCrypto), so a forgotten password means the backup is gone — and a
@@ -82,7 +84,19 @@ export default function BackupE2EEScreen() {
     return () => sub.remove();
   }, [stage, confirmLeaveKey, router]);
 
-  const fail = (e: any) => Alert.alert('Could not turn this on', e?.message ?? 'Please try again.');
+  // While on, every enable is a switch: a failure leaves the old secret in place.
+  const switching = mode !== 'account';
+  const fail = (e: any) => Alert.alert(
+    switching ? 'Nothing was changed' : 'Could not turn this on',
+    switching
+      ? `Your backup is still protected by ${mode === 'key' ? 'your current key' : 'your current password'}. ${e?.message ?? 'Please try again.'}`
+      : e?.message ?? 'Please try again.',
+  );
+  // Blobs written before a switch (local backup files, Drive) still open only
+  // with the old secret — restore picks the secret by the blob's own header.
+  const oldCopiesNote = switching
+    ? `\n\nOlder backup files on this phone or in Google Drive still need ${mode === 'key' ? 'your old key' : 'your old password'}.`
+    : '';
 
   // Turning it on re-uploads immediately, so this is a network operation and can
   // legitimately take a while on a large history — the button stays disabled
@@ -92,16 +106,16 @@ export default function BackupE2EEScreen() {
     if (problem) { Alert.alert('Choose a stronger password', problem); return; }
     if (pw !== pw2) { Alert.alert('Passwords do not match', 'Please re-enter them.'); return; }
     Alert.alert(
-      'Turn on encrypted backup?',
-      'Your backup will be re-uploaded, encrypted with this password.\n\nWe will not have a copy of it. If you forget this password, your backup cannot be recovered by anyone — including us.',
+      switching ? 'Use this new password?' : 'Turn on encrypted backup?',
+      'Your backup will be re-uploaded, encrypted with this password.\n\nWe will not have a copy of it. If you forget this password, your backup cannot be recovered by anyone — including us.' + oldCopiesNote,
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Turn on', style: 'destructive', onPress: async () => {
+        { text: switching ? 'Use password' : 'Turn on', style: 'destructive', onPress: async () => {
             setBusy(true);
             try {
               await enableE2EEBackup('password', pw);
               setMode('password'); setStage('on'); setPw(''); setPw2('');
-              Alert.alert('Encrypted backup is on', 'Your backups are now readable only with your password.');
+              Alert.alert(switching ? 'Password changed' : 'Encrypted backup is on', 'Your backups are now readable only with this password.');
             } catch (e) { fail(e); } finally { setBusy(false); }
           } },
       ],
@@ -110,8 +124,8 @@ export default function BackupE2EEScreen() {
 
   const enableKey = async () => {
     Alert.alert(
-      'Use a 64-digit key?',
-      'We will generate a key and show it to you once. Save it somewhere safe.\n\nWe will not have a copy of it. If you lose it, your backup cannot be recovered by anyone — including us.',
+      mode === 'key' ? 'Make a new key?' : 'Use a 64-character key?',
+      'We will generate a key and show it to you once. Save it somewhere safe.\n\nWe will not have a copy of it. If you lose it, your backup cannot be recovered by anyone — including us.' + oldCopiesNote,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Generate', style: 'destructive', onPress: async () => {
@@ -237,7 +251,7 @@ export default function BackupE2EEScreen() {
       <View style={s.root}>
         {header}
         <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
-          <Text style={s.h1} accessibilityRole="header">Save your 64-digit key</Text>
+          <Text style={s.h1} accessibilityRole="header">Save your 64-character key</Text>
           <Text style={s.body}>
             This is the only time it will be shown. Write it down or save it in a password manager —
             you will need it to restore your chats on a new phone.
@@ -275,7 +289,7 @@ export default function BackupE2EEScreen() {
       <KeyboardSafe style={s.root}>
         {header}
         <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
-          <Text style={s.h1} accessibilityRole="header">Create a password</Text>
+          <Text style={s.h1} accessibilityRole="header">{switching ? 'New backup password' : 'Create a password'}</Text>
           <Text style={s.body}>
             You will need this password to restore your chats. It is not your account password, and we
             cannot reset it for you.
@@ -297,9 +311,9 @@ export default function BackupE2EEScreen() {
             accessibilityRole="button"
             accessibilityState={{ disabled: busy || !pw || !pw2, busy }}
             onPress={enablePassword}>
-            {busy ? <ActivityIndicator color={colors.bubbleOutText} /> : <Text style={s.primaryTxt}>TURN ON</Text>}
+            {busy ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={s.primaryTxt}>{switching ? 'USE THIS PASSWORD' : 'TURN ON'}</Text>}
           </TouchableOpacity>
-          <TouchableOpacity style={s.linkRow} accessibilityRole="button" onPress={() => { setPw(''); setPw2(''); setStage('off'); }}>
+          <TouchableOpacity style={s.linkRow} accessibilityRole="button" onPress={() => { setPw(''); setPw2(''); setStage(switching ? 'on' : 'off'); }}>
             <Text style={s.link}>Cancel</Text>
           </TouchableOpacity>
         </ScrollView>
@@ -315,7 +329,7 @@ export default function BackupE2EEScreen() {
           <View style={s.onBadge}>
             <Ionicons name="lock-closed" size={20} color={colors.primary} />
             <Text style={s.onTxt}>
-              On — protected by {mode === 'key' ? 'your 64-digit key' : 'your password'}
+              On — protected by {mode === 'key' ? 'your 64-character key' : 'your password'}
             </Text>
           </View>
           <Text style={s.body}>
@@ -325,6 +339,20 @@ export default function BackupE2EEScreen() {
           <Text style={s.warn}>
             If you lose it, your backup cannot be recovered. Not by you, and not by us.
           </Text>
+          <TouchableOpacity
+            style={[s.primaryBtn, busy && s.btnOff]} disabled={busy}
+            onPress={mode === 'key' ? enableKey : () => setStage('password')}
+            accessibilityRole="button" accessibilityState={{ disabled: busy, busy }}>
+            {busy ? <ActivityIndicator color={colors.onPrimary} />
+                  : <Text style={s.primaryTxt}>{mode === 'key' ? 'MAKE A NEW KEY' : 'CHANGE PASSWORD'}</Text>}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[s.secondaryBtn, busy && s.btnOff]} disabled={busy}
+            onPress={mode === 'key' ? () => setStage('password') : enableKey}
+            accessibilityRole="button" accessibilityState={{ disabled: busy }}>
+            <Ionicons name={mode === 'key' ? 'text-outline' : 'key-outline'} size={18} color={colors.primary} />
+            <Text style={s.secondaryTxt}>{mode === 'key' ? 'Switch to a password' : 'Switch to a 64-character key'}</Text>
+          </TouchableOpacity>
           <TouchableOpacity style={[s.dangerBtn, busy && s.btnOff]} disabled={busy} onPress={turnOff} accessibilityRole="button" accessibilityLabel="Turn off encrypted backup" accessibilityState={{ disabled: busy, busy }}>
             {busy ? <ActivityIndicator color={colors.danger} />
                   : <Text style={s.dangerTxt}>TURN OFF</Text>}
@@ -345,7 +373,7 @@ export default function BackupE2EEScreen() {
           restored automatically — but it also means we are able to read it.
         </Text>
         <Text style={s.body}>
-          Turn this on to encrypt your backup with a password or a 64-digit key that only you hold.
+          Turn this on to encrypt your backup with a password or a 64-character key that only you hold.
         </Text>
         <Text style={s.warn}>
           There is no way to reset it. If you lose your password or key, your backup is gone
@@ -355,10 +383,10 @@ export default function BackupE2EEScreen() {
         <TouchableOpacity style={[s.primaryBtn, busy && s.btnOff]} disabled={busy} onPress={() => setStage('password')} accessibilityRole="button" accessibilityState={{ disabled: busy }}>
           <Text style={s.primaryTxt}>USE A PASSWORD</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[s.secondaryBtn, busy && s.btnOff]} disabled={busy} onPress={enableKey} accessibilityRole="button" accessibilityLabel="Use a 64-digit key instead" accessibilityState={{ disabled: busy, busy }}>
+        <TouchableOpacity style={[s.secondaryBtn, busy && s.btnOff]} disabled={busy} onPress={enableKey} accessibilityRole="button" accessibilityLabel="Use a 64-character key instead" accessibilityState={{ disabled: busy, busy }}>
           {busy ? <ActivityIndicator color={colors.primary} /> : <>
             <Ionicons name="key-outline" size={18} color={colors.primary} />
-            <Text style={s.secondaryTxt}>Use a 64-digit key instead</Text>
+            <Text style={s.secondaryTxt}>Use a 64-character key instead</Text>
           </>}
         </TouchableOpacity>
       </ScrollView>
@@ -388,10 +416,10 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   keyTxt: { color: c.text, fontSize: 16, lineHeight: 26, letterSpacing: 1, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
 
   primaryBtn: { backgroundColor: c.primary, borderRadius: 26, paddingVertical: 14, minHeight: 48, alignItems: 'center', justifyContent: 'center', marginTop: 8 },
-  primaryTxt: { color: c.bubbleOutText, fontSize: 15, fontWeight: '800', letterSpacing: 0.5 },
-  secondaryBtn: { flexDirection: 'row', gap: 8, borderRadius: 26, paddingVertical: 14, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
+  primaryTxt: { color: c.onPrimary, fontSize: 15, fontWeight: '800', letterSpacing: 0.5 },
+  secondaryBtn: { flexDirection: 'row', gap: 8, borderRadius: 26, paddingVertical: 14, minHeight: 48, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
   secondaryTxt: { color: c.primary, fontSize: 15, fontWeight: '700' },
-  dangerBtn: { borderRadius: 26, paddingVertical: 14, alignItems: 'center', marginTop: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: c.danger },
+  dangerBtn: { borderRadius: 26, paddingVertical: 14, minHeight: 48, alignItems: 'center', justifyContent: 'center', marginTop: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: c.danger },
   dangerTxt: { color: c.danger, fontSize: 15, fontWeight: '800', letterSpacing: 0.5 },
   btnOff: { opacity: 0.6 },
   linkRow: { alignItems: 'center', justifyContent: 'center', paddingVertical: 14, minHeight: 44 },

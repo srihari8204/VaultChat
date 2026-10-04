@@ -79,6 +79,10 @@ export default function ScheduledScreen() {
   const [error,      setError]      = useState<string | null>(null);
   // Set once the server answered, so a slower cache read cannot paint over it.
   const loadedRef = useRef(false);
+  // Read in load's catch (outside any state updater, so StrictMode's double
+  // invoke of updaters cannot run the side effect twice).
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
 
   const load = useCallback(async () => {
     try {
@@ -92,11 +96,10 @@ export default function ScheduledScreen() {
       setError(null);
       writeCache(CACHE_KEY, withoutContent(list));
     } catch (e: any) {
-      // Keep cached rows if we have them; only surface the error on a cold load.
-      setRows(prev => {
-        if (prev.length === 0) setError(e?.message ?? 'Failed to load');
-        return prev;
-      });
+      // Keep cached rows if we have them: over rows the error is a one-line
+      // "Couldn't refresh"; on a cold load it is the full error state.
+      setError(rowsRef.current.length ? "Couldn't refresh — showing the saved list. Pull down to try again."
+        : e?.message ?? 'Failed to load');
     }
   }, []);
 
@@ -144,6 +147,35 @@ export default function ScheduledScreen() {
       ],
     );
   }, [removeRow]);
+
+  const renderItem = useCallback(({ item: r }: { item: ScheduledMessageRow }) => (
+    <TouchableOpacity
+      style={[S.row, r.sentAt && S.rowSent]}
+      onPress={() => r.sentAt ? null : onCancel(r)}
+      disabled={!!r.sentAt}
+      activeOpacity={0.7}
+      accessibilityRole="button"
+      accessibilityLabel={`${r.chatName || (r.chatType === 'group' ? 'Group' : 'Direct chat')}${r.sentAt ? ', delivered' : ''}: ${r.type === 'text' ? (r.content || 'empty message') : typeLabel(r.type)}. ${r.sentAt ? `Sent ${new Date(r.sentAt).toLocaleString()}` : `Sends ${formatFuture(r.sendAt)}`}`}
+      accessibilityState={{ disabled: !!r.sentAt }}
+      accessibilityHint={r.sentAt ? undefined : `Cancel the message scheduled to ${r.chatName || 'this chat'}`}
+    >
+      <View style={{ flex: 1 }}>
+        <Text style={S.rowChatName} numberOfLines={1}>
+          {r.chatName || (r.chatType === 'group' ? 'Group' : 'Direct chat')}
+          {r.sentAt && <Text style={S.deliveredTag}>  · ✓ delivered</Text>}
+        </Text>
+        <Text style={S.rowContent} numberOfLines={2}>
+          {r.type === 'text' ? (r.content || '(empty)') : `${typeLabel(r.type)}${r.content ? ' · ' + r.content : ''}`}
+        </Text>
+        <Text style={S.rowWhen}>
+          {r.sentAt
+            ? `Sent ${new Date(r.sentAt).toLocaleString()}`
+            : `Sends ${formatFuture(r.sendAt)}`}
+        </Text>
+      </View>
+      {!r.sentAt && <Text style={S.cancelTxt}>Cancel</Text>}
+    </TouchableOpacity>
+  ), [S, onCancel]);
 
   if (loading) {
     return <View style={[S.screen, S.center]}>
@@ -203,34 +235,7 @@ export default function ScheduledScreen() {
               </Text>
             </View>
           }
-          renderItem={({ item: r }) => (
-            <TouchableOpacity
-              style={[S.row, r.sentAt && S.rowSent]}
-              onPress={() => r.sentAt ? null : onCancel(r)}
-              disabled={!!r.sentAt}
-              activeOpacity={0.7}
-              accessibilityRole="button"
-              accessibilityLabel={`${r.chatName || (r.chatType === 'group' ? 'Group' : 'Direct chat')}${r.sentAt ? ', delivered' : ''}: ${r.type === 'text' ? (r.content || 'empty message') : typeLabel(r.type)}. ${r.sentAt ? `Sent ${new Date(r.sentAt).toLocaleString()}` : `Sends ${formatFuture(r.sendAt)}`}`}
-              accessibilityState={{ disabled: !!r.sentAt }}
-              accessibilityHint={r.sentAt ? undefined : `Cancel the message scheduled to ${r.chatName || 'this chat'}`}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={S.rowChatName} numberOfLines={1}>
-                  {r.chatName || (r.chatType === 'group' ? 'Group' : 'Direct chat')}
-                  {r.sentAt && <Text style={S.deliveredTag}>  · ✓ delivered</Text>}
-                </Text>
-                <Text style={S.rowContent} numberOfLines={2}>
-                  {r.type === 'text' ? (r.content || '(empty)') : `${typeLabel(r.type)}${r.content ? ' · ' + r.content : ''}`}
-                </Text>
-                <Text style={S.rowWhen}>
-                  {r.sentAt
-                    ? `Sent ${new Date(r.sentAt).toLocaleString()}`
-                    : `Sends ${formatFuture(r.sendAt)}`}
-                </Text>
-              </View>
-              {!r.sentAt && <Text style={S.cancelTxt}>Cancel</Text>}
-            </TouchableOpacity>
-          )}
+          renderItem={renderItem}
         />
       )}
     </View>
@@ -274,7 +279,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   emptyTitle:    { color: c.text, fontSize: 16, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
   emptySub:      { color: c.textDim, fontSize: 13, lineHeight: 18, textAlign: 'center' },
   retryBtn:      { minHeight: 44, paddingHorizontal: 24, borderRadius: 12, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
-  retryTxt:      { color: c.bubbleOutText, fontWeight: '700' },
+  retryTxt:      { color: c.onPrimary, fontWeight: '700' },
 
   intro:         { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12 },
   introTxt:      { color: c.textDim, fontSize: 12 },
