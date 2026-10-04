@@ -2,11 +2,10 @@
 
 import React, { useCallback, useState } from 'react';
 import { useFinanceTheme } from '../../../components/finance/useFinanceTheme';
-import { HERO_INK } from '../../../components/finance/heroInk';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
-import { financeStatusColors, FIN_HERO, TABULAR, type FinancePalette } from '../../../constants/financeTheme';
+import { financeStatusColors, FIN_HERO, TABULAR, type FinancePalette, HERO_INK } from '../../../constants/financeTheme';
 import { FinHeader, Card, HeroCard, RowLine, Pill, Btn, LoadingState, ErrorState } from '../../../components/finance/ui';
 import { useLoadStatus } from '../../../components/finance/useLoad';
 import { formatINR, fmtDate, fmtDateTime, PERIOD_LABEL } from '../../../utils/financeFormat';
@@ -214,7 +213,7 @@ const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   name: { color: FIN.text, fontSize: 18, fontWeight: '800' },
   mobile: { color: FIN.sub, fontSize: 13, marginTop: 1 },
 
-  // Hero ink: the FIN_HERO gradient is dark in both schemes (components/finance/heroInk).
+  // Hero ink: the FIN_HERO gradient is dark in both schemes (HERO_INK, constants/financeTheme).
   heroLabel: { color: HERO_INK.label, fontSize: 10.5, fontWeight: '700', letterSpacing: 0.8 },
   heroVal: { color: HERO_INK.strong, fontSize: 30, fontWeight: '800', marginTop: 6, ...TABULAR },
   heroSub: { color: HERO_INK.soft, fontSize: 12.5, marginTop: 6 },

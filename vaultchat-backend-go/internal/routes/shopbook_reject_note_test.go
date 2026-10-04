@@ -5,7 +5,7 @@
 // same cleanup provably removes everything. Needs migration 140.
 //
 //	CALL_TEST_DB=1 DB_* JWT_SECRET=... CALL_TEST_ADMIN_DSN=... \
-//	go test ./internal/routes/ -run 'TestSBRejectNote|TestSBAdminReturns' -v
+//	go test ./internal/routes/ -run 'TestSBRejectNote|TestSBAdminReturns|TestSBAdminOrdersRejectNote' -v
 package routes
 
 import (
@@ -86,6 +86,50 @@ func TestSBRejectNote(t *testing.T) {
 	_, out = call(t, mux, fCustomer, "GET", "/shopbook/orders/"+rnOrderB, "")
 	if out["rejectNote"] != "" {
 		t.Errorf("rejectNote without a note = %v, want \"\"", out["rejectNote"])
+	}
+}
+
+// The admin orders list carries the same rejection reason and note the
+// customer's order view shows, so support can see why an order was refused.
+func TestSBAdminOrdersRejectNote(t *testing.T) {
+	ctx := sbFlowSkip(t)
+	sbFlowSeed(t, ctx)
+	t.Cleanup(func() { rnCleanup(t) })
+	t.Setenv("ADMIN_KEY", "zbe-admin-test-key")
+	if err := adminExec(ctx, fmt.Sprintf(
+		`INSERT INTO shopbook_order (id, shop_id, customer_user_id, status) VALUES ('%s','%s','%s','pending'), ('%s','%s','%s','pending')`,
+		rnOrderA, fShop, fCustomer, rnOrderB, fShop, fCustomer)); err != nil {
+		t.Fatalf("seed orders: %v", err)
+	}
+	mux := sbFlowMux()
+	RegisterShopBookAdmin2(mux)
+	if code, out := call(t, mux, fOwner, "POST", "/shopbook/my-shop/orders/"+rnOrderA+"/status",
+		`{"status":"rejected","reason":"other","note":"We moved shop"}`); code != 200 {
+		t.Fatalf("reject: %d %v", code, out)
+	}
+
+	req := httptest.NewRequest("GET", "/api/admin/shopbook/orders?shopId="+fShop, nil)
+	req.Header.Set("x-admin-key", "zbe-admin-test-key")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("admin orders: %d %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Orders []map[string]any `json:"orders"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	byID := map[string]map[string]any{}
+	for _, o := range out.Orders {
+		if id, _ := o["id"].(string); id != "" {
+			byID[id] = o
+		}
+	}
+	if a := byID[rnOrderA]; a == nil || a["rejectReason"] != "other" || a["rejectNote"] != "We moved shop" {
+		t.Errorf("rejected order = %v, want rejectReason other / rejectNote %q", a, "We moved shop")
+	}
+	if b := byID[rnOrderB]; b == nil || b["rejectReason"] != "" || b["rejectNote"] != "" {
+		t.Errorf("pending order = %v, want empty rejectReason/rejectNote", b)
 	}
 }
 

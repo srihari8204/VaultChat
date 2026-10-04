@@ -55,10 +55,6 @@ const GRADIENT_PRESETS = [
   { id: 'dawn',      name: 'Dawn',      colors: ['#dfe9f3', '#ffffff'] },
 ];
 
-// app/chat.tsx still imports these from this route; they live in lib now.
-// ponytail: drop this re-export once chat.tsx imports from lib/chatWallpaperStore.
-export { getWallpaper, type WallpaperConfig } from '../lib/chatWallpaperStore';
-
 type Tab = 'solid' | 'gradient' | 'custom';
 
 

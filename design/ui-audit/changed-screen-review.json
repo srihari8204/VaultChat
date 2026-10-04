@@ -518,8 +518,8 @@
       ]
     },
     {
-      "file": "app/email-verify.tsx",
-      "route": "email-verify",
+      "file": "app/phone-verify.tsx",
+      "route": "phone-verify",
       "safe": false,
       "expectedRegex": "Enter the 6-digit code",
       "reason": "OTP verification depends on onboarding phone ticket; no resend/submit against real account.",

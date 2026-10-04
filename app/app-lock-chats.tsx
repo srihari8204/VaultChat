@@ -636,8 +636,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   // Config overlay
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    // Fixed scrim: dims whatever is behind the dialog the same way in both themes (no scrim token exists).
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    backgroundColor: c.scrim,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 24,

@@ -125,7 +125,7 @@ export function hrefWithQuery(
 // (lib/authNav.resetTo on the cold path, app/app-lock's enter() on resume).
 
 /** Routes that are a lock, a verdict, or the sign-in flow: nothing opens over them. */
-const LOCK_OR_AUTH = /^\/(app-lock|onboard[\w-]*|email-verify|mpin-entry|mpin-recover|blocked)(\/|$)/;
+const LOCK_OR_AUTH = /^\/(app-lock|onboard[\w-]*|phone-verify|mpin-entry|mpin-recover|blocked)(\/|$)/;
 export function isLockOrAuthRoute(path: string | null | undefined): boolean {
   return LOCK_OR_AUTH.test(path ?? '');
 }

@@ -5,9 +5,9 @@
 // m19-reader (the page) and m20-reader-settings (the controls).
 //
 // The caller passes a chat + message id, and the Reader reads the already
-// DECRYPTED body from the local message cache — so plaintext never travels as a
-// route param. A message the cache cannot answer (unsent, or still an envelope)
-// arrives as `text` instead. The Reader never touches ciphertext, never
+// DECRYPTED body from the local message cache (or, for a row still stored as an
+// envelope, the E2EE plaintext cache) — so plaintext never travels as a route
+// param. Only an unsent message (no server id yet) arrives as `text`. The Reader never touches ciphertext, never
 // fetches, and never writes the message anywhere.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -22,6 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { paginate, readStats, formatStats, toBlocks, type Block } from '../lib/reader';
 import { getCachedMessagesByIds } from '../lib/localDb';
 import { looksEncrypted } from '../lib/chatService';
+import { E2EE_UNDECRYPTABLE, e2eeGetCached } from '../services/crypto/e2eeSession.rn';
 import {
   MARGIN_PX, READER_THEMES, SIZE_MAX, SIZE_MIN, SPACING_MAX, SPACING_MIN,
   getReaderSettingsCached, resetReaderSettings, setReaderSettings,
@@ -54,7 +55,17 @@ function ReaderScreen() {
     setReadFailed(false);
     setCached(null);
     getCachedMessagesByIds(params.chatId!, [msgId])
-      .then(([m]) => { if (live) setCached(m?.content && !looksEncrypted(m.content) ? m.content : ''); })
+      .then(async ([m]) => {
+        let text = '';
+        if (m?.content && !looksEncrypted(m.content)) text = m.content;
+        else if (m?.content) {
+          // A row still stored as an envelope that the bubble decrypted itself:
+          // its plaintext is in the E2EE cache, checked against this ciphertext.
+          const pt = await e2eeGetCached(params.chatId!, msgId, m.content);
+          if (pt && pt !== E2EE_UNDECRYPTABLE) text = pt;
+        }
+        if (live) setCached(text);
+      })
       .catch(() => { if (live) { setReadFailed(true); setCached(''); } });
     return () => { live = false; };
   }, [fromCache, params.chatId, msgId, reloadKey]);

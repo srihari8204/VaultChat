@@ -20,10 +20,6 @@ import { AuroraBackground } from '../components/ui';
 import { tint } from '../lib/tintColor';
 import { BUBBLE_KEY, BUBBLE_THEMES, GLOBAL_BUBBLE, idealText } from '../lib/chatBubbleTheme';
 
-// app/chat.tsx still imports getBubbleColors from this route; it lives in lib now.
-// ponytail: drop this re-export once chat.tsx imports from lib/chatBubbleTheme.
-export { getBubbleColors } from '../lib/chatBubbleTheme';
-
 export default function ChatThemesScreen() {
   const router = useRouter();
   const { colors } = useTheme();

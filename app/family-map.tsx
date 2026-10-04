@@ -798,6 +798,8 @@ export default function FamilyMapScreen() {
           instruction={navBanner.instruction}
           roadName={navBanner.roadName}
           distanceToManeuverM={navBanner.distanceToManeuver}
+          thenEvent={navBanner.thenEvent}
+          thenRoadName={navBanner.thenRoadName}
           remainingM={navBanner.remainingM}
           etaSeconds={Math.max(0, (navBanner.etaEpochMs - Date.now()) / 1000)}
           destinationName={navTargetName ?? destination?.name ?? 'Destination'}

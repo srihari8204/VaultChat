@@ -18,6 +18,11 @@ export const CALL = {
   ctrlBorder: 'rgba(255,255,255,0.14)',
   active:     BRAND_ACCENT,           // lavender — armed/active control
   danger:     '#E5484D',              // end-call red
+  tile:       '#1A1A22',              // empty participant tile
+  errorText:  '#FCA5A5',              // error copy on the dark call surface
+  handQueue:  '#FFD479',              // raised-hand queue line
+  pagerDim:   '#BBBBBB',              // pager label
+  pagerOff:   '#555555',              // pager arrow at either end
 };
 
 // Text over live video needs a shadow to stay legible on bright frames.

@@ -17,6 +17,7 @@ import {
 import type { Palette } from '../constants/theme';
 import { useColors } from '../lib/theme';
 import { ALARM } from '../lib/lock/alarmPalette';
+import { useReducedMotionSetting } from '../lib/useReducedMotion';
 
 export default function LockAlertScreen() {
   const c = useColors();
@@ -25,18 +26,9 @@ export default function LockAlertScreen() {
   const lock = useLockView();
   const settings = useLockSettings();
   const flash = useRef(new Animated.Value(0)).current;
-  // Null until the Reduce Motion setting is read. lib/useReducedMotion answers
-  // false until then, which let up to one strobe cycle run for a user who asked
-  // for no motion; on this full-screen red flash the loop waits for the answer.
-  const [reduceMotion, setReduceMotion] = useState<boolean | null>(null);
-  useEffect(() => {
-    let alive = true;
-    AccessibilityInfo.isReduceMotionEnabled()
-      .then((v) => { if (alive) setReduceMotion(!!v); })
-      .catch(() => { if (alive) setReduceMotion(false); });
-    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', (v) => setReduceMotion(!!v));
-    return () => { alive = false; sub.remove(); };
-  }, []);
+  // Null until the Reduce Motion setting is read: on this full-screen red flash
+  // the strobe waits for the answer instead of running one cycle first.
+  const reduceMotion = useReducedMotionSetting();
   /** The mode whose route back is being planned. */
   const [planning, setPlanning] = useState<Costing | null>(null);
 

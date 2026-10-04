@@ -1,16 +1,11 @@
 import { AppText as Text } from '../components/ui/Text';
 import { KeyboardSafe } from '../components/ui/KeyboardSafe';
-// app/email-verify.tsx — the SMS OTP step. Proves the MOBILE NUMBER is the
-// user's → phoneTicket (required by /auth/profile/init). 6 visible digits.
-//
-// THE FILE NAME IS A LIE, ON PURPOSE, FOR NOW.
-//
-// Nothing about this screen is email any more — it verifies a phone. The path
-// stays because lib/onboardNav.selftest.ts regex-matches raw source for
-// `router.replace('/onboard-profile'` inside app/email-verify.tsx, and renaming
-// the route in the same change as rewriting the flow would take the one guard
-// that proves the chain still navigates correctly offline exactly when it is
-// most needed. Rename it as its own commit, with the guard updated alongside.
+// app/phone-verify.tsx — the SMS OTP step, for EVERY number (R4BE C15). Proves
+// the MOBILE NUMBER is the user's → phoneTicket, which /auth/profile/init needs
+// for a new account and /auth/mpin/verify + recovery need for an existing one.
+// Then: existing account → /mpin-entry, new → /onboard-profile
+// (lib/otpFirstRoute). 6 visible digits. Was app/email-verify.tsx; renamed with
+// lib/onboardNav.selftest.ts, which pins its navigation.
 //
 // Auth appearance follows the selected app theme.
 
@@ -22,8 +17,9 @@ import { ActivityIndicator, Pressable, StyleSheet, ScrollView, View } from 'reac
 import { MpinInput } from '../components/auth/MpinInput';
 import { Sheet } from '../components/ui/Sheet';
 import {
-  onboarding, resendPhoneOtp, verifyPhoneOtp, onboardingError, retryAfterSec, type OtpChannel,
+  lookupUser, onboarding, resendPhoneOtp, verifyPhoneOtp, onboardingError, retryAfterSec, type OtpChannel,
 } from '../lib/onboarding';
+import { afterLookup, afterOtp, type SignInNext } from '../lib/otpFirstRoute';
 import { AuthSky } from '../components/ui';
 import { type AuthPalette } from '../constants/authTheme';
 import { useAuthTheme } from '../lib/useAuthTheme';
@@ -32,7 +28,7 @@ import { useAuthTheme } from '../lib/useAuthTheme';
 // and the whole number is one tap away behind Edit number.
 const mask = (p: string) => p.replace(/\d(?=\d{4})/g, '•');
 
-export default function EmailVerify() {
+export default function PhoneVerify() {
   const AUTH = useAuthTheme();
   const s = useMemo(() => makeStyles(AUTH), [AUTH]);
   const router = useRouter();
@@ -52,6 +48,10 @@ export default function EmailVerify() {
    */
   const inFlight = useRef(false);
   const [err, setErr] = useState<string | null>(null);
+  // The code was accepted (the ticket is held) but the step after it failed,
+  // e.g. offline during the account lookup. The code is spent, so Retry
+  // repeats only that step.
+  const [stuck, setStuck] = useState(false);
   const [sheet, setSheet] = useState(false);
   // The SERVER's cooldown, not a guessed 30 — a button that goes live early
   // spends one of the few allowed sends on a certain 429. app/onboard.tsx put
@@ -81,22 +81,46 @@ export default function EmailVerify() {
     return () => clearInterval(id);
   }, [cooldown]);
 
+  // Where the accepted code leads. Both exits REPLACE: the code is spent, so
+  // Back into this screen would be a dead end.
+  const go = async (next: SignInNext) => {
+    if (next.to === 'lookup') next = afterLookup(await lookupUser(phone, undefined, onboarding.get().phoneTicket));
+    if (next.to === 'mpin') router.replace({ pathname: '/mpin-entry', params: { userId: next.userId } } as any);
+    else if (next.to === 'signup') router.replace('/onboard-profile' as any);
+    else if (next.to === 'conflict') setErr('This mobile number can’t be used to sign up. Try a different number.');
+    else throw new Error('Couldn’t check this number. Try again.');
+  };
+
   const submit = async (value: string) => {
     if (inFlight.current) return;
     inFlight.current = true;
     setBusy(true); setErr(null);
     try {
-      const ticket = await verifyPhoneOtp(phone, value);
-      onboarding.set({ phoneTicket: ticket });
-      router.replace('/onboard-profile' as any);
-    } catch (e: any) {
-      setCode('');
-      setErr(onboardingError(e, 'That code didn’t match. Check it and try again.'));
-      // A lockout answers with the seconds to wait; run them down here rather
-      // than leaving a live button over a door that is shut.
-      const wait = retryAfterSec(e);
-      if (wait) setCooldown(wait);
+      let verified;
+      try {
+        verified = await verifyPhoneOtp(phone, value);
+      } catch (e: any) {
+        setCode('');
+        setErr(onboardingError(e, 'That code didn’t match. Check it and try again.'));
+        // A lockout answers with the seconds to wait; run them down here rather
+        // than leaving a live button over a door that is shut.
+        const wait = retryAfterSec(e);
+        if (wait) setCooldown(wait);
+        return;
+      }
+      onboarding.set({ phoneTicket: verified.phoneTicket });
+      try { await go(afterOtp(verified)); }
+      catch (e: any) { setStuck(true); setErr(onboardingError(e, 'Couldn’t finish signing in. Try again.')); }
     } finally { inFlight.current = false; setBusy(false); }
+  };
+
+  const retryAfterCode = async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setBusy(true); setErr(null);
+    try { await go({ to: 'lookup' }); setStuck(false); }
+    catch (e: any) { setErr(onboardingError(e, 'Couldn’t finish signing in. Try again.')); }
+    finally { inFlight.current = false; setBusy(false); }
   };
 
   const resend = async (channel: OtpChannel = 'sms') => {
@@ -148,7 +172,8 @@ export default function EmailVerify() {
         </Pressable>
 
         {/* The code and its resend belong to one question, so they share one card. */}
-        <View style={s.card}>
+        {/* Hidden once the code is accepted: it is spent. */}
+        {!stuck && <View style={s.card}>
           <MpinInput value={code} onChange={setCode} onComplete={submit} secure={false} autoFocus onDark label="Verification code" />
 
           {busy && <ActivityIndicator color={AUTH.accent} style={{ marginTop: 18 }} />}
@@ -165,11 +190,18 @@ export default function EmailVerify() {
               {waiting ? `Resend code in ${cooldown}s` : 'Resend code'}
             </Text>
           </Pressable>
-        </View>
+        </View>}
 
         {/* accessibilityLiveRegion so a rejected code is announced, not just
             printed — the cells clearing is invisible to a screen reader. */}
         {!!err && <Text style={s.err} accessibilityLiveRegion="polite">{err}</Text>}
+
+        {stuck && (
+          <Pressable onPress={retryAfterCode} disabled={busy} accessibilityRole="button"
+            accessibilityLabel="Try again" accessibilityState={{ disabled: busy, busy }} style={s.resendHit}>
+            <Text style={s.resend}>Try again</Text>
+          </Pressable>
+        )}
 
         <Pressable
           onPress={() => setSheet(true)}

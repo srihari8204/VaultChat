@@ -49,8 +49,9 @@ const ARCHIVE = ['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz'];
 /**
  * Documents the in-app viewers can actually render.
  *
- * Kept identical to the list app/file-viewer.tsx dispatches on, because a file
- * routed there that it cannot render shows the hand-off card — a worse outcome
+ * Kept identical to the list components/fileviewer/fileTypes.ts (detectType)
+ * dispatches on, because a file routed to app/file-viewer.tsx that it cannot
+ * render shows the hand-off card — a worse outcome
  * than going straight to the OS. Extend BOTH or neither.
  */
 const DOCUMENT = [

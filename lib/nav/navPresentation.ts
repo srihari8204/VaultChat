@@ -168,6 +168,15 @@ export function formatEta(seconds: number): string {
   return `${Math.floor(mins / 60)} h ${mins % 60} min`;
 }
 
+/**
+ * The "Then" chip (maneuver after next) shows only when that maneuver follows
+ * the next one closely — far apart, it is noise the driver does not need yet.
+ */
+export const THEN_CHIP_MAX_GAP_M = 300;
+export function showThenManeuver(gapM: number): boolean {
+  return Number.isFinite(gapM) && gapM >= 0 && gapM <= THEN_CHIP_MAX_GAP_M;
+}
+
 /** "LEFT IN 120 m" — the maneuver capsule's line (spec §17). */
 export function maneuverLine(instruction: string, distM: number): string {
   const d = formatDistance(distM);
@@ -237,6 +246,11 @@ function _selfCheck(): void {
   // 8. the maneuver line
   A(maneuverLine('Turn left', 120) === 'Turn left in 120 m', 'maneuver line reads naturally');
   A(maneuverLine('Arrive', 4) === 'Arrive', 'an arrival needs no distance suffix');
+
+  // 9. the "Then" chip only for a maneuver that follows closely
+  A(showThenManeuver(120) && showThenManeuver(THEN_CHIP_MAX_GAP_M), 'a close follow-up maneuver shows Then');
+  A(!showThenManeuver(THEN_CHIP_MAX_GAP_M + 1) && !showThenManeuver(Infinity) && !showThenManeuver(-5),
+    'a distant, missing or nonsense gap shows nothing');
 
   console.log('navPresentation self-check: OK');
 }

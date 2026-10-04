@@ -23,6 +23,8 @@ export interface SheetAction {
   destructive?: boolean;
   /** The current choice in a picker: shows a check and reports selected state. */
   selected?: boolean;
+  /** Spoken name when the visible label is not enough on its own. */
+  accessibilityLabel?: string;
   onPress: () => void;
 }
 
@@ -75,6 +77,7 @@ export function Sheet({ visible, title, message, actions, onClose }: SheetProps)
           {actions.map((a) => (
             <TouchableOpacity
               accessibilityRole="button"
+              accessibilityLabel={a.accessibilityLabel}
               accessibilityState={a.selected === undefined ? undefined : { selected: a.selected }}
               key={a.label}
               style={[styles.row, { backgroundColor: Aurora.glassSoft, borderColor: Aurora.glassStroke }]}

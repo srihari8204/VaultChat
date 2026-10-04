@@ -92,7 +92,7 @@ export function useChatMenu({
   // than guessing "Default".
   const openNotifSoundPicker = useCallback(() => {
     if (!chat) return;
-    const current = (chat as ChatDetail & { notifSound?: string }).notifSound;
+    const current = chat.notifSound;
     const known = NOTIF_CHANNELS.some(ch => ch.id === current);
     setOverflowMenu({
       title: 'Notification sound',
@@ -105,7 +105,7 @@ export function useChatMenu({
           try {
             await setChatNotifSound(chatId, ch.id);
             // Mark it locally too, so reopening the picker agrees with what was saved.
-            setChat(prev => prev ? { ...prev, notifSound: ch.id } as ChatDetail : prev);
+            setChat(prev => prev ? { ...prev, notifSound: ch.id as ChatDetail['notifSound'] } : prev);
           } catch (e: any) { Alert.alert('Could not update', e?.message ?? 'Try again'); }
         },
       })),

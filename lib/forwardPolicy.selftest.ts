@@ -63,7 +63,8 @@ check('only the many-times case warns', forwardNotice(once) === null && forwardN
 
 console.log('\nThe wiring is in place:');
 const SVC = read('lib/chatService.ts');
-check('forwardMessage writes the next score', /forwardScore: nextForwardScore\(/.test(SVC));
+check('forwardMessage sends what forwardPayload decides', /const p = forwardPayload\(source\)/.test(SVC));
+check('forwardPayload writes the next score', /forwardScore: nextForwardScore\(/.test(read('lib/forwardPayload.ts')));
 const BUBBLE = read('components/chat/MessageBubble.tsx');
 check('the bubble renders the policy label, not a hard-coded string',
   /forwardLabel\(msg\.meta\)/.test(BUBBLE));

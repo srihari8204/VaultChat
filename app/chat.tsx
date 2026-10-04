@@ -69,8 +69,8 @@ import { extractFirstUrl, fetchPreviewFromDevice, type LinkPreviewData } from '.
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import GifPicker from '../components/GifPicker';
 import { LinearGradient } from 'expo-linear-gradient';
-import { getWallpaper, type WallpaperConfig } from './chat-wallpaper';
-import { getBubbleColors } from './chat-themes';
+import { getWallpaper, type WallpaperConfig } from '../lib/chatWallpaperStore';
+import { getBubbleColors } from '../lib/chatBubbleTheme';
 import { getLock, pinRetryAfterMs, verifyBiometric, verifyPin, type LockedChat } from '../lib/chatLock';
 import { permissionDenied } from '../lib/permissionDenied';
 import { preloadViewedOnce } from '../lib/viewOnceStore';
@@ -160,8 +160,10 @@ let lastTopUpAt = 0;
  *   view gets the real chat, not a cut-down copy of it.
  * @param embedded  Hides the screen-level back button; the pane has its own
  *   close/swap controls.
+ * @param onClosePane  Split view: close just this pane (offered when the pane's
+ *   chat has ended, e.g. after leaving it).
  */
-export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: string; embedded?: boolean } = {}) {
+export default function ChatScreen({ chatIdProp, embedded, onClosePane }: { chatIdProp?: string; embedded?: boolean; onClosePane?: () => void } = {}) {
   // `id` is the normal entry param; `chatId` is what the capture screens
   // (/camera, /video-notes, /image-editor) echo back when they router.replace
   // here with a freshly captured/edited file — accept either.
@@ -2213,8 +2215,14 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           {paneNotice}
         </Text>
         <Text style={{ color: colors.textDim, fontSize: 14, textAlign: 'center' }}>
-          Use Swap or Close in the split bar to continue.
+          {onClosePane ? 'Close this pane to carry on with the other chat.' : 'Use Swap or Close in the split bar to continue.'}
         </Text>
+        {!!onClosePane && (
+          <TouchableOpacity onPress={onClosePane} accessibilityRole="button" accessibilityLabel="Close this chat pane"
+            style={{ minHeight: 44, paddingHorizontal: 20, borderRadius: 12, borderWidth: 1, borderColor: colors.glassStroke, alignItems: 'center', justifyContent: 'center', marginTop: 6 }}>
+            <Text style={{ color: colors.text, fontWeight: '700' }}>Close this chat</Text>
+          </TouchableOpacity>
+        )}
       </View>
     );
   }

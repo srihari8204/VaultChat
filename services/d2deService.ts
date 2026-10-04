@@ -44,17 +44,18 @@ export async function decryptMessage(
   throw new Error(D2DE_REMOVED);
 }
 
-// Reports the REAL encryption posture. TLS is always on (transport). The
+// Reports the encryption posture this BUILD is made for (labels say "built
+// to", not a live per-connection measurement). TLS is always on (transport). The
 // end-to-end layers are active only when E2EE_ENABLED — i.e. they reflect the
 // actual services/crypto double-ratchet path used for direct chats, not a
 // hardcoded "everything green".
 export function getD2DEStatus(): D2DEStatusLayer[] {
   const e2e = E2EE_ENABLED;
   return [
-    { layer: 'TLS 1.3',        active: true, label: 'Transport — encrypted on all connections' },
-    { layer: 'AES-256-GCM',    active: e2e,  label: e2e ? 'Direct messages encrypted on your device' : 'End-to-end encryption rolling out' },
-    { layer: 'Double Ratchet', active: e2e,  label: e2e ? 'Forward secrecy — a fresh key per message' : 'Not active yet' },
-    { layer: 'X3DH',           active: e2e,  label: e2e ? 'Key agreement via published prekeys' : 'Not active yet' },
-    { layer: 'Secure Keystore',active: e2e,  label: e2e ? 'Keys held in the device secure store' : 'No end-to-end keys yet' },
+    { layer: 'TLS 1.3',        active: true, label: 'Transport — this build is made to use TLS on every connection' },
+    { layer: 'AES-256-GCM',    active: e2e,  label: e2e ? 'Built to encrypt direct messages on your device' : 'End-to-end encryption rolling out' },
+    { layer: 'Double Ratchet', active: e2e,  label: e2e ? 'Built for forward secrecy — a fresh key per message' : 'Not active yet' },
+    { layer: 'X3DH',           active: e2e,  label: e2e ? 'Built to agree keys via published prekeys' : 'Not active yet' },
+    { layer: 'Secure Keystore',active: e2e,  label: e2e ? 'Built to keep keys in the device secure store' : 'No end-to-end keys yet' },
   ];
 }

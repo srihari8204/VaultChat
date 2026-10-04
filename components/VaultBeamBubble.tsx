@@ -7,7 +7,7 @@
 // The card's filename/size come from the E2EE manifest (decrypted `plain`), so
 // the server never sees them. 1:1 only (v1).
 
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, type MutableRefObject } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -36,11 +36,16 @@ function fmtEta(sec?: number): string | null {
 }
 
 export default function VaultBeamBubble({
-  msg, isMine, plain,
+  msg, isMine, plain, actionRef, onActionLabel,
 }: {
   msg: { meta?: any; content?: string | null; senderId?: string; createdAt?: string | null };
   isMine: boolean;
   plain: string;       // decrypted message content (the manifest JSON)
+  /** The message bubble is ONE accessible element, so the card's trailing
+   *  control (Accept / Cancel / Open / Resume / Retry) is offered as a bubble
+   *  accessibility action: the handler lands here, its label in onActionLabel. */
+  actionRef?: MutableRefObject<(() => void) | null>;
+  onActionLabel?: (label: string | null) => void;
 }) {
   const { colors } = useTheme();
   const router = useRouter();
@@ -99,6 +104,8 @@ export default function VaultBeamBubble({
   const avg = fmtRate(st?.avgBps);
   let line = fmtBytes(totalBytes);
   let action: React.ReactNode = null;
+  // The same control, for the bubble's accessibility actions.
+  let a11y: { label: string; run: () => void } | null = null;
 
   // THE TRANSPORT, IN THE ONE PLACE A HUMAN CAN SEE IT.
   //
@@ -118,9 +125,11 @@ export default function VaultBeamBubble({
   const via = st?.transport ? ` · ${st.transport}${detail ? ` (${detail})` : ''}` : '';
 
   if (isMine) {
-    if (status === 'uploading') { line = `${st?.tier === 'relay' ? 'Uploading via relay' : 'Sending direct'}… ${pct}%${meter ? ` · ${meter}` : ''}${via}`; action = <CancelBtn onPress={onCancel} colors={colors} />; }
-    else if (status === 'sent') { line = `${fmtBytes(totalBytes)} · Sent`; action = st?.savedPath ? <PillBtn label="Open" icon="open-outline" onPress={onOpen} colors={colors} /> : <Ionicons name="checkmark-done" size={18} color={colors.textDim} />; }
-    else if (status === 'complete') { line = `${fmtBytes(totalBytes)} · Delivered${avg ? ` · avg ${avg}` : ''}${via}`; action = st?.savedPath ? <PillBtn label="Open" icon="open-outline" onPress={onOpen} colors={colors} /> : <Ionicons name="checkmark-done" size={18} color={BRAND_ACCENT} />; }
+    if (status === 'uploading') { line = `${st?.tier === 'relay' ? 'Uploading via relay' : 'Sending direct'}… ${pct}%${meter ? ` · ${meter}` : ''}${via}`; action = <CancelBtn onPress={onCancel} colors={colors} />; a11y = { label: 'Cancel transfer', run: onCancel }; }
+    else if (status === 'sent') { line = `${fmtBytes(totalBytes)} · Sent`; if (st?.savedPath) a11y = { label: 'Open file', run: onOpen };
+      action = st?.savedPath ? <PillBtn label="Open" icon="open-outline" onPress={onOpen} colors={colors} /> : <Ionicons name="checkmark-done" size={18} color={colors.textDim} />; }
+    else if (status === 'complete') { line = `${fmtBytes(totalBytes)} · Delivered${avg ? ` · avg ${avg}` : ''}${via}`; if (st?.savedPath) a11y = { label: 'Open file', run: onOpen };
+      action = st?.savedPath ? <PillBtn label="Open" icon="open-outline" onPress={onOpen} colors={colors} /> : <Ionicons name="checkmark-done" size={18} color={BRAND_ACCENT} />; }
     else if (status === 'failed') { line = st?.error ? `Upload failed — ${st.error}` : 'Upload failed'; }
     else if (status === 'cancelled') { line = 'Cancelled'; }
     // No retry affordance: the offer is past its window and the relay copy it
@@ -128,23 +137,28 @@ export default function VaultBeamBubble({
     else if (status === 'expired') { line = 'Transfer expired'; }
     else { line = `${fmtBytes(totalBytes)} · Sent`; action = <Ionicons name="cloud-upload-outline" size={18} color={colors.textDim} />; }
   } else {
-    if (status === 'queued') { line = `${fmtBytes(totalBytes)} · Queued`; action = <CancelBtn onPress={onCancel} colors={colors} />; }
-    else if (status === 'paused') { line = st?.error ? `Paused — ${st.error}` : 'Auto-download paused'; action = <PillBtn label="Resume" icon="download-outline" onPress={onAccept} colors={colors} />; }
+    if (status === 'queued') { line = `${fmtBytes(totalBytes)} · Queued`; action = <CancelBtn onPress={onCancel} colors={colors} />; a11y = { label: 'Cancel transfer', run: onCancel }; }
+    else if (status === 'paused') { line = st?.error ? `Paused — ${st.error}` : 'Auto-download paused'; action = <PillBtn label="Resume" icon="download-outline" onPress={onAccept} colors={colors} />; a11y = { label: 'Resume download', run: onAccept }; }
     else if (status === 'receiving') {
       const verb = st?.auto ? 'Auto-downloading' : (st?.tier === 'relay' ? 'Downloading via relay' : 'Receiving direct');
-      line = `${verb}… ${pct}%${meter ? ` · ${meter}` : ''}${via}`; action = <CancelBtn onPress={onCancel} colors={colors} />;
+      line = `${verb}… ${pct}%${meter ? ` · ${meter}` : ''}${via}`; action = <CancelBtn onPress={onCancel} colors={colors} />; a11y = { label: 'Cancel transfer', run: onCancel };
     }
-    else if (status === 'complete') { line = `${fmtBytes(totalBytes)} · Saved${avg ? ` · avg ${avg}` : ''}${via}`; action = <PillBtn label="Open" icon="open-outline" onPress={onOpen} colors={colors} />; }
-    else if (status === 'failed') { line = st?.error ? `Failed — ${st.error}` : 'Download failed'; action = <PillBtn label="Retry" icon="refresh" onPress={onAccept} colors={colors} />; }
-    else if (status === 'cancelled') { line = 'Cancelled'; action = <PillBtn label="Accept" icon="download-outline" onPress={onAccept} colors={colors} />; }
+    else if (status === 'complete') { line = `${fmtBytes(totalBytes)} · Saved${avg ? ` · avg ${avg}` : ''}${via}`; action = <PillBtn label="Open" icon="open-outline" onPress={onOpen} colors={colors} />; a11y = { label: 'Open file', run: onOpen }; }
+    else if (status === 'failed') { line = st?.error ? `Failed — ${st.error}` : 'Download failed'; action = <PillBtn label="Retry" icon="refresh" onPress={onAccept} colors={colors} />; a11y = { label: 'Retry download', run: onAccept }; }
+    else if (status === 'cancelled') { line = 'Cancelled'; action = <PillBtn label="Accept" icon="download-outline" onPress={onAccept} colors={colors} />; a11y = { label: 'Accept file', run: onAccept }; }
     else {
       // Incoming, not yet accepted. Files ≥ 2.5 GB always require a manual Accept
       // (never auto-download), so hint why the tap is required.
       const large = totalBytes >= VB_AUTO_MAX_BYTES;
       line = large ? `${fmtBytes(totalBytes)} · manual approval (large file)` : fmtBytes(totalBytes);
       action = <PillBtn label="Accept" icon="download-outline" onPress={onAccept} colors={colors} disabled={!manifest} />;
+      if (manifest) a11y = { label: 'Accept file', run: onAccept };
     }
   }
+
+  if (actionRef) actionRef.current = a11y?.run ?? null;
+  const a11yLabel = a11y?.label ?? null;
+  useEffect(() => { onActionLabel?.(a11yLabel); }, [a11yLabel, onActionLabel]);
 
   return (
     <View style={styles.wrap}>

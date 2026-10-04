@@ -131,7 +131,9 @@ export default function MediaGalleryScreen() {
   const { colors } = useTheme();
   const s = useS();
   const router = useRouter();
-  const { chatId, id: idParam, peerName, tab: tabParam } = useLocalSearchParams<{ chatId?: string; id?: string; peerName?: string; tab?: string }>();
+  // `open`: a message id whose file opens once the Files list has loaded
+  // (contact-info's Shared Files rows).
+  const { chatId, id: idParam, peerName, tab: tabParam, open: openParam } = useLocalSearchParams<{ chatId?: string; id?: string; peerName?: string; tab?: string; open?: string }>();
   const cid = String(chatId ?? idParam ?? '');
 
   // Callers may open a specific tab (contact-info opens Files); anything else
@@ -328,6 +330,16 @@ export default function MediaGalleryScreen() {
       openingRef.current = null;
     }
   }, [unlockKey, meId, router]);
+
+  // Open the requested file once, after the list holds it (cache or network).
+  const autoOpened = useRef(false);
+  useEffect(() => {
+    if (!openParam || autoOpened.current) return;
+    const row = files.find((m) => String(m.id) === String(openParam));
+    if (!row) return;
+    autoOpened.current = true;
+    openFile(row);
+  }, [openParam, files, openFile]);
 
   // Photos and videos open in /media-viewer: it plays video (the old in-screen
   // Modal could only show a still), zooms, shares and saves. Encrypted media

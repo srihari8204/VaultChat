@@ -40,6 +40,8 @@ assert.ok(names({ location: true }).includes('location'));
 assert.ok(labels({ card: 'Open Book club' }).includes('Open Book club'));
 assert.ok(names({ link: true }).includes('link'));
 assert.ok(names({ longRead: true }).includes('reader'));
+assert.ok(labels({ beam: 'Accept file' }).includes('Accept file'));
+assert.ok(!names({ beam: null }).includes('beam'));
 
 // 5. Poll: one action per option, saying whether it adds or removes the vote.
 const poll = bubbleA11yActions({ ...base, poll: [{ label: 'Yes', mine: true }, { label: 'No', mine: false }] })
@@ -50,7 +52,7 @@ assert.deepEqual(poll, [
 ]);
 
 // 6. Names are unique (the dispatcher switches on them).
-const all = names({ quote: true, media: 'file', location: true, link: true, longRead: true, card: 'x',
+const all = names({ quote: true, media: 'file', location: true, link: true, longRead: true, card: 'x', beam: 'Open file',
   poll: [{ label: 'a', mine: false }, { label: 'b', mine: false }] });
 assert.equal(new Set(all).size, all.length);
 

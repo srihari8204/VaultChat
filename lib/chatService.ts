@@ -120,6 +120,8 @@ export interface ChatMember {
 
 export interface ChatDetail extends ChatSummary {
   members:              ChatMember[];
+  /** This member's per-chat push sound (lib/push NOTIF_CHANNELS id); absent until the server sends it (R4BE C2). */
+  notifSound?:          'default' | 'chime' | 'bell';
   description?:         string | null;   // group description (WhatsApp)
   // Chat-level disappearing-messages timer. null = off.
   disappearingSeconds?: number | null;
@@ -330,6 +332,10 @@ export async function decryptFromChat(
   ciphertext: string | null,
   messageId?: number,
   edited = false,
+  /** Plaintext-cache namespace for a non-message payload sealed with the
+   *  chat's keys (e.g. 'cal' for group-calendar rows), so its ids cannot share
+   *  a cache slot with a chat message of the same id. */
+  cacheScope?: string,
 ): Promise<string> {
   if (ciphertext == null) return '';
   if (!E2EE_ENABLED) return ciphertext;
@@ -351,7 +357,7 @@ export async function decryptFromChat(
   if (g.isGroupEnvelope(ciphertext)) {
     if (!GROUP_E2EE) return ciphertext;
     try {
-      return await g.groupDecryptMessage(chatId, senderId, messageId ?? 0, ciphertext, edited);
+      return await g.groupDecryptMessage(chatId, senderId, messageId ?? 0, ciphertext, edited, cacheScope);
     } catch (err) {
       // ONCE PER SENDER, NOT ONCE PER MESSAGE. This fires for every message that
       // cannot be opened, so one broken sender key produced a warn per message —
@@ -383,6 +389,8 @@ export async function decryptFromChat(
     return ciphertext; // pre-E2EE plaintext history
   }
   const peerId = directPeerOf(chatId) ?? senderId;     // peer = the other party
+  // A scoped payload never takes a message's cache slot (id 0 = uncached).
+  if (cacheScope) messageId = 0;
   try {
     const pt = await e2ee.e2eeDecrypt(chatId, peerId, messageId ?? 0, ciphertext);
     _decryptFailStreak.delete(peerId);                 // healthy session — clear recovery counter
@@ -1335,11 +1343,13 @@ export interface SOSHistoryItem {
   latitude:         number | null;
   longitude:        number | null;
   contactsNotified: number;
+  /** Contacts the push provider accepted it for (R4BE C13); absent on today's server. */
+  contactsReached?: number | null;
   createdAt:        string;
 }
 export async function sendSOS(
   latitude: number | null, longitude: number | null, test: boolean, contactIds?: string[],
-): Promise<{ contactsNotified: number; id: number; createdAt: string }> {
+): Promise<{ contactsNotified: number; contactsReached?: number; id: number; createdAt: string }> {
   return api('/user/sos', { method: 'POST', json: { latitude, longitude, test, contactIds } });
 }
 export async function listSOSHistory(): Promise<SOSHistoryItem[]> {
@@ -2252,6 +2262,8 @@ export function isAnnouncement(m: Pick<Message, 'meta'>): boolean {
 export interface GroupEventRow {
   id:          number;
   createdBy:   string | null;
+  /** Who sealed the current payload (R4BE C10; absent until that server deploy). */
+  updatedBy?:  string | null;
   /** 'YYYY-MM', or null for a recurring event (always returned). */
   monthKey:    string | null;
   payload:     string;
@@ -2765,7 +2777,7 @@ export interface Reactor          { emoji: string; userId: string; name: string 
 // counts themselves — one reaction per user per message.
 
 
-import { nextForwardScore } from './forwardPolicy';
+import { forwardPayload } from './forwardPayload';
 
 // ─── Forward (Day 8) ────────────────────────────────────────────────
 // Server-side it's still a normal POST /messages — we just preserve the
@@ -2775,26 +2787,11 @@ export async function forwardMessage(
   source: { id: number; chatId: string; senderId: string; type: Message['type']; content: string | null; meta?: any },
   targetChatId: string,
 ): Promise<Message> {
-  // View-once / invisible-ink content is never forwarded. Stripping only the
-  // flag would re-send the protected body as an ordinary, permanent message,
-  // so refuse outright (the UI hides Forward for these; this is the backstop).
-  if (source.meta?.viewOnce || source.meta?.invisibleInk) {
-    throw new Error('View-once and invisible-ink messages cannot be forwarded.');
-  }
-  // A sender-local file path means nothing on another device; never send it.
-  const { localUri: _localUri, viewOnce: _viewOnce, invisibleInk: _invisibleInk, ...meta } = source.meta ?? {};
-  return sendMessage(targetChatId, source.content ?? '', source.type, {
-    meta: {
-      ...meta,
-      forwardedFrom: { messageId: source.id, chatId: source.chatId, senderId: source.senderId },
-      // AUDIT F10. How many hops this has made. Read from the SOURCE message's
-      // meta, so a chain keeps counting instead of resetting to 1 at every
-      // relay — which is the only thing that separates "a friend sent me this"
-      // from a message on its fiftieth pass. See lib/forwardPolicy.ts for why
-      // this is signalling and not a control.
-      forwardScore: nextForwardScore(source.meta),
-    },
-  });
+  // The forward rules (view-once / invisible-ink refused, localUri stripped,
+  // forwardedFrom + the next forwardScore) live in lib/forwardPayload.ts, the
+  // one copy the chat screen's outbox path uses too.
+  const p = forwardPayload(source);
+  return sendMessage(targetChatId, p.plaintext, p.type as Message['type'], { meta: p.meta });
 }
 
 // ─── WebRTC ICE config (calls) ──────────────────────────────────────

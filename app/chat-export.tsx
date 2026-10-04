@@ -367,7 +367,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   noteTitle: { color: c.danger, fontSize: 12, fontWeight: '800', marginBottom: 4 },
   noteDesc: { color: c.textDim, fontSize: 11, lineHeight: 18 },
   // Fixed scrim: dims whatever is behind the dialog the same way in both themes.
-  pinOverlay: { flex: 1, backgroundColor: '#00000099', justifyContent: 'center', padding: 28 },
+  pinOverlay: { flex: 1, backgroundColor: c.scrim, justifyContent: 'center', padding: 28 },
   pinPanel: { backgroundColor: c.surfaceSolid, borderRadius: 16, padding: 20, borderWidth: 1, borderColor: c.glassStroke },
   pinTitle: { color: c.text, fontSize: 16, fontWeight: '800' },
   pinDesc: { color: c.textDim, fontSize: 12, marginTop: 4, marginBottom: 14 },

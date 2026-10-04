@@ -357,12 +357,13 @@ export default function ContactInfoScreen() {
         {files.length > 0 && (
           <View style={s.section}>
             <Text style={s.sectionTitle}>Shared Files</Text>
-            {/* Files open from the gallery's Files tab, which downloads, decrypts
-                and picks the in-app viewer (lib/docOpen) — one copy of that path. */}
+            {/* Files open through the gallery's Files tab (`open` = this message),
+                which downloads, decrypts and picks the in-app viewer (lib/docOpen)
+                — one copy of that path. */}
             {files.map(f => (
               <TouchableOpacity key={f.id} style={s.fileRow} activeOpacity={0.7}
-                onPress={() => router.push({ pathname: '/media-gallery', params: { chatId, tab: 'files' } })}
-                accessibilityRole="button" accessibilityLabel={`${f.name}. Open in shared files`}>
+                onPress={() => router.push({ pathname: '/media-gallery', params: { chatId, tab: 'files', open: String(f.id) } })}
+                accessibilityRole="button" accessibilityLabel={`Open ${f.name}`}>
                 <View style={s.fileIcon}><Ionicons name="document-text-outline" size={20} color={colors.textDim} /></View>
                 <Text style={s.fileName} numberOfLines={1}>{f.name}</Text>
                 <Ionicons name="chevron-forward" size={18} color={colors.textDim} />

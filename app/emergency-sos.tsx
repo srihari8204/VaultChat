@@ -19,16 +19,11 @@ import { Accelerometer } from 'expo-sensors';
 import { listTrustedContacts, sendSOS, listSOSHistory, type SOSHistoryItem } from '../lib/chatService';
 import { AuroraBackground } from '../components/ui';
 import { useReducedMotion } from '../lib/useReducedMotion';
+// Shared with app/notifications.tsx, so both SOS screens word a result the same way.
+import { sosReachedOf, sosReachText } from '../lib/sosReachCopy';
 
 type SosContact = { uid: string; name: string; vaultId: string };
 
-/** Contacts the push provider accepted the alert for (R4BE C13, written, not
- *  deployed). Absent or not a number = unknown: callers keep the "alerted" copy. */
-const reachedOf = (r: unknown): number | null => {
-  const v = (r as { contactsReached?: unknown } | null | undefined)?.contactsReached;
-  return typeof v === 'number' ? v : null;
-};
-const plural = (n: number) => `${n} trusted contact${n === 1 ? '' : 's'}`;
 
 function useS() {
   const { colors } = useTheme();
@@ -269,7 +264,7 @@ export default function EmergencySOSScreen() {
       if (!mounted.current) return;
 
       setNotified(typeof res?.contactsNotified === 'number' ? res.contactsNotified : null);
-      setReached(reachedOf(res));
+      setReached(sosReachedOf(res));
       setSent(true);
       setSentNoLoc(lat == null);
       Vibration.vibrate([0, 500, 200, 500]);
@@ -292,6 +287,9 @@ export default function EmergencySOSScreen() {
       return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     } catch { return 'Unknown'; }
   };
+
+  // The last send's result, in the wording app/notifications.tsx uses too.
+  const reach = notified != null && notified > 0 ? sosReachText(notified, reached, false) : null;
 
   return (
     <View style={styles.container}>
@@ -351,12 +349,11 @@ export default function EmergencySOSScreen() {
                     for — still not proof a phone showed it, so "reached", not "saw". */}
                 {notified == null ? 'Your trusted contacts are being alerted'
                   : notified === 0 ? 'No trusted contacts to alert — add some so an SOS reaches someone.'
-                    : reached == null ? `Alerting ${plural(notified)}`
-                      : `Reached ${reached} of ${plural(notified)}`}
+                    : reach?.line}
               </Text>
-              {notified != null && reached != null && reached < notified && (
+              {!!reach?.warn && (
                 <Text style={styles.sentWarn}>
-                  {notified - reached} could not be reached (no app or notifications turned off). Call or text them too.
+                  {reach.warn} Call or text them too.
                 </Text>
               )}
               {sentNoLoc && (
@@ -519,7 +516,8 @@ export default function EmergencySOSScreen() {
                   <Text style={styles.historyTime}>{formatTime(item.createdAt)}</Text>
                 </View>
                 <Text style={styles.historyContacts}>
-                  {reachedOf(item) == null ? `${item.contactsNotified} alerted` : `reached ${reachedOf(item)} of ${item.contactsNotified}`}
+                  {sosReachedOf(item) == null ? `${item.contactsNotified} alerted`
+                    : `reached ${Math.min(sosReachedOf(item)!, item.contactsNotified)} of ${item.contactsNotified}`}
                 </Text>
               </View>
             ))

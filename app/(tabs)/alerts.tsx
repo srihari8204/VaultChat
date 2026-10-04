@@ -27,16 +27,13 @@ import { AppText as Text } from '../../components/ui/Text';
 import { AuroraBackground } from '../../components/ui';
 import { tint } from '../../lib/tintColor';
 
-// Severity ink. Critical, high, low and info use palette roles (danger,
-// warning, success, accentOn — each AA on this theme's ground). Medium is the
-// one level with no palette role: a yellow kept distinct from high's amber,
-// with a darker light-theme variant so the icon and SEVERITY label stay
-// readable on the light ground.
-const MEDIUM_INK = { light: '#A16207', dark: '#FBBF24' };
-function sevColor(sev: AuditSeverity, c: Palette, scheme: 'light' | 'dark'): string {
+// Severity ink, all palette roles (danger, warning, caution, success, accentOn
+// — each AA on this theme's ground). Medium's caution yellow is kept distinct
+// from high's amber.
+function sevColor(sev: AuditSeverity, c: Palette): string {
   if (sev === 'critical') return c.danger;
   if (sev === 'high') return c.warning;
-  if (sev === 'medium') return MEDIUM_INK[scheme];
+  if (sev === 'medium') return c.caution;
   if (sev === 'low') return c.success;
   return c.accentOn;
 }
@@ -74,7 +71,7 @@ function useS() {
 }
 
 export default function AlertsScreen() {
-  const { colors, scheme } = useTheme();
+  const { colors } = useTheme();
   const S = useS();
   const router = useRouter();
   const [events, setEvents] = useState<SecurityEvent[]>([]);
@@ -86,6 +83,8 @@ export default function AlertsScreen() {
   const [scanning, setScanning] = useState(false);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  // The last background backup of the log failed; the local chain is unaffected.
+  const [syncNote, setSyncNote] = useState(false);
   // The background sync below settles after the tab may have unmounted.
   const alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
@@ -110,7 +109,9 @@ export default function AlertsScreen() {
     markAllSeen().catch(() => {});
     // Background: mirror new events to the zero-knowledge backup and restore on
     // a fresh install, then refresh the feed if anything changed.
-    syncAuditChain().then(async () => {
+    syncAuditChain().then(async (ok) => {
+      if (alive.current) setSyncNote(!ok);
+      if (!ok) return;
       const [e2, s2] = await Promise.all([listSecurityEvents(), verifyAuditChain()]);
       if (!alive.current) return;
       setEvents(e2);
@@ -169,7 +170,7 @@ export default function AlertsScreen() {
   }, [scanning, runScan]);
 
   const renderItem = useCallback(({ item }: { item: SecurityEvent }) => {
-    const color = sevColor(item.severity, colors, scheme);
+    const color = sevColor(item.severity, colors);
     const isOpen = expanded === item.seq;
     return (
       <TouchableOpacity
@@ -209,7 +210,7 @@ export default function AlertsScreen() {
         </View>
       </TouchableOpacity>
     );
-  }, [expanded, S, colors, scheme]);
+  }, [expanded, S, colors]);
 
   return (
     <View style={S.screen}>
@@ -248,6 +249,11 @@ export default function AlertsScreen() {
               : `Integrity broken at entry #${status.brokenAtSeq} — the log was altered`}
           </Text>
         </View>
+      )}
+      {syncNote && (
+        <Text style={[S.metaLine, S.syncNote]} accessibilityLiveRegion="polite">
+          Couldn’t back up the log just now — it is safe on this device.
+        </Text>
       )}
 
       {/* A failed refresh must not hide behind the events already listed. */}
@@ -326,6 +332,7 @@ const makeStyles = (c: Palette, m: ReturnType<typeof useVisionComfort>['metrics'
   rowDetail:{ color: c.textDim, fontSize: 13, lineHeight: 18, marginTop: 2 },
   metaBox:  { marginTop: 8, padding: 10, borderRadius: 10, backgroundColor: c.glassSoft, gap: 3 },
   metaLine: { color: c.textDim, fontSize: 12 },
+  syncNote: { marginHorizontal: 16, marginBottom: 8 },
   metaKey:  { color: c.textFaint, fontWeight: '700' },
 
   emptyWrap:{ paddingBottom: TAB_BAR_SPACE + 16, paddingTop: 20, flexGrow: 1, justifyContent: 'center' },

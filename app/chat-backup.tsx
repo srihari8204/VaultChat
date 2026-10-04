@@ -440,7 +440,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   note: { color: c.textFaint, fontSize: 12, lineHeight: 17, paddingHorizontal: 18, paddingTop: 18 },
 
   // Fixed scrim: dims whatever is behind the dialog the same way in both themes (no scrim token exists).
-  modalWrap: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  modalWrap: { flex: 1, backgroundColor: c.scrim, alignItems: 'center', justifyContent: 'center', padding: 24 },
   modalCard: { width: '100%', maxWidth: 420, backgroundColor: c.bg, borderRadius: 14, padding: 20 },
   modalTitle: { color: c.text, fontSize: 17, fontWeight: '700', marginBottom: 8 },
   modalBody: { color: c.textDim, fontSize: 13, lineHeight: 19, marginBottom: 14 },

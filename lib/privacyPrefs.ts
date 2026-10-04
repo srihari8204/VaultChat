@@ -85,8 +85,10 @@ export async function getNotifPreview(): Promise<NotifPreview> {
 }
 
 export async function setNotifPreview(v: NotifPreview): Promise<void> {
+  // Stored first: a failed write rejects, so the caller can revert and say so
+  // instead of showing a choice that is gone on the next launch.
+  await (await store()).setItem(NOTIF_KEY, v);
   notifCached = v;
-  try { await (await store()).setItem(NOTIF_KEY, v); } catch {}
   // Calendar reminders already booked keep the title they were booked with;
   // rewrite them now rather than on the next calendar visit. Dynamic import:
   // this module is loaded by the notification path and must stay light.
@@ -104,8 +106,8 @@ export async function getRemoteLinkPreviews(): Promise<boolean> {
 }
 
 export async function setRemoteLinkPreviews(on: boolean): Promise<void> {
+  await (await store()).setItem(LINK_KEY, on ? '1' : '0');   // rejects on failure, like setNotifPreview
   linkCached = on;
-  try { await (await store()).setItem(LINK_KEY, on ? '1' : '0'); } catch {}
 }
 
 export default {};

@@ -152,7 +152,8 @@ const IMPORT_REWRITES: [RegExp, string][] = [
    `import { E2EE_ENABLED, GROUP_E2EE, E2EE_STRICT, UPLOAD_PROGRESS } from './stubs.ts';`],
   [/^import \{ redactIds, warnOnce \} from '\.\/diagLog';$/m, `import { redactIds, warnOnce } from './stubs.ts';`],
   // mid-file import (forwarding), pure but not on the path under test
-  [/^import \{ nextForwardScore \} from '\.\/forwardPolicy';$/m, `import { nextForwardScore } from './stubs.ts';`],
+  [/^import \{ forwardPayload \} from '\.\/forwardPayload';$/m,
+   `import { forwardPayload } from '${pathToFileURL(join(HERE, 'forwardPayload.ts')).href}';`],
   // unreadStore imports react, which does not resolve from the temp workdir.
   // The unread clamp is list cosmetics, not the message path this suite drives,
   // and it has its own executing test in lib/chatUnreadCursor.selftest.ts.
@@ -308,7 +309,6 @@ export const SERVER_URL = 'http://test';
 // Pinned copies of constants/flags.ts (owned by another agent this session).
 export const E2EE_ENABLED = true, GROUP_E2EE = true, E2EE_STRICT = true, UPLOAD_PROGRESS = true;
 export const perf = { mark() {}, recordSend() {}, snapshot() { return { transport: 'test' }; } };
-export function nextForwardScore(n: number) { return n + 1; }
 export function redactIds(s: string) { return s; }
 export function warnOnce() {}
 // group session: this suite is 1:1 only, so the group envelope never matches.

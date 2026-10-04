@@ -67,7 +67,8 @@ check('the rate limit does not fail open', /ConsumeSecure/.test(GO) && !/redisx\
 console.log('\nThe switch is honoured before anything is recorded:');
 check('countScreen returns immediately when off', /export function countScreen[\s\S]{0,120}if \(!enabled\) return;/.test(CLIENT),
   'buffering while off and discarding later still means the app held a record');
-check('switching off discards what was buffered', /if \(!on\) pending = \{\};/.test(CLIENT));
+check('switching off discards what was buffered, before the preference write can fail',
+  /if \(!on\) \{ enabled = false; pending = \{\}; \}\s*(\/\/[^\n]*)?\s*await AsyncStorage\.setItem/.test(CLIENT));
 check('the preference is read at boot, before navigation',
   LAYOUT.indexOf('initUsageCounter()') > 0 && /initUsageCounter\(\)\.catch/.test(LAYOUT));
 // Two concrete properties rather than a prose match: the buffer is never

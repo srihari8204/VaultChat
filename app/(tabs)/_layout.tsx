@@ -15,11 +15,11 @@ import { TabGlyph, type TabGlyphName } from '../../components/ui/TabGlyph';
 import { AppText } from '../../components/ui/Text';
 import { GlassView } from '../../components/ui/GlassView';
 import { TAB_BAR_RAISE } from '../../constants/layout';
-import { visionTabBarGrowth } from '../../constants/layoutMath';
+import { TAB_LABEL_MAX_SCALE, visionTabBarGrowth } from '../../constants/layoutMath';
 import { useUnreadTotal } from '../../lib/unreadStore';
 import { useReducedMotion } from '../../lib/useReducedMotion';
 import { useVisionComfort } from '../../lib/visionComfort';
-import { MOTION, TAB_ICON_INK } from '../../constants/theme';
+import { APPS_DISC_GRADIENT, MOTION, TAB_BAR_SHADOW, TAB_ICON_INK } from '../../constants/theme';
 
 // Prominent raised center button for Mini Apps (the eye-catcher).
 // Styles and the unread count are computed ONCE in TabLayout and passed down:
@@ -34,14 +34,14 @@ function MiniCenterIcon({ focused, styles }: { focused: boolean; styles: TabStyl
   return (
     <View style={[styles.centerWrap, { width: Math.min(64, (width - 32) / 5) }]} pointerEvents="none">
       <LinearGradient
-        colors={scheme === 'dark' ? ['#9D82F5', '#6036BB'] : ['#9471ED', '#5830AC']}
+        colors={APPS_DISC_GRADIENT[scheme]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={[styles.centerBtn, focused && styles.centerBtnActive]}
       >
         <TabGlyph name="mini" size={28} color="#FFFFFF" active={focused} />
       </LinearGradient>
-      <AppText variant="tiny" color={TAB_ICON_INK.mini[scheme]} style={styles.centerLabel} numberOfLines={normalLabels ? 1 : 2} maxFontSizeMultiplier={1.2}>Apps</AppText>
+      <AppText variant="tiny" color={TAB_ICON_INK.mini[scheme]} style={styles.centerLabel} numberOfLines={normalLabels ? 1 : 2} maxFontSizeMultiplier={TAB_LABEL_MAX_SCALE}>Apps</AppText>
     </View>
   );
 }
@@ -84,7 +84,7 @@ function TabIcon({ tab, label, focused, styles, unread = 0 }: {
           </View>
         )}
       </Animated.View>
-      <AppText variant="tiny" color={focused ? color : c.textDim} style={[styles.tabLabel, focused && styles.tabLabelActive]} numberOfLines={normalLabels ? 1 : 2} maxFontSizeMultiplier={1.2}>{label}</AppText>
+      <AppText variant="tiny" color={focused ? color : c.textDim} style={[styles.tabLabel, focused && styles.tabLabelActive]} numberOfLines={normalLabels ? 1 : 2} maxFontSizeMultiplier={TAB_LABEL_MAX_SCALE}>{label}</AppText>
       {focused ? <View style={[styles.activeDash, { backgroundColor: color }]} /> : null}
     </View>
   );
@@ -172,7 +172,7 @@ const makeStyles = (c: Palette, barGrowth: number) => StyleSheet.create({
     // Must stay visible so the raised Apps disc can break the bar's outline.
     overflow: 'visible',
     elevation: 0,
-    shadowColor: '#05030D',
+    shadowColor: TAB_BAR_SHADOW,
     shadowOffset: { width: 0, height: 12 },
     shadowOpacity: 0.55,
     shadowRadius: 28,

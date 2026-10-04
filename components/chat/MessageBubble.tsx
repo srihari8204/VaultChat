@@ -401,6 +401,9 @@ function MessageBubble({
   const audioActionRef = useRef<(() => void) | null>(null);
   const fileActionRef = useRef<(() => void) | null>(null);
   const pollVoteRef = useRef<((idx: number) => void) | null>(null);
+  // VaultBeam card control: handler by ref, label by state (it follows the transfer).
+  const beamActionRef = useRef<(() => void) | null>(null);
+  const [beamLabel, setBeamLabel] = useState<string | null>(null);
 
   // Deleted tombstone — safe here: every hook above has already run this render.
   if (msg.deletedAt) {
@@ -464,7 +467,7 @@ function MessageBubble({
   const pollOptions: string[] = isPoll ? msg.meta.options : [];
   const readerArgs = {
     text: plain, title: member?.name ? `${member.name}’s message` : 'Long message', author: member?.name ?? '',
-    at: msg.createdAt, chatId, msgId: msg.id, cached: msg.id > 0 && !looksEncrypted(msg.content),
+    at: msg.createdAt, chatId, msgId: msg.id, cached: msg.id > 0,
   };
   const a11yActions = bubbleA11yActions({
     state: msg._state,
@@ -478,6 +481,7 @@ function MessageBubble({
     card: groupRef ? `Open ${groupRef.name || 'group'}` : gameInvite ? `Join the ${gameName(gameInvite.game)} table` : null,
     link: !!linkUrl,
     longRead,
+    beam: isVaultbeam ? beamLabel : null,
     poll: pollOptions.map((label, i) => ({ label, mine: !!pollVotesForMsg?.mine.includes(i) })),
   });
   const onA11yAction = (name: string) => {
@@ -495,6 +499,7 @@ function MessageBubble({
     else if (name === 'card') { if (groupRef) openGroupRef(bubbleRouter, groupRef); else if (gameInvite) openGameInvite(bubbleRouter, gameInvite); }
     else if (name === 'link') { if (linkUrl) openMessageUrl(linkUrl); }
     else if (name === 'reader') openReader(bubbleRouter, readerArgs);
+    else if (name === 'beam') beamActionRef.current?.();
     else if (name.startsWith('vote:')) pollVoteRef.current?.(Number(name.slice(5)));
   };
   // A bubble you can tap (photo, GIF, a failed send) is a button; the rest
@@ -688,7 +693,7 @@ function MessageBubble({
             actionRef={fileActionRef}
           />
         ) : isVaultbeam ? (
-          <VaultBeamBubble msg={msg} isMine={isMine} plain={plain} />
+          <VaultBeamBubble msg={msg} isMine={isMine} plain={plain} actionRef={beamActionRef} onActionLabel={setBeamLabel} />
         ) : groupRef ? (
           <GroupRefBubble gref={groupRef} isMine={isMine} />
         ) : gameInvite ? (

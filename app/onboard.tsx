@@ -1,6 +1,8 @@
-// app/onboard.tsx — Landing: MOBILE NUMBER ONLY → /auth/lookup → branch.
+// app/onboard.tsx — Landing: MOBILE NUMBER ONLY → SMS OTP (/phone-verify) → branch.
 //   exists  → /mpin-entry (existing user enters MPIN)
-//   new     → SMS OTP (/email-verify) → profile → security → mpin → success
+//   new     → profile → security → mpin → success
+// The code comes FIRST for every number (R4BE C15): the ticket it earns is the
+// proof of possession MPIN sign-in and recovery need (lib/otpFirstRoute).
 //
 // ONE FIELD, BECAUSE THERE IS ONE IDENTITY.
 //
@@ -20,7 +22,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { BRAND_GRADIENT_CTA } from '../constants/theme';
 import { PhoneField, toE164 } from '../components/auth/PhoneField';
-import { lookupUser, onboarding, sendPhoneOtp, onboardingError } from '../lib/onboarding';
+import { onboarding, sendPhoneOtp, onboardingError } from '../lib/onboarding';
 import { AuthSky, BrandMark, KeyboardSafe } from '../components/ui';
 import { type AuthPalette } from '../constants/authTheme';
 import { useAuthTheme } from '../lib/useAuthTheme';
@@ -45,20 +47,12 @@ export default function OnboardLanding() {
     inFlight.current = true;
     setBusy(true);
     try {
-      onboarding.set({ phone: e164 });
-      const r = await lookupUser(e164);
-      if (r.exists && r.userId) {
-        router.push({ pathname: '/mpin-entry', params: { userId: r.userId } } as any);
-      } else if (r.conflict) {
-        // Phone-only lookup makes 'exists' and a phone conflict the same thing,
-        // so this only fires if the server starts reporting one some other way.
-        Alert.alert('Number unavailable', 'This mobile number can’t be used to sign up. Try a different number.');
-      } else {
-        // The cooldown rides in the store rather than a route param: the nav
-        // self-test pins this call to `router.push('/email-verify'` exactly.
-        onboarding.set({ otpResendInSec: await sendPhoneOtp(e164) });
-        router.push('/email-verify' as any);
-      }
+      // A ticket from an earlier number must never vouch for this one.
+      onboarding.set({ phone: e164, phoneTicket: '' });
+      // The cooldown rides in the store rather than a route param: the nav
+      // self-test pins this call to `router.push('/phone-verify'` exactly.
+      onboarding.set({ otpResendInSec: await sendPhoneOtp(e164) });
+      router.push('/phone-verify' as any);
     } catch (e: any) {
       Alert.alert('Could not continue', onboardingError(e, 'Please try again'));
     } finally {

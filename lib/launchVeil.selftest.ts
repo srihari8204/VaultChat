@@ -13,7 +13,7 @@
  * `pathname` changes on every navigation. The equality is only meant to bridge
  * the frames between the gate's decision and its router.replace() landing — but
  * it was re-evaluated forever after, so the FIRST navigation inside the auth
- * flow (onboard → mpin-entry, onboard → email-verify, app-lock → chats) made
+ * flow (onboard → mpin-entry, onboard → phone-verify, app-lock → chats) made
  * the two unequal and put the veil back up over a screen the user was typing
  * into. Nothing threw, so logcat showed nothing. The veil is colors.bg, so it
  * was reported as a WHITE screen and then a BLACK one.

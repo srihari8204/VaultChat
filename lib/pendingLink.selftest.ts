@@ -119,7 +119,7 @@ ok('and the stashed broadcast link replays WITH its code',
 async function taps() {
   console.log('\nNotification taps never open over the lock:');
   ok('lock and sign-in routes are recognised',
-    ['/app-lock', '/onboard', '/onboard-mpin', '/mpin-entry', '/mpin-recover', '/email-verify', '/blocked']
+    ['/app-lock', '/onboard', '/onboard-mpin', '/mpin-entry', '/mpin-recover', '/phone-verify', '/blocked']
       .every(isLockOrAuthRoute));
   ok('ordinary screens and the splash are not',
     !isLockOrAuthRoute('/chat') && !isLockOrAuthRoute('/(tabs)/chats') && !isLockOrAuthRoute('/'));

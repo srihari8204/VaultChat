@@ -299,22 +299,36 @@ async function groupEncryptMessageLocked(chatId: string, plaintext: string): Pro
 export async function groupDecryptMessage(
   chatId: string, senderId: string, messageId: number, wire: string,
   edited = false,
+  /** Separate plaintext-cache namespace (see chatService.decryptFromChat). */
+  cacheScope?: string,
 ): Promise<string> {
   return withGroupDecryptLock(chatId + '|' + senderId,
-    () => groupDecryptMessageLocked(chatId, senderId, messageId, wire, edited));
+    () => groupDecryptMessageLocked(chatId, senderId, messageId, wire, edited, cacheScope));
 }
 
 async function groupDecryptMessageLocked(
   chatId: string, senderId: string, messageId: number, wire: string,
-  edited: boolean,
+  edited: boolean, cacheScope?: string,
 ): Promise<string> {
+  // The sender-key session is the chat's; only the plaintext-cache slot is scoped.
+  const cacheChat = cacheScope ? `${chatId}:${cacheScope}` : chatId;
   // An edit keeps its message id but replaces the ciphertext. Require the
   // matching body so an old plaintext cache cannot win over the edit.
-  const cached = await e2eeGetCached(chatId, messageId, wire, edited);
+  const cached = await e2eeGetCached(cacheChat, messageId, wire, edited);
   // Same store holds the "permanently undecryptable" tombstone. Returning it as
   // plaintext printed "__e2ee_undecryptable__" into group bubbles, exactly as it
   // did for 1:1 (seen on device). Fall through so the real state is reported.
   if (cached !== null && cached !== E2EE_UNDECRYPTABLE) return cached;
+  if (cacheScope && messageId > 0) {
+    // Written before the scope existed: the unscoped slot, accepted only when
+    // tagged with THIS ciphertext. Re-decrypting is not an option — the
+    // sender-key chain has already consumed that message key.
+    const legacy = await e2eeGetCached(chatId, messageId, wire, true);
+    if (legacy !== null && legacy !== E2EE_UNDECRYPTABLE) {
+      await e2eeCachePlaintext(cacheChat, messageId, legacy, wire);
+      return legacy;
+    }
+  }
   const cipher = JSON.parse(wire.slice(PREFIX.length));
   let rec = await loadPeer(chatId, senderId);
   if (!rec) {
@@ -339,7 +353,7 @@ async function groupDecryptMessageLocked(
   if (!rec) throw new Error('group: no sender key for ' + senderId);
   const { plaintext, next } = groupDecrypt(rec, cipher);
   await savePeer(chatId, senderId, next);
-  if (messageId > 0) await e2eeCachePlaintext(chatId, messageId, plaintext, wire);
+  if (messageId > 0) await e2eeCachePlaintext(cacheChat, messageId, plaintext, wire);
   return plaintext;
 }
 

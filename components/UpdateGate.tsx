@@ -96,7 +96,7 @@ export function UpdateGate({ children }: { children: React.ReactNode }) {
         </TouchableOpacity>
         {noStore && (
           <Text style={styles.body} accessibilityLiveRegion="polite">
-            Open your app store, search for crazzychat and install the update.
+            {t('update.noStore')}
           </Text>
         )}
         <Text style={styles.meta}>
@@ -112,11 +112,11 @@ export function UpdateGate({ children }: { children: React.ReactNode }) {
         <View style={[styles.bar, { paddingTop: 9 + insets.top }]}>
           <Ionicons name="arrow-up-circle-outline" size={17} color="#fff" />
           <Text style={styles.barTxt} numberOfLines={1}>{t('update.advise.body')}</Text>
-          <TouchableOpacity onPress={openStore} accessibilityRole="button" accessibilityLabel="Update crazzychat" hitSlop={12}>
-            <Text style={styles.barCta}>Update</Text>
+          <TouchableOpacity onPress={openStore} accessibilityRole="button" accessibilityLabel={t('update.advise.label')} hitSlop={12}>
+            <Text style={styles.barCta}>{t('update.advise.cta')}</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setDismissed(true)} accessibilityRole="button"
-            accessibilityLabel="Dismiss update notice" hitSlop={14}>
+            accessibilityLabel={t('update.dismiss')} hitSlop={14}>
             <Ionicons name="close" size={17} color="rgba(255,255,255,0.8)" />
           </TouchableOpacity>
         </View>

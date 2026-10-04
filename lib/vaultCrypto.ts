@@ -10,7 +10,7 @@
 
 import 'react-native-get-random-values';
 import { gcm } from '@noble/ciphers/aes.js';
-import { pbkdf2 } from '@noble/hashes/pbkdf2.js';
+import { pbkdf2, pbkdf2Async } from '@noble/hashes/pbkdf2.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { randomBytes } from '@noble/hashes/utils.js';
 import { Buffer } from 'buffer';
@@ -44,6 +44,28 @@ export function pbkdf2Bytes(password: string, salt: Uint8Array, iterations: numb
   return pbkdf2(sha256, new TextEncoder().encode(password), salt, { c: iterations, dkLen: 32 });
 }
 
+/**
+ * pbkdf2Bytes without holding the JS thread: quick-crypto's async pbkdf2 (runs
+ * off the JS thread) when present, else @noble's pbkdf2Async (yields to the
+ * event loop between rounds). Same bytes as pbkdf2Bytes for the same inputs.
+ */
+export async function pbkdf2BytesAsync(password: string, salt: Uint8Array, iterations: number): Promise<Uint8Array> {
+  const pw = new TextEncoder().encode(password);
+  if (typeof QC?.pbkdf2 === 'function') {
+    try {
+      const dk: any = await new Promise((resolve, reject) => QC.pbkdf2(Buffer.from(pw), Buffer.from(salt), iterations, 32, 'sha256',
+        (err: Error | null, key?: unknown) => (err || !key ? reject(err ?? new Error('pbkdf2 failed')) : resolve(key))));
+      return new Uint8Array(dk.buffer ? dk : Buffer.from(dk));
+    } catch { /* fall through to JS */ }
+  }
+  return pbkdf2Async(sha256, pw, salt, { c: iterations, dkLen: 32 });
+}
+
+/** Derive (and cache) the v1 key without blocking, so the sync calls below find it. */
+async function warmKeyFromPin(pin: string): Promise<void> {
+  if (!keyCache.has(pin)) keyCache.set(pin, await pbkdf2BytesAsync(pin, SALT, 100000));
+}
+
 function keyFromPin(pin: string): Uint8Array {
   let k = keyCache.get(pin);
   if (!k) {
@@ -68,6 +90,18 @@ export function vaultDecrypt(pin: string, p: VaultPayload): string {
   const ct = Buffer.from(p.ct, 'base64');
   const pt = gcm(key, iv).decrypt(ct);
   return new TextDecoder().decode(pt);
+}
+
+/** vaultEncrypt, with the key derived off the UI's critical path. */
+export async function vaultEncryptAsync(pin: string, plaintext: string): Promise<VaultPayload> {
+  await warmKeyFromPin(pin);
+  return vaultEncrypt(pin, plaintext);
+}
+
+/** vaultDecrypt, with the key derived off the UI's critical path. */
+export async function vaultDecryptAsync(pin: string, p: VaultPayload): Promise<string> {
+  await warmKeyFromPin(pin);
+  return vaultDecrypt(pin, p);
 }
 
 export function clearVaultKeyCache() { keyCache.clear(); }

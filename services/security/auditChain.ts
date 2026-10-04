@@ -334,7 +334,8 @@ async function pushRaw(items: RawEvent[]): Promise<void> {
  * where the local chain is empty, restore the encrypted backup. Best-effort and
  * never throws — offline/unauthenticated just leaves the local chain as-is.
  */
-export async function syncAuditChain(): Promise<void> {
+/** Mirror + restore. Resolves false when the backup could not be reached (the local chain is untouched). */
+export async function syncAuditChain(): Promise<boolean> {
   try {
     await ensureTables();
     const db = await getLocalDb();
@@ -355,8 +356,10 @@ export async function syncAuditChain(): Promise<void> {
     // 2. Restore from the server only when the local chain is empty (reinstall).
     const cnt: any = await db.getFirstAsync(`SELECT COUNT(*) AS n FROM security_events`);
     if ((cnt?.n ?? 0) === 0) await restoreFromServer();
+    return true;
   } catch {
     // best-effort: offline / unauthenticated → keep the local chain only
+    return false;
   }
 }
 

@@ -63,9 +63,10 @@ export async function getSaveToGallery(): Promise<boolean> {
   return prefCached;
 }
 
+/** Stored first; a failed write rejects (app/settings.tsx reverts and says so). */
 export async function setSaveToGallery(on: boolean): Promise<void> {
+  await AsyncStorage.setItem(PREF_KEY, on ? '1' : '0');
   prefCached = on;
-  try { await AsyncStorage.setItem(PREF_KEY, on ? '1' : '0'); } catch { /* pref is best-effort */ }
 }
 
 async function exportedSet(): Promise<Set<string>> {

@@ -27,6 +27,8 @@ export interface BubbleA11yFacts {
   /** A link in the visible text or its preview card. */
   link: boolean;
   longRead: boolean;
+  /** A VaultBeam card's current control (e.g. "Accept file"), or null. */
+  beam?: string | null;
   poll: { label: string; mine: boolean }[];
 }
 
@@ -47,6 +49,7 @@ export function bubbleA11yActions(f: BubbleA11yFacts): BubbleA11yAction[] {
   else if (f.media === 'voice') out.push({ name: 'play', label: 'Play or pause voice message' });
   if (f.location) out.push({ name: 'location', label: 'Open in Maps' });
   if (f.card) out.push({ name: 'card', label: f.card });
+  if (f.beam) out.push({ name: 'beam', label: f.beam });
   if (f.link) out.push({ name: 'link', label: 'Open link' });
   if (f.longRead) out.push({ name: 'reader', label: 'Read as page' });
   f.poll.forEach((o, i) => out.push({ name: `vote:${i}`, label: `${o.mine ? 'Remove vote for' : 'Vote for'} ${o.label}` }));

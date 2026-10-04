@@ -30,7 +30,7 @@ import { getCachedUser } from '../api';
 import { CALL_SESSIONS } from '../../constants/flags';
 import { leaveCallSession, openCallSession, ringCallGroup, setCallRole, setHandRaised, type CallRole, type RingOutcome } from '../callSession';
 import { addCallLog } from '../callLog';
-import { setSecure } from '../screenGuard';
+import { noteWindowSecure, setSecure } from '../screenGuard';
 import { nativeCall } from './native';
 import { clearActiveCall, setActiveCall, type ActiveCall } from '../callState';
 import * as media from './media';
@@ -1097,10 +1097,15 @@ async function allowScreenCapture(): Promise<void> {
 }
 
 async function windowSecure(secure: boolean): Promise<void> {
+  // Reported to lib/screenGuard, which this path bypasses, so its
+  // readSecureState stays true to the window (null = outcome unknown).
   try {
     const { NativeModules } = require('react-native');
-    await NativeModules?.VaultCalls?.setWindowSecure?.(secure);
-  } catch { /* older build: nothing to toggle */ }
+    const vc = NativeModules?.VaultCalls;
+    if (typeof vc?.setWindowSecure !== 'function') return;   // older build: nothing to toggle
+    await vc.setWindowSecure(secure);
+    noteWindowSecure(secure);
+  } catch { noteWindowSecure(null); }
 }
 
 export async function startScreenShare(): Promise<void> {

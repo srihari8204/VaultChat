@@ -1,7 +1,7 @@
 // app/message-reminder.tsx — Per-message reminders (client-only).
 //
 // Two modes:
-//   With ?chatId + ?messageId + ?preview   → composer: pick a time, save.
+//   With ?chatId + ?messageId              → composer: pick a time, save.
 //   Without params                         → list: pending reminders + cancel.
 //
 // Storage: AsyncStorage list of { id, chatId, messageId, when } — NO message
@@ -27,6 +27,7 @@ import { permissionDenied } from '../lib/permissionDenied';
 import { getNotifPreview, notifContent } from '../lib/privacyPrefs';
 import { getCachedMessagesByIds } from '../lib/localDb';
 import { looksEncrypted } from '../lib/chatService';
+import { E2EE_UNDECRYPTABLE, e2eeGetCached } from '../services/crypto/e2eeSession.rn';
 import { isChatLocked } from '../lib/chatLock';
 import { setPendingJump } from '../lib/chatJump';
 import { MESSAGE_REMINDER_BODY, isMessageReminderRequest } from '../lib/messageReminderReset';
@@ -97,7 +98,12 @@ async function cachedText(r: Pick<ReminderRow, 'chatId' | 'messageId'>): Promise
     // View-once / Invisible Ink text is never shown outside its bubble.
     if (m?.meta?.viewOnce || m?.meta?.invisibleInk) return null;
     const t = m?.type === 'text' ? m.content : null;
-    return t && !looksEncrypted(t) ? t : null;
+    if (!t) return null;
+    if (!looksEncrypted(t)) return t;
+    // Still stored as an envelope: the bubble's own decrypt cached the text,
+    // checked against this ciphertext.
+    const pt = await e2eeGetCached(r.chatId, Number(r.messageId), t);
+    return pt && pt !== E2EE_UNDECRYPTABLE ? pt : null;
   } catch { return null; }
 }
 
@@ -141,30 +147,26 @@ function useS() {
 
 export default function MessageReminderScreen() {
   const router = useRouter();
-  const { chatId, messageId, preview } = useLocalSearchParams<{
-    chatId?: string; messageId?: string; preview?: string;
-  }>();
+  const { chatId, messageId } = useLocalSearchParams<{ chatId?: string; messageId?: string }>();
 
   const composeMode = !!(chatId && messageId);
 
-  if (composeMode) return <Composer chatId={chatId!} messageId={messageId!} preview={preview ?? ''} router={router} />;
+  if (composeMode) return <Composer chatId={chatId!} messageId={messageId!} router={router} />;
   return <RemindersList router={router} />;
 }
 
 function Composer({
-  chatId, messageId, preview, router,
+  chatId, messageId, router,
 }: {
-  chatId: string; messageId: string; preview: string; router: Router;
+  chatId: string; messageId: string; router: Router;
 }) {
   const S = useS();
   const { colors } = useTheme();
   const [busy, setBusy] = useState(false);
   // Synchronous twin of `busy`: two taps in one frame both see busy=false.
   const busyRef = useRef(false);
-  // The text comes from the sealed local cache by id, like the list. The route
-  // param is only a fallback for a message the cache does not hold yet.
-  // ponytail: drop the `preview` param (components/chat/useMessageActions.ts)
-  // once that caller stops passing it — it puts message text in the route.
+  // The text comes from the sealed local cache by id, like the list — never
+  // from the route, so message text does not travel in params.
   const [cached, setCached] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
@@ -259,7 +261,7 @@ function Composer({
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }}>
         <View style={S.previewCard}>
           <Text style={S.previewLabel}>MESSAGE</Text>
-          <Text style={S.previewBody} numberOfLines={4}>{cached || preview || '(no preview)'}</Text>
+          <Text style={S.previewBody} numberOfLines={4}>{cached || '(no preview)'}</Text>
         </View>
 
         <Text style={[S.previewLabel, { marginTop: 20 }]}>WHEN</Text>

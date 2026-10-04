@@ -5,10 +5,9 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
-import { HERO_INK } from '../../components/finance/heroInk';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
-import { financeStatusColors, TABULAR, FIN_SHADOW, type FinancePalette } from '../../constants/financeTheme';
+import { financeStatusColors, TABULAR, FIN_SHADOW, type FinancePalette, HERO_INK } from '../../constants/financeTheme';
 import { FinHeader, HeroCard, StatTile, TileGrid, Pill, EmptyState, LoadingState, ErrorState } from '../../components/finance/ui';
 import { useLoadStatus } from '../../components/finance/useLoad';
 import { useMe } from '../../components/finance/useMe';
@@ -159,7 +158,7 @@ const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   avatarTxt: { color: FIN.brandDeep, fontSize: 22, fontWeight: '800' },
   name: { color: FIN.text, fontSize: 20, fontWeight: '800' },
   mobile: { color: FIN.sub, fontSize: 13, marginTop: 2 },
-  // Hero ink: the FIN_HERO gradient is dark in both schemes (components/finance/heroInk).
+  // Hero ink: the FIN_HERO gradient is dark in both schemes (HERO_INK, constants/financeTheme).
   heroLabel: { color: HERO_INK.label, fontSize: 10.5, fontWeight: '700', letterSpacing: 0.8 },
   heroVal: { color: HERO_INK.strong, fontSize: 28, fontWeight: '800', marginTop: 6, ...TABULAR },
   heroFoot: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'space-between', marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: HERO_INK.rule },

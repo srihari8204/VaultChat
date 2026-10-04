@@ -76,11 +76,7 @@ type DecryptMemo = Map<string, GroupEvent>;
  * Decrypt server rows into events. Rows we cannot open or parse are skipped,
  * never fatal, and counted in `unreadable` so the screen can say so.
  */
-// `updatedBy`: who sealed the current payload (R4 backend C10, not deployed;
-// absent today). Not yet on GroupEventRow in lib/chatService.
-type ServerEventRow = GroupEventRow & { updatedBy?: string | null };
-
-async function decryptRows(groupId: string, rows: ServerEventRow[], memo: DecryptMemo) {
+async function decryptRows(groupId: string, rows: GroupEventRow[], memo: DecryptMemo) {
   const out: GroupEvent[] = [];
   const ids: Record<string, number> = {};
   let unreadable = 0;
@@ -91,13 +87,10 @@ async function decryptRows(groupId: string, rows: ServerEventRow[], memo: Decryp
     const hit = memo.get(key);
     if (hit) { out.push(hit); ids[hit.id] = r.id; continue; }
     try {
-      // ponytail: the row id doubles as the plaintext-cache message id, so it can
-      // share a cache slot with a chat message of the same id in this group. A
-      // collision makes one of the two unreadable. Needs a cache namespace in
-      // decryptFromChat (lib/chatService.ts, not this screen's to change).
       // Sealed by the last writer: `updatedBy` once the server records it, else
-      // the author (lib/groups/serverContracts eventWriter).
-      const json = await decryptFromChat(groupId, eventWriter(r), r.payload, r.id);
+      // the author (lib/groups/serverContracts eventWriter). The 'cal' cache
+      // scope keeps row ids out of the chat messages' plaintext-cache slots.
+      const json = await decryptFromChat(groupId, eventWriter(r), r.payload, r.id, false, 'cal');
       const e = JSON.parse(json) as GroupEvent;
       // The row id is the server's handle; the payload carries the rest.
       if (e && typeof e.startsAt === 'number' && e.title) {

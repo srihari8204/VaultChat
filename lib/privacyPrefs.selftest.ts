@@ -166,5 +166,15 @@ check('no unzipSync anywhere in either file is left unbounded',
   (dt.match(/unzipSync\(/g) || []).length === (dt.match(/unzipSync\(bytes, \{ filter/g) || []).length &&
   (db.match(/unzipSync\(/g) || []).length === (db.match(/unzipSync\(bytes, \{ filter/g) || []).length);
 
+// A privacy choice that failed to save must not look saved: the setters store
+// first and reject, so app/notifications.tsx reverts and says so.
+{
+  const pp = code('lib/privacyPrefs.ts');
+  check('setNotifPreview stores before caching and lets a failed write reject',
+    /await \(await store\(\)\)\.setItem\(NOTIF_KEY, v\);\s*notifCached = v;/.test(pp));
+  check('setRemoteLinkPreviews stores before caching and lets a failed write reject',
+    /await \(await store\(\)\)\.setItem\(LINK_KEY, on \? '1' : '0'\);\s*linkCached = on;/.test(pp));
+}
+
 console.log(failures === 0 ? '\nAll privacy-prefs checks passed.\n' : `\n${failures} FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);

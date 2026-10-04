@@ -14,15 +14,18 @@
 // Restore stays compatible with every plain backup written before this: a file
 // without the envelope header is treated as plain JSON, exactly as before.
 
-import { vaultEncrypt, vaultDecrypt, type VaultPayload } from '../lib/vaultCrypto';
-import { newHeader, backupSecret, stampE2EEHeader, readE2EEHeader, passwordProblem, type E2EEHeader } from '../lib/backupCrypto';
+import { vaultEncryptAsync, vaultDecryptAsync, type VaultPayload } from '../lib/vaultCrypto';
+import { newHeader, backupSecretAsync, stampE2EEHeader, readE2EEHeader, passwordProblem, type E2EEHeader } from '../lib/backupCrypto';
 
 export { passwordProblem };
 
+// Both KDFs run async (lib/vaultCrypto pbkdf2BytesAsync), so the busy overlay
+// in app/finance/io.tsx keeps drawing while ~310k PBKDF2 rounds run.
+
 /** Seal backup JSON under a password. `header` is injectable only for tests. */
-export function sealFinanceBackup(json: string, password: string, header: E2EEHeader = newHeader('password')): string {
+export async function sealFinanceBackup(json: string, password: string, header: E2EEHeader = newHeader('password')): Promise<string> {
   if (header.mode !== 'password') throw new Error('A finance backup is sealed with a password.');
-  return stampE2EEHeader(vaultEncrypt(backupSecret(header, password), json), header);
+  return stampE2EEHeader(await vaultEncryptAsync(await backupSecretAsync(header, password), json), header);
 }
 
 /** True when the file text is a password-sealed backup (needs a password). */
@@ -35,12 +38,12 @@ export function isSealedFinanceBackup(text: string): boolean {
  * password does not open it (AES-GCM authenticates, so a wrong password or a
  * tampered file cannot yield garbage that then gets restored).
  */
-export function openFinanceBackup(text: string, password: string): string {
+export async function openFinanceBackup(text: string, password: string): Promise<string> {
   const header = readE2EEHeader(text);
   if (!header || header.mode !== 'password') throw new Error('Not a sealed backup.');
   const payload = JSON.parse(text) as VaultPayload;
   try {
-    return vaultDecrypt(backupSecret(header, password), payload);
+    return await vaultDecryptAsync(await backupSecretAsync(header, password), payload);
   } catch {
     throw new Error('WRONG_PASSWORD');
   }

@@ -166,7 +166,7 @@ console.log('\nScreens that still snapshot these values once (ponytail ceiling):
 // rotate. Convert one to the factory pattern if it ever needs to be correct in
 // landscape.
 const FROZEN_STYLE_SCREENS = [
-  'app/backup-pin.tsx', 'app/email-verify.tsx',
+  'app/backup-pin.tsx', 'app/phone-verify.tsx',
   'app/mpin-entry.tsx', 'app/mpin-recover.tsx',
   'app/onboard-profile.tsx', 'app/onboard-security.tsx', 'app/permissions.tsx',
   'components/CallBar.tsx',

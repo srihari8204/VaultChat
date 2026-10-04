@@ -22,6 +22,7 @@ import { buildGeometry, type RouteGeometry, type OffRouteVerdict } from './route
 import * as NavCore from './native/NavCore';
 import { type NavProfile, type HapticEvent, type HapticPattern } from './hapticLanguage';
 import { startVoiceGuide, stopVoiceGuide, feedVoiceGuide } from './voiceGuide';
+import { showThenManeuver } from './navPresentation';
 
 export interface NavBanner {
   active: boolean;
@@ -43,8 +44,11 @@ export interface NavBanner {
   verdict: OffRouteVerdict;
   /** Destination reached: close enough AND slowed down. */
   arrived: boolean;
+  /** The maneuver after next, only when it follows closely (navPresentation.showThenManeuver). */
+  thenEvent: HapticEvent | null;
+  thenRoadName: string;
 }
-const IDLE: NavBanner = { active: false, event: null, instruction: '', roadName: '', distanceToManeuver: 0, remainingM: 0, totalM: 0, etaEpochMs: 0, progress: 0, rerouting: false, verdict: 'on_route', arrived: false };
+const IDLE: NavBanner = { active: false, event: null, instruction: '', roadName: '', distanceToManeuver: 0, remainingM: 0, totalM: 0, etaEpochMs: 0, progress: 0, rerouting: false, verdict: 'on_route', arrived: false, thenEvent: null, thenRoadName: '' };
 
 // ── tiny external store for the banner ──
 let banner: NavBanner = IDLE;
@@ -195,7 +199,13 @@ function onFix(loc: Location.LocationObject) {
   // Advance past any maneuvers we've already reached.
   while (maneuverIdx < route.maneuvers.length && route.maneuvers[maneuverIdx].beginIndex < near - 1) maneuverIdx++;
   const m: Maneuver | undefined = route.maneuvers[maneuverIdx];
-  if (!m) { setBanner({ active: true, event: 'destination', instruction: 'Arrive', roadName: '', distanceToManeuver: 0, progress: 1 }); return; }
+  if (!m) { setBanner({ active: true, event: 'destination', instruction: 'Arrive', roadName: '', distanceToManeuver: 0, progress: 1, thenEvent: null, thenRoadName: '' }); return; }
+  // The one after it, for the "Then" chip when the two come close together.
+  const after: Maneuver | undefined = route.maneuvers[maneuverIdx + 1];
+  const thenGap = after
+    ? geom.cum[Math.min(after.beginIndex, geom.cum.length - 1)] - geom.cum[Math.min(m.beginIndex, geom.cum.length - 1)]
+    : Infinity;
+  const showThen = !!after?.event && showThenManeuver(thenGap);
 
   // The loop above may have moved us on to a LATER maneuver than the one the
   // step was asked about, in which case stepped.distToManeuverM answers the
@@ -259,6 +269,7 @@ function onFix(loc: Location.LocationObject) {
     distanceToManeuver: Math.round(distToManeuver), remainingM: Math.round(remaining),
     etaEpochMs: Math.round(etaMs), progress,
     verdict, arrived: stepped.arrived,
+    thenEvent: showThen ? after!.event : null, thenRoadName: showThen ? after!.roadName : '',
   });
 }
 

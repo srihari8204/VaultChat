@@ -3,10 +3,9 @@
 
 import React, { useMemo, useState } from 'react';
 import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
-import { HERO_INK } from '../../components/finance/heroInk';
 import { KeyboardSafe } from '../../components/ui';
 import { View, Text, ScrollView, StyleSheet, Alert, Pressable } from 'react-native';
-import { TABULAR, FIN as FIN_PRINT, type FinancePalette } from '../../constants/financeTheme';
+import { TABULAR, FIN as FIN_PRINT, type FinancePalette, HERO_INK } from '../../constants/financeTheme';
 import { FinHeader, Label, Field, Segment, Btn, HeroCard, Card, RowLine } from '../../components/finance/ui';
 import { num } from '../../utils/financeFormat';
 import { formatINR } from '../../utils/interest';
@@ -182,7 +181,7 @@ const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   chip: { minHeight: 44, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 999, borderWidth: 1, borderColor: FIN.border, backgroundColor: FIN.card, justifyContent: 'center' },
   chipText: { color: FIN.sub, fontSize: 13, fontWeight: '700' },
   btnRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 14 },
-  // Hero ink: the FIN_HERO gradient is dark in both schemes (components/finance/heroInk).
+  // Hero ink: the FIN_HERO gradient is dark in both schemes (HERO_INK, constants/financeTheme).
   heroLabel: { color: HERO_INK.label, fontSize: 10.5, fontWeight: '700', letterSpacing: 0.8 },
   heroVal: { color: HERO_INK.strong, fontSize: 30, fontWeight: '800', marginTop: 6, ...TABULAR },
 

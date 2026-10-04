@@ -468,7 +468,7 @@ function GroupCallEngine() {
             style={S.pagerBtn} disabled={page === 0}
             onPress={() => setPage(p => Math.max(0, p - 1))}
           >
-            <Ionicons name="chevron-back" size={20} color={page === 0 ? '#555' : CALL.text} />
+            <Ionicons name="chevron-back" size={20} color={page === 0 ? CALL.pagerOff : CALL.text} />
           </TouchableOpacity>
           <Text style={S.pagerLabel}>
             {page === 0 ? 'Speaking' : `Page ${page + 1} of ${pages}`}
@@ -478,7 +478,7 @@ function GroupCallEngine() {
             style={S.pagerBtn} disabled={page >= pages - 1}
             onPress={() => setPage(p => Math.min(pages - 1, p + 1))}
           >
-            <Ionicons name="chevron-forward" size={20} color={page >= pages - 1 ? '#555' : CALL.text} />
+            <Ionicons name="chevron-forward" size={20} color={page >= pages - 1 ? CALL.pagerOff : CALL.text} />
           </TouchableOpacity>
         </View>
       )}
@@ -787,7 +787,7 @@ function GroupCallLegacy() {
         <View style={[S.tile, { width: `${100 / cols - 2}%` }]}>
           {isVideo && !camOff && localUrl
             ? <RTCView streamURL={localUrl} style={S.video} objectFit="cover" mirror />
-            : <View style={S.audioTile}><Ionicons name="person" size={34} color="#fff" /></View>}
+            : <View style={S.audioTile}><Ionicons name="person" size={34} color={CALL.text} /></View>}
           <Text style={S.tileName}>You{muted ? ' 🔇' : ''}</Text>
         </View>
         {/* Remote tiles */}
@@ -795,7 +795,7 @@ function GroupCallLegacy() {
           <View key={uid} style={[S.tile, { width: `${100 / cols - 2}%` }]}>
             {isVideo && p.url
               ? <RTCView streamURL={p.url} style={S.video} objectFit="cover" />
-              : <View style={S.audioTile}>{p.url ? <RTCView streamURL={p.url} style={{ width: 1, height: 1 }} /> : null}<Ionicons name="person" size={34} color="#fff" /></View>}
+              : <View style={S.audioTile}>{p.url ? <RTCView streamURL={p.url} style={{ width: 1, height: 1 }} /> : null}<Ionicons name="person" size={34} color={CALL.text} /></View>}
             <Text style={S.tileName} numberOfLines={1}>{p.url ? (p.name || 'Connected') : 'Connecting…'}</Text>
           </View>
         ))}
@@ -842,13 +842,13 @@ function CtrlBtn({ icon, onPress, active, danger, colors, label }: {
 // Call chrome is always dark whatever the app theme (video surfaces sit on it),
 // so the greys and whites here are deliberate; only the accent follows the theme.
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen:    { flex: 1, backgroundColor: '#0B0B10' },
+  screen:    { flex: 1, backgroundColor: CALL.bg },
   topBar:    { paddingTop: HEADER_TOP, paddingHorizontal: 20, paddingBottom: 8, alignItems: 'center' },
   title:     { color: CALL.text, fontSize: 18, fontWeight: '800' },
   sub:       { color: 'rgba(255,255,255,0.6)', fontSize: 13, marginTop: 2 },
-  err:       { color: '#FCA5A5', textAlign: 'center', fontSize: 13, paddingHorizontal: 20 },
+  err:       { color: CALL.errorText, textAlign: 'center', fontSize: 13, paddingHorizontal: 20 },
   grid:      { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', paddingHorizontal: 6, paddingTop: 8 },
-  tile:      { aspectRatio: 0.8, marginHorizontal: '1%', marginBottom: 10, borderRadius: 14, overflow: 'hidden', backgroundColor: '#1A1A22', justifyContent: 'flex-end' },
+  tile:      { aspectRatio: 0.8, marginHorizontal: '1%', marginBottom: 10, borderRadius: 14, overflow: 'hidden', backgroundColor: CALL.tile, justifyContent: 'flex-end' },
   video:     { ...StyleSheet.absoluteFillObject, backgroundColor: CALL.video },
   audioTile: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: c.primary },
   tileName:  { color: CALL.text, fontSize: 12, fontWeight: '600', padding: 6, backgroundColor: 'rgba(0,0,0,0.4)' },
@@ -857,7 +857,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   handBadgeTxt: { fontSize: 14 },
   roleBadge: { position: 'absolute', top: 6, right: 6, width: 22, height: 22, borderRadius: 11,
                alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.55)' },
-  handQueue: { color: '#FFD479', fontSize: 12, textAlign: 'center', paddingBottom: 6 },
+  handQueue: { color: CALL.handQueue, fontSize: 12, textAlign: 'center', paddingBottom: 6 },
   shareBanner: {
     flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'center',
     marginTop: 6, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 14,
@@ -872,7 +872,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   addPeopleTxt: { color: CALL.text, fontSize: 12, fontWeight: '600' },
   pager:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 18, paddingBottom: 4 },
   pagerBtn:   { padding: 8 },
-  pagerLabel: { color: '#bbb', fontSize: 12, minWidth: 110, textAlign: 'center' },
+  pagerLabel: { color: CALL.pagerDim, fontSize: 12, minWidth: 110, textAlign: 'center' },
   // flexWrap added 2026-09-17. CtrlBtn pins width:60 in its own body (see the
   // component above), so the call sites carry no width and no width-grep ever
   // found this: 7 controls x 60 + 6 x 22 gap = 552dp against 369dp on an Honor.

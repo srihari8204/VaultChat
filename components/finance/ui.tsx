@@ -19,7 +19,6 @@
 
 import React, { useState } from 'react';
 import { useFinanceTheme } from './useFinanceTheme';
-import { HERO_INK } from './heroInk';
 import { useTheme } from '../../lib/theme';
 import {
   View, Text, TextInput, TouchableOpacity, Pressable, StyleSheet, StatusBar,
@@ -30,7 +29,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { FIN, FIN_RADIUS, FIN_SHADOW, TABULAR, type FinancePalette, FIN_HERO } from '../../constants/financeTheme';
+import { FIN, FIN_RADIUS, FIN_SHADOW, TABULAR, type FinancePalette, FIN_HERO, HERO_INK } from '../../constants/financeTheme';
 import {
   FIN_GUTTER, FIN_GAP, contentWidth, tileColumns, quickActionColumns,
   heroStacks, columnWidth,

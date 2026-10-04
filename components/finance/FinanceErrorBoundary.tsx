@@ -7,13 +7,13 @@
 // Finance", which goes to the Mini Apps tab the hub is opened from. The
 // fallback itself (and its error reporting) is components/ErrorBoundary,
 // unchanged; its colours are fixed dark, so this button's ink is the fixed
-// white of components/finance/heroInk.
+// white of HERO_INK (constants/financeTheme).
 
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { router } from 'expo-router';
 import { ErrorBoundary } from '../ErrorBoundary';
-import { HERO_INK } from './heroInk';
+import { HERO_INK } from '../../constants/financeTheme';
 
 export class FinanceErrorBoundary extends ErrorBoundary {
   render() {

@@ -15,12 +15,15 @@
 /** Window metrics as the live window reports them. */
 export type LayoutMetrics = { top: number; bottom: number; width: number; height: number; tabBarGrowth?: number };
 
+/** Largest OS font scale a tab label follows; the bar reserves height up to it. */
+export const TAB_LABEL_MAX_SCALE = 1.5;
+
 /** Leave room for the icon and every visible line of its label. */
 export function visionTabBarGrowth(osFontScale: number, textScale: number, lineScale: number, controlScale: number): number {
   if (![osFontScale, textScale, lineScale, controlScale].every(Number.isFinite)) return 0;
   const normalLabels = osFontScale <= 1.2 && textScale <= 1.15;
   const labelLines = normalLabels ? 1 : 2;
-  const labelHeight = labelLines * Math.ceil(16 * textScale * lineScale) * Math.min(Math.max(osFontScale, 1), 1.2);
+  const labelHeight = labelLines * Math.ceil(16 * textScale * lineScale) * Math.min(Math.max(osFontScale, 1), TAB_LABEL_MAX_SCALE);
   const iconHeight = 25 * controlScale;
   return Math.max(0, Math.ceil(iconHeight + 3 + labelHeight + 1 + 8 - 54));
 }

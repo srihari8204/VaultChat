@@ -11,13 +11,12 @@
 
 import React, { useCallback, useState } from 'react';
 import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
-import { HERO_INK } from '../../components/finance/heroInk';
 import { useTheme } from '../../lib/theme';
 import { View, Text, ScrollView, StyleSheet, StatusBar, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter, useFocusEffect, type Href } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { TABULAR, FIN_SHADOW, type FinancePalette } from '../../constants/financeTheme';
+import { TABULAR, FIN_SHADOW, type FinancePalette, HERO_INK } from '../../constants/financeTheme';
 import {
   HeroCard, HeroSplit, StatTile, QuickAction, TileGrid, ActionGrid, FinBody, IconBtn, LoadingState, ErrorState,
 } from '../../components/finance/ui';
@@ -212,7 +211,7 @@ const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   },
   badgeTxt: { color: FIN.onBrand, fontSize: 9.5, fontWeight: '800' },
 
-  // Hero ink: the FIN_HERO gradient is dark in both schemes (components/finance/heroInk).
+  // Hero ink: the FIN_HERO gradient is dark in both schemes (HERO_INK, constants/financeTheme).
   heroLabel: { color: HERO_INK.label, fontSize: 10.5, fontWeight: '700', letterSpacing: 0.9 },
   heroKey: { color: HERO_INK.label, fontSize: 12 },
   heroVal: { color: HERO_INK.strong, fontSize: 25, fontWeight: '800', marginTop: 2, letterSpacing: -0.6, ...TABULAR },

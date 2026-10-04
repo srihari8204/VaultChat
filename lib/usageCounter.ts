@@ -88,13 +88,16 @@ export function usageCounterEnabled(): boolean {
   return enabled;
 }
 
-/** Turn it on or off. Switching off DISCARDS whatever was buffered. */
+/**
+ * Turn it on or off. Switching off DISCARDS whatever was buffered and stops
+ * counting at once, even if the preference then fails to save; switching on
+ * takes effect only once it is saved. A failed write rejects, so the caller
+ * (app/settings.tsx) can revert and say so.
+ */
 export async function setUsageCounterEnabled(on: boolean): Promise<void> {
-  enabled = on;
-  if (!on) pending = {};   // nothing already recorded may survive the switch
-  try {
-    await AsyncStorage.setItem(PREF_KEY, on ? 'on' : 'off');
-  } catch {}
+  if (!on) { enabled = false; pending = {}; }   // nothing already recorded may survive the switch
+  await AsyncStorage.setItem(PREF_KEY, on ? 'on' : 'off');
+  if (on) enabled = true;
 }
 
 /**

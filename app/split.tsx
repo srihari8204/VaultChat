@@ -96,6 +96,9 @@ export default function SplitScreen() {
   const closeSplit = useCallback(() => {
     router.replace({ pathname: '/chat', params: { id: left } });
   }, [router, left]);
+  // Close ONE pane: the other chat carries on full screen.
+  const closeLeft = useCallback(() => router.replace({ pathname: '/chat', params: { id: right } }), [router, right]);
+  const closeRight = closeSplit;
 
   // ── Refusals, stated plainly rather than rendering something broken ──
   if (!left || !right) {
@@ -133,7 +136,7 @@ export default function SplitScreen() {
 
       <View style={{ flex: 1, flexDirection: vertical ? 'row' : 'column' }}>
         <View style={vertical ? { width: sizes.a } : { height: sizes.a }}>
-          <ChatScreen chatIdProp={left} embedded />
+          <ChatScreen chatIdProp={left} embedded onClosePane={closeLeft} />
         </View>
 
         {/* Divider — the drag target. Kept at DIVIDER_DP so the hit area matches
@@ -163,7 +166,7 @@ export default function SplitScreen() {
         </View>
 
         <View style={vertical ? { width: sizes.b } : { height: sizes.b }}>
-          <ChatScreen chatIdProp={right} embedded />
+          <ChatScreen chatIdProp={right} embedded onClosePane={closeRight} />
         </View>
       </View>
     </View>

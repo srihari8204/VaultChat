@@ -151,11 +151,11 @@ export async function setSecure(enabled: boolean): Promise<boolean> {
  * Android (nothing can block there); otherwise what the last confirmed
  * setSecure call applied, or 'unknown' when none was confirmed.
  *
- * ponytail: this is the flag as this module last set it. lib/call/engine.ts
- * toggles FLAG_SECURE for screen share through VaultCalls.setWindowSecure,
- * which bypasses this module, so while a share is live the answer can be stale
- * until that path reports through noteWindowSecure. Replace with a native read
- * of the window flag (a VaultViewGuard.isSecure method) once one ships.
+ * ponytail: this is the flag as last applied — by setSecure, or reported via
+ * noteWindowSecure by the VaultCalls.setWindowSecure paths (lib/call/engine.ts,
+ * lib/golive/native.ts) — not a read of the window itself. Replace with a
+ * native read of the window flag (a VaultViewGuard.isSecure method) once one
+ * ships.
  */
 export function readSecureState(): boolean | 'unknown' {
   if (__DEV__ || Platform.OS !== 'android') return false;

@@ -276,6 +276,29 @@ async function main() {
     check('two different senders decrypt concurrently', both.join(',') === 'a,b');
   }
 
+  // Cache scope: a group-calendar row and a chat message with the same id must
+  // not share a plaintext slot (a re-decrypt of a consumed key cannot succeed),
+  // and a row cached before the scope existed must still open.
+  {
+    const g: any = await import(build('scope', true));
+    const s: any = await import(pathToFileURL(join(WORK, 'scope', 'stubs.ts')).href);
+    s._server.members = ['me', 'S'];
+    const sender = peer();
+    s._server.skdms = [{ senderId: 'S', skdm: sender.skdm() }];
+    const msgWire = sender.send('chat message 7');
+    const calWire = sender.send('{"title":"event 7"}');
+    const oldWire = sender.send('{"title":"legacy event 8"}');
+    check('the message decrypts into its own slot', await g.groupDecryptMessage('g5', 'S', 7, msgWire) === 'chat message 7');
+    check('a scoped row with the same id decrypts too',
+      await g.groupDecryptMessage('g5', 'S', 7, calWire, false, 'cal') === '{"title":"event 7"}');
+    check('the message still reads from its slot (the scope did not overwrite it)',
+      await g.groupDecryptMessage('g5', 'S', 7, msgWire) === 'chat message 7');
+    // A row decrypted before the scope existed sits in the unscoped slot, and its key is spent.
+    await g.groupDecryptMessage('g5', 'S', 8, oldWire);
+    check('a row cached before the scope existed is still served',
+      await g.groupDecryptMessage('g5', 'S', 8, oldWire, false, 'cal') === '{"title":"legacy event 8"}');
+  }
+
   // ── B (chatService, not runnable here): search must not touch the ratchet ──
   // localDb already returns plaintext opened only with the at-rest cache key.
   // Replaying old rows through decryptFromChat can mutate/reset a healthy live

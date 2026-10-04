@@ -166,9 +166,10 @@ for (const [label, needle] of [
   ['the Apps label', 'styles.centerLabel'],
 ] as [string, string][]) {
   const line = tabs.split('\n').find(l => l.includes(needle) && l.includes('AppText'));
+  // The label cap is the same constant visionTabBarGrowth reserves height for.
   ok(`${label} keeps normal labels on one line and enlarged labels on two`, !!line &&
     /numberOfLines=\{normalLabels \? 1 : 2\}/.test(line) &&
-    /maxFontSizeMultiplier=\{1\.2\}/.test(line));
+    /maxFontSizeMultiplier=\{TAB_LABEL_MAX_SCALE\}/.test(line));
 }
 ok('the tab bar grows with profile and OS text and icon scale', tabs.includes('visionTabBarGrowth(fontScale, metrics.textScale, metrics.lineScale, metrics.controlScale)'));
 const badgeLine = tabs.split('\n').find(l => l.includes('styles.badgeTxt') && l.includes('AppText'));

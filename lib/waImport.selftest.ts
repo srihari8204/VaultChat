@@ -303,7 +303,7 @@ console.log('the export must never leave the device');
     [/\buploadAndSet\w+/,       'upload helper'],
     [/\bsendMedia\b/,           'sendMedia'],
   ];
-  for (const file of ['waImport.ts', '../app/import-chats.tsx']) {
+  for (const file of ['waImport.ts', '../app/import-chats.tsx', '../components/chattools/importChatsParts.tsx']) {
     let src: string;
     try { src = readFileSync(join(HERE, file), 'utf8'); }
     catch { check(`${file} exists to be scanned`, false, 'not created yet'); continue; }

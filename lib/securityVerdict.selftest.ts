@@ -7,7 +7,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { holdSecurityVerdict, securityVerdict } from './securityVerdict';
+import { clearRestrictVerdict, holdSecurityVerdict, securityVerdict } from './securityVerdict';
 
 let failures = 0;
 function ok(label: string, cond: boolean) {
@@ -28,6 +28,9 @@ holdSecurityVerdict({ level: 'restrict', threats: [{ type: 'EMULATOR_DETECTED', 
 ok('a restrict report is held with its threats',
   securityVerdict()?.level === 'restrict' && securityVerdict()?.threats.length === 1);
 
+clearRestrictVerdict();
+ok('a clean re-scan releases a held restrict verdict', securityVerdict() === null);
+
 holdSecurityVerdict({ level: 'wipe', threats: undefined });
 ok('a wipe report is held; missing threats become []',
   securityVerdict()?.level === 'wipe' && securityVerdict()?.threats.length === 0);
@@ -35,11 +38,15 @@ ok('a wipe report is held; missing threats become []',
 holdSecurityVerdict({ level: 'clean', threats: [] });
 ok('a later clean report does not lift a held verdict (only a new process does)',
   securityVerdict()?.level === 'wipe');
+clearRestrictVerdict();
+ok('clearRestrictVerdict never releases a wipe verdict', securityVerdict()?.level === 'wipe');
 
 const screen = readFileSync(join(__dirname, '..', 'app', 'blocked.tsx'), 'utf8');
 console.log('\nThe wiring in app/blocked.tsx:');
 ok('the screen reads the held verdict', /useState\(securityVerdict\)/.test(screen));
 ok('and no longer takes the level from its route params', !/params\.level/.test(screen));
+ok('a clean re-check releases only restrict, then leaves',
+  /if \(report\.clean\) \{ clearRestrictVerdict\(\); leave\(\); return; \}/.test(screen));
 const layout = readFileSync(join(__dirname, '..', 'app', '_layout.tsx'), 'utf8');
 ok('the launch scan holds its report, then routes to /blocked after the launch gate',
   /holdSecurityVerdict\(report\);[\s\S]{0,400}await launchAllowed;\s*router\.replace\('\/blocked'/.test(layout));

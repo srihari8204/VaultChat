@@ -17,7 +17,12 @@ export function seekTargetMs(fraction: number, durationMs: number): number | nul
   return Math.round(f * durationMs);
 }
 
-/** AsyncStorage key for the resume position. btoa throws on non-Latin-1 input
+/** LEGACY — app/video-player.tsx only uses this to DELETE the old key; new
+ *  positions are stored under lib/media/videoResumeKey.ts. This key collides for
+ *  files in the same folder (40 base64 chars cover only the path prefix — see
+ *  lib/media/videoResumeKey.selftest.ts), so never write it again.
+ *
+ *  AsyncStorage key for the resume position. btoa throws on non-Latin-1 input
  *  (e.g. a Devanagari filename in a file:// path); fall back to the UTF-8
  *  percent-encoding so such videos still resume instead of crashing the
  *  effect. Latin-1 URIs keep their original key, so saved positions survive. */

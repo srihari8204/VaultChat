@@ -86,6 +86,10 @@ export interface Palette {
   onDanger: string;
   /** Amber warning text/icon on this scheme's normal surfaces (AA 4.5:1). */
   warning: string;
+  /** Dim layer behind a modal dialog or sheet. */
+  scrim: string;
+  /** Medium-severity yellow, kept distinct from `warning`'s amber (AA 4.5:1 on bg/card). */
+  caution: string;
 }
 
 // ─── Single source of truth for the brand ACCENT ────────────────────
@@ -115,6 +119,15 @@ export const TAB_ICON_INK = {
   calls: { light: '#9A5700', dark: '#FFD285' },
   profile: { light: '#B42361', dark: '#FFADCA' },
 } as const;
+
+/** The raised Apps disc in the tab bar (top-left → bottom-right). */
+export const APPS_DISC_GRADIENT = {
+  light: ['#9471ED', '#5830AC'],
+  dark: ['#9D82F5', '#6036BB'],
+} as const;
+
+/** Drop shadow under the floating tab bar (both appearances). */
+export const TAB_BAR_SHADOW = '#05030D';
 
 export const CHAT_ACTION_INK = {
   search: TAB_ICON_INK.chats,
@@ -215,6 +228,8 @@ export const AuroraDark: Palette = {
   onPrimary:   '#FFFFFF',
   onDanger:    '#FFFFFF',
   warning:     '#F59E0B',   // ≥7.44:1 on bg/card/surfaceSolid/surface/glass
+  scrim:       'rgba(0,0,0,0.6)',
+  caution:     '#FBBF24',   // ≥10.1:1 on bg/card/surfaceSolid
 };
 
 export const AuroraLight: Palette = {
@@ -257,6 +272,8 @@ export const AuroraLight: Palette = {
   onPrimary:   '#FFFFFF',   // 6.33:1 on #1552E0
   onDanger:    '#FFFFFF',   // 6.57:1 on #B42318
   warning:     '#93370D',   // ≥4.83:1 on bg/card/surfaceSolid/surface (spaces' warnText)
+  scrim:       'rgba(0,0,0,0.45)',
+  caution:     '#7C5A00',   // 4.78:1 on bg, 5.56:1 on surfaceSolid, 6.33:1 on card
 };
 
 /** The static default palette (dark). Existing screens import this directly. */

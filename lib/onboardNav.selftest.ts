@@ -31,7 +31,7 @@ const check = (name: string, ok: boolean, detail = '') => {
 console.log('\nOnboarding navigation\n');
 
 const LANDING  = read('app/onboard.tsx');
-const VERIFY   = read('app/email-verify.tsx');
+const VERIFY   = read('app/phone-verify.tsx');
 const PROFILE  = read('app/onboard-profile.tsx');
 const SECURITY = read('app/onboard-security.tsx');
 const MPIN     = read('app/onboard-mpin.tsx');
@@ -42,11 +42,9 @@ const AUTHNAV  = read('lib/authNav.ts');
 
 // ── steps the user may still want to correct → push, with a way back ──
 console.log('Correctable steps are pushed and keep their Back:');
-check('landing → email-verify is a push (the email may be a typo)',
-  /router\.push\('\/email-verify'/.test(LANDING));
-check('landing → mpin-entry is a push (wrong number/account)',
-  /router\.push\(\{ pathname: '\/mpin-entry'/.test(LANDING));
-check('email-verify has a Back to the landing form', /router\.back\(\)/.test(VERIFY));
+check('landing → phone-verify is a push (the number may be a typo)',
+  /router\.push\('\/phone-verify'/.test(LANDING));
+check('phone-verify has a Back to the landing form', /router\.back\(\)/.test(VERIFY));
 check('profile → onboard-security is a push', /router\.push\('\/onboard-security'/.test(PROFILE));
 check('profile has a Back', /router\.back\(\)/.test(PROFILE));
 check('security → onboard-mpin is a push', /router\.push\('\/onboard-mpin'/.test(SECURITY));
@@ -55,8 +53,10 @@ check('mpin-entry has a Back to the landing form', /router\.back\(\)/.test(ENTRY
 
 // ── consumed steps → replace ─────────────────────────────────────────
 console.log('\nConsumed steps are replaced, not pushed:');
-check('email-verify → profile REPLACES (the OTP is spent; back into it is dead)',
+check('phone-verify → profile REPLACES (the OTP is spent; back into it is dead)',
   /router\.replace\('\/onboard-profile'/.test(VERIFY) && !/router\.push\('\/onboard-profile'/.test(VERIFY));
+check('phone-verify → mpin-entry REPLACES too (an existing account, same spent code)',
+  /router\.replace\(\{ pathname: '\/mpin-entry'/.test(VERIFY) && !/router\.push\(\{ pathname: '\/mpin-entry'/.test(VERIFY));
 check('onboard-mpin → success REPLACES (the account is committed by then)',
   /router\.replace\(\{ pathname: '\/onboard-success'/.test(MPIN));
 

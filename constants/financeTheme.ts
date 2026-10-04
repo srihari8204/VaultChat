@@ -98,6 +98,22 @@ export const FIN_HERO: Record<'brand' | 'good' | 'bad' | 'warn', [string, string
   warn: ['#93370D', '#9F3C08'],
 };
 
+/**
+ * Ink on a FIN_HERO gradient. Those are saturated and dark in BOTH schemes, so
+ * their text is white in both: FIN.onBrand turns dark in dark mode, and the app
+ * palette's onPrimary is documented as "not always white".
+ */
+export const HERO_INK = {
+  /** Headline figure. */
+  strong: '#FFFFFF',
+  /** Secondary lines under the figure. */
+  soft: 'rgba(255,255,255,0.9)',
+  /** Small caps labels above the figure. */
+  label: 'rgba(255,255,255,0.85)',
+  /** Hairline rules and dividers inside a hero. */
+  rule: 'rgba(255,255,255,0.22)',
+} as const;
+
 /** Corner radii. Matches "Vault Finance / Scale" in Figma. */
 export const FIN_RADIUS = { xs: 8, sm: 12, md: 16, lg: 20, xl: 28, pill: 999 } as const;
 

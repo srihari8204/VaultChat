@@ -439,7 +439,8 @@ func sbAdminOrders(w http.ResponseWriter, r *http.Request) {
 		SELECT o.id, s.name, COALESCE(u.name,''), o.status,
 		       `+sbCents("o.total")+`, s.currency, o.created_at,
 		       COALESCE((SELECT SUM(`+sbCents("p.amount")+`) FROM shopbook_payment p
-		                  WHERE p.order_id=o.id AND p.status='captured'),0)
+		                  WHERE p.order_id=o.id AND p.status='captured'),0),
+		       o.reject_reason, o.reject_note
 		  FROM shopbook_order o
 		  JOIN shopbook_shop s ON s.id=o.shop_id
 		  LEFT JOIN users u ON u.id=o.customer_user_id
@@ -453,16 +454,19 @@ func sbAdminOrders(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	out := []map[string]any{}
 	for rows.Next() {
-		var id, shop, cust, status, currency string
+		var id, shop, cust, status, currency, rejectReason, rejectNote string
 		var total, paid int64
 		var at time.Time
-		if rows.Scan(&id, &shop, &cust, &status, &total, &currency, &at, &paid) != nil {
+		if rows.Scan(&id, &shop, &cust, &status, &total, &currency, &at, &paid, &rejectReason, &rejectNote) != nil {
 			continue
 		}
+		// rejectReason/rejectNote (migrations 069, 140): why the owner refused
+		// the order, as the customer's order view shows it; "" when not rejected.
 		out = append(out, map[string]any{
 			"id": id, "shopName": shop, "customerName": cust, "status": status,
 			"total": money(total).Float(), "paid": money(paid).Float(),
 			"currency": currency, "createdAt": httpx.JST(&at),
+			"rejectReason": rejectReason, "rejectNote": rejectNote,
 		})
 	}
 	httpx.JSON(w, 200, map[string]any{"orders": out})

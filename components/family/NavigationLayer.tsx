@@ -40,10 +40,9 @@ export interface NavigationLayerProps {
   instruction: string;
   roadName: string;
   distanceToManeuverM: number;
-  // ponytail: no "then" (maneuver-after-next, spec §17) chip. The nav banner
-  // (lib/nav/navigationService NavBanner) does not expose that maneuver, so
-  // the prop was never passed and its chip never drew. Re-add it here once
-  // the banner carries the following maneuver.
+  /** Maneuver after next ("Then" chip, spec §17); null unless it follows closely. */
+  thenEvent?: HapticEvent | null;
+  thenRoadName?: string;
   /** Journey totals. */
   remainingM: number;
   etaSeconds: number;
@@ -167,6 +166,20 @@ export default function NavigationLayer(p: NavigationLayerProps) {
           </View>
         )}
 
+        {showCapsule && !!p.thenEvent && (
+          <View
+            style={[st.thenChip, { backgroundColor: G.sheet, borderColor: G.edge }]}
+            accessible
+            accessibilityLabel={`Then ${p.thenRoadName || 'the next turn'}`}
+          >
+            <Text style={[st.thenTxt, { color: colors.textDim }]}>Then</Text>
+            <Ionicons name={iconFor(p.thenEvent)} size={18} color={colors.primary} />
+            {!!p.thenRoadName && (
+              <Text style={[st.thenTxt, { color: colors.text, flexShrink: 1 }]} numberOfLines={1}>{p.thenRoadName}</Text>
+            )}
+          </View>
+        )}
+
         {/* Off-route banner, directly under the capsule so both read as one
             stack rather than as chrome scattered around the screen. */}
         {!!banner.text && (
@@ -280,6 +293,11 @@ const st = StyleSheet.create({
   // viewing distance this line is designed for.
   capsuleDist: { fontSize: 26, lineHeight: 30, fontWeight: '800', fontVariant: ['tabular-nums'], letterSpacing: -0.5 },
   capsuleRoad: { fontSize: 13.5, marginTop: 1 },
+  thenChip: {
+    alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 12, minHeight: 34, borderRadius: 14, borderWidth: 1, ...SPACE_SHADOW.rest,
+  },
+  thenTxt: { fontSize: 13.5, fontWeight: '700' },
 
   offRoute: {
     flexDirection: 'row', alignItems: 'center', gap: 8,

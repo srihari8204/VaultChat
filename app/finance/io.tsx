@@ -66,10 +66,10 @@ export default function FinanceIO() {
   const [pw2, setPw2] = useState('');
   // What the screen is busy doing (sealing / opening a backup), or null.
   const [busy, setBusy] = useState<string | null>(null);
-  const withBusy = async <T,>(label: string, work: () => T): Promise<T> => {
+  const withBusy = async <T,>(label: string, work: () => T | Promise<T>): Promise<T> => {
     setBusy(label);
     await nextFrame();
-    try { return work(); } finally { setBusy(null); }
+    try { return await work(); } finally { setBusy(null); }
   };
 
   const onExport = async () => {

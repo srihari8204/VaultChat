@@ -60,7 +60,7 @@ import path from 'node:path';
 // will do next.
 //
 // 107 → 102: the sign-up chain's night-sky restyle. The back arrows on
-// email-verify, onboard-profile, onboard-security and mpin-recover became
+// phone-verify, onboard-profile, onboard-security and mpin-recover became
 // labelled Pressables like the one app/mpin-entry.tsx already had — four
 // buttons. The fifth came free: the rebrand sweep in flight alongside it had
 // already labelled one more, so the tree measured 106 before this change.

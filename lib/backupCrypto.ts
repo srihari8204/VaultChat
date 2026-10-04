@@ -46,7 +46,7 @@
 import 'react-native-get-random-values';
 import { randomBytes } from '@noble/hashes/utils.js';
 import { Buffer } from 'buffer';
-import { pbkdf2Bytes } from './vaultCrypto';
+import { pbkdf2Bytes, pbkdf2BytesAsync } from './vaultCrypto';
 
 /** OWASP's floor for PBKDF2-HMAC-SHA256. Recorded per-blob so it can be raised
  *  later without stranding backups written at the old cost. */
@@ -118,6 +118,13 @@ export function backupSecret(header: E2EEHeader, userSecret: string): string {
   }
   const salt = new Uint8Array(Buffer.from(header.salt, 'base64'));
   return Buffer.from(pbkdf2Bytes(userSecret, salt, header.iter)).toString('base64');
+}
+
+/** backupSecret without holding the JS thread for the password KDF. */
+export async function backupSecretAsync(header: E2EEHeader, userSecret: string): Promise<string> {
+  if (header.mode === 'key') return backupSecret(header, userSecret);
+  const salt = new Uint8Array(Buffer.from(header.salt, 'base64'));
+  return Buffer.from(await pbkdf2BytesAsync(userSecret, salt, header.iter)).toString('base64');
 }
 
 /** Header for a NEW e2ee backup in the given mode. */

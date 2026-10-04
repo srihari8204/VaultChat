@@ -52,7 +52,7 @@ export const makeBroadcastStyles = (c: Palette) => StyleSheet.create({
   emptyTxt: { color: c.textDim, fontSize: 14 },
   emptySub: { color: c.textFaint, fontSize: 12, marginTop: 8 },
   // Fixed scrim: dims whatever is behind the sheet the same way in both themes (no scrim token exists).
-  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
+  modalBg: { flex: 1, backgroundColor: c.scrim, justifyContent: 'flex-end' },
   modal: { backgroundColor: c.surfaceSolid, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40, borderTopWidth: 1, borderColor: c.glassStroke },
   modalTitle: { color: c.text, fontSize: 18, fontWeight: '900', marginBottom: 16 },
   modalInput: { backgroundColor: c.glassSoft, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, color: c.text, fontSize: 14, marginBottom: 12, borderWidth: 1, borderColor: c.glassStroke },

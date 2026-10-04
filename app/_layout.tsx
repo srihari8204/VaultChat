@@ -317,7 +317,7 @@ function RootLayoutInner() {
   // flashes protected content. It was being re-evaluated on EVERY navigation
   // after that, and the effect above runs once per launch (deps [router]) so
   // launchGate never moves again — meaning the first step INSIDE the auth flow
-  // (onboard → mpin-entry, onboard → email-verify, app-lock → chats) made the
+  // (onboard → mpin-entry, onboard → phone-verify, app-lock → chats) made the
   // two unequal and put the veil back up over a screen the user was typing
   // into. Observed on a device 2026-09-19 as a blank page with the keyboard up:
   // white in the light theme, black in dark, because the veil is colors.bg.

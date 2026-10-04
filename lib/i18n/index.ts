@@ -52,6 +52,10 @@ const en: Catalog = {
   'update.blocked.body': 'This version can no longer talk to the server safely. Update to carry on.',
   'update.button': 'Update now',
   'update.advise.body': 'A newer version of crazzychat is available.',
+  'update.noStore': 'Open your app store, search for crazzychat and install the update.',
+  'update.advise.cta': 'Update',
+  'update.advise.label': 'Update crazzychat',
+  'update.dismiss': 'Dismiss update notice',
 
   // terms gate
   'terms.first.title': 'Before you start',
@@ -97,6 +101,10 @@ const hi: Catalog = {
   'update.blocked.body': 'यह संस्करण अब सर्वर से सुरक्षित रूप से बात नहीं कर सकता। जारी रखने के लिए अपडेट करें।',
   'update.button': 'अभी अपडेट करें',
   'update.advise.body': 'crazzychat का नया संस्करण उपलब्ध है।',
+  'update.noStore': 'अपना ऐप स्टोर खोलें, crazzychat खोजें और अपडेट इंस्टॉल करें।',
+  'update.advise.cta': 'अपडेट करें',
+  'update.advise.label': 'crazzychat अपडेट करें',
+  'update.dismiss': 'अपडेट सूचना हटाएँ',
 
   'terms.first.title': 'शुरू करने से पहले',
   'terms.first.body': 'crazzychat हमारी सेवा शर्तों और गोपनीयता नीति के अंतर्गत आता है। जारी रखने से पहले उन्हें पढ़ें।',
@@ -137,6 +145,10 @@ const te: Catalog = {
   'update.blocked.body': 'ఈ వెర్షన్ ఇక సర్వర్‌తో సురక్షితంగా మాట్లాడలేదు. కొనసాగించడానికి నవీకరించండి.',
   'update.button': 'ఇప్పుడే నవీకరించు',
   'update.advise.body': 'crazzychat యొక్క కొత్త వెర్షన్ అందుబాటులో ఉంది.',
+  'update.noStore': 'మీ యాప్ స్టోర్ తెరిచి, crazzychat కోసం వెతికి, నవీకరణను ఇన్‌స్టాల్ చేయండి.',
+  'update.advise.cta': 'నవీకరించు',
+  'update.advise.label': 'crazzychat నవీకరించు',
+  'update.dismiss': 'నవీకరణ సూచనను తీసివేయి',
 
   'terms.first.title': 'ప్రారంభించే ముందు',
   'terms.first.body': 'crazzychat మా సేవా నిబంధనలు మరియు గోప్యతా విధానానికి లోబడి ఉంటుంది. కొనసాగించే ముందు వాటిని చదవండి.',

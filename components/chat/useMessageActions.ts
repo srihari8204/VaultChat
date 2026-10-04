@@ -81,7 +81,7 @@ export function useMessageActions({
       ...(protectedMsg ? [] : [
         { key: 'remind',  label: 'Remind',  icon: 'alarm-outline', onPress: () => router.push({
             pathname: '/message-reminder' as any,
-            params: { chatId, messageId: String(msg.id), preview: (plain || msg.type).slice(0, 200) },
+            params: { chatId, messageId: String(msg.id) },
           }) },
       ] as SheetAction[]),
     ];

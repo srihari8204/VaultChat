@@ -20,7 +20,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { gcm } from '@noble/ciphers/aes.js';
 import { randomBytes, bytesToHex } from '@noble/hashes/utils.js';
 import { Buffer } from 'buffer';
-import { api, getCachedUser, setTokens, setCachedUser } from './api';
+import { api, getAccessToken, getCachedUser, setTokens, setCachedUser } from './api';
 import { uploadAttachment } from './chatService';
 
 // ── In-memory onboarding store ──────────────────────────────────────────────
@@ -134,17 +134,37 @@ export async function resendPhoneOtp(phone: string, channel: OtpChannel = 'sms')
   return r.resendInSec ?? FALLBACK_RESEND_SEC;
 }
 
-export async function verifyPhoneOtp(phone: string, code: string): Promise<string> {
-  const r = await api<{ ok: true; phoneTicket: string }>('/auth/onboard/verify-otp-phone', {
+/** The ticket, plus — from a server with R4BE C15 — whether the number has an
+ *  account (`exists`, `userId`). Absent on today's server: see lib/otpFirstRoute. */
+export async function verifyPhoneOtp(phone: string, code: string): Promise<{ phoneTicket: string; exists?: boolean; userId?: string }> {
+  return api<{ ok: true; phoneTicket: string; exists?: boolean; userId?: string }>('/auth/onboard/verify-otp-phone', {
     method: 'POST', json: { phone, code }, auth: false,
   });
-  return r.phoneTicket;
 }
 
 // Email is OMITTED rather than sent empty when there isn't one: '' is not "no
 // address" to a uniqueness check, and every account would collide on it.
-export async function lookupUser(phone: string, email?: string): Promise<{ exists: boolean; userId?: string; conflict?: 'phone' | 'email' }> {
-  return api('/auth/lookup', { method: 'POST', json: email ? { phone, email } : { phone }, auth: false });
+// `phoneTicket` (R4BE C15): with the server's enforcement on, an existing
+// account's userId is only returned to a caller that passed the SMS code.
+export async function lookupUser(phone: string, email?: string, phoneTicket?: string): Promise<{ exists: boolean; userId?: string; conflict?: 'phone' | 'email' }> {
+  return api('/auth/lookup', {
+    method: 'POST', auth: false,
+    json: { phone, ...(email ? { email } : {}), ...(phoneTicket ? { phoneTicket } : {}) },
+  });
+}
+
+// ── Possession proof for MPIN and recovery (R4BE C15) ───────────────────────
+// The SMS ticket from this sign-in (RAM-only, 15-minute server TTL), or — for a
+// device already signed in, re-checking its MPIN (app lock, delete account) —
+// its access token. Sent with auth:false so a 401 "wrong MPIN" is not read as a
+// dead session. Today's server ignores both; once AUTH_REQUIRE_PHONE_TICKET is
+// on, a call without either answers 403 otp_required.
+function possessionTicket(): string | undefined {
+  return onboarding.get().phoneTicket || undefined;
+}
+async function possessionHeaders(): Promise<Record<string, string>> {
+  const token = await getAccessToken().catch(() => null);
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 // Returns the new userId AND a short-lived setup ticket bound to it. The two
@@ -176,8 +196,10 @@ export async function setMpinRemote(userId: string, setupTicket: string, mpin: s
 // cached user when it is this same account; only a different (or no) account
 // is replaced.
 export async function verifyMpinRemote(userId: string, mpin: string): Promise<void> {
+  const phoneTicket = possessionTicket();
   const r = await api<{ accessToken: string; refreshToken: string }>('/auth/mpin/verify', {
-    method: 'POST', json: { userId, mpin }, auth: false,
+    method: 'POST', json: { userId, mpin, ...(phoneTicket ? { phoneTicket } : {}) }, auth: false,
+    headers: await possessionHeaders(),
   });
   await setTokens(r.accessToken, r.refreshToken);
   const prev = await getCachedUser().catch(() => null);
@@ -211,13 +233,19 @@ export async function uploadAndSetProfilePhoto(localUri: string): Promise<void> 
 
 // ── MPIN recovery (forgot MPIN → security questions) ────────────────────────
 export async function getRecoveryQuestions(userId: string): Promise<string[]> {
-  const r = await api<{ questions: string[] }>(`/auth/security-questions/${encodeURIComponent(userId)}`, { auth: false });
+  // The ticket rides in a header so it stays out of access logs.
+  const phoneTicket = possessionTicket();
+  const r = await api<{ questions: string[] }>(`/auth/security-questions/${encodeURIComponent(userId)}`, {
+    auth: false, headers: { ...(await possessionHeaders()), ...(phoneTicket ? { 'X-Phone-Ticket': phoneTicket } : {}) },
+  });
   return r.questions;
 }
 
 export async function verifyRecoveryAnswers(userId: string, answers: { questionCode: string; answer: string }[]): Promise<string> {
+  const phoneTicket = possessionTicket();
   const r = await api<{ ok: true; recoveryTicket: string }>('/auth/security-questions/verify', {
-    method: 'POST', json: { userId, answers }, auth: false,
+    method: 'POST', json: { userId, answers, ...(phoneTicket ? { phoneTicket } : {}) }, auth: false,
+    headers: await possessionHeaders(),
   });
   return r.recoveryTicket;
 }

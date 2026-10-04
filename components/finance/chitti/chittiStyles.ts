@@ -4,8 +4,7 @@
 
 import { StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { TABULAR, FIN_SHADOW, type FinancePalette } from '../../../constants/financeTheme';
-import { HERO_INK } from '../heroInk';
+import { TABULAR, FIN_SHADOW, type FinancePalette, HERO_INK } from '../../../constants/financeTheme';
 import type { ChittiCollection, CollectionStatus } from '../../../db/chitti';
 
 /** Tapping a dues row moves it along this cycle. */
@@ -25,7 +24,7 @@ export function collectionStatus(collections: ChittiCollection[], memberId: stri
 export const makeChittiStyles = (FIN: FinancePalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
   body: { padding: 16, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
-  // Hero ink: the FIN_HERO gradient is dark in both schemes (components/finance/heroInk).
+  // Hero ink: the FIN_HERO gradient is dark in both schemes (HERO_INK, constants/financeTheme).
   heroLabel: { color: HERO_INK.label, fontSize: 10.5, fontWeight: '700', letterSpacing: 0.8 },
   heroVal: { color: HERO_INK.strong, fontSize: 28, fontWeight: '800', marginTop: 6, ...TABULAR },
   heroFoot: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: HERO_INK.rule },

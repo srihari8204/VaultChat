@@ -28,6 +28,7 @@
 // lifecycle, and during a broadcast there is no call.
 
 import { NativeModules, Platform } from 'react-native';
+import { noteWindowSecure } from '../screenGuard';
 
 /** com.vaultchat.app.golive.GoLiveModule. Null on iOS and on older builds. */
 const GoLive: any = (NativeModules as any).VaultGoLive ?? null;
@@ -104,7 +105,9 @@ export async function afterScreenShareConsent(): Promise<void> {
  * reason.
  */
 export async function reassertWindowSecure(): Promise<void> {
-  try { await VaultCalls?.setWindowSecure?.(true); } catch {}
+  if (typeof VaultCalls?.setWindowSecure !== 'function') return;
+  // Reported to lib/screenGuard (this path bypasses setSecure) so its status reads true.
+  try { await VaultCalls.setWindowSecure(true); noteWindowSecure(true); } catch {}
 }
 
 export default {

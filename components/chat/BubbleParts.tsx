@@ -145,9 +145,8 @@ export function PollBubble({
  * almost everything, and an affordance under every message would be noise. It
  * appears only past lib/reader's word threshold, where a bubble genuinely stops
  * working. The Reader is handed the chat + message id and reads the decrypted
- * body from the local cache, so plaintext never rides in route params. Only a
- * message the cache cannot answer (`cached` false: unsent, or a still-encrypted
- * row this bubble decrypted itself) falls back to passing the text.
+ * body from the local caches, so plaintext never rides in route params. Only an
+ * unsent message (`cached` false: no server id yet) falls back to the text.
  */
 export function ReaderAffordance({ text, title, author, at, chatId, msgId, cached }: {
   text: string; title: string; author: string; at?: string;

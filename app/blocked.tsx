@@ -26,7 +26,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { holdSecurityVerdict, securityVerdict } from '../lib/securityVerdict';
+import { clearRestrictVerdict, holdSecurityVerdict, securityVerdict } from '../lib/securityVerdict';
 import { runSecurityCheck } from '../services/securityService';
 import type { Palette } from '../constants/theme';
 import { useColors } from '../lib/theme';
@@ -135,7 +135,7 @@ export default function BlockedScreen() {
   const [held, setHeld] = useState(securityVerdict);
   // Raw detector output is for technical users; behind a disclosure.
   const [showRaw, setShowRaw] = useState(false);
-  const [recheck, setRecheck] = useState<'idle' | 'busy' | 'clean' | 'still' | 'failed'>('idle');
+  const [recheck, setRecheck] = useState<'idle' | 'busy' | 'still' | 'failed'>('idle');
   const verdict = held !== null;
   const threats = held?.threats ?? [];
   // Only a `wipe` verdict ran wipeAllKeys(). A `restrict` left the keys alone,
@@ -158,16 +158,14 @@ export default function BlockedScreen() {
   };
 
   // A `restrict` verdict re-checked in place, instead of only "reopen the app".
-  // A `wipe` is not offered this: its keys are already gone.
-  // ponytail: a clean re-scan cannot release the verdict in this process —
-  // lib/securityVerdict has no clear yet — so it says to reopen the app. Once a
-  // clear for `restrict` exists, call it here and leave().
+  // A `wipe` is not offered this: its keys are already gone. A clean re-scan is
+  // the same scan a relaunch runs, so it releases `restrict` and leaves.
   const checkAgain = async () => {
     if (recheck === 'busy') return;
     setRecheck('busy');
     try {
       const report = await runSecurityCheck();
-      if (report.clean) { setRecheck('clean'); return; }
+      if (report.clean) { clearRestrictVerdict(); leave(); return; }
       holdSecurityVerdict(report);
       setHeld(securityVerdict());
       setRecheck('still');
@@ -325,11 +323,9 @@ export default function BlockedScreen() {
             </TouchableOpacity>
             {recheck !== 'idle' && recheck !== 'busy' && (
               <Text style={styles.recheckTxt} accessibilityLiveRegion="polite">
-                {recheck === 'clean'
-                  ? 'The indicator is gone. Close crazzychat completely and open it again to continue.'
-                  : recheck === 'still'
-                    ? 'Still detected — see the list above.'
-                    : 'Couldn’t run the check. Try again.'}
+                {recheck === 'still'
+                  ? 'Still detected — see the list above.'
+                  : 'Couldn’t run the check. Try again.'}
               </Text>
             )}
           </>

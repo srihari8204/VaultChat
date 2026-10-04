@@ -30,3 +30,12 @@ export function holdSecurityVerdict(report: { level: string; threats?: { type: s
 export function securityVerdict(): HeldVerdict | null {
   return held;
 }
+
+/**
+ * Release a held `restrict` verdict after a fresh in-process scan came back
+ * clean — the same scan a relaunch would run. A `wipe` is never released here:
+ * its keys are already gone and only a reinstall recovers.
+ */
+export function clearRestrictVerdict(): void {
+  if (held?.level === 'restrict') held = null;
+}

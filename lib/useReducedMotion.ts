@@ -15,13 +15,22 @@ import { useEffect, useState } from 'react';
 import { AccessibilityInfo } from 'react-native';
 
 export function useReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(false);
+  return useReducedMotionSetting() ?? false;
+}
+
+/**
+ * The same setting, but null until the first read resolves. For motion that
+ * must not run even one frame against the user's wish (a full-screen strobe):
+ * wait for a boolean before starting it. An unreadable setting reads false.
+ */
+export function useReducedMotionSetting(): boolean | null {
+  const [reduced, setReduced] = useState<boolean | null>(null);
 
   useEffect(() => {
     let alive = true;
     AccessibilityInfo.isReduceMotionEnabled()
       .then(v => { if (alive) setReduced(!!v); })
-      .catch(() => { /* setting unavailable — animate normally */ });
+      .catch(() => { if (alive) setReduced(false); /* setting unavailable — animate normally */ });
     const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', v => setReduced(!!v));
     return () => { alive = false; sub.remove(); };
   }, []);

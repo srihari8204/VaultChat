@@ -70,6 +70,8 @@ export const BIZ: Palette = {
   onPrimary:   '#FFFFFF',   // as today; see constants/theme.ts AuroraDark note
   onDanger:    '#FFFFFF',
   warning:     '#F59E0B',   // = BIZ_WARN; 9.21:1 on bg, 7.21:1 on surfaceSolid
+  scrim:       'rgba(0,0,0,0.6)',
+  caution:     '#FBBF24',   // ≥9.2:1 on bg/card/surfaceSolid
 };
 
 // The design system's status colors that Palette has no slot for. Fixed by
