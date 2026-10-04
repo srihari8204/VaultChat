@@ -46,12 +46,6 @@ function isEphemeralName(name: string): boolean {
 const DOC_DIR_PREFIX = 'dc_';
 
 /**
- * Delete every ephemeral protected-media plaintext left in the cache.
- * Unconditional (not size-capped) — see EPHEMERAL_PREFIXES. Safe to call any
- * time no protected viewer is on screen; media-viewer also cleans up its own
- * file on unmount, so this is the crash-recovery path.
- */
-/**
  * Delete document plaintext staged for a viewer or an external hand-off.
  *
  * These live in `dc_<attachmentId>/` subdirectories of the cache (see
@@ -69,7 +63,7 @@ const DOC_DIR_PREFIX = 'dc_';
 export async function purgeDocumentCache(attachmentId?: string): Promise<number> {
   let n = 0;
   try {
-    const dir = (FileSystem as any).cacheDirectory;
+    const dir = FileSystem.cacheDirectory;
     if (!dir) return 0;
     const want = attachmentId
       ? DOC_DIR_PREFIX + attachmentId.replace(/[^A-Za-z0-9_.-]/g, '_')
@@ -84,10 +78,16 @@ export async function purgeDocumentCache(attachmentId?: string): Promise<number>
   return n;
 }
 
+/**
+ * Delete every ephemeral protected-media plaintext left in the cache.
+ * Unconditional (not size-capped) — see EPHEMERAL_PREFIXES. Safe to call any
+ * time no protected viewer is on screen; media-viewer also cleans up its own
+ * file on unmount, so this is the crash-recovery path.
+ */
 export async function purgeEphemeralMedia(): Promise<number> {
   let n = 0;
   try {
-    const dir = (FileSystem as any).cacheDirectory;
+    const dir = FileSystem.cacheDirectory;
     if (!dir) return 0;
     const names = await FileSystem.readDirectoryAsync(dir);
     for (const name of names) {
@@ -118,7 +118,7 @@ export async function sweepMediaCache(): Promise<void> {
   } catch { /* best-effort */ }
 
   try {
-    const dir = (FileSystem as any).cacheDirectory;
+    const dir = FileSystem.cacheDirectory;
     if (!dir) return;
     const names = await FileSystem.readDirectoryAsync(dir);
     const ours = names.filter((n: string) => PREFIXES.some((p) => n.startsWith(p)));
@@ -128,7 +128,7 @@ export async function sweepMediaCache(): Promise<void> {
     let total = 0;
     for (const n of ours) {
       const uri = dir + n;
-      const info: any = await FileSystem.getInfoAsync(uri).catch(() => null);
+      const info = await FileSystem.getInfoAsync(uri).catch(() => null);
       if (info?.exists) { const size = info.size ?? 0; files.push({ uri, size, mtime: info.modificationTime ?? 0 }); total += size; }
     }
     if (total <= CAP_BYTES) return;

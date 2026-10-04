@@ -11,7 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { TAB_ICON_INK, type Palette } from '../constants/theme';
+import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { recentMarks, recentSends, snapshot, type SendTiming } from '../lib/perf';
 import { ccwireDiagnostics } from '../lib/ccwire/transport';
@@ -21,11 +21,9 @@ import { AuroraBackground } from '../components/ui';
 type Styles = ReturnType<typeof makeStyles>;
 
 export default function PerfDebugScreen() {
-  const { colors, scheme } = useTheme();
-  // Amber for "slow"/"warning". The palette has no warning token; the calls ink
-  // is the theme's amber, readable on both grounds (#F59E0B was 2:1 on light).
-  const warn = TAB_ICON_INK.calls[scheme];
-  const S = useMemo(() => makeStyles(colors, warn), [colors, warn]);
+  const { colors } = useTheme();
+  // Amber for "slow"/"warning": the palette's warning token, AA on both grounds.
+  const S = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
   const slow = (total?: number) => (total != null && total > 1500 ? S.slow : undefined);
 
@@ -57,7 +55,7 @@ export default function PerfDebugScreen() {
     <View style={S.screen}>
       <AuroraBackground />
       <View style={S.header}>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/profile'))} hitSlop={10} style={S.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title} accessibilityRole="header">Diagnostics</Text>
@@ -162,7 +160,7 @@ function Row({ S, k, v, bad }: { S: Styles; k: string; v: string; bad?: boolean 
 
 function ms(n?: number): string { return n == null ? '—' : `${n}ms`; }
 
-const makeStyles = (c: Palette, warn: string) => StyleSheet.create({
+const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   header:  { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   backBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
@@ -182,8 +180,8 @@ const makeStyles = (c: Palette, warn: string) => StyleSheet.create({
   td:    { flex: 1, color: c.text, fontSize: 12, fontVariant: ['tabular-nums'] },
   tdFail:{ color: c.danger, fontWeight: '700' },
 
-  slow:  { color: warn },
-  warn:  { color: warn, fontSize: 12, marginTop: 8, paddingHorizontal: 4 },
+  slow:  { color: c.warning },
+  warn:  { color: c.warning, fontSize: 12, marginTop: 8, paddingHorizontal: 4 },
   empty: { color: c.textDim, fontSize: 13, padding: 14 },
   note:  { color: c.textDim, fontSize: 11, lineHeight: 16, marginTop: 16, paddingHorizontal: 4 },
 });

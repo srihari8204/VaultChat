@@ -32,9 +32,6 @@ import { describeRetry, summarizeOutbox, unreadableRows, type OutboxRow, type Ou
 const LEGACY_MOCK_KEYS = ['vc_offline_queue', 'vc_last_sync'];
 // One page is plenty for a count; the queue itself drains in pages of 200.
 const OUTBOX_READ_LIMIT = 1000;
-// Label colour on the solid primary button. The palette has no on-primary
-// token; white is the brand's button text in both themes.
-const ON_PRIMARY = '#FFFFFF';
 
 type Outbox = OutboxSummary & { unreadable: number; chatNames: Record<string, string> };
 
@@ -70,9 +67,13 @@ export default function OfflineModeScreen() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
   const [retryResult, setRetryResult] = useState<string | null>(null);
+  // The outbox as it was when the last manual retry started. Sends still in
+  // flight when flush() returns finish later; each recount (queue events call
+  // loadOutbox) re-describes the retry against this, so the line catches up.
+  const retryBase = useRef<Outbox | null>(null);
   // Queue events can land after the screen is gone; no state updates then.
   const mounted = useRef(true);
-  useEffect(() => () => { mounted.current = false; }, []);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
   const loadOutbox = useCallback(async (): Promise<Outbox | null> => {
     try {
@@ -89,6 +90,7 @@ export default function OfflineModeScreen() {
       if (!mounted.current) return null;
       setOutbox(next);
       setLoadError(null);
+      if (retryBase.current) setRetryResult(describeRetry(retryBase.current, next));
       return next;
     } catch (e: any) {
       if (mounted.current) setLoadError(e?.message ?? 'Could not read the outbox');
@@ -121,6 +123,7 @@ export default function OfflineModeScreen() {
     }
     setRetrying(true);
     setRetryResult(null);
+    retryBase.current = null;
     const before = outbox;
     try {
       // retry() moves a rejected row back to the queue and starts a flush;
@@ -130,12 +133,11 @@ export default function OfflineModeScreen() {
     } catch (e: any) {
       Alert.alert('Could not retry', e?.message ?? 'Try again');
     } finally {
-      // Say what happened, from the recount — never assume success.
-      const after = await loadOutbox();
-      if (mounted.current) {
-        setRetrying(false);
-        if (after) setRetryResult(describeRetry(before, after));
-      }
+      // Say what happened, from the recount — never assume success. From here
+      // on every recount updates the line (see retryBase).
+      retryBase.current = before;
+      await loadOutbox();
+      if (mounted.current) setRetrying(false);
     }
   }, [retrying, outbox, isOnline, loadOutbox]);
 
@@ -147,7 +149,7 @@ export default function OfflineModeScreen() {
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={[s.headerRow, { marginTop: HEADER_TOP }]}>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={16} style={s.backBtn}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => (router.canGoBack() ? router.back() : router.replace('/settings'))} hitSlop={16} style={s.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.headerTitle} accessibilityRole="header">Offline mode</Text>
@@ -231,7 +233,7 @@ export default function OfflineModeScreen() {
                 accessibilityLabel={outbox.failed > 0 ? `Retry ${unsent} unsent messages` : `Send ${unsent} waiting messages now`}
                 accessibilityState={{ disabled: retrying || !isOnline, busy: retrying }}
               >
-                {retrying ? <ActivityIndicator color={ON_PRIMARY} /> : (
+                {retrying ? <ActivityIndicator color={colors.onPrimary} /> : (
                   <Text style={s.primaryBtnTxt}>{outbox.failed > 0 ? 'Retry now' : 'Send now'}</Text>
                 )}
               </TouchableOpacity>
@@ -303,7 +305,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   emptyRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   primaryBtn: { marginTop: 14, minHeight: 48, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: c.primary },
-  primaryBtnTxt: { color: ON_PRIMARY, fontSize: 16, fontWeight: '700' },
+  primaryBtnTxt: { color: c.onPrimary, fontSize: 16, fontWeight: '700' },
   chatLink: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 44, marginTop: 6 },
   outlineBtn: { marginTop: 10, alignSelf: 'flex-start', minHeight: 44, paddingHorizontal: 16, justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glassSoft },
   outlineBtnTxt: { color: c.primary, fontWeight: '700' },

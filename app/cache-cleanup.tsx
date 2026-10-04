@@ -26,9 +26,6 @@ import {
 import { AuroraBackground } from '../components/ui';
 
 const AUTO_OPTIONS = [0, 7, 15, 30];
-// Label/icon colour on the solid primary fill. The palette has no on-primary
-// token; white is the brand's button text in both themes.
-const ON_PRIMARY = '#FFFFFF';
 // The database cache is reclaimed by VACUUM and is never scanned, so its size is
 // unknown, not zero (services/cache/cacheManager.ts measureCacheSizes).
 const UNMEASURED: ReadonlySet<CacheCategoryId> = new Set(['dbCache']);
@@ -124,7 +121,7 @@ export default function CacheCleanupScreen() {
     <View style={S.container}>
       <AuroraBackground />
       <View style={S.header}>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={S.backBtn} hitSlop={10}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => (router.canGoBack() ? router.back() : router.replace('/storage-manager'))} style={S.backBtn} hitSlop={10}>
           <Ionicons name="chevron-back" size={26} color={colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
@@ -141,7 +138,7 @@ export default function CacheCleanupScreen() {
 
         <View style={S.btnRow}>
           <TouchableOpacity style={[S.actBtn, S.actPrimary]} onPress={onSmart} disabled={busy || loading} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel="One-tap smart cleanup" accessibilityState={{ disabled: busy || loading, busy }}>
-            {busy ? <ActivityIndicator size="small" color={ON_PRIMARY} /> : <Ionicons name="flash" size={16} color={ON_PRIMARY} />}
+            {busy ? <ActivityIndicator size="small" color={colors.onPrimary} /> : <Ionicons name="flash" size={16} color={colors.onPrimary} />}
             <Text style={S.actPrimaryText}>One-Tap Smart Cleanup</Text>
           </TouchableOpacity>
         </View>
@@ -191,7 +188,7 @@ export default function CacheCleanupScreen() {
             <View style={S.chips} accessibilityRole="radiogroup" accessibilityLabel="Auto-clear safe cache">
               {AUTO_OPTIONS.map((d) => (
                 <TouchableOpacity key={d} onPress={() => chooseAutoDays(d)} accessibilityRole="radio" accessibilityState={{ checked: autoDays === d }} accessibilityLabel={d === 0 ? 'Auto-clear off' : `Auto-clear every ${d} days`} style={[S.chip, autoDays === d && { backgroundColor: colors.primary, borderColor: colors.primary }]}>
-                  <Text style={[S.chipText, autoDays === d && { color: ON_PRIMARY }]}>{d === 0 ? 'Off' : `${d}d`}</Text>
+                  <Text style={[S.chipText, autoDays === d && { color: colors.onPrimary }]}>{d === 0 ? 'Off' : `${d}d`}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -202,7 +199,7 @@ export default function CacheCleanupScreen() {
               <Text style={S.rowLabel}>Clear cache on logout</Text>
               <Text style={S.rowDesc}>Removes cache (not your data) when you sign out.</Text>
             </View>
-            <Switch value={clearLogout} onValueChange={toggleLogout} accessibilityLabel="Clear cache on logout" trackColor={{ true: colors.primary, false: colors.border }} />
+            <Switch value={clearLogout} onValueChange={toggleLogout} accessibilityLabel="Clear cache on logout" trackColor={{ true: colors.primary, false: colors.border }} thumbColor={colors.onPrimary} />
           </View>
         </View>
 
@@ -232,7 +229,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   btnRow: { paddingHorizontal: 16 },
   actBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginHorizontal: 16, paddingVertical: 14, borderRadius: 14, marginTop: 8 },
   actPrimary: { backgroundColor: c.primary, marginHorizontal: 0 },
-  actPrimaryText: { color: ON_PRIMARY, fontWeight: '800', fontSize: 15 },
+  actPrimaryText: { color: c.onPrimary, fontWeight: '800', fontSize: 15 },
   actClear: { borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glassSoft },
   actClearText: { fontWeight: '800', fontSize: 14 },
 

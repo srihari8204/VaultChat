@@ -15,7 +15,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback, type Componen
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { TAB_ICON_INK, type Palette } from '../constants/theme';
+import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { Stack, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -61,8 +61,12 @@ const EXT = {
 // root, bucketed by file type and attributed to chats.
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
-/** Per-walk tallies: subfolders that could not be read, files deleted. */
-type WalkStats = { skipped: number; removed: number };
+/** Per-walk tallies: subfolders that could not be read, files deleted, entries looked at. */
+type WalkStats = { skipped: number; removed: number; seen: number };
+// Entries stat'ed at once. getInfoAsync is one native call per entry; asking
+// for a directory's entries a batch at a time instead of one after another is
+// what keeps a large media folder from taking minutes (📱 timing not measured here).
+const INFO_BATCH = 16;
 
 async function walk(
   dir: string,
@@ -79,10 +83,15 @@ async function walk(
     if (info && !info.exists) return;
     throw e;
   }
-  for (const name of names) {
-    const uri = dir + (dir.endsWith('/') ? '' : '/') + name;
-    let info: FileSystem.FileInfo;
-    try { info = await FileSystem.getInfoAsync(uri); } catch { continue; }
+  const base = dir + (dir.endsWith('/') ? '' : '/');
+  const entries: { name: string; uri: string; info: FileSystem.FileInfo | null }[] = [];
+  for (let i = 0; i < names.length; i += INFO_BATCH) {
+    const batch = names.slice(i, i + INFO_BATCH);
+    const infos = await Promise.all(batch.map(n => FileSystem.getInfoAsync(base + n).catch(() => null)));
+    batch.forEach((n, k) => entries.push({ name: n, uri: base + n, info: infos[k] }));
+    stats.seen += batch.length;
+  }
+  for (const { name, uri, info } of entries) {
     if (!info?.exists) continue;
     if (info.isDirectory) {
       // One unreadable subfolder is skipped and counted, not fatal: the rest of
@@ -117,7 +126,7 @@ function useS() {
 }
 
 export default function StorageManagerScreen() {
-  const { colors, scheme } = useTheme();
+  const { colors } = useTheme();
   const s = useS();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -130,20 +139,24 @@ export default function StorageManagerScreen() {
   const [loadFailed, setLoadFailed] = useState(false);
   // Subfolders the last measurement could not read (totals may be low).
   const [skippedDirs, setSkippedDirs] = useState(0);
+  // Entries looked at so far, shown while measuring so a long walk visibly moves.
+  const [progress, setProgress] = useState(0);
   // The walk can outlive the screen; no state updates after leaving it.
   const mounted = useRef(true);
-  useEffect(() => () => { mounted.current = false; }, []);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
   const catColor = (k: CategoryKey) =>
     k === 'img' ? colors.primary : k === 'vid' ? colors.accent : k === 'aud' ? colors.purple
-      : k === 'file' ? TAB_ICON_INK.calls[scheme] : colors.textDim;
+      : k === 'file' ? colors.warning : colors.textDim;
 
   const loadStorageData = useCallback(async () => {
     setLoading(true);
     setLoadFailed(false);
+    setProgress(0);
+    const stats: WalkStats = { skipped: 0, removed: 0, seen: 0 };
+    const tick = setInterval(() => { if (mounted.current) setProgress(stats.seen); }, 400);
     try {
       const acc: Record<string, number> = { img: 0, vid: 0, aud: 0, file: 0, other: 0 };
-      const stats: WalkStats = { skipped: 0, removed: 0 };
       const attMap = await getAttachmentChatMap().catch(() => ({} as Record<string, string>));
       const perChat = { map: attMap, sizes: {} as Record<string, number> };
       for (const root of measuredRoots()) await walk(toUri(root), acc, stats, undefined, perChat);
@@ -184,6 +197,7 @@ export default function StorageManagerScreen() {
       // Nothing from an earlier load may stay on screen as if it were current.
       if (mounted.current) { setLoadFailed(true); setChatStores([]); }
     } finally {
+      clearInterval(tick);
       if (mounted.current) setLoading(false);
     }
   }, []);
@@ -258,7 +272,7 @@ export default function StorageManagerScreen() {
             setClearing(true);
             try {
               const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
-              const stats: WalkStats = { skipped: 0, removed: 0 };
+              const stats: WalkStats = { skipped: 0, removed: 0, seen: 0 };
               if (FileSystem.cacheDirectory) await walk(FileSystem.cacheDirectory, {}, stats, cutoff);
               const n = stats.removed;
               Alert.alert('Done', (n > 0
@@ -282,7 +296,7 @@ export default function StorageManagerScreen() {
   const header = (
     <LinearGradient colors={[colors.glassSoft, colors.bg]} style={s.header}>
       <View style={[s.headerRow, { marginTop: HEADER_TOP }]}>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={16}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => (router.canGoBack() ? router.back() : router.replace('/settings'))} hitSlop={16}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.headerTitle} accessibilityRole="header">Storage Manager</Text>
@@ -299,7 +313,9 @@ export default function StorageManagerScreen() {
         {header}
         <View style={s.loadingWrap} accessibilityLiveRegion="polite">
           <ActivityIndicator size="large" color={colors.accent} />
-          <Text style={{ color: colors.textDim, marginTop: 12 }}>Measuring storage…</Text>
+          <Text style={s.loadingText}>
+            {progress > 0 ? `Measuring storage… ${progress.toLocaleString()} items checked` : 'Measuring storage…'}
+          </Text>
         </View>
       </View>
     );
@@ -444,6 +460,7 @@ export default function StorageManagerScreen() {
 const makeStyles = (c: Palette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: 'transparent' },
   loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadingText: { color: c.textDim, marginTop: 12 },
   header: { paddingBottom: 16, paddingHorizontal: 20 },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   headerTitle: { color: c.text, fontSize: 20, fontWeight: '700' },

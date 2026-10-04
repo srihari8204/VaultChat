@@ -13,8 +13,13 @@ import { ErrorBoundary } from '../components/ErrorBoundary';
 import { getSecurityOverview, type SecurityOverview } from '../lib/security';
 import { E2EE_ENABLED } from '../constants/flags';
 
-/** `href` is the screen where the check is changed; null when nothing there can change it. */
-type Check = { name: string; icon: React.ComponentProps<typeof Ionicons>['name']; ok: boolean; desc: string; href: Href | null };
+/**
+ * `href` is the screen where the check is changed; null when nothing there can change it.
+ * `ok: null` is a fact shown for review, not scored: how many people you have
+ * blocked, or how many sessions are signed in, is neither safe nor unsafe by
+ * itself (they used to count as a pass, or pass at an arbitrary "3 or fewer").
+ */
+type Check = { name: string; icon: React.ComponentProps<typeof Ionicons>['name']; ok: boolean | null; desc: string; href: Href | null };
 
 function buildChecks(ov: SecurityOverview): Check[] {
   return [
@@ -30,11 +35,11 @@ function buildChecks(ov: SecurityOverview): Check[] {
     { name: 'Undiscoverable', icon: 'person-remove-outline', ok: ov.settings.discoverable === false,
       desc: ov.settings.discoverable === false ? "You're not discoverable by search" : "You're discoverable by phone/handle",
       href: '/last-seen-privacy' },
-    { name: 'Blocked Contacts', icon: 'ban-outline', ok: true,
+    { name: 'Blocked Contacts', icon: 'ban-outline', ok: null,
       desc: `${ov.blockedContacts} contact${ov.blockedContacts === 1 ? '' : 's'} blocked`,
       href: '/blocked' },
-    { name: 'Active Sessions', icon: 'phone-portrait-outline', ok: ov.activeSessions <= 3,
-      desc: `${ov.activeSessions} signed-in session${ov.activeSessions === 1 ? '' : 's'} · ${ov.linkedDevices} device${ov.linkedDevices === 1 ? '' : 's'}`,
+    { name: 'Active Sessions', icon: 'phone-portrait-outline', ok: null,
+      desc: `${ov.activeSessions} signed-in session${ov.activeSessions === 1 ? '' : 's'} · ${ov.linkedDevices} device${ov.linkedDevices === 1 ? '' : 's'} — sign out any you don't recognise`,
       href: '/login-history' },
   ];
 }
@@ -55,6 +60,11 @@ function DashboardContent() {
   const [overview, setOverview] = useState<SecurityOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // A refresh that failed while cached data is on screen: say it is not current.
+  const [stale, setStale] = useState(false);
+  // load() can finish after the screen is gone; no state updates then.
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const fadeAnim  = useRef(new Animated.Value(0)).current;
   const radarAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -67,15 +77,22 @@ function DashboardContent() {
     setError(null);
     // Local-first: paint last-known security overview instantly, then refresh.
     const cached = await readCache<SecurityOverview>('dashboard');
+    if (!mounted.current) { inFlight.current = false; return; }
     if (cached) { setOverview(cached); setLoading(false); }
     else setLoading(true);
     try {
       const fresh = await getSecurityOverview();
-      setOverview(fresh);
       writeCache('dashboard', fresh);
+      if (!mounted.current) return;
+      setOverview(fresh);
+      setStale(false);
     }
-    catch (e: any) { if (!cached) setError(e?.message ?? 'Failed to load'); }
-    finally { setLoading(false); inFlight.current = false; }
+    catch (e: any) {
+      if (!mounted.current) return;
+      if (cached) setStale(true);
+      else setError(e?.message ?? 'Failed to load');
+    }
+    finally { inFlight.current = false; if (mounted.current) setLoading(false); }
   }, []);
 
   // On every focus, not just mount: the check rows send you off to change a
@@ -96,7 +113,8 @@ function DashboardContent() {
   }, [fadeAnim, pulseAnim, radarAnim]);
 
   const checks = overview ? buildChecks(overview) : [];
-  const score = checks.length ? Math.round((checks.filter(c => c.ok).length / checks.length) * 100) : 0;
+  const scored = checks.filter(c => c.ok !== null);
+  const score = scored.length ? Math.round((scored.filter(c => c.ok).length / scored.length) * 100) : 0;
   const scoreColor = score >= 80 ? colors.success : score >= 50 ? colors.accent : colors.danger;
   const scoreWord = score >= 80 ? 'STRONG' : score >= 50 ? 'FAIR' : 'REVIEW';
   const radarDeg = radarAnim.interpolate({inputRange:[0,1],outputRange:['0deg','360deg']});
@@ -107,9 +125,9 @@ function DashboardContent() {
 
       <Animated.View style={[{flex:1},{ opacity:fadeAnim}]}>
         <View style={S.header}>
-          <TouchableOpacity hitSlop={4} accessibilityRole="button" accessibilityLabel="Back" onPress={()=>router.back()} style={S.backBtn}><Ionicons name="arrow-back" size={24} color={colors.primary} /></TouchableOpacity>
+          <TouchableOpacity hitSlop={4} accessibilityRole="button" accessibilityLabel="Back" onPress={()=>(router.canGoBack() ? router.back() : router.replace('/settings'))} style={S.backBtn}><Ionicons name="arrow-back" size={24} color={colors.primary} /></TouchableOpacity>
           <View style={{flex:1}}>
-            <Text variant="h2" style={S.title}>Security Hub</Text>
+            <Text variant="h2" style={S.title} accessibilityRole="header">Security Hub</Text>
             <Text style={{color:colors.textDim,fontSize:12}}>Your account security</Text>
           </View>
           <TouchableOpacity accessibilityRole="button" accessibilityLabel="Refresh security overview" accessibilityState={{ disabled: loading, busy: loading }} disabled={loading} onPress={load} style={S.scanBtn}>
@@ -155,6 +173,12 @@ function DashboardContent() {
           ))}
         </View>
 
+          {stale && !loading && (
+            <View style={S.staleRow} accessibilityRole="alert">
+              <Ionicons name="cloud-offline-outline" size={16} color={colors.textDim} />
+              <Text style={S.staleText}>Couldn&apos;t refresh. This is your last saved overview and may be out of date.</Text>
+            </View>
+          )}
           {loading && <ActivityIndicator color={colors.primary} style={{marginTop:30}} />}
           {error && !loading && (
             <View style={{alignItems:'center',marginTop:24,gap:12}}>
@@ -165,7 +189,8 @@ function DashboardContent() {
             </View>
           )}
           {!loading && !error && checks.map((c)=>{
-            const col = c.ok ? colors.success : colors.danger;
+            const col = c.ok === null ? colors.primary : c.ok ? colors.success : colors.danger;
+            const verdict = c.ok === null ? 'INFO' : c.ok ? 'OK' : 'REVIEW';
             const href = c.href;
             return (
               <TouchableOpacity
@@ -174,7 +199,7 @@ function DashboardContent() {
                 disabled={!href}
                 onPress={href ? () => router.push(href) : undefined}
                 accessibilityRole={href ? 'link' : 'text'}
-                accessibilityLabel={`${c.name}, ${c.ok ? 'OK' : 'needs review'}. ${c.desc}`}
+                accessibilityLabel={`${c.name}, ${c.ok === null ? 'not scored' : c.ok ? 'OK' : 'needs review'}. ${c.desc}`}
                 accessibilityHint={href ? 'Opens the screen where you can change this' : undefined}
               >
                 <View style={[S.modIcon,{backgroundColor:col+'18',borderColor:col+'44'}]}>
@@ -184,7 +209,7 @@ function DashboardContent() {
                   <View style={{flexDirection:'row',flexWrap:'wrap',alignItems:'center',gap:8,marginBottom:4}}>
                     <Text style={{color:colors.text,fontSize:15,fontWeight:'700',flexShrink:1}}>{c.name}</Text>
                     <View style={{backgroundColor:col+'18',borderRadius:5,paddingHorizontal:5,paddingVertical:2,borderWidth:1,borderColor:col}}>
-                      <Text style={{color:col,fontSize:11,fontWeight:'800'}}>{c.ok?'OK':'REVIEW'}</Text>
+                      <Text style={{color:col,fontSize:11,fontWeight:'800'}}>{verdict}</Text>
                     </View>
                   </View>
                   <Text style={{color:colors.textDim,fontSize:13,lineHeight:19}}>{c.desc}</Text>
@@ -234,4 +259,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   statCard:{flexGrow:1,flexBasis:'45%',backgroundColor:c.glassSoft,borderRadius:20,padding:16,alignItems:'center',borderWidth:1,borderColor:c.glassStroke,gap:6},
   moduleRow:{flexDirection:'row',alignItems:'center',backgroundColor:c.glassSoft,borderRadius:20,padding:16,marginBottom:10,borderWidth:1,borderColor:c.glassStroke,gap:12},
   modIcon:{width:44,height:44,borderRadius:22,justifyContent:'center',alignItems:'center',borderWidth:1},
+  staleRow:{flexDirection:'row',alignItems:'center',gap:8,marginBottom:12,paddingHorizontal:4},
+  staleText:{flex:1,color:c.textDim,fontSize:12,lineHeight:17},
 });

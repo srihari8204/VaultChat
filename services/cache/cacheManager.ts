@@ -48,7 +48,7 @@ async function dirSize(uri: string): Promise<number> {
   try {
     const info = await FileSystem.getInfoAsync(uri);
     if (!info.exists) return 0;
-    if (!info.isDirectory) return (info as any).size ?? 0;
+    if (!info.isDirectory) return info.size ?? 0;
     const base = uri.endsWith('/') ? uri : uri + '/';
     const names = await FileSystem.readDirectoryAsync(base);
     let total = 0;
@@ -81,7 +81,7 @@ async function vacuumDbCache(): Promise<void> {
   // Rebuild/compact the local SQLite file. VACUUM rewrites free pages only — it
   // never drops rows, so messages/chats are untouched. Best-effort.
   try {
-    const { getLocalDb } = require('../../lib/localDb');
+    const { getLocalDb } = await import('../../lib/localDb');
     const db = await getLocalDb();
     await db.execAsync('VACUUM');
   } catch { /* best-effort */ }

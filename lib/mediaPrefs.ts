@@ -23,9 +23,11 @@ export async function getAutoDownload(): Promise<AutoDownloadPolicy> {
   return cached;
 }
 
+/** Saves the policy. Rejects when it could not be stored, and the policy in
+ *  effect stays the old one, so the caller (settings' saveLocal) can revert and say so. */
 export async function setAutoDownload(p: AutoDownloadPolicy): Promise<void> {
+  await AsyncStorage.setItem(KEY, p);
   cached = p;
-  try { await AsyncStorage.setItem(KEY, p); } catch {}
 }
 
 /** Should an un-cached attachment auto-download right now (policy + network)? */

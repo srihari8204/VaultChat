@@ -19,17 +19,13 @@ import {
   NOTIF_PREVIEW_OPTIONS, getNotifPreview, setNotifPreview,
   getRemoteLinkPreviews, setRemoteLinkPreviews, type NotifPreview,
 } from '../lib/privacyPrefs';
+import { sosReachedOf, sosReachText } from '../lib/sosReachCopy';
 
 
 type TabId = 'alerts' | 'settings' | 'panic';
 const TABS: { id: TabId; label: string }[] = [
   { id: 'alerts', label: 'SOS HISTORY' }, { id: 'settings', label: 'PRIVACY' }, { id: 'panic', label: 'PANIC' },
 ];
-
-// Text on a solid danger fill (the armed panic button). The palette has no
-// on-danger token; white passes on both themes' danger red at this size.
-const ON_DANGER = '#FFFFFF';
-
 
 function fmtTime(iso: string): string {
   const d = Date.now() - new Date(iso).getTime();
@@ -148,7 +144,9 @@ function NotificationsContent() {
         }
       } catch {}
       const r = await sendSOS(lat, lng, false);
-      Alert.alert('Emergency alert sent', `Notified ${r.contactsNotified} trusted contact${r.contactsNotified === 1 ? '' : 's'}${lat != null ? ' with your location' : ' (location unavailable)'}.`);
+      // "Sent to N" until the server reports who the push actually reached.
+      const t = sosReachText(r.contactsNotified, sosReachedOf(r), lat != null);
+      Alert.alert('Emergency alert sent', [t.line, lat == null ? 'Your location was unavailable.' : null, t.warn && `${t.warn} Call or text them too.`].filter(Boolean).join(' '));
       loadSos();
     } catch (e: any) {
       Alert.alert('Could not send alert', e?.message ?? 'Please try again.');
@@ -188,17 +186,33 @@ function NotificationsContent() {
     finally { setSettingsRetrying(false); }
   };
 
+  // A setting that did not save goes back to what is stored, and says so.
+  const chooseNotifPreview = async (v: NotifPreview) => {
+    const prev = notifPreview;
+    if (v === prev) return;
+    setNotifPreviewState(v);
+    try { await setNotifPreview(v); }
+    catch { setNotifPreviewState(prev); Alert.alert('Could not save', 'Notification preview was not changed.'); }
+  };
+  const toggleRemoteLinks = async (v: boolean) => {
+    setRemoteLinksState(v);
+    try { await setRemoteLinkPreviews(v); }
+    catch { setRemoteLinksState(!v); Alert.alert('Could not save', 'Link previews were not changed.'); }
+  };
+  // A cold deep link has nothing to go back to.
+  const goBack = () => (router.canGoBack() ? router.back() : router.replace('/settings'));
+
   const panicBorderColor=glowAnim.interpolate({inputRange:[0,1],outputRange:[colors.danger+'4D',colors.danger+'CC']});
 
   return (
     <View style={S.container}>
       <AuroraBackground />
-      <Animated.View style={{flex:1,opacity:fadeIn}}>
+      <Animated.View style={[S.flex1,{opacity:fadeIn}]}>
         <View style={S.header}>
-          <TouchableOpacity hitSlop={4} accessibilityRole="button" accessibilityLabel="Back" onPress={()=>router.back()} style={S.backBtn}><Ionicons name="arrow-back" size={20} color={colors.primary} /></TouchableOpacity>
-          <View style={{flex:1}}>
-            <Text style={S.title}>Alerts & Safety</Text>
-            <Text style={{color:colors.textFaint,fontSize:11,letterSpacing:1.5}}>EMERGENCY & PRIVACY CENTER</Text>
+          <TouchableOpacity hitSlop={4} accessibilityRole="button" accessibilityLabel="Back" onPress={goBack} style={S.backBtn}><Ionicons name="arrow-back" size={20} color={colors.primary} /></TouchableOpacity>
+          <View style={S.flex1}>
+            <Text style={S.title} accessibilityRole="header">Alerts & Safety</Text>
+            <Text style={S.subtitle}>EMERGENCY & PRIVACY CENTER</Text>
           </View>
         </View>
 
@@ -211,71 +225,73 @@ function NotificationsContent() {
         </View>
 
         <ScrollView
-          contentContainerStyle={{paddingHorizontal:18,paddingBottom:24}}
+          contentContainerStyle={S.scrollContent}
           showsVerticalScrollIndicator={false}
           refreshControl={activeTab==='alerts' && !loading ? <RefreshControl refreshing={sosRefreshing} onRefresh={refreshSos} tintColor={colors.primary} colors={[colors.primary]} /> : undefined}
         >
-          {loading && <ActivityIndicator color={colors.primary} style={{marginTop:30}}/>}
+          {loading && <ActivityIndicator color={colors.primary} style={S.spinner}/>}
 
           {!loading && activeTab==='alerts' && sosFailed && sos.length===0 && (
-            <View style={{alignItems:'center',marginTop:36,gap:12}}>
-              <Text style={{color:colors.textDim,textAlign:'center',fontSize:13}}>Your SOS history could not be loaded.</Text>
-              <TouchableOpacity onPress={refreshSos} disabled={sosRefreshing} style={[S.settingRow,{paddingHorizontal:20,minHeight:44}]} accessibilityRole="button" accessibilityLabel="Try loading SOS history again" accessibilityState={{ busy: sosRefreshing, disabled: sosRefreshing }}>
-                {sosRefreshing ? <ActivityIndicator color={colors.primary}/> : <Text style={{color:colors.primary,fontSize:14,fontWeight:'700'}}>Try again</Text>}
+            <View style={S.errorBox}>
+              <Text style={S.errorText}>Your SOS history could not be loaded.</Text>
+              <TouchableOpacity onPress={refreshSos} disabled={sosRefreshing} style={[S.settingRow,S.retryRow]} accessibilityRole="button" accessibilityLabel="Try loading SOS history again" accessibilityState={{ busy: sosRefreshing, disabled: sosRefreshing }}>
+                {sosRefreshing ? <ActivityIndicator color={colors.primary}/> : <Text style={S.retryText}>Try again</Text>}
               </TouchableOpacity>
             </View>
           )}
 
           {!loading && activeTab==='alerts' && !(sosFailed && sos.length===0) && (sos.length===0
-            ? <Text style={{color:colors.textFaint,textAlign:'center',marginTop:36,fontSize:13}}>No emergency alerts sent yet.{'\n'}Your SOS history will appear here.</Text>
+            ? <Text style={S.emptyText}>No emergency alerts sent yet.{'\n'}Your SOS history will appear here.</Text>
             : sos.map((a)=>{
                 const col = a.type==='emergency' ? colors.danger : colors.accent;
+                const reach = sosReachText(a.contactsNotified, sosReachedOf(a), a.latitude!=null);
                 return (
                   <View key={a.id} style={[S.alertRow,{borderLeftColor:col}]}>
-                    <View style={{flex:1}}>
-                      <View style={{flexDirection:'row',alignItems:'center',gap:8,marginBottom:4}}>
-                        <View style={{backgroundColor:col+'18',borderRadius:5,paddingHorizontal:5,paddingVertical:2,borderWidth:1,borderColor:col}}><Text style={{color:col,fontSize:11,fontWeight:'800',letterSpacing:1}}>{a.type==='emergency'?'EMERGENCY':'TEST'}</Text></View>
-                        <Text style={{color:colors.text,fontSize:12,fontWeight:'800'}}>SOS alert sent</Text>
+                    <View style={S.flex1}>
+                      <View style={S.alertHead}>
+                        <View style={[S.typeBadge,{backgroundColor:col+'18',borderColor:col}]}><Text style={[S.typeBadgeText,{color:col}]}>{a.type==='emergency'?'EMERGENCY':'TEST'}</Text></View>
+                        <Text style={S.alertTitle}>SOS alert sent</Text>
                       </View>
-                      <Text style={{color:colors.textDim,fontSize:12,lineHeight:17}}>Notified {a.contactsNotified} trusted contact{a.contactsNotified===1?'':'s'}{a.latitude!=null?' with your location':''}.</Text>
-                      <Text style={{color:colors.textFaint,fontSize:11,marginTop:6}}>{fmtTime(a.createdAt)}</Text>
+                      <Text style={S.alertBody}>{reach.line}</Text>
+                      {reach.warn && <Text style={[S.alertBody,{color:colors.danger}]}>{reach.warn}</Text>}
+                      <Text style={S.alertTime}>{fmtTime(a.createdAt)}</Text>
                     </View>
                   </View>
                 );
               }))}
 
           {!loading && activeTab==='settings' && !settings && (
-            <View style={{alignItems:'center',marginTop:36,gap:12}}>
-              <Text style={{color:colors.textDim,textAlign:'center',fontSize:13}}>Your privacy settings could not be loaded.</Text>
-              <TouchableOpacity onPress={retrySettings} disabled={settingsRetrying} style={[S.settingRow,{paddingHorizontal:20,minHeight:44}]} accessibilityRole="button" accessibilityLabel="Try loading privacy settings again" accessibilityState={{ busy: settingsRetrying, disabled: settingsRetrying }}>
-                {settingsRetrying ? <ActivityIndicator color={colors.primary}/> : <Text style={{color:colors.primary,fontSize:14,fontWeight:'700'}}>Try again</Text>}
+            <View style={S.errorBox}>
+              <Text style={S.errorText}>Your privacy settings could not be loaded.</Text>
+              <TouchableOpacity onPress={retrySettings} disabled={settingsRetrying} style={[S.settingRow,S.retryRow]} accessibilityRole="button" accessibilityLabel="Try loading privacy settings again" accessibilityState={{ busy: settingsRetrying, disabled: settingsRetrying }}>
+                {settingsRetrying ? <ActivityIndicator color={colors.primary}/> : <Text style={S.retryText}>Try again</Text>}
               </TouchableOpacity>
             </View>
           )}
 
           {!loading && activeTab==='settings' && settings && (
-            <View style={{marginTop:4}}>
-              <Text accessibilityRole="header" style={{color:colors.textFaint,fontSize:11,fontWeight:'800',letterSpacing:1.5,marginBottom:10}}>PRIVACY</Text>
+            <View style={S.settingsWrap}>
+              <Text accessibilityRole="header" style={S.sectionLabel}>PRIVACY</Text>
               {/* One owner per privacy setting: these four live on Last seen &
                   privacy (app/last-seen-privacy.tsx); this row only links there. */}
               <TouchableOpacity
-                style={[S.settingRow,{minHeight:44}]}
-                onPress={()=>router.push('/last-seen-privacy' as any)}
+                style={[S.settingRow,S.minTouch]}
+                onPress={()=>router.push('/last-seen-privacy')}
                 accessibilityRole="button"
                 accessibilityLabel="Privacy: last seen, read receipts, profile photo and discoverability"
                 accessibilityHint="Opens your privacy settings"
               >
                 <View style={S.settingIcon}><Ionicons name="eye-outline" size={20} color={colors.primary} /></View>
-                <View style={{flex:1}}>
-                  <Text numberOfLines={1} style={{color:colors.text,fontSize:13,fontWeight:'700'}}>Last seen & privacy</Text>
-                  <Text style={{color:colors.textFaint,fontSize:12,marginTop:2}}>Last seen, read receipts, profile photo, discoverability</Text>
+                <View style={S.flex1}>
+                  <Text numberOfLines={1} style={S.rowTitle}>Last seen & privacy</Text>
+                  <Text style={S.rowDesc}>Last seen, read receipts, profile photo, discoverability</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
               </TouchableOpacity>
 
               {/* Notification preview. There is no "show message text" option:
                   the push carries no text to show — see lib/privacyPrefs.ts. */}
-              <Text accessibilityRole="header" style={{color:colors.textFaint,fontSize:11,fontWeight:'800',letterSpacing:1.5,marginTop:18,marginBottom:10}}>NOTIFICATION PREVIEW</Text>
+              <Text accessibilityRole="header" style={[S.sectionLabel,S.sectionGap]}>NOTIFICATION PREVIEW</Text>
               <View accessibilityRole="radiogroup" accessibilityLabel="Notification preview">
               {NOTIF_PREVIEW_OPTIONS.map((o)=>{
                 const on = notifPreview === o.value;
@@ -285,65 +301,67 @@ function NotificationsContent() {
                     accessibilityRole="radio"
                     accessibilityState={{ checked: on }}
                     style={[S.settingRow, on && {borderColor:colors.primary}]}
-                    onPress={()=>{ setNotifPreviewState(o.value); setNotifPreview(o.value); }}
+                    onPress={()=>{ void chooseNotifPreview(o.value); }}
                   >
-                    <View style={{flex:1}}>
-                      <Text numberOfLines={1} style={{color:colors.text,fontSize:13,fontWeight:'700'}}>{o.title}</Text>
-                      <Text style={{color:colors.textFaint,fontSize:12,marginTop:2}}>{o.desc}</Text>
+                    <View style={S.flex1}>
+                      <Text numberOfLines={1} style={S.rowTitle}>{o.title}</Text>
+                      <Text style={S.rowDesc}>{o.desc}</Text>
                     </View>
                     {on && <Ionicons name="checkmark-circle" size={20} color={colors.primary} />}
                   </TouchableOpacity>
                 );
               })}
               </View>
-              <Text style={{color:colors.textFaint,fontSize:12,lineHeight:17,marginTop:2}}>
+              <Text style={S.footnote}>
                 Message text never appears in the tray on any setting — notifications are delivered without it.
               </Text>
 
               {/* Recipient-side link previews. OFF = the server never learns a
                   URL that arrived inside an encrypted message. */}
-              <Text accessibilityRole="header" style={{color:colors.textFaint,fontSize:11,fontWeight:'800',letterSpacing:1.5,marginTop:18,marginBottom:10}}>LINK PREVIEWS</Text>
+              <Text accessibilityRole="header" style={[S.sectionLabel,S.sectionGap]}>LINK PREVIEWS</Text>
               <View style={S.settingRow}>
                 <View style={S.settingIcon}><Ionicons name="link-outline" size={20} color={colors.primary} /></View>
-                <View style={{flex:1}}>
-                  <Text numberOfLines={1} style={{color:colors.text,fontSize:13,fontWeight:'700'}}>Fetch previews for received links</Text>
-                  <Text style={{color:colors.textFaint,fontSize:12,marginTop:2}}>Off: crazzychat&apos;s server never sees links people send you. Previews the sender attached still show.</Text>
+                <View style={S.flex1}>
+                  <Text numberOfLines={1} style={S.rowTitle}>Fetch previews for received links</Text>
+                  <Text style={S.rowDesc}>Off: crazzychat&apos;s server never sees links people send you. Previews the sender attached still show.</Text>
                 </View>
-                <Switch value={remoteLinks} onValueChange={(v)=>{ setRemoteLinksState(v); setRemoteLinkPreviews(v); }} trackColor={{false:colors.border,true:colors.primary}} thumbColor={colors.card} accessibilityLabel="Fetch previews for received links"/>
+                {/* Thumb: the on-primary ink (white) in both themes, the same rule as notification-sounds. */}
+                <Switch value={remoteLinks} onValueChange={(v)=>{ void toggleRemoteLinks(v); }} trackColor={{false:colors.border,true:colors.primary}} thumbColor={colors.onPrimary} accessibilityLabel="Fetch previews for received links"/>
               </View>
             </View>
           )}
 
           {!loading && activeTab==='panic' && (
-            <View style={{gap:16}}>
-              <View style={{backgroundColor:colors.danger+'14',borderRadius:16,padding:16,borderWidth:1,borderColor:colors.danger+'40'}}>
-                <Text style={{color:colors.danger,fontSize:12,fontWeight:'800',marginBottom:6}}>EMERGENCY PANIC BUTTON</Text>
-                <Text style={{color:colors.textDim,fontSize:12,lineHeight:18}}>Sends an emergency alert with your current location to your trusted contacts.</Text>
+            <View style={S.panicWrap}>
+              <View style={S.panicNotice}>
+                <Text style={S.panicNoticeTitle}>EMERGENCY PANIC BUTTON</Text>
+                <Text style={S.panicNoticeBody}>Sends an emergency alert with your current location to your trusted contacts.</Text>
               </View>
-              <Animated.View style={{borderRadius:22,borderWidth:2,borderColor:panicBorderColor,overflow:'hidden'}}>
+              <Animated.View style={[S.panicFrame,{borderColor:panicBorderColor}]}>
                 <TouchableOpacity onPress={armPanic} activeOpacity={0.85} disabled={sending} accessibilityRole="button" accessibilityLabel={sending ? 'Sending emergency alert' : panicArmed ? `Panic alert armed, sending in ${panicCountdown} seconds. Tap to cancel` : 'Panic alert. Tap to arm, sends after 3 seconds'} accessibilityState={{ busy: sending, disabled: sending }} accessibilityLiveRegion="polite">
-                  <LinearGradient colors={panicArmed?[colors.danger,colors.danger]:[colors.glass,colors.glassSoft]} style={{padding:28,alignItems:'center',gap:8}}>
-                    <Animated.View style={{transform:[{scale:panicAnim}]}}><Ionicons name="warning-outline" size={52} color={colors.danger} /></Animated.View>
-                    <Text style={{color:panicArmed?ON_DANGER:colors.danger,fontSize:17,fontWeight:'900',letterSpacing:2}}>{sending?'SENDING…':panicArmed?'SENDING IN '+panicCountdown+'...':'PANIC ALERT'}</Text>
-                    <Text style={{color:panicArmed?ON_DANGER:colors.textDim,fontSize:12}}>{panicArmed?'Tap again to cancel':'Tap to arm — auto-sends in 3 seconds'}</Text>
+                  <LinearGradient colors={panicArmed?[colors.danger,colors.danger]:[colors.glass,colors.glassSoft]} style={S.panicFill}>
+                    {/* Armed = solid danger fill, so the glyph and copy take the on-danger ink. */}
+                    <Animated.View style={{transform:[{scale:panicAnim}]}}><Ionicons name="warning-outline" size={52} color={panicArmed?colors.onDanger:colors.danger} /></Animated.View>
+                    <Text style={[S.panicLabel,{color:panicArmed?colors.onDanger:colors.danger}]}>{sending?'SENDING…':panicArmed?'SENDING IN '+panicCountdown+'...':'PANIC ALERT'}</Text>
+                    <Text style={[S.panicHint,{color:panicArmed?colors.onDanger:colors.textDim}]}>{panicArmed?'Tap again to cancel':'Tap to arm — auto-sends in 3 seconds'}</Text>
                   </LinearGradient>
                 </TouchableOpacity>
               </Animated.View>
-              <Text accessibilityRole="header" style={{color:colors.textFaint,fontSize:11,fontWeight:'800',letterSpacing:1.5}}>TRUSTED CONTACTS{contactsFailed ? '' : ` (${contacts.length})`}</Text>
+              <Text accessibilityRole="header" style={S.sectionLabel}>TRUSTED CONTACTS{contactsFailed ? '' : ` (${contacts.length})`}</Text>
               {contactsFailed
-                ? <Text style={{color:colors.textDim,fontSize:12}}>Your trusted contacts could not be loaded. The panic button still alerts everyone you have added.</Text>
+                ? <Text style={S.rowDescDim}>Your trusted contacts could not be loaded. The panic button still alerts everyone you have added.</Text>
                 : contacts.length===0
-                ? <TouchableOpacity onPress={()=>router.push('/trusted-contacts')} accessibilityRole="link" accessibilityLabel="Add trusted contacts">
-                    <Text style={{color:colors.textFaint,fontSize:12}}>No trusted contacts yet. <Text style={{color:colors.primary,fontWeight:'700'}}>Add trusted contacts</Text> so they’re alerted in an emergency.</Text>
+                ? <TouchableOpacity onPress={()=>router.push('/trusted-contacts')} accessibilityRole="link" accessibilityLabel="Add trusted contacts" style={S.minTouch}>
+                    <Text style={S.rowDesc}>No trusted contacts yet. <Text style={S.linkText}>Add trusted contacts</Text> so they’re alerted in an emergency.</Text>
                   </TouchableOpacity>
                 : contacts.map((c)=>(
-                    <View key={c.userId} style={[S.settingRow,{borderColor:colors.danger+'26'}]}>
+                    <View key={c.userId} style={[S.settingRow,{borderColor:colors.danger+'26'}]} accessible accessibilityLabel={`${c.name || c.vaultId || 'Contact'}, ${c.online ? 'online' : 'offline'}`}>
                       <Ionicons name="people-circle-outline" size={30} color={colors.danger} />
-                      <View style={{flex:1}}>
-                        <Text numberOfLines={1} style={{color:colors.text,fontSize:13,fontWeight:'700'}}>{c.name || c.vaultId || 'Contact'}</Text>
-                        {c.vaultId && <Text style={{color:colors.textFaint,fontSize:11,marginTop:2}}>@{c.vaultId}</Text>}
+                      <View style={S.flex1}>
+                        <Text numberOfLines={1} style={S.rowTitle}>{c.name || c.vaultId || 'Contact'}</Text>
+                        {c.vaultId && <Text style={S.handle}>@{c.vaultId}</Text>}
                       </View>
-                      <View style={{backgroundColor:(c.online?colors.accent:colors.textFaint)+'18',borderRadius:8,paddingHorizontal:8,paddingVertical:4,borderWidth:1,borderColor:c.online?colors.accent:colors.textFaint}}><Text style={{color:c.online?colors.accent:colors.textFaint,fontSize:11,fontWeight:'700'}}>{c.online?'ONLINE':'OFFLINE'}</Text></View>
+                      <View style={[S.presence,{backgroundColor:(c.online?colors.accent:colors.textFaint)+'18',borderColor:c.online?colors.accent:colors.textFaint}]}><Text style={[S.presenceText,{color:c.online?colors.accent:colors.textFaint}]}>{c.online?'ONLINE':'OFFLINE'}</Text></View>
                     </View>
                   ))}
             </View>
@@ -367,14 +385,49 @@ export default function NotificationsScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   container:{flex:1,backgroundColor: 'transparent'},
+  flex1:{flex:1},
   header:{flexDirection:'row',alignItems:'center',paddingHorizontal:18,paddingTop:HEADER_TOP,paddingBottom:14,gap:10},
   title:{color:c.text,fontSize:20,fontWeight:'900'},
+  subtitle:{color:c.textFaint,fontSize:11,letterSpacing:1.5},
   backBtn:{width:44,height:44,borderRadius:22,backgroundColor:c.glass,justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:c.glassStroke},
   tabs:{flexDirection:'row',marginHorizontal:18,backgroundColor:c.glass,borderRadius:14,padding:4,marginBottom:14,borderWidth:1,borderColor:c.glassStroke},
   tab:{flex:1,minHeight:44,paddingVertical:9,alignItems:'center',justifyContent:'center',borderRadius:10},
   tabActive:{backgroundColor:brandAlpha(0.12),borderWidth:1,borderColor:c.primary},
   tabText:{fontSize:12,fontWeight:'800',letterSpacing:0.5},
+  scrollContent:{paddingHorizontal:18,paddingBottom:24},
+  spinner:{marginTop:30},
+  errorBox:{alignItems:'center',marginTop:36,gap:12},
+  errorText:{color:c.textDim,textAlign:'center',fontSize:13},
+  retryRow:{paddingHorizontal:20,minHeight:44},
+  retryText:{color:c.primary,fontSize:14,fontWeight:'700'},
+  emptyText:{color:c.textFaint,textAlign:'center',marginTop:36,fontSize:13},
   alertRow:{backgroundColor:c.glass,borderRadius:16,padding:14,marginBottom:8,borderWidth:1,borderColor:c.glassStroke,borderLeftWidth:3},
+  alertHead:{flexDirection:'row',alignItems:'center',gap:8,marginBottom:4},
+  typeBadge:{borderRadius:5,paddingHorizontal:5,paddingVertical:2,borderWidth:1},
+  typeBadgeText:{fontSize:11,fontWeight:'800',letterSpacing:1},
+  alertTitle:{color:c.text,fontSize:12,fontWeight:'800'},
+  alertBody:{color:c.textDim,fontSize:12,lineHeight:17},
+  alertTime:{color:c.textFaint,fontSize:11,marginTop:6},
+  settingsWrap:{marginTop:4},
+  sectionLabel:{color:c.textFaint,fontSize:11,fontWeight:'800',letterSpacing:1.5,marginBottom:10},
+  sectionGap:{marginTop:18},
+  minTouch:{minHeight:44,justifyContent:'center'},
   settingRow:{flexDirection:'row',alignItems:'center',backgroundColor:c.glass,borderRadius:16,padding:14,marginBottom:8,borderWidth:1,borderColor:c.glassStroke,gap:12},
   settingIcon:{width:40,height:40,borderRadius:20,backgroundColor:c.glassSoft,justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:c.glassStroke},
+  rowTitle:{color:c.text,fontSize:13,fontWeight:'700'},
+  rowDesc:{color:c.textFaint,fontSize:12,marginTop:2},
+  rowDescDim:{color:c.textDim,fontSize:12},
+  footnote:{color:c.textFaint,fontSize:12,lineHeight:17,marginTop:2},
+  linkText:{color:c.primary,fontWeight:'700'},
+  handle:{color:c.textFaint,fontSize:11,marginTop:2},
+  presence:{borderRadius:8,paddingHorizontal:8,paddingVertical:4,borderWidth:1},
+  presenceText:{fontSize:11,fontWeight:'700'},
+  panicWrap:{gap:16},
+  panicNotice:{backgroundColor:c.danger+'14',borderRadius:16,padding:16,borderWidth:1,borderColor:c.danger+'40'},
+  panicNoticeTitle:{color:c.danger,fontSize:12,fontWeight:'800',marginBottom:6},
+  panicNoticeBody:{color:c.textDim,fontSize:12,lineHeight:18},
+  panicFrame:{borderRadius:22,borderWidth:2,overflow:'hidden'},
+  panicFill:{padding:28,alignItems:'center',gap:8},
+  panicLabel:{fontSize:17,fontWeight:'900',letterSpacing:2},
+  panicHint:{fontSize:12},
 });

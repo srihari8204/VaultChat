@@ -16,15 +16,16 @@ import {
 } from '../lib/sounds';
 import { AppText as Text, AuroraBackground } from '../components/ui';
 
-// The Switch thumb stays white in both themes (the platform look). colors.card
-// would turn it near-black on the dark theme's dark track and lose it.
-const THUMB = '#FFFFFF';
-
 export default function NotificationSoundsScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const s = useMemo(() => makeStyles(colors), [colors]);
   const [prefs, setPrefs] = useState<SoundPrefs | null>(null);
+  // One ringtone save at a time: two quick taps raced two saves and two previews.
+  const [savingTone, setSavingTone] = useState(false);
+  // The Switch thumb is the on-primary ink (white in both themes, the platform
+  // look). colors.card would turn it near-black on the dark theme's dark track.
+  const thumb = colors.onPrimary;
 
   useEffect(() => {
     getSoundPrefs().then(setPrefs);
@@ -39,7 +40,11 @@ export default function NotificationSoundsScreen() {
   };
 
   const pickRingtone = async (id: string) => {
-    if (await patch({ ringtone: id })) previewRingtone(id);   // play it once so they hear the choice
+    if (savingTone) return;
+    setSavingTone(true);
+    try {
+      if (await patch({ ringtone: id })) previewRingtone(id);   // play it once so they hear the choice
+    } finally { setSavingTone(false); }
   };
 
   if (!prefs) return <View style={[s.root, { justifyContent: 'center' }]}><ActivityIndicator color={colors.primary} /></View>;
@@ -55,10 +60,10 @@ export default function NotificationSoundsScreen() {
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <View style={s.header}>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.iconBtn} hitSlop={8}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => (router.canGoBack() ? router.back() : router.replace('/settings'))} style={s.iconBtn} hitSlop={8}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={s.headerTitle}>Notifications & Sounds</Text>
+        <Text style={s.headerTitle} accessibilityRole="header">Notifications & Sounds</Text>
       </View>
 
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
@@ -75,7 +80,7 @@ export default function NotificationSoundsScreen() {
             onValueChange={(v) => { void patch({ messageSounds: v }); }}
             accessibilityLabel="In-app message sounds"
             trackColor={{ true: colors.primary, false: colors.border }}
-            thumbColor={THUMB}
+            thumbColor={thumb}
           />
         </View>
 
@@ -91,7 +96,7 @@ export default function NotificationSoundsScreen() {
             onValueChange={(v) => { void patch({ vibrate: v }); }}
             accessibilityLabel="Vibrate on incoming call"
             trackColor={{ true: colors.primary, false: colors.border }}
-            thumbColor={THUMB}
+            thumbColor={thumb}
           />
         </View>
 
@@ -106,9 +111,10 @@ export default function NotificationSoundsScreen() {
               key={rt.id}
               style={s.row}
               onPress={() => pickRingtone(rt.id)}
+              disabled={savingTone}
               activeOpacity={0.7}
               accessibilityRole="radio"
-              accessibilityState={{ checked: on }}
+              accessibilityState={{ checked: on, disabled: savingTone }}
               accessibilityLabel={rt.preview ? `${rt.name}, plays a preview` : rt.name}
             >
               <Ionicons name={on ? 'radio-button-on' : 'radio-button-off'} size={22} color={on ? colors.primary : colors.textDim} />

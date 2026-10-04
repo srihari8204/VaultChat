@@ -14,9 +14,6 @@ import {
 } from '../lib/visionComfort';
 
 const TRACK_HEIGHT = 192;
-// Label colour on solid primary fills. The palette has no on-primary token;
-// white is the brand's button text in both themes.
-const ON_PRIMARY = '#FFFFFF';
 
 // Sight descriptions, keyed by id so the hint logic does not depend on copy.
 // `larger`: the description is about near text, so start from a larger level.
@@ -35,7 +32,10 @@ const sameProfile = (a: VisionProfile, b: VisionProfile) =>
 
 export default function VisionComfortScreen() {
   const router = useRouter();
-  const { eyeCheckSuggestion, eyeCheckGlasses } = useLocalSearchParams<{ eyeCheckSuggestion?: string; eyeCheckGlasses?: string }>();
+  // Eye Check returns here with dismissTo (it pops back to this same screen
+  // instead of stacking a second one), so the suggestion can arrive after this
+  // screen has already initialised. eyeCheckAt tells one result from the next.
+  const { eyeCheckSuggestion, eyeCheckGlasses, eyeCheckAt } = useLocalSearchParams<{ eyeCheckSuggestion?: string; eyeCheckGlasses?: string; eyeCheckAt?: string }>();
   const { colors, scheme } = useTheme();
   const previewColors = PALETTES[scheme];
   const { ready, activeProfile, profiles, saveProfile, setActiveProfile, resetProfile } = useVisionComfort();
@@ -45,6 +45,7 @@ export default function VisionComfortScreen() {
   const [sightStep, setSightStep] = useState(true);
   const [sightKind, setSightKind] = useState<SightKindId | null>(null);
   const initialized = useRef(false);
+  const appliedCheck = useRef<string | undefined>(undefined);
 
   // Leaving with unsaved edits asks first, the same way switching profile does.
   // beforeRemove covers the Back button, hardware back and the swipe gesture.
@@ -64,14 +65,17 @@ export default function VisionComfortScreen() {
   }), [navigation]);
 
   useEffect(() => {
-    if (!ready || initialized.current) return;
+    if (!ready) return;
+    const freshCheck = eyeCheckSuggestion !== undefined && appliedCheck.current !== eyeCheckAt;
+    if (initialized.current && !freshCheck) return;
     initialized.current = true;
+    appliedCheck.current = eyeCheckAt;
     const key = eyeCheckSuggestion !== undefined ? (eyeCheckGlasses === 'without' ? 'without-glasses' : 'with-glasses') : activeProfile;
     setSelected(key);
     setDraft(eyeCheckSuggestion === '1'
       ? { ...profiles[key], level: Math.max(2, profiles[key].level), highContrast: true, reduceTransparency: true }
       : profiles[key]);
-  }, [ready, activeProfile, profiles, eyeCheckSuggestion, eyeCheckGlasses]);
+  }, [ready, activeProfile, profiles, eyeCheckSuggestion, eyeCheckGlasses, eyeCheckAt]);
 
   const chooseProfile = (key: VisionProfileKey) => {
     if (key === selected) return;
@@ -145,7 +149,7 @@ export default function VisionComfortScreen() {
       <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
         <View style={s.container}>
           <View style={s.header}>
-            <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.iconButton}>
+            <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={() => (router.canGoBack() ? router.back() : router.replace('/settings'))} style={s.iconButton}>
               <Ionicons name="arrow-back" size={24} color={colors.text} />
             </Pressable>
             <Text style={s.title} accessibilityRole="header">Vision Comfort</Text>
@@ -155,22 +159,22 @@ export default function VisionComfortScreen() {
               <Text style={[s.intro, { color: colors.textDim }]}>Drag until this chat looks clear and comfortable. You decide what works best for your sight.</Text>
               {eyeCheckSuggestion !== undefined && <View style={[s.checkCard, { backgroundColor: colors.surfaceSolid, borderColor: colors.glassStroke }]}><Text style={s.checkTitle}>Eye Check display suggestion</Text><Text style={[s.checkStep, { color: colors.textDim }]}>{eyeCheckSuggestion === '1' ? 'A starting preview with larger text, higher contrast and solid backgrounds is ready below.' : 'Your existing display profile is ready below. Adjust it if reading feels uncomfortable.'} Check the sample chat with both eyes and change anything you need before saving.</Text><Text style={[s.checkNote, { color: colors.textDim }]}>This changes app readability only. It does not measure or correct spectacle power.</Text></View>}
 
-              <Text style={[s.sectionTitle, { color: colors.textDim }]}>PROFILE</Text>
-              <View style={s.profileRow}>
+              <Text style={[s.sectionTitle, { color: colors.textDim }]} accessibilityRole="header">PROFILE</Text>
+              <View style={s.profileRow} accessibilityRole="radiogroup" accessibilityLabel="Display profile">
                 {([
                   ['with-glasses', 'With glasses', 'glasses-outline'],
                   ['without-glasses', 'Without glasses', 'eye-outline'],
                 ] as const).map(([key, label, icon]) => (
-                  <Pressable key={key} accessibilityRole="button" accessibilityState={{ selected: selected === key }}
+                  <Pressable key={key} accessibilityRole="radio" accessibilityState={{ checked: selected === key }}
                     onPress={() => chooseProfile(key)}
                     style={[s.profileButton, { backgroundColor: selected === key ? colors.primary : colors.surfaceSolid, borderColor: selected === key ? colors.primary : colors.glassStroke }]}>
-                    <Ionicons name={icon} size={20} color={selected === key ? ON_PRIMARY : colors.text} />
-                    <Text style={[s.profileLabel, { color: selected === key ? ON_PRIMARY : colors.text }]}>{label}</Text>
+                    <Ionicons name={icon} size={20} color={selected === key ? colors.onPrimary : colors.text} />
+                    <Text style={[s.profileLabel, { color: selected === key ? colors.onPrimary : colors.text }]}>{label}</Text>
                   </Pressable>
                 ))}
               </View>
 
-              <Text style={[s.sectionTitle, { color: colors.textDim }]}>LIVE PREVIEW</Text>
+              <Text style={[s.sectionTitle, { color: colors.textDim }]} accessibilityRole="header">LIVE PREVIEW</Text>
               <View style={[s.previewRow, { backgroundColor: draft.reduceTransparency || draft.highContrast ? previewColors.surfaceSolid : previewColors.glassSoft, borderColor: previewColors.glassStroke }]}>
                 <View style={s.chatPreview}>
                   <NativeText style={[s.sender, { color: previewColors.text, fontSize: fontSize + 1, lineHeight: Math.ceil((fontSize + 1) * 1.4 * metrics.lineScale), fontWeight: metrics.bold ? '700' : '600' }]}>Ravi</NativeText>
@@ -180,7 +184,7 @@ export default function VisionComfortScreen() {
                     <NativeText style={{ color: draft.highContrast ? textColor : previewColors.bubbleMetaIn, fontSize: Math.max(13, fontSize - 3), marginTop: 6 }}>Today · 6:12 PM</NativeText>
                   </View>
                   <View style={[s.sampleControl, { backgroundColor: previewColors.primary, minHeight: Math.max(44, Math.round(44 * metrics.controlScale)) }]}>
-                    <NativeText style={{ color: ON_PRIMARY, fontSize: Math.max(15, fontSize - 1), fontWeight: '700' }}>Reply</NativeText>
+                    <NativeText style={{ color: previewColors.onPrimary, fontSize: Math.max(15, fontSize - 1), fontWeight: '700' }}>Reply</NativeText>
                   </View>
                 </View>
                 <View style={s.sliderColumn}>
@@ -234,7 +238,7 @@ export default function VisionComfortScreen() {
                 {sightKind === 'short' && <Text style={[s.optionHint, { color: colors.textDim }]}>This phone preview checks near-screen comfort only. Distance sight needs a measured-distance chart or an eye examination.</Text>}
                 <View style={s.sightActions}>
                   <Pressable accessibilityRole="button" onPress={() => finishSightStep(false)} style={s.sightAction}><Text style={{ color: colors.textDim }}>Skip</Text></Pressable>
-                  <Pressable accessibilityRole="button" onPress={() => finishSightStep(true)} style={[s.sightAction, { backgroundColor: colors.primary }]}><Text style={{ color: ON_PRIMARY, fontWeight: '700' }}>Use starting hint</Text></Pressable>
+                  <Pressable accessibilityRole="button" onPress={() => finishSightStep(true)} style={[s.sightAction, { backgroundColor: colors.primary }]}><Text style={{ color: colors.onPrimary, fontWeight: '700' }}>Use starting hint</Text></Pressable>
                 </View>
               </View>}
 
@@ -244,21 +248,21 @@ export default function VisionComfortScreen() {
                     <Text style={s.optionTitle}>Higher contrast</Text>
                     <Text style={[s.optionHint, { color: colors.textDim }]}>Make chat text and surfaces easier to distinguish</Text>
                   </View>
-                  <Switch accessibilityLabel="Higher contrast" value={draft.highContrast} onValueChange={highContrast => setDraft(current => ({ ...current, highContrast }))} trackColor={{ true: colors.primary }} />
+                  <Switch accessibilityLabel="Higher contrast" value={draft.highContrast} onValueChange={highContrast => setDraft(current => ({ ...current, highContrast }))} trackColor={{ true: colors.primary }} thumbColor={colors.onPrimary} />
                 </View>
                 <View style={s.optionRow}>
                   <View style={s.optionCopy}>
                     <Text style={s.optionTitle}>Reduce transparency</Text>
                     <Text style={[s.optionHint, { color: colors.textDim }]}>Use solid surfaces behind content</Text>
                   </View>
-                  <Switch accessibilityLabel="Reduce transparency" value={draft.reduceTransparency} onValueChange={reduceTransparency => setDraft(current => ({ ...current, reduceTransparency }))} trackColor={{ true: colors.primary }} />
+                  <Switch accessibilityLabel="Reduce transparency" value={draft.reduceTransparency} onValueChange={reduceTransparency => setDraft(current => ({ ...current, reduceTransparency }))} trackColor={{ true: colors.primary }} thumbColor={colors.onPrimary} />
                 </View>
               </View>
 
               <Text style={[s.note, { color: colors.textDim }]}>This adjusts the app display for comfort. It does not correct eyesight or replace glasses or an eye examination.</Text>
               <Pressable accessibilityRole="button" accessibilityLabel="Save my Vision Comfort settings" accessibilityState={{ disabled: busy, busy }} disabled={busy} onPress={save}
                 style={[s.saveButton, { backgroundColor: colors.primary, opacity: busy ? 0.6 : 1 }]}>
-                {busy ? <ActivityIndicator color={ON_PRIMARY} /> : <Text style={s.saveLabel}>✓ This looks clear · Save</Text>}
+                {busy ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={[s.saveLabel, { color: colors.onPrimary }]}>✓ This looks clear · Save</Text>}
               </Pressable>
               <Pressable accessibilityRole="button" accessibilityLabel="Reset selected Vision Comfort profile" accessibilityState={{ disabled: busy }} disabled={busy} onPress={reset} style={s.resetButton}>
                 <Text style={[s.resetLabel, { color: colors.textDim }]}>Reset this profile</Text>
@@ -315,7 +319,7 @@ const s = StyleSheet.create({
   optionHint: { fontSize: 12, lineHeight: 18, marginTop: 3 },
   note: { marginTop: 18, fontSize: 12, lineHeight: 18 },
   saveButton: { marginTop: 18, minHeight: 52, borderRadius: 12, alignItems: 'center', justifyContent: 'center', padding: 10 },
-  saveLabel: { color: ON_PRIMARY, fontSize: 16, fontWeight: '800', textAlign: 'center' },
+  saveLabel: { fontSize: 16, fontWeight: '800', textAlign: 'center' },
   resetButton: { minHeight: 48, alignItems: 'center', justifyContent: 'center', marginTop: 4 },
   resetLabel: { fontSize: 14, fontWeight: '600' },
 });
