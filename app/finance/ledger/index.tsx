@@ -1,11 +1,12 @@
 // app/finance/ledger/index.tsx — Ledger Book list (All / Lent / Borrowed) with
-// status filtering and a 30-second undo-delete snackbar.
+// status filtering and a 30-second undo-delete snackbar. The detail screen's
+// Delete hands its ledger here (`deleteId`), so both deletes undo the same way.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFinanceTheme } from '../../../components/finance/useFinanceTheme';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, Animated, Alert, AccessibilityInfo, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { financeStatusColors, TABULAR, FIN_SHADOW, type FinancePalette } from '../../../constants/financeTheme';
 import { FinHeader, Segment, Pill, EmptyState, LoadingState, ErrorState } from '../../../components/finance/ui';
@@ -28,14 +29,16 @@ export default function LedgerList() {
   const me = useMe();
   const [filter, setFilter] = useState<Filter>('all');
   const [rows, setRows] = useState<LedgerEntry[]>([]);
-  const [pendingDelete, setPendingDelete] = useState<LedgerEntry | null>(null);
-  // The earlier delete a second long-press made final, so the snackbar says so.
-  const [madeFinal, setMadeFinal] = useState<string | null>(null);
+  // Deletes still inside their undo window. Several can wait together: one
+  // Undo puts them all back, and the window restarts with each new delete.
+  const [pending, setPending] = useState<LedgerEntry[]>([]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const snack = useRef(new Animated.Value(0)).current;
+  const { deleteId } = useLocalSearchParams<{ deleteId?: string }>();
 
-  const pendingRef = useRef<LedgerEntry | null>(null);
-  pendingRef.current = pendingDelete;
+  // Kept current synchronously (not only on render), so a reload that lands
+  // between a delete and its re-render still hides the row.
+  const pendingRef = useRef<LedgerEntry[]>([]);
 
   const { status, begin, done, fail } = useLoadStatus();
   const reload = useCallback(() => {
@@ -45,7 +48,7 @@ export default function LedgerList() {
     // far as the user knows: opening another ledger and coming back used to
     // show it again under a snackbar saying "Ledger deleted".
     listLedger(me.id)
-      .then(r => { const p = pendingRef.current; setRows(p ? r.filter(x => x.id !== p.id) : r); done(); })
+      .then(r => { const p = pendingRef.current; setRows(r.filter(x => !p.some(d => d.id === x.id))); done(); })
       .catch(fail);
   }, [me, begin, done, fail]);
   useFocusEffect(reload);
@@ -55,26 +58,40 @@ export default function LedgerList() {
     [rows, filter],
   );
 
+  const setPendingNow = (next: LedgerEntry[]) => { pendingRef.current = next; setPending(next); };
+
   const askDelete = (e: LedgerEntry) => {
-    // optimistic remove + start the 30s undo window
+    if (pendingRef.current.some(d => d.id === e.id)) return;
+    // optimistic remove + (re)start the 30s undo window
     setRows(prev => prev.filter(r => r.id !== e.id));
-    // COMMIT THE PREVIOUS ONE FIRST (2026-09-17). This used to be a bare
-    // clearTimeout, which cancelled the pending finalizeDelete WITHOUT running
-    // it — so deleting two entries inside 30s removed both from the list but
-    // only ever deleted the second. The first silently came back on the next
-    // reload, after the user had been told it was gone. Only ONE delete can be
-    // undoable at a time, so the earlier one is committed, not dropped.
-    const prev = timer.current && pendingDelete ? pendingDelete : null;
-    if (timer.current) { clearTimeout(timer.current); if (pendingDelete) finalizeDelete(pendingDelete.id); }
-    setPendingDelete(e);
-    setMadeFinal(prev ? prev.name : null);
+    // A second delete inside the window used to commit the first (and, before
+    // 2026-09-17, silently drop it). Now it joins the queue: nothing is
+    // committed early, and the timer below commits every queued delete.
+    const next = [...pendingRef.current, e];
+    setPendingNow(next);
+    if (timer.current) clearTimeout(timer.current);
     Animated.timing(snack, { toValue: 1, duration: 180, useNativeDriver: true }).start();
-    timer.current = setTimeout(() => finalizeDelete(e.id), 30000);
+    timer.current = setTimeout(finalizeDeletes, 30000);
     // accessibilityLiveRegion on the snackbar is Android-only; iOS hears it here.
     if (Platform.OS === 'ios') {
-      AccessibilityInfo.announceForAccessibility(`${e.name} deleted. Undo is available for 30 seconds.${prev ? ` Deleting ${prev.name} can no longer be undone.` : ''}`);
+      AccessibilityInfo.announceForAccessibility(next.length > 1
+        ? `${e.name} deleted. Undo is available for 30 seconds and puts back all ${next.length} ledgers.`
+        : `${e.name} deleted. Undo is available for 30 seconds.`);
     }
   };
+
+  // The detail screen's Delete arrives as `deleteId` (it pops back here with
+  // dismissTo), once the row is on screen; the param is then cleared so a
+  // later focus does not delete it again.
+  useEffect(() => {
+    if (!deleteId || status !== 'ready') return;
+    const row = rows.find(r => r.id === deleteId);
+    router.setParams({ deleteId: undefined });
+    if (row) askDelete(row);
+    // askDelete reads only refs and setters; re-running on its identity would
+    // be per render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deleteId, status, rows, router]);
 
   // FLUSH ON THE WAY OUT. The 30s timer dies with the screen, so leaving inside
   // the window abandoned a delete the snackbar had already reported as done —
@@ -82,32 +99,37 @@ export default function LedgerList() {
   // user already made; unmounting is not an undo.
   useEffect(() => () => {
     if (timer.current) clearTimeout(timer.current);
-    const p = pendingRef.current;
     // The screen is gone, so there is nowhere to show a failure; the row simply
     // reappears on the next visit, which is the truthful outcome.
-    if (p) deleteLedger(p.id).catch(() => {});
+    for (const p of pendingRef.current) deleteLedger(p.id).catch(() => {});
   }, []);
-  const finalizeDelete = (id: string) => {
+  function finalizeDeletes() {
+    timer.current = null;
+    const due = pendingRef.current;
+    setPendingNow([]);
     // A failed delete used to vanish silently while the snackbar said
     // "deleted"; the ledger came back on the next visit with no explanation.
-    deleteLedger(id).catch((err: any) => {
-      Alert.alert('Could not delete the ledger', `${err?.message ?? 'It is still in your ledger book.'}`);
-      reload();
-    });
-    setPendingDelete(null);
+    for (const p of due) {
+      deleteLedger(p.id).catch((err: any) => {
+        Alert.alert('Could not delete the ledger', `${p.name}: ${err?.message ?? 'It is still in your ledger book.'}`);
+        reload();
+      });
+    }
     Animated.timing(snack, { toValue: 0, duration: 180, useNativeDriver: true }).start();
-  };
+  }
   const undo = () => {
-    if (!pendingDelete) return;
+    const back = pendingRef.current;
+    if (!back.length) return;
     if (timer.current) clearTimeout(timer.current);
-    // Cleared first, so the reload below shows the restored row.
-    pendingRef.current = null;
-    restoreLedger(pendingDelete)
+    timer.current = null;
+    // Cleared first, so the reload below shows the restored rows.
+    setPendingNow([]);
+    Promise.all(back.map(p => restoreLedger(p)))
       .catch((err: any) => Alert.alert('Could not undo', err?.message ?? 'The ledger could not be restored.'))
       .finally(reload);
-    setPendingDelete(null);
     Animated.timing(snack, { toValue: 0, duration: 180, useNativeDriver: true }).start();
   };
+  const last = pending[pending.length - 1];
 
   return (
     <View style={s.screen}>
@@ -186,12 +208,15 @@ export default function LedgerList() {
         <Text style={s.fabTxt}>Add New Ledger</Text>
       </TouchableOpacity>
 
-      {pendingDelete && (
+      {last && (
         <Animated.View accessibilityLiveRegion="polite" style={[s.snack, { bottom: insets.bottom + 84, opacity: snack, transform: [{ translateY: snack.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }]}>
           <Text style={s.snackTxt}>
-            {pendingDelete.name} deleted{madeFinal ? `. Deleting ${madeFinal} is now final` : ''}
+            {pending.length > 1 ? `${pending.length} ledgers deleted` : `${last.name} deleted`}
           </Text>
-          <TouchableOpacity onPress={undo} style={s.snackAct} accessibilityRole="button" accessibilityLabel={`Undo deleting ${pendingDelete.name}`}><Text style={s.snackBtn}>UNDO</Text></TouchableOpacity>
+          <TouchableOpacity onPress={undo} style={s.snackAct} accessibilityRole="button"
+            accessibilityLabel={pending.length > 1 ? `Undo deleting ${pending.map(p => p.name).join(', ')}` : `Undo deleting ${last.name}`}>
+            <Text style={s.snackBtn}>UNDO</Text>
+          </TouchableOpacity>
         </Animated.View>
       )}
     </View>

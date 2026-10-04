@@ -10,6 +10,11 @@ import type { ChittiCollection, CollectionStatus } from '../../../db/chitti';
 /** Tapping a dues row moves it along this cycle. */
 export const CYCLE: CollectionStatus[] = ['pending', 'paid', 'overdue'];
 
+/** Member and dues rows are drawn this many at a time ("Show N more"): the
+ *  group screen is one ScrollView, so the rows are not virtualised. A typical
+ *  group (10–60 members) shows in full; a very large one stays bounded. */
+export const ROW_PAGE = 100;
+
 export const getCollectionMeta = (FIN: FinancePalette): Record<CollectionStatus, { fg: string; bg: string; label: string; icon: keyof typeof Ionicons.glyphMap }> => ({
   paid:    { fg: FIN.good, bg: FIN.goodSoft, label: 'Paid',    icon: 'checkmark-circle' },
   pending: { fg: FIN.warn, bg: FIN.warnSoft, label: 'Pending', icon: 'ellipse-outline' },

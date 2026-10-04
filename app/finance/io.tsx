@@ -281,6 +281,8 @@ export default function FinanceIO() {
             kind="ghost" icon="cloud-upload-outline" onPress={onImport} wide disabled={!!busy}
           />
         </View>
+        {/* Says why both buttons are off, next to them, not only in the spinner. */}
+        {busy && <Text style={[s.hint, { marginTop: 8 }]}>Export and import are paused until this finishes.</Text>}
         {busy && <LoadingState label={busy} />}
 
         <Text style={s.hint}>

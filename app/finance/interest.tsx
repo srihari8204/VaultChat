@@ -15,11 +15,14 @@ import type { LedgerPeriod } from '../../utils/finance';
 import { calculateInterest, compoundingFor, compoundingWord, COMPOUNDING } from '../../lib/finance/compounding';
 import { insertInterest } from '../../db/interestHistory';
 import { sharePdf, pdfDocument, kvTable } from '../../utils/financeIO';
+import { useRouter } from 'expo-router';
+import { ledgerPrefillParams } from '../../components/finance/ledgerPrefill';
 
 export default function InterestCalc() {
   const FIN = useFinanceTheme();
   const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   const me = useMe();
+  const router = useRouter();
   const [type, setType] = useState<InterestType>('simple');
   const [principal, setPrincipal] = useState('');
   const [rateMode, setRateMode] = useState<'percent' | 'rupees'>('percent');
@@ -39,6 +42,8 @@ export default function InterestCalc() {
     interest: number; total: number; years: number;
     type: InterestType; principal: number; rate: number; rateMode: 'percent' | 'rupees'; period: LedgerPeriod;
     perYear: number; timeMode: 'dates' | 'duration';
+    /** The term as dates, for "Save as ledger" (a duration starts today). */
+    start: number; end: number;
   } | null>(null);
   const picker = useDatePicker();
 
@@ -53,10 +58,12 @@ export default function InterestCalc() {
     // 0% is a real (family) loan — same rule as the ledger forms and EMI.
     if (!Number.isFinite(R) || R < 0) return Alert.alert('Rate', 'Enter an interest rate of 0 or more.');
     let years: number;
+    let start = Date.now();
     if (timeMode === 'dates') {
       if (!from) return Alert.alert('From date', 'Pick a start date.');
       if (to <= from) return Alert.alert('Dates', 'End date must be after start date.');
       years = (to - from) / 31536000000;
+      start = from;
     } else {
       // `|| 0` SWALLOWED THE HARDENED PARSER (2026-09-17). num() returns NaN
       // for a half-typed "1,2" so that `!(x > 0)` can reject it — but `|| 0`
@@ -88,7 +95,8 @@ export default function InterestCalc() {
     if (!Number.isFinite(r.total) || Math.abs(r.total) > Number.MAX_SAFE_INTEGER) {
       return Alert.alert('Out of range', 'That rate and duration produce a number too large to calculate. Try a shorter duration or a lower rate.');
     }
-    const out = { interest: round2(r.interest), total: round2(r.total), years, type, principal: P, rate: R, rateMode, period, perYear, timeMode };
+    // The ledger counts years the same way (utils/financeRules ledgerInterest).
+    const out = { interest: round2(r.interest), total: round2(r.total), years, type, principal: P, rate: R, rateMode, period, perYear, timeMode, start, end: start + years * 31536000000 };
     setRes(out);
     if (me) {
       try {
@@ -203,10 +211,17 @@ export default function InterestCalc() {
                 <RowLine k="Daily interest" v={formatINR(daily)} />
                 <RowLine k="Duration" v={`${res.years.toFixed(2)} years`} />
                 <Text style={s.note}>{conventionNote(res.timeMode)}</Text>
-                {res.type === 'compound' && <Text style={s.note}>{LEDGER_NOTE}</Text>}
+                {res.type === 'compound' && <Text style={s.note}>{SCREEN_LEDGER_NOTE}</Text>}
               </Card>
               <View style={s.btnRow}>
                 <Btn label="Share PDF" kind="ghost" icon="share-outline" onPress={onShare} wide />
+              </View>
+              {/* The ledger gets these exact terms, compounding included, so it
+                  shows this interest whatever a new ledger defaults to. Its own
+                  row: two labels side by side truncate at 320dp. */}
+              <View style={[s.btnRow, { marginTop: 12 }]}>
+                <Btn label="Save as ledger" kind="ghost" icon="book-outline" wide
+                  onPress={() => router.push({ pathname: '/finance/ledger/new', params: ledgerPrefillParams(res) })} />
               </View>
             </>
           )}
@@ -219,6 +234,8 @@ export default function InterestCalc() {
 
 /** A ledger with the same terms gives this answer only with the same compounding. */
 const LEDGER_NOTE = 'A ledger compounds as chosen on that ledger; ledgers saved before the choice existed compound yearly.';
+/** On screen the note sits above "Save as ledger", which keeps this compounding. */
+const SCREEN_LEDGER_NOTE = 'Save as ledger keeps this compounding. Other ledgers compound as chosen on each; ledgers saved before the choice existed compound yearly.';
 
 /** The day-count convention the duration was turned into years with. */
 function conventionNote(mode: 'dates' | 'duration'): string {

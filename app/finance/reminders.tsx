@@ -143,22 +143,34 @@ export default function Reminders() {
       freq === 'monthly' ? 'Keep day ' + day : 'Keep 29 February',
     )) return;
     // Phones repeat by day and time with no start date, so a series that
-    // starts more than one period ahead also alerts before it starts.
+    // starts more than one period ahead also alerts before it starts. Starting
+    // the series at that first alert instead makes the app and the phone agree
+    // (same day and time, so the same phone trigger; reminderSchedule.selftest).
+    let start = when;
     const { earlyAt } = osTriggerFor(freq, when, Date.now());
-    if (earlyAt != null && !await confirm(
-      'Your phone will alert early',
-      `Phones repeat a reminder from today, so this one will also alert from ${fmtDateTime(earlyAt)}, before its first date, ${fmtDateTime(when)}.`,
-      'Add anyway',
-    )) return;
+    if (earlyAt != null) {
+      const pick = await new Promise<'back' | 'early' | 'keep'>((resolve) => Alert.alert(
+        'Your phone will alert early',
+        `Phones repeat a reminder from today, so this one will also alert from ${fmtDateTime(earlyAt)}, before its first date, ${fmtDateTime(when)}. Start the reminder on ${fmtDateTime(earlyAt)} instead, so the app shows every alert?`,
+        [
+          { text: 'Go back', style: 'cancel', onPress: () => resolve('back') },
+          { text: 'Start earlier', onPress: () => resolve('early') },
+          { text: 'Add anyway', onPress: () => resolve('keep') },
+        ],
+        { cancelable: true, onDismiss: () => resolve('back') },
+      ));
+      if (pick === 'back') return;
+      if (pick === 'early') { start = earlyAt; setWhen(earlyAt); }
+    }
     const ref = params.refType === 'ledger' || params.refType === 'chitti' ? params.refType : null;
     try {
-      const notifId = await scheduleReminder('Vault Finance', title.trim(), freq, when);
+      const notifId = await scheduleReminder('Vault Finance', title.trim(), freq, start);
       await insertReminder({
         user_id: me.id,
         ref_type: ref,
         ref_id: ref ? params.refId ?? null : null,
         // The picked time anchors the series; next_at is its next occurrence.
-        title: title.trim(), freq, next_at: nextOccurrence(freq, when, Date.now()), anchor_at: when, notif_id: notifId,
+        title: title.trim(), freq, next_at: nextOccurrence(freq, start, Date.now()), anchor_at: start, notif_id: notifId,
       });
       if (!notifId) void warnUnscheduled();
       setShowAdd(false); setTitle(''); reload();

@@ -128,4 +128,24 @@ eq('… but not on 29 Feb 2032', phoneSkips({ freq: 'yearly', next_at: 0, anchor
   eq('active reminders are unchanged', historyOccurrences(active, at(2026, 5, 1, 0), at(2026, 6, 1, 0)).map(ymd), [[2026, 5, 5]]);
 }
 
+// ── "Start then instead": re-anchoring at earlyAt removes the early alert ──
+// reminders.tsx offers to start a series at its first early alert. That is a
+// fix only if the re-anchored series has no early alert of its own, keeps the
+// same phone trigger, and its first date IS that alert.
+{
+  const now = at(2026, 10, 4, 15, 30);
+  const cases: [Parameters<typeof osTriggerFor>[0], number][] = [
+    ['monthly', at(2026, 12, 5)], ['monthly', at(2027, 3, 31)], ['weekly', at(2026, 10, 25)],
+    ['daily', at(2026, 10, 7)], ['yearly', at(2028, 10, 4, 9)], ['yearly', at(2032, 2, 29)],
+  ];
+  for (const [freq, anchor] of cases) {
+    const first = osTriggerFor(freq, anchor, now);
+    assert.ok(first.earlyAt != null, `${freq} ${ymd(anchor)} has an early alert`);
+    const moved = osTriggerFor(freq, first.earlyAt!, now);
+    eq(`${freq} ${ymd(anchor).join('-')}: started at its early alert, none is left`, moved.earlyAt, null);
+    eq(`${freq} ${ymd(anchor).join('-')}: … the phone trigger is unchanged`, moved.trigger, first.trigger);
+    eq(`${freq} ${ymd(anchor).join('-')}: … and the first date is that alert`, moved.firstAt, first.earlyAt);
+  }
+}
+
 console.log(`reminderSchedule: ${n} assertions passed`);

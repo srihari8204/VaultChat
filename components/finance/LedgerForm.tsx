@@ -17,6 +17,7 @@ import type { LedgerPeriod } from '../../utils/finance';
 import { ledgerInterest, ledgerCompounding } from '../../utils/financeRules';
 import { COMPOUNDING, ledgerInterestTypeLabel } from '../../lib/finance/compounding';
 import { checkLedgerForm } from './ledgerFormRules';
+import type { LedgerPrefill } from './ledgerPrefill';
 
 export interface LedgerFormValues {
   direction: 'lend' | 'borrow'; name: string; mobile: string | null;
@@ -26,9 +27,11 @@ export interface LedgerFormValues {
   compounding: number | null;
 }
 
-export function LedgerForm({ initial, directionEditable, saveLabel, onSave }: {
+export function LedgerForm({ initial, prefill, directionEditable, saveLabel, onSave }: {
   /** The stored ledger when editing; omitted for a new one. */
   initial?: LedgerFormValues;
+  /** Starting terms for a new ledger (the calculator's "Save as ledger"). */
+  prefill?: LedgerPrefill;
   /** Lend / Borrow can be chosen only when creating. */
   directionEditable: boolean;
   saveLabel: string;
@@ -42,17 +45,18 @@ export function LedgerForm({ initial, directionEditable, saveLabel, onSave }: {
   const [direction, setDirection] = useState<'lend' | 'borrow'>(initial?.direction ?? 'lend');
   const [name, setName] = useState(initial?.name ?? '');
   const [mobile, setMobile] = useState(initial?.mobile ?? '');
-  const [itype, setItype] = useState<'simple' | 'compound'>(initial?.interest_type ?? 'simple');
-  const [principal, setPrincipal] = useState(initial ? String(initial.principal) : '');
-  const [rateMode, setRateMode] = useState<'percent' | 'rupees'>(initial?.rate_mode ?? 'percent');
-  const [rate, setRate] = useState(initial ? String(initial.rate) : '');
-  const [period, setPeriod] = useState<LedgerPeriod>(initial?.period ?? 'monthly');
-  const [start, setStart] = useState<number>(initial?.start_date ?? Date.now());
-  const [end, setEnd] = useState<number | null>(initial?.end_date ?? null);
+  const seed: LedgerPrefill | undefined = initial ?? prefill;
+  const [itype, setItype] = useState<'simple' | 'compound'>(seed?.interest_type ?? 'simple');
+  const [principal, setPrincipal] = useState(seed?.principal != null ? String(seed.principal) : '');
+  const [rateMode, setRateMode] = useState<'percent' | 'rupees'>(seed?.rate_mode ?? 'percent');
+  const [rate, setRate] = useState(seed?.rate != null ? String(seed.rate) : '');
+  const [period, setPeriod] = useState<LedgerPeriod>(seed?.period ?? 'monthly');
+  const [start, setStart] = useState<number>(seed?.start_date ?? Date.now());
+  const [end, setEnd] = useState<number | null>(seed?.end_date ?? null);
   const [notes, setNotes] = useState(initial?.notes ?? '');
   // Yearly unless chosen: every ledger was computed that way before the choice
   // existed, so a stored NULL stays yearly (utils/financeRules ledgerCompounding).
-  const [perYear, setPerYear] = useState<number>(ledgerCompounding({ compounding: initial?.compounding }));
+  const [perYear, setPerYear] = useState<number>(ledgerCompounding({ compounding: seed?.compounding }));
   // After a refused Save the checks run live, so the marked field clears as
   // soon as it is fixed.
   const [tried, setTried] = useState(false);

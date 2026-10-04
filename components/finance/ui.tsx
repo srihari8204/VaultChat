@@ -23,7 +23,7 @@ import { useTheme } from '../../lib/theme';
 import {
   View, Text, TextInput, TouchableOpacity, Pressable, StyleSheet, StatusBar,
   ActivityIndicator, useWindowDimensions,
-  type ViewStyle, type TextStyle, type KeyboardTypeOptions,
+  type ViewStyle, type TextStyle, type StyleProp, type KeyboardTypeOptions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -125,7 +125,7 @@ export function Field(props: {
   /** Password fields (the Full Backup password). */
   secureTextEntry?: boolean; autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters'; autoCorrect?: boolean;
   onBlur?: () => void;
-  style?: ViewStyle | TextStyle | (ViewStyle | TextStyle)[];
+  style?: StyleProp<TextStyle>;
 }) {
   const FIN = useFinanceTheme();
   const s = React.useMemo(() => makeStyles(FIN), [FIN]);
@@ -145,7 +145,7 @@ export function Field(props: {
           multiline && s.fieldMulti,
           focused && s.fieldFocus,
           !!error && s.fieldError,
-          style as any,
+          style,
         ]}
       />
       {error ? <Text style={s.fieldErrTxt} accessibilityLiveRegion="polite">{error}</Text> : null}

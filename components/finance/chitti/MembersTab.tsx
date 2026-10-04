@@ -3,7 +3,7 @@
 // (validated) and address. The form's draft is held by the group screen, so
 // it survives a switch to another tab while only the open tab is rendered.
 
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFinanceTheme } from '../useFinanceTheme';
@@ -12,7 +12,7 @@ import { nextMemberNumber } from '../chittiNumber';
 import {
   insertMember, updateMember, deleteMember, normalizeMobile, type ChittiGroup, type ChittiMember,
 } from '../../../db/chitti';
-import { makeChittiStyles } from './chittiStyles';
+import { makeChittiStyles, ROW_PAGE } from './chittiStyles';
 
 export interface MemberDraft { show: boolean; editingId: string | null; name: string; phone: string; address: string }
 export const EMPTY_MEMBER_DRAFT: MemberDraft = { show: false, editingId: null, name: '', phone: '', address: '' };
@@ -26,6 +26,7 @@ export function MembersTab({ group: g, members, onChanged, draft, setDraft }: {
   const FIN = useFinanceTheme();
   const s = React.useMemo(() => makeChittiStyles(FIN), [FIN]);
 
+  const [limit, setLimit] = useState(ROW_PAGE);
   const { show: showMemberForm, editingId, name: mName, phone: mPhone, address: mAddress } = draft;
   const set = (p: Partial<MemberDraft>) => setDraft(d => ({ ...d, ...p }));
   const setMName = (name: string) => set({ name });
@@ -92,7 +93,7 @@ export function MembersTab({ group: g, members, onChanged, draft, setDraft }: {
           <Text style={s.addRowTxt}>Add member</Text>
         </TouchableOpacity>
       )}
-      {members.length === 0 ? <Text style={s.empty}>No members yet — add them above.</Text> : members.map(m => (
+      {members.length === 0 ? <Text style={s.empty}>No members yet — add them above.</Text> : members.slice(0, limit).map(m => (
         <TouchableOpacity key={m.id} style={s.memRow} activeOpacity={0.85} onPress={() => openEditMember(m)}
           accessibilityRole="button"
           accessibilityLabel={`Member ${m.number}, ${m.name}${m.phone ? `, ${m.phone}` : ''}. Edit`}
@@ -112,6 +113,10 @@ export function MembersTab({ group: g, members, onChanged, draft, setDraft }: {
           </TouchableOpacity>
         </TouchableOpacity>
       ))}
+      {members.length > limit && (
+        <Btn label={`Show ${Math.min(ROW_PAGE, members.length - limit)} more members`} kind="ghost"
+          onPress={() => setLimit(n => n + ROW_PAGE)} style={{ marginTop: 8 }} />
+      )}
     </>
   );
 }

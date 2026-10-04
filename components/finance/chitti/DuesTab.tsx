@@ -1,12 +1,13 @@
 // components/finance/chitti/DuesTab.tsx — one month's dues per member; a tap
 // moves a member along Pending → Paid → Overdue.
 
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFinanceTheme } from '../useFinanceTheme';
 import { markCollection, type ChittiGroup, type ChittiMember, type ChittiCollection } from '../../../db/chitti';
-import { makeChittiStyles, getCollectionMeta, collectionStatus, CYCLE } from './chittiStyles';
+import { makeChittiStyles, getCollectionMeta, collectionStatus, CYCLE, ROW_PAGE } from './chittiStyles';
+import { Btn } from '../ui';
 import { MonthChips } from './MonthChips';
 
 export function DuesTab({ group, members, collections, month, onMonth, onChanged }: {
@@ -23,6 +24,7 @@ export function DuesTab({ group, members, collections, month, onMonth, onChanged
   // latch is held until the re-read has landed: released earlier, a quick
   // second tap read the old status and wrote the same value again.
   const cycling = useRef(false);
+  const [limit, setLimit] = useState(ROW_PAGE);
 
   const cycleStatus = async (m: ChittiMember) => {
     if (cycling.current) return;
@@ -40,7 +42,7 @@ export function DuesTab({ group, members, collections, month, onMonth, onChanged
   return (
     <>
       <MonthChips count={group.duration} value={month} onChange={onMonth} />
-      {members.length === 0 ? <Text style={s.empty}>Add members first to record collections.</Text> : members.map(m => {
+      {members.length === 0 ? <Text style={s.empty}>Add members first to record collections.</Text> : members.slice(0, limit).map(m => {
         const st = collectionStatus(collections, m.id, month);
         const meta = COL_META[st];
         const nextLabel = COL_META[CYCLE[(CYCLE.indexOf(st) + 1) % CYCLE.length]].label;
@@ -58,6 +60,10 @@ export function DuesTab({ group, members, collections, month, onMonth, onChanged
           </TouchableOpacity>
         );
       })}
+      {members.length > limit && (
+        <Btn label={`Show ${Math.min(ROW_PAGE, members.length - limit)} more members`} kind="ghost"
+          onPress={() => setLimit(n => n + ROW_PAGE)} style={{ marginTop: 8 }} />
+      )}
       {members.length > 0 && <Text style={s.hint}>Tap a row to cycle Pending → Paid → Overdue</Text>}
     </>
   );

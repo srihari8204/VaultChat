@@ -9,7 +9,7 @@ import { financeStatusColors, FIN_HERO, TABULAR, type FinancePalette, HERO_INK }
 import { FinHeader, Card, HeroCard, RowLine, Pill, Btn, LoadingState, ErrorState } from '../../../components/finance/ui';
 import { useLoadStatus } from '../../../components/finance/useLoad';
 import { formatINR, fmtDate, fmtDateTime, PERIOD_LABEL } from '../../../utils/financeFormat';
-import { getLedger, deleteLedger, snapshotLedger, restoreLedgerSnapshot, type LedgerEntry } from '../../../db/ledger';
+import { getLedger, type LedgerEntry } from '../../../db/ledger';
 import { listTimeline, type TimelineRow } from '../../../db/financeTimeline';
 import { ledgerInterest, ledgerInterestSoFar } from '../../../utils/financeRules';
 import { ledgerInterestTypeLabel } from '../../../lib/finance/compounding';
@@ -74,26 +74,14 @@ export default function LedgerDetail() {
     try { await sharePdf(html, `ledger-${e.name}`); } catch (err: any) { Alert.alert('Share failed', err?.message ?? 'Try again'); }
   };
 
-  // Like the list's long-press delete, this can be undone: the full record
-  // (repayments and timeline too) is read first and put back on Undo.
-  const onDelete = () => Alert.alert('Delete ledger?', `Delete ${e.name} with its repayments and timeline?`, [
+  // The same undo as the list's long-press: the delete is handed to the Ledger
+  // Book (`deleteId`), which hides the row and shows its 30-second Undo
+  // snackbar before anything is removed. dismissTo pops back to the list when
+  // it is in the stack, and opens it when this screen came from elsewhere
+  // (customer, search, a link).
+  const onDelete = () => Alert.alert('Delete ledger?', `Delete ${e.name} with its repayments and timeline? You can undo this for 30 seconds in the Ledger Book.`, [
     { text: 'Cancel', style: 'cancel' },
-    { text: 'Delete', style: 'destructive', onPress: async () => {
-      try {
-        const snap = await snapshotLedger(e.id);
-        await deleteLedger(e.id);
-        Alert.alert('Ledger deleted', `${e.name} was deleted.`, [
-          { text: 'Undo', onPress: () => {
-            if (!snap) return reload();
-            restoreLedgerSnapshot(snap).then(reload)
-              .catch((err: any) => { Alert.alert('Could not undo', err?.message ?? 'The ledger could not be restored.'); router.back(); });
-          } },
-          { text: 'Done', onPress: () => router.back() },
-          // Not dismissable: tapping outside or Back on Android used to drop
-          // the snapshot with no chance to undo. Undo or Done must be chosen.
-        ], { cancelable: false });
-      } catch (err: any) { Alert.alert('Could not delete', err?.message ?? 'Try again'); }
-    } },
+    { text: 'Delete', style: 'destructive', onPress: () => router.dismissTo({ pathname: '/finance/ledger', params: { deleteId: e.id } }) },
   ]);
 
   return (

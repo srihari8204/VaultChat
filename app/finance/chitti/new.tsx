@@ -12,6 +12,7 @@ import { useMe } from '../../../components/finance/useMe';
 import { fmtDate, num, formatINR } from '../../../utils/financeFormat';
 import { toPaise } from '../../../utils/money';
 import { insertGroup, type ChittiStatus } from '../../../db/chitti';
+import { checkChittiForm, type ChittiFormField } from '../../../components/finance/chittiFormRules';
 
 export default function NewChitti() {
   const FIN = useFinanceTheme();
@@ -29,6 +30,12 @@ export default function NewChitti() {
   // A new group is Active or a Draft. Closed is where a group ends up (by
   // itself after its last auction, or from the group screen), not a start.
   const [status, setStatus] = useState<Exclude<ChittiStatus, 'closed'>>('active');
+  // After a refused Create the checks run live, so each marked field clears as
+  // soon as it is fixed (the LedgerForm pattern).
+  const [tried, setTried] = useState(false);
+  const checked = checkChittiForm({ name, chitValue, installment, members, duration });
+  const errorAt = (f: ChittiFormField) =>
+    tried && 'problems' in checked ? checked.problems.find((p) => p.field === f)?.message : undefined;
 
   // The installment × members check, shown next to the fields as they are
   // typed (paise-exact), and still confirmed on Create.
@@ -40,14 +47,9 @@ export default function NewChitti() {
 
   const onSave = async () => {
     if (!me) return;
-    if (!name.trim()) return Alert.alert('Name', 'Enter a group name.');
-    const cv = num(chitValue), inst = num(installment), mem = num(members), dur = num(duration);
-    if (!(cv > 0)) return Alert.alert('Chit value', 'Enter a chit value greater than 0.');
-    if (!(inst > 0)) return Alert.alert('Installment', 'Enter a monthly installment.');
-    // Whole numbers of at least 1: 0.4 members used to pass `> 0` and then
-    // round to a group of 0, and 2.5 months has no third auction.
-    if (!(Number.isInteger(mem) && mem >= 1)) return Alert.alert('Members', 'Enter the number of members as a whole number, 1 or more.');
-    if (!(Number.isInteger(dur) && dur >= 1)) return Alert.alert('Duration', 'Enter the duration as a whole number of months, 1 or more.');
+    setTried(true);
+    if ('problem' in checked) return Alert.alert(checked.problem.title, checked.problem.message);
+    const { chitValue: cv, installment: inst, members: mem, duration: dur } = checked.ok;
     // In a standard chit every member pays the installment each month, so
     // installment × members is the chit value. A mismatch is usually a typo —
     // but some groups do run that way, so it is a question, not a refusal.
@@ -62,7 +64,7 @@ export default function NewChitti() {
     }
     try {
       const g = await insertGroup({
-        user_id: me.id, name: name.trim(), chit_value: cv, installment: inst,
+        user_id: me.id, name: checked.ok.name, chit_value: cv, installment: inst,
         members: mem, duration: dur, start_date: start,
         foreman: foreman.trim() || null, status,
       });
@@ -85,22 +87,22 @@ export default function NewChitti() {
       <KeyboardSafe style={{ flex: 1 }} >
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <Label>Group Name</Label>
-          <Field label="Group name" value={name} onChangeText={setName} placeholder="e.g. Sundar Group" />
+          <Field label="Group name" error={errorAt('name')} value={name} onChangeText={setName} placeholder="e.g. Sundar Group" />
 
           <Label>Chit Value</Label>
-          <Field label="Chit value" onBlur={sayMismatch} value={chitValue} onChangeText={setChitValue} placeholder="₹ 0" keyboardType="numeric" />
+          <Field label="Chit value" error={errorAt('chitValue')} onBlur={sayMismatch} value={chitValue} onChangeText={setChitValue} placeholder="₹ 0" keyboardType="numeric" />
 
           <Label>Monthly Installment</Label>
-          <Field label="Monthly installment" onBlur={sayMismatch} value={installment} onChangeText={setInstallment} placeholder="₹ 0" keyboardType="numeric" />
+          <Field label="Monthly installment" error={errorAt('installment')} onBlur={sayMismatch} value={installment} onChangeText={setInstallment} placeholder="₹ 0" keyboardType="numeric" />
 
           <View style={s.row}>
             <View style={{ flex: 1 }}>
               <Label>Members</Label>
-              <Field label="Members" onBlur={sayMismatch} value={members} onChangeText={setMembers} placeholder="e.g. 20" keyboardType="numeric" />
+              <Field label="Members" error={errorAt('members')} onBlur={sayMismatch} value={members} onChangeText={setMembers} placeholder="e.g. 20" keyboardType="numeric" />
             </View>
             <View style={{ flex: 1 }}>
               <Label>Duration (months)</Label>
-              <Field label="Duration in months" value={duration} onChangeText={setDuration} placeholder="e.g. 20" keyboardType="numeric" />
+              <Field label="Duration in months" error={errorAt('duration')} value={duration} onChangeText={setDuration} placeholder="e.g. 20" keyboardType="numeric" />
             </View>
           </View>
 

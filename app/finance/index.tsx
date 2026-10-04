@@ -27,16 +27,18 @@ import { listLedger } from '../../db/ledger';
 import { listGroups } from '../../db/chitti';
 import { listReminders } from '../../db/reminders';
 import { sumRupees } from '../../utils/money';
-import { ledgerInterest, startOfDay } from '../../utils/financeRules';
+import { ledgerInterest, ledgerInterestSoFar, startOfDay } from '../../utils/financeRules';
 import { ledgerCompoundingNote } from '../../lib/finance/compounding';
 
 interface Totals {
   lent: number; borrowed: number; earned: number; pending: number;
+  /** Interest accrued to today on open lent loans (to the end date once past it). */
+  accrued: number;
   active: number; overdue: number; today: number; chitti: number;
   /** How the summed compound loans compound, or null when none is compound. */
   compounding: string | null;
 }
-const ZERO: Totals = { lent: 0, borrowed: 0, earned: 0, pending: 0, active: 0, overdue: 0, today: 0, chitti: 0, compounding: null };
+const ZERO: Totals = { lent: 0, borrowed: 0, earned: 0, pending: 0, accrued: 0, active: 0, overdue: 0, today: 0, chitti: 0, compounding: null };
 
 export default function FinanceDashboard() {
   const { scheme } = useTheme();
@@ -56,7 +58,8 @@ export default function FinanceDashboard() {
         listLedger(me.id), listGroups(me.id), listReminders(me.id),
       ]);
       const acc = { ...ZERO };
-      const todayStart = startOfDay(Date.now());
+      const now = Date.now();
+      const todayStart = startOfDay(now);
       const todayEnd = todayStart + 86400000;
       // Statuses (overdue, closed) are brought up to date by listLedger /
       // listGroups themselves; the interest is the ledger detail's own
@@ -68,7 +71,12 @@ export default function FinanceDashboard() {
         if (l.direction === 'lend') {
           acc.lent = sumRupees([acc.lent, l.principal]);
           if (l.status === 'completed') acc.earned = sumRupees([acc.earned, interest]);
-          else acc.pending = sumRupees([acc.pending, interest]);
+          else {
+            acc.pending = sumRupees([acc.pending, interest]);
+            // Accrued so far; null once past the end date, where interest
+            // stops (the ledger detail says so), so the full term has accrued.
+            acc.accrued = sumRupees([acc.accrued, ledgerInterestSoFar(l, now) ?? interest]);
+          }
         } else { acc.borrowed = sumRupees([acc.borrowed, l.principal]); }
         if (l.status === 'running') acc.active += 1;
         if (l.status === 'overdue') acc.overdue += 1;
@@ -154,6 +162,10 @@ export default function FinanceDashboard() {
                 Interest, open loans (full term) {inrShort(t.pending)}
               </Text>
             </View>
+            <Text style={[s.heroFootTxt, { marginTop: 8 }]} numberOfLines={2}
+              accessibilityLabel={`Interest accrued so far on open loans: ${inrShort(t.accrued)}`}>
+              Interest accrued so far, open loans {inrShort(t.accrued)}
+            </Text>
             {t.compounding && <Text style={s.heroNote} numberOfLines={3} adjustsFontSizeToFit minimumFontScale={0.8}>{t.compounding}</Text>}
           </HeroCard>
 
