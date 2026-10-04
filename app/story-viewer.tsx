@@ -55,6 +55,9 @@ import { peekStoryFeed, putStoryFeed } from '../lib/storyFeedCache';
 import { unlockKeyWithAnswer } from '../lib/status/gateKey';
 import { puzzleFrameUri } from '../lib/status/puzzleFrame';
 
+/** Icon ink over the always-dark story stage (not a theme role). */
+const ON_STAGE = '#FFFFFF';
+
 
 function useS() {
   const { colors } = useTheme();
@@ -70,12 +73,25 @@ function StoryViewerScreen() {
   const [entry,      setEntry]      = useState<StoryFeedEntry | null>(null);
   const [index,      setIndex]      = useState(0);
   const authHeader = useAuthHeader();
-  const [paused,     setPaused]     = useState(false);
+  const [paused,     setPaused]     = useState(false);   // held (long-press) or sheet open
+  // The Pause button's own state, separate from the hold: releasing a
+  // long-press or closing the viewers sheet must not resume a story the user
+  // paused on purpose (the only pause a screen reader can reach).
+  const [userPaused, setUserPaused] = useState(false);
+  const isPaused = paused || userPaused;
   const [loaded,     setLoaded]     = useState(false);   // media actually rendered?
   const [error,      setError]      = useState<string | null>(null);
 
   // Progress bar animation per active story. Re-runs on `index` change.
   const progress = useRef(new Animated.Value(0)).current;
+  // Where the bar is, and which story it belongs to, so a pause/resume (or a
+  // late load/duration update) continues the bar instead of restarting it.
+  const progressFrac = useRef(0);
+  const progressStory = useRef<string | null>(null);
+  useEffect(() => {
+    const id = progress.addListener(({ value }) => { progressFrac.current = value; });
+    return () => progress.removeListener(id);
+  }, [progress]);
 
   // ── Initial load ──────────────────────────────────────────
   useEffect(() => {
@@ -298,7 +314,14 @@ function StoryViewerScreen() {
     // `gated` stops the clock. The media-stall safety timer sets `loaded` even
     // though nothing rendered, so without this the progress bar runs down and
     // advance(+1) walks off a puzzle the viewer is halfway through solving.
-    if (!current || paused || !loaded || gated) return;
+    // A different story starts its bar at 0 (before the early return, so a
+    // story opened while paused or loading does not show the last one's bar).
+    if (current && progressStory.current !== current.id) {
+      progressStory.current = current.id;
+      progressFrac.current = 0;
+      progress.setValue(0);
+    }
+    if (!current || isPaused || !loaded || gated) return;
 
     // Best-effort mark-viewed; server is idempotent. Do NOT mark a media story
     // viewed if its media never actually resolved (decrypt/download failed) —
@@ -307,10 +330,10 @@ function StoryViewerScreen() {
       markStoryViewed(current.id).catch(() => {});
     }
 
-    progress.setValue(0);
+    const total = storyDurationMs(current.mediaType, videoDurMs);
     const anim = Animated.timing(progress, {
       toValue:  1,
-      duration: storyDurationMs(current.mediaType, videoDurMs),
+      duration: Math.max(0, total * (1 - progressFrac.current)),
       useNativeDriver: false,
     });
     anim.start(({ finished }) => {
@@ -320,7 +343,7 @@ function StoryViewerScreen() {
   // intentional: re-runs when *index* changes, on pause/resume, once loaded, or
   // when the media source resolves (so mark-viewed sees a non-null mediaSrc).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current?.id, paused, loaded, mediaSrc, gated, videoDurMs]);
+  }, [current?.id, isPaused, loaded, mediaSrc, gated, videoDurMs]);
 
   const close = useCallback(() => router.back(), [router]);
 
@@ -451,7 +474,7 @@ function StoryViewerScreen() {
             source={mediaSrc as any}
             style={S.media}
             resizeMode={ResizeMode.CONTAIN}
-            shouldPlay={!paused && loaded}
+            shouldPlay={!isPaused && loaded}
             isLooping={false}
             useNativeControls={false}
             onLoad={(st) => { if (st.isLoaded) setVideoDurMs(st.durationMillis ?? null); setLoaded(true); }}
@@ -561,9 +584,13 @@ function StoryViewerScreen() {
           </Text>
           <Text style={S.authorTime}>{formatAgo(current.createdAt)}</Text>
           <View style={{ flex: 1 }} />
+          <TouchableOpacity onPress={() => setUserPaused(p => !p)} hitSlop={8} style={S.iconBtn}
+            accessibilityRole="button" accessibilityLabel={userPaused ? 'Resume story' : 'Pause story'}>
+            <Ionicons name={userPaused ? 'play' : 'pause'} size={20} color={ON_STAGE} />
+          </TouchableOpacity>
           {isMyStory && (
             <TouchableOpacity onPress={openViewers} hitSlop={8} style={S.iconBtn} accessibilityRole="button" accessibilityLabel="Who has seen this">
-              <Ionicons name="eye-outline" size={20} color="#FFFFFF" />
+              <Ionicons name="eye-outline" size={20} color={ON_STAGE} />
             </TouchableOpacity>
           )}
           {isMyStory && (
@@ -572,7 +599,7 @@ function StoryViewerScreen() {
             </TouchableOpacity>
           )}
           <TouchableOpacity onPress={close} hitSlop={8} style={S.iconBtn} accessibilityRole="button" accessibilityLabel="Close">
-            <Ionicons name="close" size={22} color="#FFFFFF" />
+            <Ionicons name="close" size={22} color={ON_STAGE} />
           </TouchableOpacity>
         </View>
       </View>

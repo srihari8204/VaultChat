@@ -32,6 +32,7 @@ import {
   type ScheduledMessageRow,
 } from '../lib/chatService';
 import { getScheduledCopy, deleteScheduledCopy, pruneScheduledCopies } from '../lib/scheduledLocalCopy';
+import { isChatLocked } from '../lib/chatLock';
 import { AuroraBackground } from '../components/ui';
 import { AppText as Text } from '../components/ui/Text';
 
@@ -41,10 +42,20 @@ const SERVER_LIST_LIMIT = 200;
 
 const withoutContent = (rows: ScheduledMessageRow[]) => rows.map(r => ({ ...r, content: null }));
 
+/** Shown instead of the preview of a message scheduled into a locked chat. */
+const LOCKED_TEXT = '🔒 Locked chat';
+
 // The server holds E2E ciphertext; show the sender's own local plaintext copy,
-// and never the ciphertext itself.
+// and never the ciphertext itself. A locked chat's preview is not shown here
+// without unlocking it; an unreadable lock table counts as locked, as in
+// bookmarks and reminders.
 async function withLocalCopies(rows: ScheduledMessageRow[]): Promise<ScheduledMessageRow[]> {
+  const lockedIds = new Set<string>();
+  await Promise.all([...new Set(rows.map(r => r.chatId))].map(async id => {
+    if (await isChatLocked(id).catch(() => true)) lockedIds.add(id);
+  }));
   return Promise.all(rows.map(async r => {
+    if (lockedIds.has(r.chatId)) return { ...r, content: LOCKED_TEXT };
     // A media row's content (caption/meta) is ciphertext too: never print it.
     if (r.type !== 'text') return r.content && looksEncrypted(r.content) ? { ...r, content: null } : r;
     const plain = await getScheduledCopy(String(r.id));

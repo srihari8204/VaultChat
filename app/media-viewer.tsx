@@ -175,8 +175,10 @@ function VideoPlayer({ source, waitingForAuth, onLoaded, onFail, onStreaming }: 
     videoRef.current?.setPositionAsync(Math.max(0, Math.min(dur, (st.positionMillis || 0) + deltaMs))).catch(() => {});
   };
   return (
-    <TouchableOpacity style={s.full} activeOpacity={1} onPress={() => setCtrl(!ctrl)}
-      accessibilityRole="button" accessibilityLabel={ctrl ? 'Hide video controls' : 'Show video controls'}>
+    // Not accessible: an accessible wrapper groups its children, which hid the
+    // play button and seek track from screen readers. Controls start shown and
+    // only this (unfocusable) tap hides them, so they stay reachable.
+    <TouchableOpacity style={s.full} activeOpacity={1} onPress={() => setCtrl(!ctrl)} accessible={false} accessibilityRole="none">
       <Video ref={videoRef} source={source} style={s.fullVid} resizeMode={ResizeMode.CONTAIN}
         shouldPlay={shouldPlay} isLooping={false} useNativeControls={false} progressUpdateIntervalMillis={250}
         onPlaybackStatusUpdate={(status) => { if (!status.isLoaded) return; setSt(status); if (status.didJustFinish) setShouldPlay(false); }}
@@ -431,9 +433,9 @@ function MediaViewerScreen() {
   // For our own /uploads images we attach the Bearer header so Fresco serves the
   // already-cached image instantly (no re-download).
   const [authHeaders, setAuthHeaders] = useState<{ Authorization: string } | undefined>(undefined);
-  useEffect(() => {
-    if (needsAuth) getAccessToken().then(t => { if (t) setAuthHeaders({ Authorization: `Bearer ${t}` }); });
-  }, [needsAuth]);
+  // No token (signed out, or the read failed) must end in an error, not a
+  // player that waits for headers forever.
+  const [authFailed, setAuthFailed] = useState(false);
 
   const fileType = msgType === 'image' ? 'image' : msgType === 'video' ? 'video' : msgType === 'audio' ? 'audio' : getFileType(fileName);
   const [loading, setLoading] = useState(true);
@@ -441,6 +443,15 @@ function MediaViewerScreen() {
   const [fileSize, setFileSize] = useState(0);
   // Bumped by Retry: re-runs the attachment resolve and remounts the player.
   const [reloadKey, setReloadKey] = useState(0);
+  useEffect(() => {
+    if (!needsAuth) return;
+    let dead = false;
+    setAuthFailed(false);
+    getAccessToken()
+      .then(t => { if (dead) return; if (t) setAuthHeaders({ Authorization: `Bearer ${t}` }); else setAuthFailed(true); })
+      .catch(() => { if (!dead) setAuthFailed(true); });
+    return () => { dead = true; };
+  }, [needsAuth, reloadKey]);
   // When opened by attachmentId (the common path from a chat bubble) we resolve
   // a local file here — so the bubble navigates INSTANTLY and we show a spinner,
   // instead of the bubble awaiting a download (which made taps feel unreliable
@@ -469,6 +480,11 @@ function MediaViewerScreen() {
   // retry, so a player that loses that race stays broken until the screen is
   // reopened — intermittently, which is the worst way to hit it.
   const waitingForAuth = remoteNeedsAuth && !authHeaders;
+  useEffect(() => {
+    if (!waitingForAuth || !authFailed) return;
+    setError("This media couldn't be loaded because you're signed out or offline. Check your connection and try again.");
+    setLoading(false);
+  }, [waitingForAuth, authFailed]);
 
   useEffect(() => {
     if (fileUri || !attachmentId) return;

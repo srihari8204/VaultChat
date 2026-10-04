@@ -17,9 +17,9 @@
 // not proof of who is holding the phone (lib/confirmIdentity.ts says so), and
 // the number is on the profile for anyone with the unlocked phone to read. The
 // account MPIN is sent IN the DELETE /user/account body and the server checks
-// it there (400 mpin_required, 403 invalid_mpin, 423 locked + retryAfter). It
-// shares the /auth/mpin/verify attempt budget, so there is deliberately no
-// separate pre-check: that would spend a second attempt per delete.
+// it there (400 mpin_required, 403 invalid_mpin, 423 locked + retryAfter).
+// The deployed server does not check it yet, so the MPIN is ALSO verified
+// first with verifyMpinRemote (which keeps this account's cached profile).
 
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -31,8 +31,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { HEADER_TOP } from '../constants/layout';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
-import { api } from '../lib/api';
-import { onboardingError, retryAfterSec } from '../lib/onboarding';
+import { api, getCachedUser } from '../lib/api';
+import { onboardingError, retryAfterSec, verifyMpinRemote } from '../lib/onboarding';
 import { deleteAccount } from '../lib/chatService';
 import { profileFromProtobuf } from '../lib/userProfilePolicy';
 import { identityMatches, type AccountIdentity } from '../lib/confirmIdentity';
@@ -67,6 +67,7 @@ export default function DeleteAccountScreen() {
   const S = useS();
 
   const [me, setMe] = useState<AccountIdentity | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [mpin, setMpin] = useState('');
   const [authErr, setAuthErr] = useState<string | null>(null);
   const [loadErr, setLoadErr] = useState(false);
@@ -85,6 +86,11 @@ export default function DeleteAccountScreen() {
       // be deleted. Rendering the form anyway leaves a button that can never
       // arm; the retry at least has a way forward.
       if (!id.phone && !id.email && !id.vaultId) { setLoadErr(true); return; }
+      const uid = u?.id || u?.userId || (await getCachedUser().catch(() => null))?.id || null;
+      // No user id means the MPIN cannot be pre-checked — a failed load, not a
+      // form that skips re-authentication.
+      if (!uid) { setLoadErr(true); return; }
+      setUserId(String(uid));
       setMe(id);
     } catch {
       setLoadErr(true);
@@ -102,8 +108,22 @@ export default function DeleteAccountScreen() {
   const armed = identityOk && /^\d{6}$/.test(mpin);
 
   const run = useCallback(async () => {
+    if (!userId) return;
     setBusy(true);
     setAuthErr(null);
+    // ponytail: client-side MPIN pre-check because the deployed DELETE
+    // /user/account ignores `mpin` (the checking route in vaultchat-backend-go
+    // is written, not deployed). Once that server is live this spends one extra
+    // attempt of the shared /auth/mpin/verify budget per delete; drop this
+    // block then and rely on the server's 400/403/423 below.
+    try {
+      await verifyMpinRemote(userId, mpin);
+    } catch (e: any) {
+      setBusy(false);
+      setMpin('');
+      setAuthErr(`${onboardingError(e, 'Incorrect MPIN.')} Your account was not deleted.`);
+      return;
+    }
     try {
       await deleteAccount(mpin, reason ?? undefined);
       // Order matters: the account is gone, so these are best-effort cleanups
@@ -138,7 +158,7 @@ export default function DeleteAccountScreen() {
       }
       Alert.alert('Delete failed', onboardingError(e, 'Check your connection and try again.'));
     }
-  }, [reason, mpin]);
+  }, [reason, mpin, userId]);
 
   const confirm = useCallback(() => {
     if (!armed || busy) return;

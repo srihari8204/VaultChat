@@ -251,7 +251,7 @@ function VideoPlayerInner() {
   const seekRelative = useCallback(async (deltaMs: number) => {
     if (!videoRef.current) return;
     const newPos = Math.max(0, Math.min(positionMs + deltaMs, durationMs));
-    await videoRef.current.setPositionAsync(newPos);
+    await videoRef.current.setPositionAsync(newPos).catch(() => {});
   }, [positionMs, durationMs]);
 
   // Reads the live duration from a ref, so it is stable and safe to call from
@@ -262,27 +262,32 @@ function VideoPlayerInner() {
     await videoRef.current.setPositionAsync(target).catch(() => {});
   }, []);
 
+  // Like togglePlay: a torn-down player (or a refused orientation lock) must
+  // not surface as an unhandled rejection, and the UI state changes only when
+  // the call succeeded, so the button never shows a state the player is not in.
   const cycleSpeed = useCallback(async () => {
     const nextIdx = (speedIndex + 1) % SPEEDS.length;
-    setSpeedIndex(nextIdx);
-    if (videoRef.current) {
-      await videoRef.current.setRateAsync(SPEEDS[nextIdx], true);
-    }
+    try {
+      if (videoRef.current) await videoRef.current.setRateAsync(SPEEDS[nextIdx], true);
+      setSpeedIndex(nextIdx);
+    } catch { /* speed unchanged */ }
   }, [speedIndex]);
 
   const toggleMute = useCallback(async () => {
     if (!videoRef.current) return;
-    await videoRef.current.setIsMutedAsync(!isMuted);
-    setIsMuted(!isMuted);
+    try {
+      await videoRef.current.setIsMutedAsync(!isMuted);
+      setIsMuted(!isMuted);
+    } catch { /* mute unchanged */ }
   }, [isMuted]);
 
   const toggleFullscreen = useCallback(async () => {
-    if (isFullscreen) {
-      await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-    } else {
-      await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT);
-    }
-    setIsFullscreen(!isFullscreen);
+    try {
+      await ScreenOrientation.lockAsync(isFullscreen
+        ? ScreenOrientation.OrientationLock.PORTRAIT_UP
+        : ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT);
+      setIsFullscreen(!isFullscreen);
+    } catch { /* orientation unchanged */ }
   }, [isFullscreen]);
 
   const handleClose = useCallback(async () => {

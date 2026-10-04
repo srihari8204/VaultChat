@@ -136,7 +136,15 @@ export default function BackupE2EEScreen() {
             await disableE2EEBackup();
             setMode('account'); setStage('off');
           } catch (e: any) {
-            Alert.alert('Could not turn this off', e?.message ?? 'Please try again.');
+            // disableE2EEBackup restores the secret on failure; show what the
+            // device will actually do next, not what we hoped.
+            const now = await getBackupMode().catch(() => null);
+            if (now === 'account') {
+              setMode('account'); setStage('off');
+              Alert.alert('Encrypted backup is off', 'This device now backs up with your account key, but the backup could not be re-uploaded yet. It will be on the next backup.');
+            } else {
+              Alert.alert('Could not turn this off', `Encrypted backup is still on. ${e?.message ?? 'Please try again.'}`);
+            }
           } finally { setBusy(false); }
         } },
     ],

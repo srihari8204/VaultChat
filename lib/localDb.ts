@@ -20,6 +20,7 @@ import { Buffer } from 'buffer';
 import type { Message } from './chatService';
 import { encField, decField, clearCacheKeyStore } from './cacheCrypto';
 import { mark } from './perf';
+import { isProtectedMessage } from './bookmarkBodies';
 
 // Engine: op-sqlite (JSI) — faster than expo-sqlite, same SQL. A thin shim keeps
 // the expo-sqlite-style async API (getAllAsync/runAsync/withTransactionAsync/…)
@@ -942,7 +943,16 @@ export interface CachedMessageSearchHit {
   createdAt: string;
 }
 
-/** Search every locally retained plaintext message in one chat. */
+/** View-once / Invisible Ink rows are never listed as search hits. Meta that
+ *  is present but unreadable counts as protected (fail closed). */
+function searchHidden(rawMeta: string | null | undefined): boolean {
+  if (!rawMeta) return false;
+  const meta = safeParse(decField(rawMeta) || '');
+  return meta == null || isProtectedMessage(meta);
+}
+
+/** Search every locally retained plaintext message in one chat. View-once and
+ *  Invisible Ink messages are excluded (they are only shown in their bubble). */
 export async function searchCachedMessagesInChat(
   chatId: string, query: string, limit = 80,
 ): Promise<CachedMessageSearchHit[]> {
@@ -959,7 +969,7 @@ export async function searchCachedMessagesInChat(
         let candidateBefore: number | null = null;
         for (;;) {
           const rows = await db.getAllAsync(
-            `SELECT m.id, m.sender_id, m.content, m.type, m.created_at
+            `SELECT m.id, m.sender_id, m.content, m.type, m.created_at, m.meta
                FROM msg_fts f JOIN messages m ON m.id = f.rowid
               WHERE msg_fts MATCH ? AND m.chat_id = ? AND m.deleted_at IS NULL
                 ${candidateBefore == null ? '' : 'AND m.id < ?'}
@@ -970,7 +980,7 @@ export async function searchCachedMessagesInChat(
           ) as any[];
           for (const r of rows) {
             const text = decField(r.content);
-            if (!text || text.startsWith('enc:v1:') || looksLikeEnvelope(text) || r.type !== 'text') continue;
+            if (!text || text.startsWith('enc:v1:') || looksLikeEnvelope(text) || r.type !== 'text' || searchHidden(r.meta)) continue;
             if (text.toLowerCase().includes(q)) {
               out.push({ id: r.id, senderId: String(r.sender_id ?? ''), content: text, type: 'text', createdAt: r.created_at });
               if (out.length >= limit) break;
@@ -989,7 +999,7 @@ export async function searchCachedMessagesInChat(
   let before: number | null = null;
   while (out.length < limit) {
     const rows = await db.getAllAsync(
-      `SELECT id, sender_id, content, type, created_at FROM messages
+      `SELECT id, sender_id, content, type, created_at, meta FROM messages
         WHERE chat_id = ? AND type = 'text' AND content IS NOT NULL AND deleted_at IS NULL
           ${before == null ? '' : 'AND id < ?'}
         ORDER BY id DESC LIMIT 500`,
@@ -997,7 +1007,7 @@ export async function searchCachedMessagesInChat(
     ) as any[];
     for (const r of rows) {
       const text = decField(r.content);
-      if (!text || text.startsWith('enc:v1:') || looksLikeEnvelope(text)) continue;
+      if (!text || text.startsWith('enc:v1:') || looksLikeEnvelope(text) || searchHidden(r.meta)) continue;
       if (text.toLowerCase().includes(q)) {
         out.push({ id: r.id, senderId: String(r.sender_id ?? ''), content: text, type: 'text', createdAt: r.created_at });
         if (out.length >= limit) break;

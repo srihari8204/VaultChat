@@ -18,7 +18,7 @@ import Svg, { Path } from 'react-native-svg';
 import { FilterImage } from 'react-native-svg/filter-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../lib/theme';
-import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
+import { useRouter, useLocalSearchParams, useNavigation, Stack } from 'expo-router';
 import { returnParams } from '../lib/camera/cameraMode';
 import { strokeD } from '../lib/strokePath';
 import {
@@ -286,6 +286,24 @@ export default function ImageEditorScreen() {
 
   const dirty = imageUri !== (uri || '') || lines.length > 0 || textOverlays.length > 0 || !!matrix;
 
+  // Hardware back and swipe leave through beforeRemove, not Cancel, so the
+  // discard prompt lives here (the chat-wallpaper model). Done and a confirmed
+  // discard set `leaving` so they pass straight through.
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const leaving = useRef(false);
+  const navigation = useNavigation();
+  useEffect(() => navigation.addListener('beforeRemove', (ev) => {
+    // beforeRemove is preventable at runtime; the generic navigation type says otherwise.
+    const e = ev as typeof ev & { preventDefault(): void };
+    if (leaving.current || !dirtyRef.current) return;
+    e.preventDefault();
+    Alert.alert('Discard Changes?', 'All edits will be lost.', [
+      { text: 'Keep Editing', style: 'cancel' },
+      { text: 'Discard', style: 'destructive', onPress: () => { leaving.current = true; navigation.dispatch(e.data.action); } },
+    ]);
+  }), [navigation]);
+
   // ── Done — capture final image ──
   const handleDone = async () => {
     if (processing) return;
@@ -299,30 +317,40 @@ export default function ImageEditorScreen() {
       if (lines.length > 0 || textOverlays.length > 0 || matrix) {
         if (!viewShotRef.current) throw new Error('canvas not ready');
         finalUri = await viewShotRef.current.capture();
+        // The canvas is screen-sized with the photo letterboxed inside it:
+        // keep only the photo's area (`frame`), so no bands are sent.
+        // ponytail: still screen resolution, not the photo's; rendering the
+        // edits onto the full-size image needs an offscreen renderer.
+        if (frame) {
+          const shot = await new Promise<{ w: number; h: number }>((res, rej) =>
+            Image.getSize(finalUri, (w, h) => res({ w, h }), rej));
+          const cut = await ImageManipulator.manipulateAsync(
+            finalUri,
+            [{ crop: toImageCrop(frame, { x: 0, y: 0, w: canvasW, h: canvasH }, shot.w, shot.h) }],
+            { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
+          );
+          finalUri = cut.uri;
+        }
       }
 
       // Hand the edited image back to the chat via the shared capturedUri
       // contract so it's actually sent (a prior router.back()+setParams lost it).
       // dismissTo pops back to the chat already in the stack instead of
       // pushing a second /chat, exactly as app/camera.tsx leaves.
+      leaving.current = true;
       router.dismissTo({
         pathname: (returnTo || '/chat') as any,
         params: returnParams({ chatId, peerUid, peerName }, { uri: finalUri, type: 'image' }),
       });
     } catch {
+      leaving.current = false;
       Alert.alert('Could not save', 'The edited image could not be saved. Please try again.');
       setProcessing(false);
     }
   };
 
-  // ── Cancel ── (asks only when there is something to lose)
-  const handleCancel = () => {
-    if (!dirty) { router.back(); return; }
-    Alert.alert('Discard Changes?', 'All edits will be lost.', [
-      { text: 'Keep Editing', style: 'cancel' },
-      { text: 'Discard', style: 'destructive', onPress: () => router.back() },
-    ]);
-  };
+  // ── Cancel ── (beforeRemove above asks when there is something to lose)
+  const handleCancel = () => router.back();
 
   // ── Undo last draw line ──
   const undoLastLine = () => {

@@ -61,20 +61,21 @@ interface ScannedDoc {
   mk?: MediaKey;
 }
 
-/** Encrypt a legacy plaintext scan in place: write <id>.vcs, then delete the
- *  plaintext. On any failure the plaintext doc is returned unchanged, so a
- *  migration problem can never lose a scan. */
-async function migrateDoc(doc: ScannedDoc): Promise<ScannedDoc> {
-  if (doc.mk) return doc;
+/** Encrypt a legacy plaintext scan: write <id>.vcs and return the encrypted
+ *  doc plus the plaintext path. The plaintext is NOT deleted here: its new key
+ *  only exists in memory until the sealed list is saved, so the caller deletes
+ *  it after that save succeeds. On any failure the plaintext doc is returned
+ *  unchanged. */
+async function migrateDoc(doc: ScannedDoc): Promise<{ doc: ScannedDoc; plain?: string }> {
+  if (doc.mk) return { doc };
   try {
-    if (!(await FileSystem.getInfoAsync(doc.pdfUri)).exists) return doc;
+    if (!(await FileSystem.getInfoAsync(doc.pdfUri)).exists) return { doc };
     await FileSystem.makeDirectoryAsync(SCAN_DIR, { intermediates: true });
     const enc = `${SCAN_DIR}${doc.id}.vcs`;
     const mk = await encryptFileTo(doc.pdfUri, enc);
-    await FileSystem.deleteAsync(doc.pdfUri, { idempotent: true });
-    return { ...doc, pdfUri: enc, mk, filename: doc.filename || doc.pdfUri.split('/').pop() };
+    return { doc: { ...doc, pdfUri: enc, mk, filename: doc.filename || doc.pdfUri.split('/').pop() }, plain: doc.pdfUri };
   } catch {
-    return doc;
+    return { doc };
   }
 }
 
@@ -110,9 +111,11 @@ function DocScannerContent() {
   const runRef = useRef(0);
   useEffect(() => () => { runRef.current++; }, []);
 
+  // Throws when the sealed list cannot be written: it holds every scan's key,
+  // so a failed write must fail the caller rather than look saved.
   const persistRecent = async (docs: ScannedDoc[]) => {
+    await AsyncStorage.setItem(RECENT_KEY, await sealJson(docs.slice(0, 20)));
     setRecentDocs(docs);
-    try { await AsyncStorage.setItem(RECENT_KEY, await sealJson(docs.slice(0, 20))); } catch {}
   };
 
   const loadRecent = async () => {
@@ -128,9 +131,19 @@ function DocScannerContent() {
       // One-time migration from the plaintext list + plaintext PDFs.
       const legacy = await AsyncStorage.getItem(LEGACY_RECENT_KEY);
       if (!legacy) return;
-      const docs: ScannedDoc[] = [];
-      for (const d of JSON.parse(legacy) as ScannedDoc[]) docs.push(await migrateDoc(d));
-      await AsyncStorage.setItem(RECENT_KEY, await sealJson(docs.slice(0, 20)));
+      const migrated: { doc: ScannedDoc; plain?: string }[] = [];
+      for (const d of JSON.parse(legacy) as ScannedDoc[]) migrated.push(await migrateDoc(d));
+      const docs = migrated.map(m => m.doc);
+      try {
+        await AsyncStorage.setItem(RECENT_KEY, await sealJson(docs.slice(0, 20)));
+      } catch (e) {
+        // The new keys were never saved: drop the unreadable .vcs copies and
+        // keep the plaintext + legacy list so the next open retries.
+        for (const m of migrated) if (m.plain) FileSystem.deleteAsync(m.doc.pdfUri, { idempotent: true }).catch(() => {});
+        throw e;
+      }
+      // Keys are saved; only now is the plaintext safe to remove.
+      for (const m of migrated) if (m.plain) await FileSystem.deleteAsync(m.plain, { idempotent: true }).catch(() => {});
       await AsyncStorage.removeItem(LEGACY_RECENT_KEY);
       setRecentDocs(docs);
     } catch {
@@ -240,8 +253,11 @@ function DocScannerContent() {
         id, type: selectedType, title,
         createdAt: Date.now(), pages: imageUris.length, pdfUri, sizeKb, filename, mk,
       };
-      setCurrentDoc(doc);
+      // Persist BEFORE showing "PDF ready": the sealed list is the only place
+      // the scan's key is kept, so a failed save is a failed scan (the catch
+      // below deletes the unreadable .vcs and says so).
       await persistRecent([doc, ...recentDocs]);
+      setCurrentDoc(doc);
       setProcessingProgress(100);
       setStep('preview');
     } catch (e: any) {
@@ -330,8 +346,13 @@ function DocScannerContent() {
     Alert.alert('Delete document?', `Remove ${doc.title}?`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
+        try {
+          await persistRecent(recentDocs.filter(d => d.id !== doc.id));
+        } catch {
+          Alert.alert('Could not delete', 'The document list could not be saved. Please try again.');
+          return;
+        }
         FileSystem.deleteAsync(doc.pdfUri, { idempotent: true }).catch(() => {});
-        await persistRecent(recentDocs.filter(d => d.id !== doc.id));
       } },
     ]);
   };

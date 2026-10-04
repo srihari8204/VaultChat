@@ -28,6 +28,7 @@ import { getNotifPreview, notifContent } from '../lib/privacyPrefs';
 import { getCachedMessagesByIds } from '../lib/localDb';
 import { looksEncrypted } from '../lib/chatService';
 import { isChatLocked } from '../lib/chatLock';
+import { MESSAGE_REMINDER_BODY, isMessageReminderRequest } from '../lib/messageReminderReset';
 
 type Router = ReturnType<typeof useRouter>;
 
@@ -106,6 +107,32 @@ async function saveReminders(list: ReminderRow[]): Promise<void> {
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(list));
 }
 
+/** Recovery for a list that cannot be read: its rows hold the cancel ids, so
+ *  cancel every pending notification this screen scheduled (matched by its
+ *  fixed body + chat/message data), then drop the stored list. */
+async function clearReminders(): Promise<void> {
+  const pending = await Notifications.getAllScheduledNotificationsAsync();
+  await Promise.all(pending.filter(isMessageReminderRequest)
+    .map(r => Notifications.cancelScheduledNotificationAsync(r.identifier)));
+  await AsyncStorage.removeItem(STORAGE_KEY);
+}
+
+/** Confirm, then clear the unreadable list; `after` runs once it is cleared. */
+function offerClearReminders(after: () => void) {
+  Alert.alert(
+    'Saved reminders can\'t be read',
+    'The reminder list on this device is damaged, so reminders can\'t be saved or cancelled here. Clearing it cancels every message reminder you have set.',
+    [
+      { text: 'Not now', style: 'cancel' },
+      { text: 'Clear reminders', style: 'destructive', onPress: async () => {
+        try { await clearReminders(); }
+        catch { Alert.alert('Could not clear reminders', 'Please try again.'); return; }
+        after();
+      } },
+    ],
+  );
+}
+
 function useS() {
   const { colors } = useTheme();
   return useMemo(() => makeStyles(colors), [colors]);
@@ -163,7 +190,7 @@ function Composer({
       const id = await Notifications.scheduleNotificationAsync({
         content: {
           title: tray.title,
-          body:  'You asked to be reminded about a message.',
+          body:  MESSAGE_REMINDER_BODY,
           // Root layout's attachTapHandler reads data.chatId and routes
           // to /chat?id=<chatId> when the user taps the notification.
           data:  { chatId, messageId },
@@ -171,8 +198,17 @@ function Composer({
         trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: when },
       });
 
+      let list: ReminderRow[];
       try {
-        const list = await loadReminders();
+        list = await loadReminders();
+      } catch {
+        // A damaged list would refuse every new reminder: take this one back
+        // out and offer the reset, then schedule again once it is cleared.
+        await Notifications.cancelScheduledNotificationAsync(id).catch(() => {});
+        offerClearReminders(() => { schedule(mins); });
+        return;
+      }
+      try {
         list.push({
           id, chatId, messageId, when: when.toISOString(),
           createdAt: new Date().toISOString(),
@@ -336,6 +372,9 @@ function RemindersList({ router }: { router: Router }) {
           <TouchableOpacity accessibilityRole="button" onPress={reload} style={S.retryBtn}>
             <Text style={S.retryTxt}>Try again</Text>
           </TouchableOpacity>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Clear reminders" onPress={() => offerClearReminders(reload)} style={S.clearBtn}>
+            <Text style={S.clearTxt}>Clear reminders</Text>
+          </TouchableOpacity>
         </View>
       ) : rows.length === 0 ? (
         <View style={[S.center, { flex: 1, paddingHorizontal: 32 }]}>
@@ -403,6 +442,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   emptySub:     { color: c.textDim, fontSize: 13, lineHeight: 18, textAlign: 'center' },
   retryBtn:     { marginTop: 20, minHeight: 44, paddingHorizontal: 24, borderRadius: 12, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
   retryTxt:     { color: c.bubbleOutText, fontWeight: '700' },
+  clearBtn:     { marginTop: 8, minHeight: 44, paddingHorizontal: 24, alignItems: 'center', justifyContent: 'center' },
+  clearTxt:     { color: c.danger, fontWeight: '700' },
 
   row:          { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   iconBox:      { width: 36, height: 36, borderRadius: 18, backgroundColor: c.glassSoft, alignItems: 'center', justifyContent: 'center' },

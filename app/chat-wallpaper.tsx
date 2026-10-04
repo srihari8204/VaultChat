@@ -66,13 +66,23 @@ export async function getWallpaper(chatId: string): Promise<WallpaperConfig | nu
     // wallpaper is set (lib/scopedChoice.ts).
     const raw = resolveScoped(
       await AsyncStorage.getItem(`vc_wallpaper_${chatId}`),
-      await AsyncStorage.getItem('vc_wallpaper_default'),
+      await AsyncStorage.getItem(GLOBAL_KEY),
     );
     return raw ? JSON.parse(raw) as WallpaperConfig : null;
   } catch { return null; }
 }
 
 type Tab = 'solid' | 'gradient' | 'custom';
+
+const GLOBAL_KEY = 'vc_wallpaper_default';
+
+/** What a wallpaper is called, for "Same as all chats · <name>". */
+function wallpaperName(w: WallpaperConfig | null): string {
+  if (!w) return 'Default';
+  if (w.type === 'image') return 'Photo';
+  if (w.type === 'gradient') return GRADIENT_PRESETS.find(g => g.id === w.value)?.name ?? 'Gradient';
+  return SOLID_COLORS.find(c => c.hex === w.value)?.name ?? 'Colour';
+}
 
 // The live preview behind the sample bubbles. Module scope, so the Image /
 // LinearGradient are not remounted on every render of the screen.
@@ -106,6 +116,11 @@ export default function ChatWallpaperScreen() {
 
   // null = default (theme wallpaper)
   const [selected, setSelected] = useState<WallpaperConfig | null>(null);
+  // Per-chat only: nothing stored for this chat, so it shows the all-chats
+  // wallpaper (lib/scopedChoice). Saving it removes the per-chat key.
+  const [inherit, setInherit] = useState(false);
+  // The all-chats wallpaper, so a per-chat screen can show what it inherits.
+  const [globalWp, setGlobalWp] = useState<WallpaperConfig | null>(null);
   const [tab, setTab] = useState<Tab>('solid');
   // What is stored now, to tell an unsaved change from the saved choice.
   const [savedJson, setSavedJson] = useState('null');
@@ -113,23 +128,29 @@ export default function ChatWallpaperScreen() {
   const savingRef = useRef(false);
   // A pick made before the initial read resolves wins over that read.
   const touched = useRef(false);
-  const pick = (w: WallpaperConfig | null) => { touched.current = true; setSelected(w); };
+  const pick = (w: WallpaperConfig | null) => { touched.current = true; setInherit(false); setSelected(w); };
+  const pickInherit = () => { touched.current = true; setInherit(true); setSelected(null); };
+  const choiceJson = (inh: boolean, w: WallpaperConfig | null) => (inh ? '"inherit"' : JSON.stringify(w));
 
   useEffect(() => {
     touched.current = false;
     (async () => {
       try {
-        const raw = await AsyncStorage.getItem(storageKey);
+        const [raw, globalRaw] = await Promise.all([AsyncStorage.getItem(storageKey), AsyncStorage.getItem(GLOBAL_KEY)]);
         const loaded: WallpaperConfig | null = raw && raw !== SCOPED_DEFAULT ? JSON.parse(raw) : null;
-        setSavedJson(JSON.stringify(loaded));
-        if (!touched.current) setSelected(loaded);
+        const inh = !!chatId && raw == null;
+        if (chatId) {
+          try { setGlobalWp(JSON.parse(resolveScoped(null, globalRaw) ?? 'null')); } catch { setGlobalWp(null); }
+        }
+        setSavedJson(choiceJson(inh, loaded));
+        if (!touched.current) { setSelected(loaded); setInherit(inh); }
       } catch { /* keep default */ }
     })();
-  }, [storageKey]);
+  }, [storageKey, chatId]);
 
   // Same model as everywhere else that edits before saving: leaving with an
   // unsaved pick (header back, hardware back, swipe) asks first.
-  const dirty = JSON.stringify(selected) !== savedJson;
+  const dirty = choiceJson(inherit, selected) !== savedJson;
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
   const leaving = useRef(false);
@@ -164,7 +185,8 @@ export default function ChatWallpaperScreen() {
         toSave = { ...toSave, value: dest };
       }
       const prevRaw = await AsyncStorage.getItem(storageKey).catch(() => null);
-      if (toSave) await AsyncStorage.setItem(storageKey, JSON.stringify(toSave));
+      if (chatId && inherit) await AsyncStorage.removeItem(storageKey);
+      else if (toSave) await AsyncStorage.setItem(storageKey, JSON.stringify(toSave));
       // Per-chat Default must beat a global wallpaper, so it is stored, not removed.
       else if (chatId) await AsyncStorage.setItem(storageKey, SCOPED_DEFAULT);
       else await AsyncStorage.removeItem(storageKey);
@@ -184,7 +206,8 @@ export default function ChatWallpaperScreen() {
     }
   };
 
-  const reset = () => pick(null);
+  // Per-chat Reset follows all chats (as chat-themes does); global → default.
+  const reset = () => (chatId ? pickInherit() : pick(null));
 
   const pickImage = async () => {
     try {
@@ -205,7 +228,7 @@ export default function ChatWallpaperScreen() {
     }
   };
 
-  const isDefault = !selected;
+  const isDefault = !inherit && !selected;
 
   return (
     <View style={s.root}>
@@ -218,12 +241,12 @@ export default function ChatWallpaperScreen() {
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.headerTitle} accessibilityRole="header">{chatId ? 'Wallpaper · this chat' : 'Wallpaper · all chats'}</Text>
-        <TouchableOpacity onPress={reset} style={s.resetBtn} accessibilityRole="button" accessibilityLabel="Reset to default wallpaper"><Text style={s.resetText}>Reset</Text></TouchableOpacity>
+        <TouchableOpacity onPress={reset} style={s.resetBtn} accessibilityRole="button" accessibilityLabel={chatId ? 'Reset to the wallpaper used for all chats' : 'Reset to default wallpaper'}><Text style={s.resetText}>Reset</Text></TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
         {/* Preview */}
-        <PreviewBg selected={selected} fallbackBg={colors.chatBg} boxStyle={s.previewBox}>
+        <PreviewBg selected={inherit ? globalWp : selected} fallbackBg={colors.chatBg} boxStyle={s.previewBox}>
           <View style={s.sampleBubbles}>
             <View style={[s.peerBubble, { backgroundColor: colors.bubbleIn }]}>
               <Text style={[s.bubbleText, { color: colors.bubbleInText }]}>Hey, how are you?</Text>
@@ -235,6 +258,20 @@ export default function ChatWallpaperScreen() {
             </View>
           </View>
         </PreviewBg>
+
+        {!!chatId && (
+          <TouchableOpacity
+            style={[s.inheritRow, inherit && s.inheritRowOn]}
+            onPress={pickInherit}
+            activeOpacity={0.8}
+            accessibilityRole="radio"
+            accessibilityLabel={`Same as all chats, currently ${wallpaperName(globalWp)}`}
+            accessibilityState={{ checked: inherit }}
+          >
+            <Ionicons name={inherit ? 'radio-button-on' : 'radio-button-off'} size={20} color={inherit ? colors.primary : colors.textFaint} />
+            <Text style={s.inheritTxt}>Same as all chats · {wallpaperName(globalWp)}</Text>
+          </TouchableOpacity>
+        )}
 
         {/* Tabs */}
         <View style={s.tabs}>
@@ -251,7 +288,7 @@ export default function ChatWallpaperScreen() {
           <View style={s.colorGrid}>
             {/* Default tile */}
             <TouchableOpacity
-              onPress={reset}
+              onPress={() => pick(null)}
               style={[s.colorTile, { backgroundColor: colors.chatBg }, isDefault && s.tileSelected]}
               accessibilityRole="radio"
               accessibilityLabel="Default wallpaper"
@@ -341,6 +378,10 @@ const makeStyles = (c: Palette, SW: number) => {
   myBubble: { alignSelf: 'flex-end', borderRadius: 14, borderTopRightRadius: 4, paddingHorizontal: 12, paddingVertical: 8, maxWidth: '78%' },
   bubbleText: { fontSize: 14, lineHeight: 19 },
   bubbleTime: { fontSize: 10, alignSelf: 'flex-end', marginTop: 2 },
+
+  inheritRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 48, paddingHorizontal: 14, marginBottom: 14, borderRadius: 14, backgroundColor: c.glassSoft, borderWidth: 1, borderColor: 'transparent' },
+  inheritRowOn: { borderColor: c.primary },
+  inheritTxt: { color: c.text, fontSize: 14, fontWeight: '600', flex: 1 },
 
   tabs: { flexDirection: 'row', backgroundColor: c.glassSoft, borderRadius: 12, padding: 4, marginBottom: 16 },
   tab: { flex: 1, minHeight: 44, paddingVertical: 10, alignItems: 'center', justifyContent: 'center', borderRadius: 9 },

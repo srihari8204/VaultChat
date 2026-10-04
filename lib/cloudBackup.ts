@@ -165,11 +165,29 @@ export async function enableE2EEBackup(
   return mode === 'key' ? { recoveryKey: userSecret } : {};
 }
 
-/** Revert to the account-managed key and re-upload so the server copy matches. */
+/**
+ * Revert to the account-managed key and re-upload so the server copy matches.
+ * All or nothing: if the re-upload (or clearing the secret) fails, the previous
+ * secret and header are put back, so the device keeps writing encrypted
+ * backups instead of silently switching to server-readable ones while the
+ * screen still says "On". Callers should re-read getBackupMode() on failure.
+ */
 export async function disableE2EEBackup(): Promise<void> {
-  await SecureStore.deleteItemAsync(E2EE_SECRET_STORE).catch(() => {});
-  await SecureStore.deleteItemAsync(E2EE_HEADER_STORE).catch(() => {});
-  await uploadCloudBackup();
+  const [prevSecret, prevHeader] = await Promise.all([
+    SecureStore.getItemAsync(E2EE_SECRET_STORE),
+    SecureStore.getItemAsync(E2EE_HEADER_STORE),
+  ]);
+  try {
+    await SecureStore.deleteItemAsync(E2EE_SECRET_STORE);
+    await SecureStore.deleteItemAsync(E2EE_HEADER_STORE);
+    await uploadCloudBackup();
+  } catch (e) {
+    if (prevSecret && prevHeader) {
+      await SecureStore.setItemAsync(E2EE_SECRET_STORE, prevSecret).catch(() => {});
+      await SecureStore.setItemAsync(E2EE_HEADER_STORE, prevHeader).catch(() => {});
+    }
+    throw e;
+  }
 }
 
 /** Thrown by a restore that needs a secret this device does not hold. */
