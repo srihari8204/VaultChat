@@ -1,5 +1,6 @@
-// components/shopbook/checkout.tsx — Shop Book, moved out of app/shop-book.tsx
-// unchanged. Palette and styles come from ./theme; see app/shop-book.tsx.
+// components/shopbook/checkout.tsx — Shop Book: the customer's cart and order placement.
+// Split out of app/shop-book.tsx on 2026-10-04 and edited since (fixes are
+// logged per round). Palette and styles come from ./theme.
 
 import { useRef, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
@@ -25,6 +26,10 @@ export function CartView({ shop, cart, setCart, onPlaced, coupons }: {
   const remove = (key: string) => setCart(cart.filter((it) => it.key !== key));
 
   const subtotal = cartTotal(cart);
+  // An applied coupon is re-checked against the cart as it is NOW: removing
+  // items can take it under the minimum, and "Applied" must not stay on screen
+  // (or go to the server) for a discount that no longer applies.
+  const lapsed = !!applied && subtotal < applied.minOrder;
   const discount = couponDiscount(subtotal, applied);
   const total = Math.max(0, subtotal - discount);
 
@@ -53,7 +58,7 @@ export function CartView({ shop, cart, setCart, onPlaced, coupons }: {
           unit: it.unit, taxPercent: it.taxPercent,
         })),
         note.trim(),
-        { couponCode: applied?.code, idempotencyKey: idemKey, confirmPricing },
+        { couponCode: lapsed ? undefined : applied?.code, idempotencyKey: idemKey, confirmPricing },
       );
       onPlaced(res.id);
     } catch (e: any) {
@@ -115,7 +120,11 @@ export function CartView({ shop, cart, setCart, onPlaced, coupons }: {
               <Text style={s.outlineBtnText}>Apply</Text>
             </TouchableOpacity>
           </View>
-          {!!couponMsg && <Text style={[s.hint, { color: applied ? C.green : C.danger }]} accessibilityLiveRegion="polite">{couponMsg}</Text>}
+          {!!couponMsg && (
+            <Text style={[s.hint, { color: applied && !lapsed ? C.green : C.danger }]} accessibilityLiveRegion="polite">
+              {lapsed && applied ? `${applied.code} needs an order of ${money(applied.minOrder)} — not applied` : couponMsg}
+            </Text>
+          )}
 
           <TextInput style={s.input} placeholder="Order note (e.g. pack before 8 PM)" placeholderTextColor={C.sub}
             accessibilityLabel="Order note" value={note} onChangeText={setNote} />
@@ -131,8 +140,8 @@ export function CartView({ shop, cart, setCart, onPlaced, coupons }: {
           <TouchableOpacity style={[s.primaryBtn, placing && { opacity: 0.6 }]} disabled={placing}
             accessibilityRole="button" accessibilityLabel="Place order" accessibilityState={{ disabled: placing, busy: placing }}
             onPress={() => { void place(); }}>
-            {placing ? <ActivityIndicator color="#fff" /> : <>
-              <Ionicons name="checkmark-circle" size={18} color="#fff" />
+            {placing ? <ActivityIndicator color={C.onFill} /> : <>
+              <Ionicons name="checkmark-circle" size={18} color={C.onFill} />
               <Text style={s.primaryBtnText}>Place Order</Text>
             </>}
           </TouchableOpacity>

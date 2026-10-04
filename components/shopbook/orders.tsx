@@ -1,5 +1,6 @@
-// components/shopbook/orders.tsx — Shop Book, moved out of app/shop-book.tsx
-// unchanged. Palette and styles come from ./theme; see app/shop-book.tsx.
+// components/shopbook/orders.tsx — Shop Book: customer and owner order screens, returns.
+// Split out of app/shop-book.tsx on 2026-10-04 and edited since (fixes are
+// logged per round). Palette and styles come from ./theme.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { KeyboardSafe } from '../ui';
@@ -14,18 +15,13 @@ import { invoiceHtml, fromOrder } from '../../utils/shopbookInvoice';
 import { LoadingState, ErrorState } from '../finance/ui';
 import { t } from '../../lib/shopbookI18n';
 import { C, s } from './theme';
-import { previewDoc, loadErrText, Row, onShopBookEvent, ReasonModal, SubHeader, Field, StatusPill, AvailabilityTag, TxnRow, Empty } from './shared';
+import { previewDoc, Row, onShopBookEvent, ReasonModal, SubHeader, Field, StatusPill, AvailabilityTag, TxnRow, Empty } from './shared';
 import { InvoiceView, BillScreen } from './invoices';
+import { useShopLoad } from './useShopLoad';
 
 export function MyOrders({ onOpen }: { onOpen: (id: string) => void }) {
-  const [loading, setLoading] = useState(true);
   const [orders, setOrders] = useState<SB.OrderSummary[]>([]);
-  const [err, setErr] = useState('');
-  const load = useCallback(async () => {
-    setLoading(true); setErr('');
-    try { setOrders(await SB.myOrders()); } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
-  }, []);
-  useEffect(() => { load(); }, [load]);
+  const { loading, err, load } = useShopLoad(SB.myOrders, setOrders);
 
   // An order history only grows, so the list itself is the scroller and the
   // label + loading/empty states ride above it as the header.
@@ -64,7 +60,6 @@ export function MyOrders({ onOpen }: { onOpen: (id: string) => void }) {
 }
 
 export function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }) {
-  const [loading, setLoading] = useState(true);
   const [order, setOrder] = useState<SB.OrderDetail | null>(null);
   const [stars, setStars] = useState(0);
   const [review, setReview] = useState('');
@@ -88,12 +83,8 @@ export function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () =>
   const [taxNo, setTaxNo] = useState('');
   const [bizAddr, setBizAddr] = useState('');
 
-  const [err, setErr] = useState('');
-  const load = useCallback(async () => {
-    setLoading(true); setErr('');
-    try { setOrder(await SB.orderDetails(orderId)); } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
-  }, [orderId]);
-  useEffect(() => { load(); }, [load]);
+  const fetchOrder = useCallback(() => SB.orderDetails(orderId), [orderId]);
+  const { loading, err, load } = useShopLoad(fetchOrder, setOrder);
 
   // Realtime (P1-E): the shop moves the order and this screen follows, without
   // the customer pulling to refresh while standing in the shop.
@@ -266,7 +257,7 @@ export function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () =>
                   return (
                     <View key={step} style={{ alignItems: 'center', flex: 1 }}>
                       <View style={[s.stepDot, done && s.stepDotDone]}>
-                        {done && <Ionicons name="checkmark" size={12} color="#fff" />}
+                        {done && <Ionicons name="checkmark" size={12} color={C.onFill} />}
                       </View>
                       <Text style={s.stepLabel}>{orderStatusLabel(step)}</Text>
                     </View>
@@ -348,7 +339,7 @@ export function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () =>
               <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy}
                 accessibilityRole="button" accessibilityState={{ disabled: busy }}
                 onPress={confirmCollected}>
-                <Ionicons name="bag-check" size={18} color="#fff" />
+                <Ionicons name="bag-check" size={18} color={C.onFill} />
                 <Text style={s.primaryBtnText}>{t('orders.collected')}</Text>
               </TouchableOpacity>
             )}
@@ -470,23 +461,20 @@ export const OWNER_ORDER_TABS: { id: string; label: string }[] = [
 
 export function OwnerOrders() {
   const [filter, setFilter] = useState('pending');
-  const [loading, setLoading] = useState(true);
   const [orders, setOrders] = useState<SB.OrderSummary[]>([]);
   const [open, setOpen] = useState<string | null>(null);
 
-  const [err, setErr] = useState('');
-  const load = useCallback(async (f: string) => {
-    setLoading(true); setErr('');
-    try { setOrders(await SB.ownerOrders(f)); } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
-  }, []);
-  useEffect(() => { load(filter); }, [filter, load]);
+  // Reloads when the tab changes; a late answer for the previous tab is
+  // dropped by useShopLoad rather than shown under this one.
+  const fetchOrders = useCallback(() => SB.ownerOrders(filter), [filter]);
+  const { loading, err, load } = useShopLoad(fetchOrders, setOrders);
 
   // A new order should appear on the owner's list the moment it is placed —
   // they may be standing at the counter with the app already open (P1-E).
   useEffect(() => {
-    const stop = onShopBookEvent(() => load(filter));
+    const stop = onShopBookEvent(() => { void load(); });
     return stop;
-  }, [filter, load]);
+  }, [load]);
 
   // A busy shop's order list is unbounded, so it is the scroller rather than a
   // block of rows inside one. Declared above the early return below so the hook
@@ -508,7 +496,7 @@ export function OwnerOrders() {
           </TxnRow>
   ), []);
 
-  if (open) return <OwnerOrderDetail orderId={open} onBack={() => { setOpen(null); load(filter); }} />;
+  if (open) return <OwnerOrderDetail orderId={open} onBack={() => { setOpen(null); load(); }} />;
 
   return (
     <>
@@ -528,19 +516,18 @@ export function OwnerOrders() {
         ListHeaderComponent={(
           <>
             {loading && <LoadingState />}
-            {!!err && !loading && <ErrorState title="Couldn’t load orders" sub={err} onRetry={() => load(filter)} />}
+            {!!err && !loading && <ErrorState title="Couldn’t load orders" sub={err} onRetry={load} />}
             {!loading && !err && orders.length === 0 && <Empty icon="receipt-outline" text={`No ${filter} orders.`} />}
           </>
         )}
         contentContainerStyle={s.body}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={() => load(filter)} tintColor={C.green} />}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}
       />
     </>
   );
 }
 
 export function OwnerOrderDetail({ orderId, onBack }: { orderId: string; onBack: () => void }) {
-  const [loading, setLoading] = useState(true);
   const [order, setOrder] = useState<SB.OrderDetail | null>(null);
   const [busy, setBusy] = useState(false);
   const [rejectAsk, setRejectAsk] = useState(false);
@@ -550,25 +537,22 @@ export function OwnerOrderDetail({ orderId, onBack }: { orderId: string; onBack:
   const [altFor, setAltFor] = useState<string | null>(null);
   const [altName, setAltName] = useState('');
   const [altPrice, setAltPrice] = useState('');
-  const [err, setErr] = useState('');
-
-  const load = useCallback(async () => {
-    setLoading(true); setErr('');
-    try { setOrder(await SB.orderDetails(orderId)); } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
-  }, [orderId]);
-  useEffect(() => { load(); }, [load]);
+  const fetchOrder = useCallback(() => SB.orderDetails(orderId), [orderId]);
+  const { loading, err, load } = useShopLoad(fetchOrder, setOrder);
 
   // Busy-guarded: two quick taps (available, then unavailable) must not race
   // each other to the server and leave the line in whichever landed last.
-  const setAvail = async (itemId: string, a: ItemAvailability, name = '', price = 0) => {
-    if (busy) return;
+  // Resolves true only once the server took it, so a caller holding typed
+  // input (the alternative modal) knows whether it is safe to clear.
+  const setAvail = async (itemId: string, a: ItemAvailability, name = '', price = 0): Promise<boolean> => {
+    if (busy) return false;
     setBusy(true);
-    try { await SB.setItemAvailability(orderId, itemId, a, name, price); load(); }
-    catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
+    try { await SB.setItemAvailability(orderId, itemId, a, name, price); load(); return true; }
+    catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); return false; }
     finally { setBusy(false); }
   };
 
-  const submitAlt = () => {
+  const submitAlt = async () => {
     if (!altFor || !altName.trim()) { Alert.alert(t('owner.suggestAlt'), 'Enter the alternative product'); return; }
     // isNum, not just num (2026-09-17). This price is what the customer is
     // asked to approve, and num() turns anything unparseable into 0 — the
@@ -579,8 +563,11 @@ export function OwnerOrderDetail({ orderId, onBack }: { orderId: string; onBack:
         `"${altPrice}" is not a plain number. Use digits only — 1200 or 1,200 both work.`);
       return;
     }
-    setAvail(altFor, 'alternative', altName.trim(), num(altPrice));
-    setAltFor(null); setAltName(''); setAltPrice('');
+    // The modal stays open until the server has the alternative: closing it
+    // first threw away what the owner typed whenever the save failed.
+    if (await setAvail(altFor, 'alternative', altName.trim(), num(altPrice))) {
+      setAltFor(null); setAltName(''); setAltPrice('');
+    }
   };
 
   const setStatus = async (status: OrderStatus, reason = '', note = '') => {
@@ -640,14 +627,14 @@ export function OwnerOrderDetail({ orderId, onBack }: { orderId: string; onBack:
         <KeyboardSafe keyboardOnly style={s.modalWrap}>
           <ScrollView style={{ flex: 1 }} contentContainerStyle={s.modalScroll} keyboardShouldPersistTaps="handled">
           <View style={s.modalCard}>
-            <Text style={s.modalTitle}>{t('owner.suggestAlt')}</Text>
+            <Text style={s.modalTitle} accessibilityRole="header">{t('owner.suggestAlt')}</Text>
             <TextInput style={s.input} placeholder={t('owner.altName')} placeholderTextColor={C.sub}
               accessibilityLabel={t('owner.altName')} value={altName} onChangeText={setAltName} autoFocus />
             <TextInput style={s.input} placeholder={t('owner.altPrice')} placeholderTextColor={C.sub}
               accessibilityLabel={t('owner.altPrice')} value={altPrice} onChangeText={setAltPrice} keyboardType="numeric" />
-            <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={submitAlt}
-              accessibilityRole="button" accessibilityState={{ disabled: busy }}>
-              <Text style={s.primaryBtnText}>{t('common.save')}</Text>
+            <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={() => { void submitAlt(); }}
+              accessibilityRole="button" accessibilityState={{ disabled: busy, busy }}>
+              {busy ? <ActivityIndicator color={C.onFill} /> : <Text style={s.primaryBtnText}>{t('common.save')}</Text>}
             </TouchableOpacity>
             <TouchableOpacity style={s.dangerBtn} onPress={() => setAltFor(null)} accessibilityRole="button">
               <Text style={s.dangerBtnText}>{t('common.cancel')}</Text>
@@ -720,7 +707,7 @@ export function OwnerOrderDetail({ orderId, onBack }: { orderId: string; onBack:
                         style={[s.primaryBtn, { flex: 2 }, (busy || !reviewed) && { opacity: 0.6 }]}
                         accessibilityRole="button" accessibilityState={{ disabled: busy || !reviewed }}
                         disabled={busy || !reviewed} onPress={() => setStatus('accepted')}>
-                        <Ionicons name="checkmark-circle" size={18} color="#fff" />
+                        <Ionicons name="checkmark-circle" size={18} color={C.onFill} />
                         <Text style={s.primaryBtnText}>{t('owner.accept')}</Text>
                       </TouchableOpacity>
                       <TouchableOpacity style={[s.dangerBtn, { flex: 1, marginTop: 12 }]} disabled={busy} onPress={() => setRejectAsk(true)}
@@ -741,7 +728,7 @@ export function OwnerOrderDetail({ orderId, onBack }: { orderId: string; onBack:
                 {order.status !== 'pending' && next && (
                   <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={() => setStatus(next)}
                     accessibilityRole="button" accessibilityState={{ disabled: busy }}>
-                    <Ionicons name="arrow-forward-circle" size={18} color="#fff" />
+                    <Ionicons name="arrow-forward-circle" size={18} color={C.onFill} />
                     <Text style={s.primaryBtnText}>{`Mark as ${orderStatusLabel(next)}`}</Text>
                   </TouchableOpacity>
                 )}
@@ -853,7 +840,7 @@ export function ReturnRequest({ order, onDone }: { order: SB.OrderDetail; onDone
           placeholder="e.g. Bag was torn" />
         <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={submit}
           accessibilityRole="button" accessibilityLabel="Request return" accessibilityState={{ disabled: busy, busy }}>
-          {busy ? <ActivityIndicator color="#fff" />
+          {busy ? <ActivityIndicator color={C.onFill} />
                 : <Text style={s.primaryBtnText}>Request return</Text>}
         </TouchableOpacity>
         <Text style={s.hint}>
@@ -869,17 +856,11 @@ export function ReturnRequest({ order, onDone }: { order: SB.OrderDetail; onDone
 // sellable goods back. Refusing requires saying why.
 export function ReturnsScreen({ currency, onBack }: { currency?: string; onBack: () => void }) {
   const [rows, setRows] = useState<SB.ShopReturn[]>([]);
-  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [refuse, setRefuse] = useState<SB.ShopReturn | null>(null);
   const [note, setNote] = useState('');
 
-  const [err, setErr] = useState('');
-  const load = useCallback(async () => {
-    setLoading(true); setErr('');
-    try { setRows(await SB.shopReturns()); } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
-  }, []);
-  useEffect(() => { load(); }, [load]);
+  const { loading, err, load } = useShopLoad(SB.shopReturns, setRows);
 
   const money = (n: number) => formatMoney(n, currency);
 
@@ -951,7 +932,7 @@ export function ReturnsScreen({ currency, onBack }: { currency?: string; onBack:
         <KeyboardSafe keyboardOnly style={s.modalWrap}>
           <ScrollView style={{ flex: 1 }} contentContainerStyle={s.modalScroll} keyboardShouldPersistTaps="handled">
           <View style={s.modalCard}>
-            <Text style={s.modalTitle}>Why are you declining?</Text>
+            <Text style={s.modalTitle} accessibilityRole="header">Why are you declining?</Text>
             <Text style={s.hint}>The customer sees this. A refusal with no reason is the most complained-about outcome of any returns process.</Text>
             <TextInput style={s.input} placeholder="e.g. Item shows use beyond inspection"
               accessibilityLabel="Reason for declining"

@@ -1,5 +1,6 @@
 // components/shopbook/theme.ts — Shop Book's palette and stylesheet, and the
-// switch between the light and dark variants. Moved out of app/shop-book.tsx.
+// switch between the light and dark variants. Split out of app/shop-book.tsx on
+// 2026-10-04 and edited since.
 
 import { StyleSheet } from 'react-native';
 // The shared ice-glass system. It lives under finance/ because Vault Finance is
@@ -55,6 +56,9 @@ export const makeC = (P: Palette) => ({
   // green as a FILL under white text, for the same reason: white on the dark
   // accent green read at 1.9:1; this fill reads at 5.3:1.
   greenFill:  P === FIN ? '#0B7A3B' : '#1E7A4C',
+  // Text and icons ON those fills (greenFill, navyFill, danger badge). White
+  // in both themes: each fill above was chosen to clear AA under white.
+  onFill:     '#FFFFFF',
 
   // The app header is a large FILL, not accent text. One token cannot be both:
   // reusing the accent in dark gives a glaring slab, so the roles are split.
@@ -108,7 +112,7 @@ export const makeStyles = (C: ReturnType<typeof makeC>) => StyleSheet.create({
   },
   modeBtnActive: { backgroundColor: C.navyFill },
   modeText: { color: C.green, fontWeight: '700', fontSize: 13 },
-  modeTextActive: { color: '#fff' },
+  modeTextActive: { color: C.onFill },
 
   subHeader: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: C.card,
@@ -120,7 +124,7 @@ export const makeStyles = (C: ReturnType<typeof makeC>) => StyleSheet.create({
     position: 'absolute', top: 2, right: 2, backgroundColor: C.danger,
     borderRadius: 9, minWidth: 18, height: 18, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 4,
   },
-  cartBadgeText: { color: '#fff', fontSize: 10, fontWeight: '800' },
+  cartBadgeText: { color: C.onFill, fontSize: 10, fontWeight: '800' },
 
   // Every screen's content container. The cap is the responsive change with
   // the widest reach in the file: without it a khata list stretches a customer
@@ -173,7 +177,7 @@ export const makeStyles = (C: ReturnType<typeof makeC>) => StyleSheet.create({
   badgeText: { fontSize: 11, fontWeight: '700', color: C.green },
 
   addBtn: { backgroundColor: C.greenFill, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 9 },
-  addBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  addBtnText: { color: C.onFill, fontWeight: '700', fontSize: 13 },
 
   panel: { backgroundColor: C.card, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: C.border, marginVertical: 8, gap: 8 },
   panelTitle: { color: C.text, fontSize: 14, fontWeight: '700' },
@@ -189,7 +193,7 @@ export const makeStyles = (C: ReturnType<typeof makeC>) => StyleSheet.create({
     flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8,
     backgroundColor: C.greenFill, borderRadius: 12, paddingVertical: 14, marginTop: 8,
   },
-  primaryBtnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
+  primaryBtnText: { color: C.onFill, fontWeight: '800', fontSize: 15 },
   outlineBtn: {
     flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8,
     borderRadius: 12, paddingVertical: 13, marginTop: 8, borderWidth: 1.5, borderColor: C.green,
@@ -199,7 +203,7 @@ export const makeStyles = (C: ReturnType<typeof makeC>) => StyleSheet.create({
   dangerBtnText: { color: C.danger, fontWeight: '700', fontSize: 14 },
 
   smallGreen: { backgroundColor: C.greenFill, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
-  smallGreenText: { color: '#fff', fontWeight: '700', fontSize: 12 },
+  smallGreenText: { color: C.onFill, fontWeight: '700', fontSize: 12 },
   smallOutline: { borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7, borderWidth: 1, borderColor: C.border },
   smallOutlineText: { color: C.text, fontWeight: '600', fontSize: 12 },
 
@@ -207,7 +211,7 @@ export const makeStyles = (C: ReturnType<typeof makeC>) => StyleSheet.create({
     flexDirection: 'row', justifyContent: 'space-between', backgroundColor: C.navyFill,
     borderRadius: 12, paddingVertical: 14, paddingHorizontal: 18, marginTop: 12,
   },
-  stickyCartText: { color: '#fff', fontWeight: '800', fontSize: 15 },
+  stickyCartText: { color: C.onFill, fontWeight: '800', fontSize: 15 },
 
   qtyRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   qtyBtn: { width: 30, height: 30, borderRadius: 8, backgroundColor: C.greenSoft, justifyContent: 'center', alignItems: 'center' },
@@ -256,11 +260,12 @@ export const makeStyles = (C: ReturnType<typeof makeC>) => StyleSheet.create({
   filterChip: { paddingHorizontal: 14, paddingVertical: 8, marginVertical: 7, marginRight: 8, borderRadius: 18, backgroundColor: C.chip },
   filterChipActive: { backgroundColor: C.greenFill },
   filterChipText: { color: C.sub, fontWeight: '700', fontSize: 13 },
-  filterChipTextActive: { color: '#fff' },
+  filterChipTextActive: { color: C.onFill },
 
   stepper: { flexDirection: 'row', marginVertical: 10 },
   stepDot: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: C.border, backgroundColor: C.card, justifyContent: 'center', alignItems: 'center' },
-  stepDotDone: { backgroundColor: C.green, borderColor: C.green },
+  // A fill under a white tick: the accent green read 1.9:1 under it in dark.
+  stepDotDone: { backgroundColor: C.greenFill, borderColor: C.greenFill },
   stepLabel: { fontSize: 9.5, color: C.sub, marginTop: 4, textAlign: 'center' },
 
   pill: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, marginTop: 6 },
@@ -293,7 +298,7 @@ export const makeStyles = (C: ReturnType<typeof makeC>) => StyleSheet.create({
     backgroundColor: C.greenFill, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6,
     borderStyle: 'dashed', borderWidth: 1, borderColor: '#166534',
   },
-  couponCodeText: { color: '#fff', fontSize: 12.5, fontWeight: '800', letterSpacing: 1 },
+  couponCodeText: { color: C.onFill, fontSize: 12.5, fontWeight: '800', letterSpacing: 1 },
 
   stars: { color: C.amber, fontSize: 15, letterSpacing: 2 },
   reviewName: { color: C.sub, fontSize: 12, marginTop: 4, fontStyle: 'italic' },
@@ -302,7 +307,7 @@ export const makeStyles = (C: ReturnType<typeof makeC>) => StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', backgroundColor: C.navyFill, borderRadius: 16,
     padding: 18, marginTop: 10,
   },
-  loyaltyPoints: { color: '#fff', fontSize: 28, fontWeight: '800' },
+  loyaltyPoints: { color: C.onFill, fontSize: 28, fontWeight: '800' },
   loyaltyTier: { color: '#93C5FD', fontSize: 13, fontWeight: '700', marginTop: 2 },
   loyaltySub: { color: C.sub, fontSize: 12, marginTop: 2 },
 

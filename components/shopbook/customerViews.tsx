@@ -1,12 +1,13 @@
-// components/shopbook/customerViews.tsx — Shop Book, moved out of app/shop-book.tsx
-// unchanged. Palette and styles come from ./theme; see app/shop-book.tsx.
+// components/shopbook/customerViews.tsx — Shop Book: find shops, product search, shop details, profile and the inbox.
+// Split out of app/shop-book.tsx on 2026-10-04 and edited since (fixes are
+// logged per round). Palette and styles come from ./theme.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, FlatList, Alert, RefreshControl, Share } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { SHOP_CATEGORIES, categoryIcon, categoryLabel } from '../../constants/shopCategories';
-import { formatMoney, formatDistance, shopOpenState, couponLabel, starText, loyaltyTier, type CartItem, isStalePrice, dateLocale } from '../../utils/shopbook';
+import { formatMoney, formatDistance, shopOpenState, couponLabel, starText, loyaltyTier, type CartItem, isStalePrice, dateLocale, notificationTarget, type NotificationTarget } from '../../utils/shopbook';
 import * as SB from '../../services/shopBookService';
 import { LoadingState, ErrorState } from '../finance/ui';
 import { listShopLists, saveShopList, deleteShopList, type ShopList } from '../../db/shopLists';
@@ -16,6 +17,7 @@ import { loadErrText, SubHeader, Chip, openDirections, InfoRow, Empty } from './
 import { Catalog } from './catalog';
 import { CartView } from './checkout';
 import { permissionDenied } from '../../lib/permissionDenied';
+import { useShopLoad } from './useShopLoad';
 
 /** Unwrap an expo-location result to a usable pair, or null.
  *  Rejects (0,0): that is what a failed fix serialises to, not a place anyone
@@ -39,26 +41,21 @@ export function FindShops({ onOpen, favIds, onToggleFav, favErr, onRetryFavs, on
   favErr: boolean; onRetryFavs: () => void;
   onProductSearch: () => void;
 }) {
-  const [loading, setLoading] = useState(true);
   const [shops, setShops] = useState<SB.Shop[]>([]);
   const [favShops, setFavShops] = useState<SB.Shop[]>([]);
   const [cat, setCat] = useState('all');
   const [q, setQ] = useState('');
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
-  const [err, setErr] = useState<string | null>(null);
   const [favShopsErr, setFavShopsErr] = useState(false);
   const loadFavShops = useCallback(async () => {
     try { setFavShops(await SB.favorites()); setFavShopsErr(false); } catch { setFavShopsErr(true); }
   }, []);
 
-  const load = useCallback(async (category: string, c?: { lat: number; lng: number } | null) => {
-    setLoading(true); setErr(null);
-    try {
-      const list = await SB.nearbyShops(c?.lat, c?.lng, category);
-      setShops(list);
-    } catch (e: any) { setErr(e?.message ?? 'Could not load shops'); }
-    finally { setLoading(false); }
-  }, []);
+  // The first load waits for the location read below, so it is started there.
+  const { loading, err, loadWith: load } = useShopLoad(fetchNearby, setShops,
+    { auto: false, fallback: 'Could not load shops' });
+  // Before that first load the list is not "empty", it is not read yet.
+  const [started, setStarted] = useState(false);
 
   // DO NOT PROMPT ON MOUNT.
   //
@@ -96,6 +93,7 @@ export function FindShops({ onOpen, favIds, onToggleFav, favErr, onRetryFavs, on
         if (c) setCoords(c);
       }
     } catch {}
+    setStarted(true);
     load('all', c);
     loadFavShops();
   })(); }, [load, loadFavShops]);
@@ -141,7 +139,7 @@ export function FindShops({ onOpen, favIds, onToggleFav, favErr, onRetryFavs, on
         <Text style={s.findProductText}>Find a product across shops</Text>
         <Ionicons name="chevron-forward" size={16} color={C.green} style={{ marginLeft: 'auto' }} />
       </TouchableOpacity>
-      {!coords && !loading && (
+      {!coords && started && !loading && (
         <TouchableOpacity onPress={enableLocation} activeOpacity={0.7} accessibilityRole="button"
           accessibilityLabel="Location off, showing recent shops. Enable location for distance.">
           <Text style={s.hint}>📍 Location off — showing recent shops. Tap to enable for distance.</Text>
@@ -182,9 +180,9 @@ export function FindShops({ onOpen, favIds, onToggleFav, favErr, onRetryFavs, on
         ))}
       </ScrollView>
 
-      {loading && <LoadingState />}
-      {err && <Text style={s.error}>{err}</Text>}
-      {!loading && !err && filtered.length === 0 && (
+      {(loading || !started) && <LoadingState />}
+      {!!err && !loading && <ErrorState title="Couldn’t load shops" sub={err} onRetry={() => load(cat, coords)} />}
+      {started && !loading && !err && filtered.length === 0 && (
         <Empty icon="storefront-outline" text="No shops found nearby yet." />
       )}
 
@@ -203,10 +201,13 @@ export function FindShops({ onOpen, favIds, onToggleFav, favErr, onRetryFavs, on
       renderItem={renderShop}
       ListHeaderComponent={header}
       contentContainerStyle={s.body}
-      refreshControl={<RefreshControl refreshing={loading} onRefresh={() => load(cat, coords)} tintColor={C.green} />}
+      refreshControl={<RefreshControl refreshing={started && loading} onRefresh={() => load(cat, coords)} tintColor={C.green} />}
     />
   );
 }
+
+const fetchNearby = (category: string, c?: { lat: number; lng: number } | null) =>
+  SB.nearbyShops(c?.lat, c?.lng, category);
 
 export function ShopCard({ shop, onOpen, isFav, onToggleFav }: {
   shop: SB.Shop; onOpen: () => void; isFav: boolean; onToggleFav: () => void;
@@ -249,31 +250,32 @@ export function ShopCard({ shop, onOpen, isFav, onToggleFav }: {
 
 export function ProductSearch({ onBack, onOpenShop }: { onBack: () => void; onOpenShop: (shopId: string) => void }) {
   const [q, setQ] = useState('');
-  const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<SB.ProductHit[]>([]);
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [searched, setSearched] = useState(false);
+  const [tooShort, setTooShort] = useState(false);
 
   useEffect(() => { (async () => {
     try {
       const { status } = await Location.getForegroundPermissionsAsync();
       if (status === 'granted') {
-        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        // Same rules as FindShops: last known first, and a (0,0) "fix" is
+        // a failed one, not a place to rank shops around.
+        const c = await positionOf(Location.getLastKnownPositionAsync())
+          ?? await positionOf(Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }));
+        if (c) setCoords(c);
       }
     } catch {}
   })(); }, []);
 
   const [sort, setSort] = useState<'price' | 'nearest' | 'open'>('price');
-  const [err, setErr] = useState('');
+  const { loading, err, loadWith } = useShopLoad(SB.searchProducts, setResults, { auto: false });
 
   const run = async () => {
-    if (q.trim().length < 2) return;
-    setLoading(true); setSearched(true); setErr('');
-    try {
-      setResults(await SB.searchProducts(
-        q.trim(), coords?.lat, coords?.lng, sort === 'nearest' ? 'nearest' : 'price'));
-    } catch (e: any) { setResults([]); setErr(loadErrText(e)); } finally { setLoading(false); }
+    // Said, not silently ignored: a one-letter search did nothing at all.
+    if (q.trim().length < 2) { setTooShort(true); return; }
+    setTooShort(false); setSearched(true); setResults([]);
+    await loadWith(q.trim(), coords?.lat, coords?.lng, sort === 'nearest' ? 'nearest' : 'price');
   };
   // Re-run when the sort changes after a search.
   useEffect(() => { if (searched) run(); /* eslint-disable-line react-hooks/exhaustive-deps */ }, [sort]);
@@ -301,6 +303,9 @@ export function ProductSearch({ onBack, onOpenShop }: { onBack: () => void; onOp
             placeholderTextColor={C.sub} value={q} onChangeText={setQ}
             onSubmitEditing={run} returnKeyType="search" autoFocus />
         </View>
+        {tooShort && (
+          <Text style={[s.hint, { color: C.danger }]} accessibilityLiveRegion="polite">Type at least 2 letters to search.</Text>
+        )}
         <TouchableOpacity style={s.primaryBtn} onPress={run} accessibilityRole="button"><Text style={s.primaryBtnText}>Search nearby shops</Text></TouchableOpacity>
 
         {searched && (
@@ -436,7 +441,7 @@ export function ShopFlow({ shop, cart, setCart, onBack, onPlaced, onLedger, isFa
           <InfoRow icon="hourglass-outline" label="Prep time" value={`~${shop.prepMins} min`} />
 
           <TouchableOpacity style={s.primaryBtn} onPress={() => setView('catalog')} accessibilityRole="button">
-            <Ionicons name="list" size={18} color="#fff" />
+            <Ionicons name="list" size={18} color={C.onFill} />
             <Text style={s.primaryBtnText}>View Catalog</Text>
           </TouchableOpacity>
           {shop.lat != null && shop.lng != null && (
@@ -489,6 +494,7 @@ export function CustomerProfile({ me }: { me: { id: string; name: string } | nul
   const lang = useShopBookLang();
   // A failed read must not look like "0 pts" or "no saved lists".
   const [accountErr, setAccountErr] = useState(false);
+  const [accountLoading, setAccountLoading] = useState(true);
   const [listsErr, setListsErr] = useState('');
   const [listBusy, setListBusy] = useState(false);
 
@@ -499,7 +505,9 @@ export function CustomerProfile({ me }: { me: { id: string; name: string } | nul
   }, [me]);
 
   const loadAccount = useCallback(async () => {
+    setAccountLoading(true);
     const [ly, lg] = await Promise.allSettled([SB.loyalty(), SB.myLedgers()]);
+    setAccountLoading(false);
     if (ly.status === 'fulfilled') setLoyalty(ly.value);
     if (lg.status === 'fulfilled') setLedgers(lg.value.ledgers);
     setAccountErr(ly.status === 'rejected' || lg.status === 'rejected');
@@ -537,7 +545,8 @@ export function CustomerProfile({ me }: { me: { id: string; name: string } | nul
         </View>
       </View>
 
-      {accountErr && (
+      {accountLoading && !loyalty && <LoadingState />}
+      {accountErr && !accountLoading && (
         <ErrorState title="Couldn’t load your points and balances" sub="Check your connection and try again." onRetry={loadAccount} />
       )}
 
@@ -581,7 +590,7 @@ export function CustomerProfile({ me }: { me: { id: string; name: string } | nul
           <TouchableOpacity key={l.id} style={[s.chip, lang === l.id && s.chipActive]}
             accessibilityRole="radio" accessibilityState={{ checked: lang === l.id }}
             onPress={() => setShopBookLang(l.id)}>
-            <Text style={[s.chipText, lang === l.id && { color: '#fff' }]}>{l.native}</Text>
+            <Text style={[s.chipText, lang === l.id && { color: C.onFill }]}>{l.native}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -628,47 +637,86 @@ export function CustomerProfile({ me }: { me: { id: string; name: string } | nul
   );
 }
 
-export function NotificationCenter({ onBack, onRead }: { onBack: () => void; onRead: () => void }) {
-  const [loading, setLoading] = useState(true);
+export function NotificationCenter({ mode, onBack, onRead, onReadOne, onOpen }: {
+  mode: 'customer' | 'owner';
+  onBack: () => void; onRead: () => void; onReadOne: () => void;
+  onOpen: (target: NotificationTarget) => void;
+}) {
   const [items, setItems] = useState<SB.Notification[]>([]);
-  const [err, setErr] = useState('');
-  const load = useCallback(async () => {
-    setLoading(true); setErr('');
-    try { setItems((await SB.notifications()).notifications); } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
-  }, []);
-  useEffect(() => { load(); }, [load]);
+  const { loading, err, load } = useShopLoad(fetchNotifications, setItems);
 
   const markAll = async () => {
     try { await SB.markNotificationsRead(); onRead(); load(); }
     catch (e: any) { Alert.alert('Could not mark as read', e?.message ?? 'Try again'); }
   };
 
+  // Opening a row reads it. Marking is best-effort: the badge corrects itself
+  // on the next inbox load, and a failed mark must not block the navigation.
+  const open = (n: SB.Notification, target: NotificationTarget) => {
+    if (!n.read) {
+      setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
+      onReadOne();
+      SB.markNotificationsRead([n.id]).catch(() => {});
+    }
+    onOpen(target);
+  };
+
+  const renderItem = ({ item: n }: { item: SB.Notification }) => {
+    const target = notificationTarget(n, mode);
+    const label = [n.read ? '' : 'Unread', n.title, n.body].filter(Boolean).join('. ');
+    const body = (
+      <>
+        <View style={{ flex: 1 }}>
+          <Text numberOfLines={1} style={s.cardTitle}>{n.title}</Text>
+          {!!n.body && <Text style={s.cardSub}>{n.body}</Text>}
+          <Text style={[s.cardSub, { fontSize: 11 }]}>{new Date(n.createdAt).toLocaleString(dateLocale())}</Text>
+        </View>
+        {!n.read && <View style={[s.pillDot, { backgroundColor: C.green }]} />}
+        {target && <Ionicons name="chevron-forward" size={18} color={C.sub} />}
+      </>
+    );
+    // Only a row with somewhere to go is a button; the rest stay plain text
+    // rather than touchables that do nothing.
+    return target ? (
+      <TouchableOpacity style={[s.card, !n.read && { borderColor: C.green }]} onPress={() => open(n, target)}
+        accessibilityRole="button" accessibilityLabel={label}
+        accessibilityHint={target.kind === 'returns' ? 'Opens your returns' : 'Opens the order'}>
+        {body}
+      </TouchableOpacity>
+    ) : (
+      <View style={[s.card, !n.read && { borderColor: C.green }]} accessible accessibilityLabel={label}>
+        {body}
+      </View>
+    );
+  };
+
   return (
     <>
       <SubHeader title={t('notif.title')} onBack={onBack}
         right={{ icon: 'checkmark-done-outline', label: t('notif.markAllRead'), onPress: markAll }} />
-      <ScrollView contentContainerStyle={s.body}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
-        {!!err && !loading && <ErrorState title="Couldn’t load notifications" sub={err} onRetry={load} />}
-        {!loading && !err && items.length === 0 && <Empty icon="notifications-off-outline" text={t('notif.empty')} />}
-        {items.map((n) => (
-          <View key={n.id} style={[s.card, !n.read && { borderColor: C.green }]} accessible
-            accessibilityLabel={[n.read ? '' : 'Unread', n.title, n.body].filter(Boolean).join('. ')}>
-            <View style={{ flex: 1 }}>
-              <Text numberOfLines={1} style={s.cardTitle}>{n.title}</Text>
-              {!!n.body && <Text style={s.cardSub}>{n.body}</Text>}
-              <Text style={[s.cardSub, { fontSize: 11 }]}>{new Date(n.createdAt).toLocaleString(dateLocale())}</Text>
-            </View>
-            {!n.read && <View style={[s.pillDot, { backgroundColor: C.green }]} />}
-          </View>
-        ))}
-        {items.length > 0 && (
+      {/* Up to 100 rows come back, so the inbox is a virtualized list. */}
+      <FlatList
+        data={items}
+        keyExtractor={(n) => n.id}
+        renderItem={renderItem}
+        contentContainerStyle={s.body}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}
+        ListHeaderComponent={(
+          <>
+            {loading && items.length === 0 && <LoadingState />}
+            {!!err && !loading && <ErrorState title="Couldn’t load notifications" sub={err} onRetry={load} />}
+            {!loading && !err && items.length === 0 && <Empty icon="notifications-off-outline" text={t('notif.empty')} />}
+          </>
+        )}
+        ListFooterComponent={items.length > 0 ? (
           <TouchableOpacity style={s.outlineBtn} onPress={markAll} accessibilityRole="button">
             <Ionicons name="checkmark-done" size={18} color={C.green} />
             <Text style={s.outlineBtnText}>{t('notif.markAllRead')}</Text>
           </TouchableOpacity>
-        )}
-      </ScrollView>
+        ) : null}
+      />
     </>
   );
 }
+
+const fetchNotifications = () => SB.notifications().then((r) => r.notifications);

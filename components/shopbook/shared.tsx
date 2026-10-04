@@ -1,5 +1,6 @@
-// components/shopbook/shared.tsx — Shop Book, moved out of app/shop-book.tsx
-// unchanged. Palette and styles come from ./theme; see app/shop-book.tsx.
+// components/shopbook/shared.tsx — Shop Book: small components and helpers every Shop Book screen uses.
+// Split out of app/shop-book.tsx on 2026-10-04 and edited since (fixes are
+// logged per round). Palette and styles come from ./theme.
 
 import React, { useEffect, useState } from 'react';
 import { KeyboardSafe } from '../ui';
@@ -29,11 +30,8 @@ import { C, s } from './theme';
  * file is the one printToFileAsync produced, already numbered and stored
  * server-side, and this only decides what is shown next.
  */
-export function previewDoc(uri: string, filename: string): void {
-  navRouter.push({
-    pathname: '/file-viewer',
-    params: { uri, filename, mimeType: 'application/pdf' },
-  } as any);
+export function previewDoc(uri: string, filename: string, mimeType = 'application/pdf'): void {
+  navRouter.push({ pathname: '/file-viewer', params: { uri, filename, mimeType } });
 }
 
 /** What to say when a load fails. Shown in ErrorState with a retry, so a
@@ -102,14 +100,15 @@ export function ReasonModal({ visible, title, codes, placeholder, maxLength, onS
       <KeyboardSafe keyboardOnly style={s.modalWrap}>
         <ScrollView style={{ flex: 1 }} contentContainerStyle={s.modalScroll} keyboardShouldPersistTaps="handled">
         <View style={s.modalCard}>
-          <Text numberOfLines={1} style={s.modalTitle}>{title}</Text>
+          <Text numberOfLines={1} style={s.modalTitle} accessibilityRole="header">{title}</Text>
           {codes && (
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 10 }} accessibilityRole="radiogroup">
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 10 }}
+              accessibilityRole="radiogroup" accessibilityLabel="Reason">
               {codes.map((rc) => (
                 <TouchableOpacity key={rc.code} style={[s.chip, code === rc.code && s.chipActive]}
                   accessibilityRole="radio" accessibilityState={{ checked: code === rc.code }}
                   onPress={() => setCode(rc.code)}>
-                  <Text style={[s.chipText, code === rc.code && { color: '#fff' }]}>{rc.label}</Text>
+                  <Text style={[s.chipText, code === rc.code && { color: C.onFill }]}>{rc.label}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -177,16 +176,18 @@ export function SubHeader({ title, onBack, right }: {
   );
 }
 
-const ON_FILL = '#fff';   // chip icon and text on the green fill
+/** An Ionicons glyph name, as opposed to an emoji or a blank icon. */
+const isGlyph = (icon: string): icon is keyof typeof Ionicons.glyphMap => icon in Ionicons.glyphMap;
+
 export function Chip({ label, icon, active, onPress }: { label: string; icon: string; active: boolean; onPress: () => void }) {
   return (
     <TouchableOpacity style={[s.chip, active && s.chipActive]} onPress={onPress}
       // The icon is an emoji or a glyph name, never a label worth reading out.
       accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ selected: active }}>
-      {/^[a-z]+(-[a-z]+)*$/.test(icon)
-        ? <Ionicons name={icon as any} size={14} color={active ? ON_FILL : C.sub} />
+      {isGlyph(icon)
+        ? <Ionicons name={icon} size={14} color={active ? C.onFill : C.sub} />
         : <Text style={{ fontSize: 13 }}>{icon}</Text>}
-      <Text style={[s.chipText, active && { color: ON_FILL }]}>{label}</Text>
+      <Text style={[s.chipText, active && { color: C.onFill }]}>{label}</Text>
     </TouchableOpacity>
   );
 }
@@ -312,7 +313,7 @@ export function TxnRow({
   const bg = iconTone === 'good' ? C.goodSoft : iconTone === 'bad' ? C.dangerSoft
     : iconTone === 'warn' ? C.warnSoft : C.greenSoft;
   const amtColor = amountTone === 'good' ? C.good : amountTone === 'bad' ? C.danger : C.text;
-  const Wrap: any = onPress ? TouchableOpacity : View;
+  const Wrap: React.ElementType = onPress ? TouchableOpacity : View;
   return (
     <Wrap
       style={[s.card, { alignItems: 'flex-start' }]}
@@ -408,7 +409,7 @@ export function Banner({ tone, text, sub, icon, onPress }: {
 }) {
   const fg = tone === 'warn' ? C.amber : tone === 'bad' ? C.danger : C.blue;
   const bg = tone === 'warn' ? C.warnSoft : tone === 'bad' ? C.dangerSoft : C.infoSoft;
-  const Wrap: any = onPress ? TouchableOpacity : View;
+  const Wrap: React.ElementType = onPress ? TouchableOpacity : View;
   return (
     <Wrap
       style={[s.banner, { backgroundColor: bg, borderColor: fg }]}

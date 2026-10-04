@@ -1,7 +1,8 @@
-// components/shopbook/reports.tsx — Shop Book, moved out of app/shop-book.tsx
-// unchanged. Palette and styles come from ./theme; see app/shop-book.tsx.
+// components/shopbook/reports.tsx — Shop Book: owner dashboard, plans and reports.
+// Split out of app/shop-book.tsx on 2026-10-04 and edited since (fixes are
+// logged per round). Palette and styles come from ./theme.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, Alert, RefreshControl, Share, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import QRCode from 'react-native-qrcode-svg';
@@ -11,7 +12,8 @@ import * as SB from '../../services/shopBookService';
 import { StatTile, TileGrid, ActionGrid, QuickAction, LoadingState, ErrorState } from '../finance/ui';
 import { t } from '../../lib/shopbookI18n';
 import { C, s } from './theme';
-import { loadErrText, Row, SubHeader, StatCard, Empty, Banner } from './shared';
+import { Row, SubHeader, StatCard, Empty, Banner } from './shared';
+import { useShopLoad } from './useShopLoad';
 
 export function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPlans, onReports,
                          onPurchases, onReturns, onAudit, onVerify }: {
@@ -19,16 +21,10 @@ export function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPla
   onPlans: () => void; onReports: () => void;
   onPurchases: () => void; onReturns: () => void; onAudit: () => void; onVerify: () => void;
 }) {
-  const [loading, setLoading] = useState(true);
   const [d, setD] = useState<SB.Dashboard | null>(null);
   const [qr, setQr] = useState(false);
   const deepLink = `vaultchat://shop-book?shop=${shop.id}`;
-  const [err, setErr] = useState('');
-  const load = useCallback(async () => {
-    setLoading(true); setErr('');
-    try { setD(await SB.dashboard()); } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
-  }, []);
-  useEffect(() => { load(); }, [load]);
+  const { loading, err, load } = useShopLoad(SB.dashboard, setD);
   const st = shopOpenState(shop);
 
   return (
@@ -37,14 +33,14 @@ export function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPla
       <Modal visible={qr} transparent animationType="fade" onRequestClose={() => setQr(false)}>
         <View style={s.modalWrap}>
           <View style={s.modalCard}>
-            <Text numberOfLines={1} style={s.modalTitle}>{shop.name}</Text>
+            <Text numberOfLines={1} style={s.modalTitle} accessibilityRole="header">{shop.name}</Text>
             <Text style={[s.hint, { textAlign: 'center' }]}>Customers scan this to open your shop</Text>
             <View style={{ alignItems: 'center', marginVertical: 18, backgroundColor: '#FFFFFF', padding: 14, borderRadius: 14 }}>   {/* theme-exempt: a QR needs a real white quiet zone */}
               <QRCode value={deepLink} size={190} color={C.navyFill} backgroundColor="#ffffff" />
             </View>
             <TouchableOpacity style={s.primaryBtn} accessibilityRole="button"
               onPress={() => Share.share({ message: `Order from ${shop.name} on Shop Book 🛍️\n${deepLink}` }).catch(() => {})}>
-              <Ionicons name="share-social-outline" size={18} color="#fff" />
+              <Ionicons name="share-social-outline" size={18} color={C.onFill} />
               <Text style={s.primaryBtnText}>Share shop link</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.dangerBtn} onPress={() => setQr(false)} accessibilityRole="button"><Text style={s.dangerBtnText}>Close</Text></TouchableOpacity>
@@ -68,7 +64,7 @@ export function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPla
             <Text numberOfLines={1} style={s.cardTitle}>{shop.name}</Text>
             {shop.verified && <Ionicons name="checkmark-circle" size={16} color={C.blue} />}
             <View style={[s.planTag, shop.plan === 'pro' ? s.planPro : s.planFree]}>
-              <Text style={[s.planTagText, shop.plan === 'pro' && { color: '#fff' }]}>{shop.plan === 'pro' ? '★ PRO' : 'FREE'}</Text>
+              <Text style={[s.planTagText, shop.plan === 'pro' && { color: C.onFill }]}>{shop.plan === 'pro' ? '★ PRO' : 'FREE'}</Text>
             </View>
           </View>
           <Text style={s.cardSub}>
@@ -177,18 +173,28 @@ export function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPla
   );
 }
 
-export function OwnerPlans({ plan, onBack, onChanged }: {
-  plan: 'free' | 'pro'; onBack: () => void; onChanged: () => void;
+export function OwnerPlans({ plan, requestedAt: knownRequestedAt, onBack, onChanged }: {
+  plan: 'free' | 'pro'; requestedAt?: string | null; onBack: () => void; onChanged: () => void;
 }) {
   const [busy, setBusy] = useState(false);
-  // When the owner asked for Pro. Known only once they have asked in this
-  // visit: the request endpoint returns the FIRST request's time every call.
-  const [requestedAt, setRequestedAt] = useState<string | null>(null);
+  // When the owner asked for Pro. From /my-shop once the server returns it
+  // (written, not deployed); until then known only after asking in this visit
+  // — the request endpoint returns the FIRST request's time every call.
+  const [requestedAt, setRequestedAt] = useState<string | null>(knownRequestedAt ?? null);
   const requestPro = async () => {
     if (busy) return;
     setBusy(true);
     try { setRequestedAt((await SB.requestPro()).requestedAt); }
-    catch (e: any) { Alert.alert('Could not send the request', e?.message ?? 'Try again'); }
+    catch (e: any) {
+      // Today's server has no such route yet: say that, rather than a failure
+      // the owner would keep retrying.
+      if (SB.notAvailableYet(e)) {
+        Alert.alert('Not available yet',
+          'Requesting Pro from the app needs a server update that is not live yet. Nothing was sent, and your plan has not changed.');
+      } else {
+        Alert.alert('Could not send the request', e?.message ?? 'Try again');
+      }
+    }
     finally { setBusy(false); }
   };
   // Only a downgrade is the owner's to make. Upgrading used to POST 'pro' here,
@@ -263,23 +269,22 @@ export function OwnerReports({ plan, currency, onBack, onUpgrade }: {
   plan: 'free' | 'pro'; currency?: string; onBack: () => void; onUpgrade: () => void;
 }) {
   const [scope, setScope] = useState<'basic' | 'advanced'>('basic');
-  const [loading, setLoading] = useState(true);
   const [data, setData] = useState<SB.Reports | null>(null);
   // The server decides what is Pro: the lock shows when IT refuses, never on
   // the client's guess of the plan.
   const [locked, setLocked] = useState(false);
-  const [err, setErr] = useState('');
   const money = (n: number) => formatMoney(n, currency || '₹');
 
-  const load = useCallback(async () => {
-    setLoading(true); setErr(''); setLocked(false); setData(null);
-    try { setData(await SB.reports(scope)); }
-    catch (e: any) {
-      if (SB.needsUpgrade(e)) setLocked(true);
-      else setErr(e?.message ?? 'Could not load the reports');
-    } finally { setLoading(false); }
+  // A Pro refusal is an answer (show the lock), not a load failure. The last
+  // scope's figures are cleared first so they never show under the new tab.
+  const fetchReports = useCallback(() => {
+    setData(null); setLocked(false);
+    return SB.reports(scope).then(
+      (r) => ({ data: r as SB.Reports | null, locked: false }),
+      (e) => { if (SB.needsUpgrade(e)) return { data: null, locked: true }; throw e; });
   }, [scope]);
-  useEffect(() => { load(); }, [load]);
+  const { loading, err, load } = useShopLoad(fetchReports, (r) => { setData(r.data); setLocked(r.locked); },
+    { fallback: 'Could not load the reports' });
 
   return (
     <>

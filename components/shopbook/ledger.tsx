@@ -1,27 +1,23 @@
-// components/shopbook/ledger.tsx — Shop Book, moved out of app/shop-book.tsx
-// unchanged. Palette and styles come from ./theme; see app/shop-book.tsx.
+// components/shopbook/ledger.tsx — Shop Book: khata (customer ledgers), counter sales and khata entries.
+// Split out of app/shop-book.tsx on 2026-10-04 and edited since (fixes are
+// logged per round). Palette and styles come from ./theme.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, FlatList, Alert, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
-import * as Sharing from 'expo-sharing';
 import { formatMoney, clientKey, normalizeUnit, isNum, isBlankOrNum, num } from '../../utils/shopbook';
 import * as SB from '../../services/shopBookService';
 import { LoadingState, ErrorState } from '../finance/ui';
 import { C, s } from './theme';
-import { previewDoc, loadErrText, SubHeader, Chip, StatCard, TxnRow, LedgerRow, Empty, Banner } from './shared';
+import { previewDoc, SubHeader, Chip, StatCard, TxnRow, LedgerRow, Empty, Banner } from './shared';
+import { useShopLoad } from './useShopLoad';
 
 export function CustomerLedgerView({ shop, onBack }: { shop: SB.Shop; onBack: () => void }) {
   const money = (n: number) => formatMoney(n, shop.currency || '₹');
-  const [loading, setLoading] = useState(true);
   const [ledger, setLedger] = useState<SB.Ledger | null>(null);
-  const [err, setErr] = useState('');
-  const load = useCallback(async () => {
-    setLoading(true); setErr('');
-    try { setLedger(await SB.customerLedger(shop.id)); } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
-  }, [shop.id]);
-  useEffect(() => { load(); }, [load]);
+  const fetchLedger = useCallback(() => SB.customerLedger(shop.id), [shop.id]);
+  const { loading, err, load } = useShopLoad(fetchLedger, setLedger);
 
   const renderEntry = ({ item: e }: { item: SB.LedgerEntry }) => <LedgerRow entry={e} currency={shop.currency} />;
 
@@ -58,7 +54,6 @@ export function CustomerLedgerView({ shop, onBack }: { shop: SB.Shop; onBack: ()
 
 export function OwnerKhata({ currency }: { currency?: string }) {
   const money = (n: number) => formatMoney(n, currency || '₹');
-  const [loading, setLoading] = useState(true);
   const [customers, setCustomers] = useState<SB.CustomerPending[]>([]);
   const [sel, setSel] = useState<SB.CustomerPending | null>(null);
   // Adding a walk-in: someone with no crazzychat account who buys on credit.
@@ -68,12 +63,7 @@ export function OwnerKhata({ currency }: { currency?: string }) {
   const [newMobile, setNewMobile] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const [err, setErr] = useState('');
-  const load = useCallback(async () => {
-    setLoading(true); setErr('');
-    try { setCustomers(await SB.ownerLedgerSummary()); } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
-  }, []);
-  useEffect(() => { load(); }, [load]);
+  const { loading, err, load } = useShopLoad(SB.ownerLedgerSummary, setCustomers);
 
   if (sel) return <KhataDetail customer={sel} currency={currency} onBack={() => { setSel(null); load(); }} />;
 
@@ -263,23 +253,20 @@ export function CounterSale({ currency, onDone }: { currency?: string; onDone: (
         name: it.name.trim(), brand: '', unit: normalizeUnit(it.unit),
         qty: num(it.qty), price: num(it.price), taxPercent: 0,
       })));
-      // The bill is the point of the sale, so print it here rather than making
-      // the owner hunt for the document afterwards. A failed share must not
-      // read as a failed sale — the document is already numbered and stored.
+      // The bill is the point of the sale, so show it here rather than making
+      // the owner hunt for the document afterwards — in the in-app viewer like
+      // every other Shop Book document, which keeps Share and Open-with. (It
+      // went straight to the share sheet, and on a device with no share target
+      // it went nowhere.) A failed print must not read as a failed sale: the
+      // document is already numbered and stored.
+      onDone();
       try {
         const html = await SB.invoiceHtml(id);
         const { uri } = await Print.printToFileAsync({ html });
-        if (await Sharing.isAvailableAsync()) {
-          await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: 'Bill' });
-        }
+        previewDoc(uri, `bill-${id}.pdf`);
       } catch {
-        Alert.alert('Sale recorded', 'The bill could not be shared, but the sale is saved.');
+        Alert.alert('Sale recorded', 'The bill could not be shown, but the sale is saved.');
       }
-      // ponytail: this one still goes straight to the share sheet rather than
-      // previewDoc(). onDone() closes the panel on the next line, so pushing a
-      // viewer here would race that navigation. Move it over when this flow is
-      // next opened — the bill stays re-openable from the khata list meanwhile.
-      onDone();
     } catch (e: any) {
       Alert.alert('Could not record the sale', e?.message ?? 'Try again');
     } finally { setBusy(false); }
@@ -342,7 +329,6 @@ export function CounterSale({ currency, onDone }: { currency?: string; onDone: (
 
 export function KhataDetail({ customer, currency, onBack }: { customer: SB.CustomerPending; currency?: string; onBack: () => void }) {
   const money = (n: number) => formatMoney(n, currency || '₹');
-  const [loading, setLoading] = useState(true);
   const [ledger, setLedger] = useState<SB.Ledger | null>(null);
   const [amount, setAmount] = useState('');
   const [remark, setRemark] = useState('');
@@ -355,13 +341,10 @@ export function KhataDetail({ customer, currency, onBack }: { customer: SB.Custo
     setItems((prev) => prev.map((it) => (it.key === key ? { ...it, ...patch } : it)));
   const itemsTotal = items.reduce((n, it) => n + num(it.qty) * num(it.price), 0);
 
-  const [err, setErr] = useState('');
-  const load = useCallback(async () => {
-    setLoading(true); setErr('');
-    try { setLedger(await SB.ownerCustomerLedger(customer.customerId, !!customer.isKhata)); }
-    catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
-  }, [customer.customerId, customer.isKhata]);
-  useEffect(() => { load(); }, [load]);
+  const fetchLedger = useCallback(
+    () => SB.ownerCustomerLedger(customer.customerId, !!customer.isKhata),
+    [customer.customerId, customer.isKhata]);
+  const { loading, err, load } = useShopLoad(fetchLedger, setLedger);
 
   // A key per entry the owner is composing: a retry of THIS payment resolves
   // to the row already written, but the next payment gets its own key.

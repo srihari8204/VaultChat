@@ -777,6 +777,25 @@ export function myShop() {
   return api<{ shop: Shop | null }>(`/shopbook/my-shop`).then((r) => r.shop);
 }
 
+/**
+ * The owner's shop plus what the account screens need beside it, from the one
+ * /my-shop read.
+ *
+ * `entitledPlan` and `proRequestedAt` are written into the server contract but
+ * not served yet (handoff in the round-4 Shop Book log). Until they are, both
+ * come back undefined — "unknown", never Free or "not requested" — and the
+ * caller falls back: the plan from entitledPlan() below, the request time from
+ * the request itself.
+ */
+export function myShopAccount() {
+  return api<{ shop: Shop | null; entitledPlan?: 'free' | 'pro'; proRequestedAt?: string | null }>(`/shopbook/my-shop`)
+    .then((r) => ({
+      shop: r.shop,
+      entitledPlan: r.entitledPlan === 'pro' || r.entitledPlan === 'free' ? r.entitledPlan : undefined,
+      proRequestedAt: typeof r.proRequestedAt === 'string' ? r.proRequestedAt : undefined,
+    }));
+}
+
 export type ShopInput = Partial<Omit<Shop, 'id' | 'distanceKm'>> & { name: string };
 export function saveShop(input: ShopInput) {
   return api<{ id: string }>(`/shopbook/my-shop`, { method: 'POST', json: input });
@@ -961,11 +980,20 @@ export function setPlan(plan: 'free') {
 export function requestPro() {
   return api<{ ok: boolean; requestedAt: string }>(`/shopbook/my-shop/plan/request-pro`, { method: 'POST' });
 }
+// True when the server has no such route yet (404/405), as opposed to a real
+// refusal or a network failure — the Request Pro endpoint is written but not
+// deployed, and "Could not send" would read as a fault the owner can retry.
+export function notAvailableYet(err: any): boolean {
+  return (err?.status === 404 || err?.status === 405) && !err?.body?.error;
+}
 
 // The plan the shop is ENTITLED to — what every server gate checks. Shop.plan
 // is only a display column and can drift (an expired entitlement does not
 // rewrite it). /reports is the one owner endpoint that returns the entitled
-// plan, so this reads it from the basic report.
+// plan TODAY, so this reads it from the basic report.
+// ponytail: computes the whole basic report to read one field. Only the
+// fallback for a server whose /my-shop does not yet return `entitledPlan`
+// (myShopAccount); remove once that field is deployed.
 export function entitledPlan() {
   return reports('basic').then((r) => r.plan);
 }

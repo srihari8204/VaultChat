@@ -1,5 +1,6 @@
-// components/shopbook/catalog.tsx — Shop Book, moved out of app/shop-book.tsx
-// unchanged. Palette and styles come from ./theme; see app/shop-book.tsx.
+// components/shopbook/catalog.tsx — Shop Book: the customer's shop catalog, typed and spoken product requests.
+// Split out of app/shop-book.tsx on 2026-10-04 and edited since (fixes are
+// logged per round). Palette and styles come from ./theme.
 
 import { useCallback, useEffect, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, FlatList, Alert } from 'react-native';
@@ -10,7 +11,8 @@ import * as SB from '../../services/shopBookService';
 import { LoadingState, ErrorState } from '../finance/ui';
 import { speechLocale } from '../../lib/shopbookI18n';
 import { C, s } from './theme';
-import { loadErrText, Chip, Empty } from './shared';
+import { Chip, Empty } from './shared';
+import { useShopLoad } from './useShopLoad';
 
 // Prices a customer reads must be in the SHOP's currency. These used to be
 // formatINR — a hardcoded ₹ — which mislabels every figure for a shop
@@ -19,7 +21,6 @@ export function Catalog({ shop, cart, setCart, onCart }: {
   shop: SB.Shop; cart: CartItem[]; setCart: (c: CartItem[]) => void; onCart: () => void;
 }) {
   const money = (n: number) => formatMoney(n, shop.currency || '₹');
-  const [loading, setLoading] = useState(true);
   const [products, setProducts] = useState<SB.Product[]>([]);
   const [q, setQ] = useState('');
   // "Type any product" form
@@ -40,13 +41,8 @@ export function Catalog({ shop, cart, setCart, onCart }: {
   const [tNote, setTNote] = useState('');
   const [listening, setListening] = useState(false);
 
-  const [err, setErr] = useState('');
-  const loadProducts = useCallback(async () => {
-    setLoading(true); setErr('');
-    try { setProducts(await SB.shopProducts(shop.id)); }
-    catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
-  }, [shop.id]);
-  useEffect(() => { loadProducts(); }, [loadProducts]);
+  const fetchProducts = useCallback(() => SB.shopProducts(shop.id), [shop.id]);
+  const { loading, err, load: loadProducts } = useShopLoad(fetchProducts, setProducts);
 
   // Voice ordering — speak a product name into "Type any product".
   useEffect(() => {
@@ -223,7 +219,7 @@ export function Catalog({ shop, cart, setCart, onCart }: {
             accessibilityLabel="Product name" value={tName} onChangeText={setTName} />
           <TouchableOpacity accessibilityRole="button" accessibilityState={{ busy: listening }}
             accessibilityLabel={listening ? "Stop listening" : "Say the product name instead of typing"} style={[s.micBtn, listening && s.micBtnOn]} onPress={mic}>
-            <Ionicons name={listening ? 'stop' : 'mic'} size={20} color={listening ? '#fff' : C.green} />
+            <Ionicons name={listening ? 'stop' : 'mic'} size={20} color={listening ? C.onFill : C.green} />
           </TouchableOpacity>
         </View>
         {listening
@@ -265,7 +261,7 @@ export function Catalog({ shop, cart, setCart, onCart }: {
               normalizeUnit(tUnit));
           setTName(''); setTBrand(''); setTQty('1'); setTUnit(''); setTNote('');
         }}>
-          <Ionicons name="add" size={18} color="#fff" />
+          <Ionicons name="add" size={18} color={C.onFill} />
           <Text style={s.primaryBtnText}>Add to Order</Text>
         </TouchableOpacity>
       </View>

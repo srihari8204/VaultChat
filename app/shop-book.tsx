@@ -15,7 +15,7 @@ import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
 import { getCurrentUserAsync } from './(constants)/authService';
-import { type CartsByShop, cartFor, withShopCart } from '../utils/shopbook';
+import { type CartsByShop, cartFor, withShopCart, type NotificationTarget } from '../utils/shopbook';
 import * as SB from '../services/shopBookService';
 // The app already owns theming — persisted 'light' | 'dark' | 'system'. Shop
 // Book joins it rather than inventing a second switch.
@@ -27,12 +27,13 @@ import { t, useShopBookLang, initShopBookLang } from '../lib/shopbookI18n';
 import { C, s, applyScheme } from '../components/shopbook/theme';
 import { loadErrText, TabBar } from '../components/shopbook/shared';
 import { FindShops, ProductSearch, ShopFlow, CustomerProfile, NotificationCenter } from '../components/shopbook/customerViews';
-import { MyOrders, OrderTrack, OwnerOrders, ReturnsScreen } from '../components/shopbook/orders';
+import { MyOrders, OrderTrack, OwnerOrders, OwnerOrderDetail, ReturnsScreen } from '../components/shopbook/orders';
 import { CustomerLedgerView, OwnerKhata } from '../components/shopbook/ledger';
 import { OwnerDashboard, OwnerPlans, OwnerReports } from '../components/shopbook/reports';
 import { OwnerProducts, PurchasesScreen, OwnerCoupons, OwnerSuppliers } from '../components/shopbook/products';
 import { ShopSettings } from '../components/shopbook/settings';
 import { VerificationScreen, AuditScreen } from '../components/shopbook/verification';
+import { useShopLoad } from '../components/shopbook/useShopLoad';
 
 type Mode = 'customer' | 'owner';
 
@@ -50,6 +51,13 @@ export default function ShopBookScreen() {
   const [me, setMe] = useState<{ id: string; name: string } | null>(null);
   const [inbox, setInbox] = useState(false);
   const [unread, setUnread] = useState(0);
+  // A tapped notification, waiting for the mode's screen to open it. Cleared
+  // by that screen once handled, so remounting the mode later cannot replay it.
+  const [pending, setPending] = useState<NotificationTarget | null>(null);
+  // One cart per shop, so lines picked at shop A can never be posted to shop B.
+  // Held here, above the mode switch: CustomerApp unmounts while the Shop Owner
+  // side is open, and a cart kept in it was emptied by a look at one's own shop.
+  const [carts, setCarts] = useState<CartsByShop>({});
   // Read from the device, never guessed. The header used to hardcode
   // paddingTop: 48, which floats on a short status bar and tucks the title
   // under the clock on a punch-hole phone.
@@ -77,50 +85,64 @@ export default function ShopBookScreen() {
     try { setUnread((await SB.notifications()).unread); } catch { /* badge stays 0 */ }
   })(); }, []);
 
-  if (inbox) {
-    return (
-      <IceGround>
-        <Stack.Screen options={{ headerShown: false }} />
-        <NotificationCenter onBack={() => setInbox(false)} onRead={() => setUnread(0)} />
-      </IceGround>
-    );
-  }
+  const clearPending = useCallback(() => setPending(null), []);
+  const readOne = useCallback(() => setUnread((n) => Math.max(0, n - 1)), []);
+  const openTarget = (target: NotificationTarget) => {
+    // An owner-side target needs the owner screens, a customer one the
+    // customer screens; the returns list is the owner's.
+    setMode(target.kind === 'returns' ? 'owner' : target.side);
+    setPending(target);
+    setInbox(false);
+  };
 
   return (
     <IceGround>
       <Stack.Screen options={{ headerShown: false }} />
-      {/* Header + mode toggle */}
-      <View style={[s.header, { paddingTop: insets.top + 10 }]}>
-        <TouchableOpacity onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" hitSlop={10} style={s.hBtn}>
-          <Ionicons name="arrow-back" size={22} color="#fff" />
-        </TouchableOpacity>
-        <View style={{ flex: 1 }}>
-          <Text style={s.headerTitle}>🛍️ Shop Book</Text>
-          <Text style={s.headerSub}>Find shops • Order • Digital Khata</Text>
+      {/* The inbox sits OVER the app instead of replacing it. Returning early
+          here unmounted the screens below, so closing the inbox dropped the
+          user back at the top of the mini-app instead of where they were. */}
+      {inbox && (
+        <View style={[StyleSheet.absoluteFill, { paddingTop: insets.top }]}>
+          <NotificationCenter mode={mode} onBack={() => setInbox(false)} onRead={() => setUnread(0)}
+            onReadOne={readOne} onOpen={openTarget} />
         </View>
-        <TouchableOpacity onPress={() => setInbox(true)} hitSlop={10} style={s.hBtn} accessibilityRole="button"
-          accessibilityLabel={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}>
-          <Ionicons name="notifications-outline" size={22} color="#fff" />
-          {unread > 0 && <View style={s.cartBadge}><Text style={s.cartBadgeText}>{unread > 9 ? '9+' : unread}</Text></View>}
-        </TouchableOpacity>
-      </View>
-      <View style={s.modeRow} accessibilityRole="tablist">
-        {(['customer', 'owner'] as Mode[]).map((m) => (
-          <TouchableOpacity key={m} onPress={() => setMode(m)}
-            accessibilityRole="tab" accessibilityState={{ selected: mode === m }}
-            style={[s.modeBtn, mode === m && s.modeBtnActive]}>
-            <Ionicons name={m === 'customer' ? 'person' : 'storefront'} size={15}
-              color={mode === m ? '#fff' : C.green} />
-            <Text style={[s.modeText, mode === m && s.modeTextActive]}>
-              {m === 'customer' ? 'Customer' : 'Shop Owner'}
-            </Text>
+      )}
+      <View style={{ flex: 1, display: inbox ? 'none' : 'flex' }}>
+        {/* Header + mode toggle */}
+        <View style={[s.header, { paddingTop: insets.top + 10 }]}>
+          <TouchableOpacity onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" hitSlop={10} style={s.hBtn}>
+            <Ionicons name="arrow-back" size={22} color={C.headerFg} />
           </TouchableOpacity>
-        ))}
-      </View>
+          <View style={{ flex: 1 }}>
+            <Text style={s.headerTitle}>🛍️ Shop Book</Text>
+            <Text style={s.headerSub}>Find shops • Order • Digital Khata</Text>
+          </View>
+          <TouchableOpacity onPress={() => setInbox(true)} hitSlop={10} style={s.hBtn} accessibilityRole="button"
+            accessibilityLabel={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}>
+            <Ionicons name="notifications-outline" size={22} color={C.headerFg} />
+            {unread > 0 && <View style={s.cartBadge}><Text style={s.cartBadgeText}>{unread > 9 ? '9+' : unread}</Text></View>}
+          </TouchableOpacity>
+        </View>
+        <View style={s.modeRow} accessibilityRole="tablist">
+          {(['customer', 'owner'] as Mode[]).map((m) => (
+            <TouchableOpacity key={m} onPress={() => setMode(m)}
+              accessibilityRole="tab" accessibilityState={{ selected: mode === m }}
+              style={[s.modeBtn, mode === m && s.modeBtnActive]}>
+              <Ionicons name={m === 'customer' ? 'person' : 'storefront'} size={15}
+                color={mode === m ? C.onFill : C.green} />
+              <Text style={[s.modeText, mode === m && s.modeTextActive]}>
+                {m === 'customer' ? 'Customer' : 'Shop Owner'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
 
-      {mode === 'customer'
-        ? <CustomerApp me={me} initialShopId={initialShopId} />
-        : <OwnerApp me={me} />}
+        {mode === 'customer'
+          ? <CustomerApp me={me} initialShopId={initialShopId} carts={carts} setCarts={setCarts}
+              openOrder={pending?.kind === 'order' && pending.side === 'customer' ? pending.orderId : null}
+              onOpened={clearPending} />
+          : <OwnerApp me={me} open={pending} onOpened={clearPending} />}
+      </View>
     </IceGround>
   );
 }
@@ -151,12 +173,14 @@ function IceGround({ children }: { children: React.ReactNode }) {
 // ════════════════════════════════════════════════════════════════
 //  CUSTOMER
 // ════════════════════════════════════════════════════════════════
-function CustomerApp({ me, initialShopId }: { me: { id: string; name: string } | null; initialShopId?: string }) {
+function CustomerApp({ me, initialShopId, carts, setCarts, openOrder, onOpened }: {
+  me: { id: string; name: string } | null; initialShopId?: string;
+  carts: CartsByShop; setCarts: React.Dispatch<React.SetStateAction<CartsByShop>>;
+  openOrder: string | null; onOpened: () => void;
+}) {
   const [tab, setTab] = useState<CustTab>('shops');
   // drill-down within the Shops tab
   const [selShop, setSelShop] = useState<SB.Shop | null>(null);
-  // One cart per shop, so lines picked at shop A can never be posted to shop B.
-  const [carts, setCarts] = useState<CartsByShop>({});
   const [trackId, setTrackId] = useState<string | null>(null);
   const [ledgerShop, setLedgerShop] = useState<SB.Shop | null>(null);
   const [productSearch, setProductSearch] = useState(false);
@@ -191,6 +215,14 @@ function CustomerApp({ me, initialShopId }: { me: { id: string; name: string } |
   }, [loadFavs]);
 
   const openTrack = (id: string) => { setTrackId(id); };
+
+  // From the inbox: the order a notification is about.
+  useEffect(() => {
+    if (!openOrder) return;
+    setTab('orders'); setSelShop(null); setLedgerShop(null); setProductSearch(false);
+    setTrackId(openOrder);
+    onOpened();
+  }, [openOrder, onOpened]);
 
   return (
     <>
@@ -250,10 +282,16 @@ function CustomerApp({ me, initialShopId }: { me: { id: string; name: string } |
 // ════════════════════════════════════════════════════════════════
 //  SHOP OWNER
 // ════════════════════════════════════════════════════════════════
-function OwnerApp({ me }: { me: { id: string; name: string } | null }) {
+function OwnerApp({ me, open, onOpened }: {
+  me: { id: string; name: string } | null;
+  open: NotificationTarget | null; onOpened: () => void;
+}) {
   const [tab, setTab] = useState<OwnerTab>('dashboard');
-  const [loading, setLoading] = useState(true);
   const [shop, setShop] = useState<SB.Shop | null>(null);
+  // When the owner asked for Pro, if the server says (see myShopAccount).
+  const [proRequestedAt, setProRequestedAt] = useState<string | null>(null);
+  // An order opened from the inbox, over whichever tab is showing.
+  const [orderOpen, setOrderOpen] = useState<string | null>(null);
   const [settings, setSettings] = useState(false);
   const [sub, setSub] = useState<
     'coupons' | 'suppliers' | 'plans' | 'reports'
@@ -267,21 +305,18 @@ function OwnerApp({ me }: { me: { id: string; name: string } | null }) {
   // with NO cancel (onCancel is undefined when shop is null) — and pressing
   // Create POSTs the empty form to the same endpoint, OVERWRITING their real
   // shop name, hours, address, country and tax config.
-  const [loadErr, setLoadErr] = useState('');
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      setLoadErr('');
-      const sh = await SB.myShop();
-      // Shop.plan is a display column; show PRO only for what the server's
-      // entitlement says. An unconfirmed plan reads as Free, and every Pro
-      // feature is still gated server-side either way.
-      setShop(sh && { ...sh, plan: await SB.entitledPlan().catch(() => 'free' as const) });
-    }
-    catch (e: any) { setLoadErr(e?.message || 'Could not reach your shop'); }
-    finally { setLoading(false); }
-  }, []);
-  useEffect(() => { load(); }, [load]);
+  const { loading, err: loadErr, load } = useShopLoad(fetchOwnerShop, (r) => {
+    setShop(r.shop); setProRequestedAt(r.proRequestedAt ?? null);
+  }, { fallback: 'Could not reach your shop' });
+
+  // From the inbox: an order (over the current tab) or the returns list.
+  useEffect(() => {
+    if (!open) return;
+    if (open.kind === 'returns') setSub('returns');
+    else if (open.side === 'owner') { setSub(null); setOrderOpen(open.orderId); }
+    else return;   // a customer-side target is CustomerApp's
+    onOpened();
+  }, [open, onOpened]);
 
   if (loading) return <LoadingState />;
 
@@ -305,13 +340,14 @@ function OwnerApp({ me }: { me: { id: string; name: string } | null }) {
     );
   }
 
+  if (orderOpen) return <OwnerOrderDetail orderId={orderOpen} onBack={() => setOrderOpen(null)} />;
   if (sub === 'coupons') return <OwnerCoupons currency={shop.currency} onBack={() => setSub(null)} />;
   if (sub === 'suppliers') return <OwnerSuppliers onBack={() => setSub(null)} />;
   if (sub === 'purchases') return <PurchasesScreen currency={shop.currency} onBack={() => { setSub(null); load(); }} />;
   if (sub === 'returns') return <ReturnsScreen currency={shop.currency} onBack={() => setSub(null)} />;
   if (sub === 'audit') return <AuditScreen onBack={() => setSub(null)} />;
   if (sub === 'verify') return <VerificationScreen onBack={() => { setSub(null); load(); }} />;
-  if (sub === 'plans') return <OwnerPlans plan={shop.plan} onBack={() => setSub(null)} onChanged={() => { setSub(null); load(); }} />;
+  if (sub === 'plans') return <OwnerPlans plan={shop.plan} requestedAt={proRequestedAt} onBack={() => setSub(null)} onChanged={() => { setSub(null); load(); }} />;
   if (sub === 'reports') return <OwnerReports plan={shop.plan} currency={shop.currency} onBack={() => setSub(null)} onUpgrade={() => setSub('plans')} />;
 
   return (
@@ -342,3 +378,14 @@ function OwnerApp({ me }: { me: { id: string; name: string } | null }) {
   );
 }
 
+// Shop.plan is a display column; PRO shows only for what the server's
+// entitlement says. A server that already returns the entitled plan with the
+// shop saves the second request; otherwise it is read from the basic report.
+// An unconfirmed plan reads as Free, and every Pro feature is still gated
+// server-side either way.
+async function fetchOwnerShop() {
+  const r = await SB.myShopAccount();
+  if (!r.shop) return { shop: null, proRequestedAt: r.proRequestedAt };
+  const plan = r.entitledPlan ?? await SB.entitledPlan().catch(() => 'free' as const);
+  return { shop: { ...r.shop, plan }, proRequestedAt: r.proRequestedAt };
+}

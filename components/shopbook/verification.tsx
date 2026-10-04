@@ -1,26 +1,22 @@
-// components/shopbook/verification.tsx — Shop Book, moved out of app/shop-book.tsx
-// unchanged. Palette and styles come from ./theme; see app/shop-book.tsx.
+// components/shopbook/verification.tsx — Shop Book: shop verification documents and the activity log.
+// Split out of app/shop-book.tsx on 2026-10-04 and edited since (fixes are
+// logged per round). Palette and styles come from ./theme.
 
-import { useCallback, useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, FlatList, Alert, ActivityIndicator, RefreshControl, Linking } from 'react-native';
+import { useState } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, FlatList, Alert, ActivityIndicator, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import { dateLocale } from '../../utils/shopbook';
 import * as SB from '../../services/shopBookService';
 import { ErrorState } from '../finance/ui';
 import { C, s } from './theme';
-import { loadErrText, SubHeader, Empty } from './shared';
+import { previewDoc, SubHeader, Empty } from './shared';
+import { useShopLoad } from './useShopLoad';
 
 // The shop's own audit trail (P1-F). Append-only server-side; read-only here.
 export function AuditScreen({ onBack }: { onBack: () => void }) {
   const [rows, setRows] = useState<SB.AuditEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState('');
-  const load = useCallback(async () => {
-    setLoading(true); setErr('');
-    try { setRows(await SB.auditLog()); } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
-  }, []);
-  useEffect(() => { load(); }, [load]);
+  const { loading, err, load } = useShopLoad(SB.auditLog, setRows);
 
   const describe = (e: SB.AuditEntry) => {
     const b = e.before ?? {}, a = e.after ?? {};
@@ -82,23 +78,15 @@ export function VerificationScreen({ onBack }: { onBack: () => void }) {
   const [accepted, setAccepted] = useState<string[]>([]);
   const [state, setState] = useState<SB.VerifyState>('unverified');
   const [note, setNote] = useState('');
-  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [loadErr, setLoadErr] = useState('');
   // Nothing about the shop's status shows until a load has succeeded: the
   // 'unverified' default would read "Not verified" for a verified shop.
   const [loaded, setLoaded] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const r = await SB.shopDocuments();
-      setDocs(r.documents); setAccepted(r.accepted ?? []);
-      setState(r.verifyState); setNote(r.verifyNote); setLoadErr(''); setLoaded(true);
-    } catch (e: any) { setLoadErr(e?.message ?? 'Could not load your documents'); }
-    finally { setLoading(false); }
-  }, []);
-  useEffect(() => { load(); }, [load]);
+  const { loading, err: loadErr, load } = useShopLoad(SB.shopDocuments, (r) => {
+    setDocs(r.documents); setAccepted(r.accepted ?? []);
+    setState(r.verifyState); setNote(r.verifyNote); setLoaded(true);
+  }, { fallback: 'Could not load your documents' });
 
   // Upload one document for `kind`: pick → presigned PUT → record. A second
   // upload of the same kind replaces the first server-side.
@@ -135,10 +123,12 @@ export function VerificationScreen({ onBack }: { onBack: () => void }) {
     } finally { setBusy(false); }
   };
 
+  // Shown in the app's own viewer, not the external browser: the short-lived
+  // signed link then never leaves the app, and the owner stays on this screen.
   const view = async (d: SB.ShopDocument) => {
     try {
       const { url } = await SB.documentUrl(d.id);
-      Linking.openURL(url);
+      previewDoc(url, d.filename || d.kind, d.mime || undefined);
     } catch (e: any) { Alert.alert('Could not open', e?.message ?? 'Try again'); }
   };
 
@@ -208,7 +198,7 @@ export function VerificationScreen({ onBack }: { onBack: () => void }) {
         {(state === 'unverified' || state === 'rejected') && (
           <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={submit}
             accessibilityRole="button" accessibilityLabel="Submit for verification" accessibilityState={{ disabled: busy, busy }}>
-            {busy ? <ActivityIndicator color="#fff" />
+            {busy ? <ActivityIndicator color={C.onFill} />
                   : <Text style={s.primaryBtnText}>Submit for verification</Text>}
           </TouchableOpacity>
         )}

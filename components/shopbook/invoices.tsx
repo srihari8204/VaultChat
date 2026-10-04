@@ -1,7 +1,8 @@
-// components/shopbook/invoices.tsx — Shop Book, moved out of app/shop-book.tsx
-// unchanged. Palette and styles come from ./theme; see app/shop-book.tsx.
+// components/shopbook/invoices.tsx — Shop Book: the owner's live bill and the invoice view.
+// Split out of app/shop-book.tsx on 2026-10-04 and edited since (fixes are
+// logged per round). Palette and styles come from ./theme.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { KeyboardSafe } from '../ui';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,6 +16,7 @@ import { LoadingState, ErrorState } from '../finance/ui';
 import { t } from '../../lib/shopbookI18n';
 import { C, s } from './theme';
 import { previewDoc, Row, SubHeader, Field } from './shared';
+import { useShopLoad } from './useShopLoad';
 
 // Live bill (P0-C). The owner weighs out what they packed and the total moves.
 //
@@ -24,7 +26,6 @@ import { previewDoc, Row, SubHeader, Field } from './shared';
 // invented.
 export function BillScreen({ orderId, onBack }: { orderId: string; onBack: () => void }) {
   const [bill, setBill] = useState<SB.Bill | null>(null);
-  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [qtyDraft, setQtyDraft] = useState<Record<string, string>>({});
   const [discount, setDiscount] = useState('');
@@ -33,20 +34,17 @@ export function BillScreen({ orderId, onBack }: { orderId: string; onBack: () =>
   const [addQty, setAddQty] = useState('1');
   const [addPrice, setAddPrice] = useState('');
 
-  const [loadErr, setLoadErr] = useState('');
-  const load = useCallback(async () => {
-    setLoading(true); setLoadErr('');
-    try {
-      const b = await SB.getBill(orderId);
-      setBill(b);
-      setDiscount(b.billDiscount > 0 ? String(b.billDiscount) : '');
-    } catch (e: any) { setLoadErr(e?.message ?? 'Could not load the bill'); }
-    finally { setLoading(false); }
-  }, [orderId]);
-  useEffect(() => { load(); }, [load]);
+  const fetchBill = useCallback(() => SB.getBill(orderId), [orderId]);
+  const { loading, err: loadErr, load } = useShopLoad(fetchBill, (b) => {
+    setBill(b);
+    setDiscount(b.billDiscount > 0 ? String(b.billDiscount) : '');
+  }, { fallback: 'Could not load the bill' });
 
   // One helper for every edit: post it, take the server's bill as the truth.
+  // One at a time: two edits in flight could land in either order, and the
+  // bill shown would be whichever answer came back last, not the latest edit.
   const patch = async (p: SB.BillUpdate) => {
+    if (busy) return;
     setBusy(true);
     try { setBill(await SB.updateBill(orderId, p)); }
     catch (e: any) { Alert.alert('Could not update the bill', e?.message ?? 'Try again'); }
@@ -77,7 +75,7 @@ export function BillScreen({ orderId, onBack }: { orderId: string; onBack: () =>
         <KeyboardSafe keyboardOnly style={s.modalWrap}>
           <ScrollView style={{ flex: 1 }} contentContainerStyle={s.modalScroll} keyboardShouldPersistTaps="handled">
           <View style={s.modalCard}>
-            <Text style={s.modalTitle}>Add an item</Text>
+            <Text style={s.modalTitle} accessibilityRole="header">Add an item</Text>
             <TextInput style={s.input} placeholder="Item name" placeholderTextColor={C.sub}
               accessibilityLabel="Item name" value={addName} onChangeText={setAddName} autoFocus />
             <TextInput style={s.input} placeholder="Quantity" placeholderTextColor={C.sub}
@@ -85,7 +83,8 @@ export function BillScreen({ orderId, onBack }: { orderId: string; onBack: () =>
             <TextInput style={s.input} placeholder={`Price (${bill.currency}) — catalog items price themselves`}
               accessibilityLabel={`Price in ${bill.currency}. Catalog items price themselves`}
               placeholderTextColor={C.sub} keyboardType="numeric" value={addPrice} onChangeText={setAddPrice} />
-            <TouchableOpacity style={s.primaryBtn} accessibilityRole="button" accessibilityLabel="Add the item to the bill" onPress={() => {
+            <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} accessibilityRole="button" accessibilityLabel="Add the item to the bill"
+              disabled={busy} accessibilityState={{ disabled: busy }} onPress={() => {
               const name = addName.trim();
               if (!name) { Alert.alert('Name the item', 'Enter what you are adding to the bill.'); return; }
               // isNum, not just num (2026-09-17). An unparseable price becomes
@@ -149,7 +148,8 @@ export function BillScreen({ orderId, onBack }: { orderId: string; onBack: () =>
                     onChangeText={(v) => setQtyDraft({ ...qtyDraft, [l.id]: v })}
                     onBlur={() => {
                       const raw = qtyDraft[l.id];
-                      if (raw == null) return;
+                      // Busy: keep the draft on screen instead of dropping it.
+                      if (raw == null || busy) return;
                       // Empty clears back to "as requested" rather than zero —
                       // a blank box must never silently mean "packed nothing".
                       // Neither may GARBAGE (2026-09-17): num() coerces it to 0,
@@ -174,6 +174,7 @@ export function BillScreen({ orderId, onBack }: { orderId: string; onBack: () =>
                     }}
                   />
                   <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Remove ${l.name} from the bill`} hitSlop={12}
+                    disabled={busy} accessibilityState={{ disabled: busy }} style={busy && { opacity: 0.5 }}
                     onPress={() => patch({ lines: [{ id: l.id, removed: true }] })}>
                     <Ionicons name="trash-outline" size={18} color={C.danger} />
                   </TouchableOpacity>
@@ -181,6 +182,7 @@ export function BillScreen({ orderId, onBack }: { orderId: string; onBack: () =>
               )}
               {l.removed && bill.editable && (
                 <TouchableOpacity onPress={() => patch({ lines: [{ id: l.id, removed: false }] })} hitSlop={12}
+                  disabled={busy} accessibilityState={{ disabled: busy }} style={busy && { opacity: 0.5 }}
                   accessibilityRole="button" accessibilityLabel={`Put ${l.name} back on the bill`}>
                   <Text style={[s.cardSub, { color: C.green }]}>Put back</Text>
                 </TouchableOpacity>
@@ -192,7 +194,8 @@ export function BillScreen({ orderId, onBack }: { orderId: string; onBack: () =>
 
         {bill.editable && (
           <>
-            <TouchableOpacity style={s.outlineBtn} onPress={() => setAddOpen(true)} accessibilityRole="button">
+            <TouchableOpacity style={[s.outlineBtn, busy && { opacity: 0.5 }]} onPress={() => setAddOpen(true)}
+              disabled={busy} accessibilityRole="button" accessibilityState={{ disabled: busy }}>
               <Ionicons name="add" size={18} color={C.green} />
               <Text style={s.outlineBtnText}>Add an item</Text>
             </TouchableOpacity>
@@ -201,8 +204,9 @@ export function BillScreen({ orderId, onBack }: { orderId: string; onBack: () =>
                 <Field label={`Discount (${bill.currency})`} value={discount} onChange={setDiscount}
                   placeholder="0" keyboardType="numeric" />
               </View>
-              <TouchableOpacity style={[s.outlineBtn, { marginTop: 0, paddingHorizontal: 18 }]}
+              <TouchableOpacity style={[s.outlineBtn, { marginTop: 0, paddingHorizontal: 18 }, busy && { opacity: 0.5 }]}
                 accessibilityRole="button" accessibilityLabel="Apply discount"
+                disabled={busy} accessibilityState={{ disabled: busy }}
                 onPress={() => {
                   // The EIGHTH ungated money write, and the only one pointed at
                   // the live customer bill with no range check at all
@@ -250,15 +254,8 @@ export function BillScreen({ orderId, onBack }: { orderId: string; onBack: () =>
 // the shop configured tax details — the backend snapshot decides, not the UI.
 export function InvoiceView({ orderId, onBack }: { orderId: string; onBack: () => void }) {
   const [inv, setInv] = useState<SB.Invoice | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState('');
-  const load = useCallback(async () => {
-    setLoading(true); setErr('');
-    try { setInv(await SB.orderInvoice(orderId)); }
-    catch (e: any) { setErr(e?.message ?? 'Not available yet'); }
-    finally { setLoading(false); }
-  }, [orderId]);
-  useEffect(() => { load(); }, [load]);
+  const fetchInvoice = useCallback(() => SB.orderInvoice(orderId), [orderId]);
+  const { loading, err, load } = useShopLoad(fetchInvoice, setInv, { fallback: 'Not available yet' });
 
   const sharePdf = async () => {
     if (!inv) return;
@@ -332,9 +329,9 @@ export function InvoiceView({ orderId, onBack }: { orderId: string; onBack: () =
                 <Text style={[s.hint, { color: C.green, marginTop: 4 }]}>✓ Paid in full</Text>
               )}
             </View>
-            <TouchableOpacity style={s.primaryBtn} onPress={sharePdf} accessibilityRole="button" accessibilityLabel="Invoice PDF">
-              <Ionicons name="download-outline" size={18} color="#fff" />
-              <Text style={s.primaryBtnText}>PDF</Text>
+            <TouchableOpacity style={s.primaryBtn} onPress={sharePdf} accessibilityRole="button">
+              <Ionicons name="download-outline" size={18} color={C.onFill} />
+              <Text style={s.primaryBtnText}>Invoice PDF</Text>
             </TouchableOpacity>
           </>
         )}

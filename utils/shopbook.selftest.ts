@@ -14,6 +14,7 @@ import {
   canCustomerCollect, notCollectedGate, NOT_COLLECTED_AFTER_HOURS,
   isStalePrice, PRICE_STALE_DAYS, dateLocale, orderStamp,
   cartFor, withShopCart, type CartsByShop, type CartItem,
+  parseBulkProducts, skippedBulkLines, notificationTarget,
   type OrderStatus, type TimelineEvent,
 } from './shopbook';
 // financeFormat is where the comma rule came from. Assert the two screens
@@ -407,6 +408,61 @@ check('callers that pass no symbol keep the old ₹ label',
   const screen = shopBookSource() ?? '';
   check('the screen keys its cart by the open shop', /cart=\{cartFor\(carts, selShop\.id\)\}/.test(screen), true);
   check('no single shared cart state is left', /useState<CartItem\[\]>\(\[\]\)/.test(screen), false);
+}
+
+// ── bulk paste: what is skipped is reported (round 4) ─────────────
+{
+  const text = 'Aashirvaad Atta 5kg 285\n\n, 20\nTata Salt, Tata, 1kg, 20\n₹ 40\nFortune Oil';
+  check('bulk: parsed lines unchanged by the split-out line parser',
+    parseBulkProducts(text).map((p) => [p.name, p.brand, p.unit, p.price]),
+    [['Aashirvaad Atta 5kg', '', '', 285], ['Tata Salt', 'Tata', '1kg', 20], ['Fortune Oil', '', '', 0]]);
+  check('bulk: nameless lines are the skipped ones, blank lines are not', skippedBulkLines(text), [', 20', '₹ 40']);
+  check('bulk: nothing skipped from a clean paste', skippedBulkLines('Milk 30\nBread, 40'), []);
+  check('bulk: every non-blank line is parsed or reported',
+    parseBulkProducts(text).length + skippedBulkLines(text).length,
+    text.split('\n').filter((l) => l.trim()).length);
+}
+
+// ── inbox row → screen (round 4) ──────────────────────────────────
+{
+  const n = (event: string, data: Record<string, unknown>) => ({ event, data });
+  check('new order opens the owner\'s order',
+    notificationTarget(n('new_order', { orderId: 'o1' }), 'customer'), { kind: 'order', side: 'owner', orderId: 'o1' });
+  check('a cancelled order opens the owner\'s order',
+    notificationTarget(n('order_cancelled', { orderId: 'o2' }), 'customer'), { kind: 'order', side: 'owner', orderId: 'o2' });
+  check('an alternative offer opens the customer\'s order',
+    notificationTarget(n('alternative', { orderId: 'o3' }), 'owner'), { kind: 'order', side: 'customer', orderId: 'o3' });
+  check('order_status follows the open side (customer)',
+    notificationTarget(n('order_status', { orderId: 'o4', status: 'ready' }), 'customer'), { kind: 'order', side: 'customer', orderId: 'o4' });
+  check('order_status follows the open side (owner)',
+    notificationTarget(n('order_status', { orderId: 'o4', status: 'completed' }), 'owner'), { kind: 'order', side: 'owner', orderId: 'o4' });
+  check('a return request opens the owner\'s returns list',
+    notificationTarget(n('return_requested', { returnId: 'r1', orderId: 'o5' }), 'customer'), { kind: 'returns' });
+  check('a return decision without an orderId (today\'s server) is not a link',
+    notificationTarget(n('return_approved', { returnId: 'r1' }), 'customer'), null);
+  check('… and opens the customer\'s order once the server sends one',
+    notificationTarget(n('return_rejected', { returnId: 'r1', orderId: 'o6' }), 'owner'), { kind: 'order', side: 'customer', orderId: 'o6' });
+  check('payments, reminders and shop news have no screen to open',
+    [notificationTarget(n('payment', { shopId: 's1' }), 'customer'), notificationTarget(n('reminder', { shopId: 's1' }), 'customer'),
+     notificationTarget(n('shop_approved', {}), 'owner')], [null, null, null]);
+  check('the event may come from data when the column is empty',
+    notificationTarget({ event: '', data: { event: 'new_order', orderId: 7 } }, 'customer'), { kind: 'order', side: 'owner', orderId: '7' });
+  check('missing data is not a crash', notificationTarget({ event: 'new_order', data: null }, 'owner'), null);
+}
+
+// ── one load/error/retry hook, not twenty copies (round 4) ─────────
+{
+  const screen = shopBookSource() ?? '';
+  const block = /setLoading\(true\);\s*set(Load)?Err\(/g;
+  // The hook itself is the one place the block may appear (its body, and the
+  // header comment quoting what it replaced).
+  const hookStart = screen.indexOf('// components/shopbook/useShopLoad.ts');
+  const hookEnd = screen.indexOf('\n}\n', hookStart);
+  check('the hook is found in the Shop Book sources', hookStart >= 0 && hookEnd > hookStart, true);
+  const outsideHook = screen.slice(0, hookStart) + screen.slice(hookEnd);
+  check('no Shop Book screen hand-rolls the load/error block any more',
+    (outsideHook.match(block) ?? []).length, 0);
+  check('the screens load through useShopLoad', (screen.match(/useShopLoad\(/g) ?? []).length >= 20, true);
 }
 
 // This line used to print unconditionally, with no process.exit - so a failed

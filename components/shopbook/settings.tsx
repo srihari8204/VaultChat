@@ -1,5 +1,6 @@
-// components/shopbook/settings.tsx — Shop Book, moved out of app/shop-book.tsx
-// unchanged. Palette and styles come from ./theme; see app/shop-book.tsx.
+// components/shopbook/settings.tsx — Shop Book: shop settings and shop creation.
+// Split out of app/shop-book.tsx on 2026-10-04 and edited since (fixes are
+// logged per round). Palette and styles come from ./theme.
 
 import { useCallback, useEffect, useState } from 'react';
 import { KeyboardSafe } from '../ui';
@@ -68,7 +69,7 @@ export function ShopSettings({ shop, me, onSaved, onCancel }: {
   // prefix is how both eslint and the React Compiler (app.json: reactCompiler
   // true) identify a hook — and this is called conditionally inside an effect,
   // inside `save()`, and inside an onPress. Under the compiler that is a
-  // component-wide bail-out at best, on a 3,800-line screen.
+  // component-wide bail-out at best.
   const captureLocation = async (silent = false): Promise<{ lat: number; lng: number } | null> => {
     setLocating(true);
     try {
@@ -95,12 +96,18 @@ export function ShopSettings({ shop, me, onSaved, onCancel }: {
   };
 
   // A decision the owner has not seen yet is the first thing they should see.
+  // A failed read says so: it may be hiding exactly that decision.
+  const [locReqErr, setLocReqErr] = useState(false);
+  const loadLocReq = useCallback(async (alive: () => boolean = () => true) => {
+    try { const r = await SB.myLocationRequest(); if (alive()) { setLocReq(r); setLocReqErr(false); } }
+    catch { if (alive()) setLocReqErr(true); }
+  }, []);
   useEffect(() => {
     if (!shop) return;
     let alive = true;
-    SB.myLocationRequest().then((r) => { if (alive) setLocReq(r); }).catch(() => {});
+    loadLocReq(() => alive);
     return () => { alive = false; };
-  }, [shop]);
+  }, [shop, loadLocReq]);
 
   const submitMove = async (reason: string) => {
     if (!coords) return;
@@ -227,7 +234,7 @@ export function ShopSettings({ shop, me, onSaved, onCancel }: {
               <TouchableOpacity key={st} style={[s.statusBtn, status === st && s.statusBtnActive]} onPress={() => setStatus(st)}
                 accessibilityRole="radio" accessibilityState={{ checked: status === st }}
                 accessibilityLabel={t(`owner.status.${st}`)}>
-                <Text style={[s.statusBtnText, status === st && { color: '#fff' }]}>{lbl}</Text>
+                <Text style={[s.statusBtnText, status === st && { color: C.onFill }]}>{lbl}</Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -279,6 +286,11 @@ export function ShopSettings({ shop, me, onSaved, onCancel }: {
               hundred metres is reviewed before customers see the new place.
             </Text>
           )}
+          {locReqErr && (
+            <TouchableOpacity accessibilityRole="button" onPress={() => { void loadLocReq(); }}>
+              <Text style={[s.hint, { color: C.danger }]}>Couldn’t check for a location change request. Tap to try again.</Text>
+            </TouchableOpacity>
+          )}
           {locReq && (
             <View style={[s.panel, { borderColor: locReq.status === 'rejected' ? C.danger : C.amber }]}>
               <Text style={{ color: locReq.status === 'rejected' ? C.danger : C.amber, fontWeight: '700' }}>
@@ -293,7 +305,7 @@ export function ShopSettings({ shop, me, onSaved, onCancel }: {
           )}
           <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={save}
             accessibilityRole="button" accessibilityLabel={shop ? 'Save settings' : 'Create shop'} accessibilityState={{ disabled: busy, busy }}>
-            {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.primaryBtnText}>{shop ? 'Save Settings' : 'Create Shop'}</Text>}
+            {busy ? <ActivityIndicator color={C.onFill} /> : <Text style={s.primaryBtnText}>{shop ? 'Save Settings' : 'Create Shop'}</Text>}
           </TouchableOpacity>
         </ScrollView>
       </KeyboardSafe>

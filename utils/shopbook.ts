@@ -399,29 +399,39 @@ export interface ParsedProduct { name: string; brand: string; unit: string; pric
 export function parseBulkProducts(text: string): ParsedProduct[] {
   const out: ParsedProduct[] = [];
   for (const raw of text.split('\n')) {
-    const line = raw.trim();
-    if (!line) continue;
-    let name = '', brand = '', unit = '', price = 0;
-    if (line.includes(',')) {
-      const p = line.split(',').map((x) => x.trim());
-      name = p[0] ?? '';
-      const last = Number((p[p.length - 1] ?? '').replace(/[₹,\s]/g, ''));
-      if (p.length >= 2 && Number.isFinite(last)) {
-        price = last;
-        if (p.length >= 3) brand = p[1];
-        if (p.length >= 4) unit = p[2];
-      } else {
-        brand = p[1] ?? '';
-        unit = p[2] ?? '';
-      }
-    } else {
-      const m = line.match(/^(.*?)[\s₹]+(\d+(?:\.\d+)?)\s*$/);
-      if (m) { name = m[1].trim(); price = Number(m[2]); }
-      else { name = line; }
-    }
-    if (name) out.push({ name, brand, unit, price: Number.isFinite(price) ? price : 0 });
+    const p = parseBulkLine(raw.trim());
+    if (p) out.push(p);
   }
   return out;
+}
+
+/** The non-blank pasted lines that parseBulkProducts drops (no product name
+ *  could be read from them), trimmed, so the screen can say which. */
+export function skippedBulkLines(text: string): string[] {
+  return text.split('\n').map((l) => l.trim()).filter((l) => l && !parseBulkLine(l));
+}
+
+function parseBulkLine(line: string): ParsedProduct | null {
+  if (!line) return null;
+  let name = '', brand = '', unit = '', price = 0;
+  if (line.includes(',')) {
+    const p = line.split(',').map((x) => x.trim());
+    name = p[0] ?? '';
+    const last = Number((p[p.length - 1] ?? '').replace(/[₹,\s]/g, ''));
+    if (p.length >= 2 && Number.isFinite(last)) {
+      price = last;
+      if (p.length >= 3) brand = p[1];
+      if (p.length >= 4) unit = p[2];
+    } else {
+      brand = p[1] ?? '';
+      unit = p[2] ?? '';
+    }
+  } else {
+    const m = line.match(/^(.*?)[\s₹]+(\d+(?:\.\d+)?)\s*$/);
+    if (m) { name = m[1].trim(); price = Number(m[2]); }
+    else { name = line; }
+  }
+  return name ? { name, brand, unit, price: Number.isFinite(price) ? price : 0 } : null;
 }
 
 // ── units ──────────────────────────────────────────────────────────
@@ -518,6 +528,43 @@ export function orderStamp(iso: string, now: Date = new Date()): string {
   return sameDay
     ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     : d.toLocaleDateString(dateLocale(), { day: 'numeric', month: 'short' });
+}
+
+// ── notification → screen ────────────────────────────────────────
+//
+// Where tapping an inbox row goes. The server's notification `data` carries
+// identifiers only (see sbNotify in vaultchat-backend-go routes/shopbook.go),
+// and the same order can be the reader's purchase or their shop's sale, so the
+// event decides which side's screen opens:
+//   new_order, alternative_decision, order_cancelled → the owner's order
+//   alternative                                      → the customer's order
+//   return_requested                                 → the owner's returns list
+//   order_status → whichever side is open: the server sends it to the customer
+//     on every move and to the owner only for collected / not collected.
+// A return decision opens the customer's order once the server includes its
+// orderId; today it does not, so that row (like payments, reminders and shop
+// news) has no screen to open and is not offered as a link.
+export type NotificationTarget =
+  | { kind: 'order'; side: 'customer' | 'owner'; orderId: string }
+  | { kind: 'returns' };
+
+const OWNER_ORDER_EVENTS = new Set(['new_order', 'alternative_decision', 'order_cancelled']);
+const CUSTOMER_ORDER_EVENTS = new Set(['alternative', 'return_approved', 'return_rejected']);
+
+export function notificationTarget(
+  n: { event?: string; data?: Record<string, unknown> | null },
+  mode: 'customer' | 'owner',
+): NotificationTarget | null {
+  const data = n.data ?? {};
+  const event = n.event || (typeof data.event === 'string' ? data.event : '');
+  if (event === 'return_requested') return { kind: 'returns' };
+  const raw = data.orderId;
+  const orderId = typeof raw === 'string' || typeof raw === 'number' ? String(raw).trim() : '';
+  if (!orderId) return null;
+  if (OWNER_ORDER_EVENTS.has(event)) return { kind: 'order', side: 'owner', orderId };
+  if (CUSTOMER_ORDER_EVENTS.has(event)) return { kind: 'order', side: 'customer', orderId };
+  if (event === 'order_status') return { kind: 'order', side: mode, orderId };
+  return null;
 }
 
 export default {};

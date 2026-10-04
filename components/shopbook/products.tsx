@@ -1,20 +1,25 @@
-// components/shopbook/products.tsx — Shop Book, moved out of app/shop-book.tsx
-// unchanged. Palette and styles come from ./theme; see app/shop-book.tsx.
+// components/shopbook/products.tsx — Shop Book: products, coupons, suppliers, purchases, stock and bulk add.
+// Split out of app/shop-book.tsx on 2026-10-04 and edited since (fixes are
+// logged per round). Palette and styles come from ./theme.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { KeyboardSafe } from '../ui';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, FlatList, Alert, ActivityIndicator, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { categoryLabel } from '../../constants/shopCategories';
-import { formatMoney, clientKey, couponLabel, parseBulkProducts, UNIT_PRESETS, isNum, isBlankOrNonNegative, num } from '../../utils/shopbook';
+import { formatMoney, clientKey, couponLabel, parseBulkProducts, skippedBulkLines, UNIT_PRESETS, isNum, isBlankOrNonNegative, num } from '../../utils/shopbook';
 import * as SB from '../../services/shopBookService';
 import { LoadingState, ErrorState } from '../finance/ui';
 import { t } from '../../lib/shopbookI18n';
 import { C, s } from './theme';
 import { loadErrText, Row, SubHeader, Chip, StatCard, Field, ToggleRow, Empty } from './shared';
+import { useShopLoad } from './useShopLoad';
+
+// Purchases needs the catalog too (the "add an item" chips), so both are read
+// in one load and fail or succeed together, as before.
+const fetchPurchasesAndProducts = () => Promise.all([SB.purchases(), SB.ownerProducts()]);
 
 export function OwnerCoupons({ currency, onBack }: { currency?: string; onBack: () => void }) {
-  const [loading, setLoading] = useState(true);
   const [coupons, setCoupons] = useState<SB.Coupon[]>([]);
   const [code, setCode] = useState('');
   const [kind, setKind] = useState<'percent' | 'flat'>('percent');
@@ -22,12 +27,7 @@ export function OwnerCoupons({ currency, onBack }: { currency?: string; onBack: 
   const [minOrder, setMinOrder] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const [err, setErr] = useState('');
-  const load = useCallback(async () => {
-    setLoading(true); setErr('');
-    try { setCoupons(await SB.ownerCoupons()); } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
-  }, []);
-  useEffect(() => { load(); }, [load]);
+  const { loading, err, load } = useShopLoad(SB.ownerCoupons, setCoupons);
 
   const cur = currency || '₹';
   const add = async () => {
@@ -76,11 +76,11 @@ export function OwnerCoupons({ currency, onBack }: { currency?: string; onBack: 
           <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }} accessibilityRole="radiogroup" accessibilityLabel="Discount type">
             <TouchableOpacity style={[s.statusBtn, kind === 'percent' && s.statusBtnActive]} onPress={() => setKind('percent')}
               accessibilityRole="radio" accessibilityState={{ checked: kind === 'percent' }}>
-              <Text style={[s.statusBtnText, kind === 'percent' && { color: '#fff' }]}>% Percent</Text>
+              <Text style={[s.statusBtnText, kind === 'percent' && { color: C.onFill }]}>% Percent</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[s.statusBtn, kind === 'flat' && s.statusBtnActive]} onPress={() => setKind('flat')}
               accessibilityRole="radio" accessibilityState={{ checked: kind === 'flat' }}>
-              <Text style={[s.statusBtnText, kind === 'flat' && { color: '#fff' }]}>{cur} Flat</Text>
+              <Text style={[s.statusBtnText, kind === 'flat' && { color: C.onFill }]}>{cur} Flat</Text>
             </TouchableOpacity>
           </View>
           <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -119,7 +119,6 @@ export function OwnerCoupons({ currency, onBack }: { currency?: string; onBack: 
 }
 
 export function OwnerSuppliers({ onBack }: { onBack: () => void }) {
-  const [loading, setLoading] = useState(true);
   const [suppliers, setSuppliers] = useState<SB.Supplier[]>([]);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -127,12 +126,7 @@ export function OwnerSuppliers({ onBack }: { onBack: () => void }) {
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const [err, setErr] = useState('');
-  const load = useCallback(async () => {
-    setLoading(true); setErr('');
-    try { setSuppliers(await SB.suppliers()); } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
-  }, []);
-  useEffect(() => { load(); }, [load]);
+  const { loading, err, load } = useShopLoad(SB.suppliers, setSuppliers);
 
   const add = async () => {
     if (!name.trim()) { Alert.alert('Enter supplier name'); return; }
@@ -194,17 +188,11 @@ export function OwnerSuppliers({ onBack }: { onBack: () => void }) {
 }
 
 export function OwnerProducts({ shop }: { shop: SB.Shop }) {
-  const [loading, setLoading] = useState(true);
   const [products, setProducts] = useState<SB.Product[]>([]);
   const [edit, setEdit] = useState<SB.Product | 'new' | 'bulk' | 'stock' | null>(null);
   const [seeding, setSeeding] = useState(false);
 
-  const [err, setErr] = useState('');
-  const load = useCallback(async () => {
-    setLoading(true); setErr('');
-    try { setProducts(await SB.ownerProducts()); } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
-  }, []);
-  useEffect(() => { load(); }, [load]);
+  const { loading, err, load } = useShopLoad(SB.ownerProducts, setProducts);
 
   // One-tap category starter catalog (server-managed; spec: product-catalog).
   // Items land with price 0 + disabled — the owner prices and activates them.
@@ -248,7 +236,7 @@ export function OwnerProducts({ shop }: { shop: SB.Shop }) {
     <>
       <View style={{ flexDirection: 'row', gap: 8 }}>
         <TouchableOpacity style={[s.primaryBtn, { flex: 1, marginTop: 0 }]} onPress={() => setEdit('new')} accessibilityRole="button">
-          <Ionicons name="add" size={18} color="#fff" />
+          <Ionicons name="add" size={18} color={C.onFill} />
           <Text style={s.primaryBtnText}>Add Product</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[s.outlineBtn, { flex: 1, marginTop: 0 }]} onPress={() => setEdit('bulk')} accessibilityRole="button">
@@ -325,6 +313,12 @@ export function ProductEditor({ product, currency, onDone }: {
     if (bad) {
       Alert.alert('Check the numbers',
         `${bad[0]}: "${bad[1]}" is not a plain number. Use digits only — 1200 or 1,200 both work.`);
+      return;
+    }
+    // A tax rate is a percentage of the price. Over 100 is a typo (an extra
+    // zero), and it would be printed on every invoice for this product.
+    if (num(taxPercent) > 100) {
+      Alert.alert('Check the tax rate', 'Tax % must be between 0 and 100.');
       return;
     }
     setBusy(true);
@@ -406,7 +400,6 @@ export function ProductEditor({ product, currency, onDone }: {
 export function PurchasesScreen({ currency, onBack }: { currency?: string; onBack: () => void }) {
   const [rows, setRows] = useState<SB.PurchaseSummary[]>([]);
   const [spend, setSpend] = useState(0);
-  const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [supplier, setSupplier] = useState('');
   const [invNo, setInvNo] = useState('');
@@ -420,16 +413,9 @@ export function PurchasesScreen({ currency, onBack }: { currency?: string; onBac
   const [busy, setBusy] = useState(false);
   const key = useRef(clientKey());
 
-  const [err, setErr] = useState('');
-  const load = useCallback(async () => {
-    setLoading(true); setErr('');
-    try {
-      const r = await SB.purchases();
-      setRows(r.purchases); setSpend(r.totalSpend);
-      setProducts(await SB.ownerProducts());
-    } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
-  }, []);
-  useEffect(() => { load(); }, [load]);
+  const { loading, err, load } = useShopLoad(fetchPurchasesAndProducts, ([r, list]) => {
+    setRows(r.purchases); setSpend(r.totalSpend); setProducts(list);
+  });
 
   const money = (n: number) => formatMoney(n, currency);
 
@@ -547,7 +533,7 @@ export function PurchasesScreen({ currency, onBack }: { currency?: string; onBac
           )}
           <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={save}
             accessibilityRole="button" accessibilityLabel="Save purchase" accessibilityState={{ disabled: busy, busy }}>
-            {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.primaryBtnText}>Save purchase</Text>}
+            {busy ? <ActivityIndicator color={C.onFill} /> : <Text style={s.primaryBtnText}>Save purchase</Text>}
           </TouchableOpacity>
         </ScrollView>
       </>
@@ -564,7 +550,7 @@ export function PurchasesScreen({ currency, onBack }: { currency?: string; onBac
         ListHeaderComponent={(
           <>
             <TouchableOpacity style={[s.primaryBtn, { marginTop: 0 }]} onPress={() => setAdding(true)} accessibilityRole="button">
-              <Ionicons name="add" size={18} color="#fff" />
+              <Ionicons name="add" size={18} color={C.onFill} />
               <Text style={s.primaryBtnText}>Record a purchase</Text>
             </TouchableOpacity>
             {rows.length > 0 && (
@@ -572,6 +558,7 @@ export function PurchasesScreen({ currency, onBack }: { currency?: string; onBac
                 <Row label="Total spend" value={money(spend)} bold />
               </View>
             )}
+            {loading && <LoadingState />}
             {!!err && !loading && <ErrorState title="Couldn’t load purchases" sub={err} onRetry={load} />}
             {!loading && !err && rows.length === 0 && (
               <Empty icon="cart-outline" text="No purchases yet. Recording what stock costs is what makes profit reporting possible." />
@@ -589,7 +576,6 @@ export function PurchasesScreen({ currency, onBack }: { currency?: string; onBac
 // changes it. Every change needs a reason, because the movement ledger is only
 // worth keeping if it answers "where did 8 kg go?".
 export function StockScreen({ currency, onBack }: { currency?: string; onBack: () => void }) {
-  const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<SB.StockRow[]>([]);
   const [lowCount, setLowCount] = useState(0);
   const [sel, setSel] = useState<SB.StockRow | null>(null);
@@ -601,20 +587,19 @@ export function StockScreen({ currency, onBack }: { currency?: string; onBack: (
   // "No movements yet" is a claim about the ledger; a failed read is not it.
   const [historyErr, setHistoryErr] = useState('');
 
-  const [err, setErr] = useState('');
-  const load = useCallback(async () => {
-    setLoading(true); setErr('');
-    try {
-      const r = await SB.stockList();
-      setRows(r.stock); setLowCount(r.lowCount);
-    } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
-  }, []);
-  useEffect(() => { load(); }, [load]);
+  const { loading, err, load } = useShopLoad(SB.stockList, (r) => { setRows(r.stock); setLowCount(r.lowCount); });
 
+  // The item whose history is wanted NOW. Opening A then B quickly could let
+  // A's slower answer land under B's heading; a reply for any other item is
+  // dropped.
+  const historyFor = useRef<string | null>(null);
   const loadHistory = async (productId: string) => {
+    historyFor.current = productId;
     setHistoryErr('');
-    try { setHistory(await SB.stockMovements(productId)); }
-    catch (e: any) { setHistoryErr(loadErrText(e)); }
+    try {
+      const list = await SB.stockMovements(productId);
+      if (historyFor.current === productId) setHistory(list);
+    } catch (e: any) { if (historyFor.current === productId) setHistoryErr(loadErrText(e)); }
   };
   const openItem = async (row: SB.StockRow) => {
     setSel(row); setQty(''); setReason(''); setKind('purchase'); setHistory([]);
@@ -689,7 +674,7 @@ export function StockScreen({ currency, onBack }: { currency?: string; onBack: (
   if (sel) {
     return (
       <>
-        <SubHeader title={sel.name} onBack={() => setSel(null)} />
+        <SubHeader title={sel.name} onBack={() => { historyFor.current = null; setSel(null); }} />
         <FlatList
           // Movements are append-only, so the history is the scroller and the
           // position + record form ride above it. An element, not a component
@@ -720,7 +705,7 @@ export function StockScreen({ currency, onBack }: { currency?: string; onBack: (
               placeholder={kind === 'damage' ? 'Dropped a crate' : 'Supplier delivery'} />
             <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={submit}
               accessibilityRole="button" accessibilityLabel="Record the movement" accessibilityState={{ disabled: busy, busy }}>
-              {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.primaryBtnText}>Record</Text>}
+              {busy ? <ActivityIndicator color={C.onFill} /> : <Text style={s.primaryBtnText}>Record</Text>}
             </TouchableOpacity>
           </View>
           <Text style={s.sectionLabel}>History</Text>
@@ -766,6 +751,10 @@ export function BulkAdd({ currency, onDone }: { currency?: string; onDone: () =>
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const parsed = useMemo(() => parseBulkProducts(text), [text]);
+  // Lines that do not become a product are skipped on save, and lines with no
+  // price would go in at 0. Both are said before the owner taps Add, not after.
+  const skipped = useMemo(() => skippedBulkLines(text), [text]);
+  const unpriced = parsed.filter((p) => p.price <= 0).length;
 
   const save = async () => {
     if (parsed.length === 0) { Alert.alert('Nothing to add', 'Paste one product per line.'); return; }
@@ -809,9 +798,19 @@ export function BulkAdd({ currency, onDone }: { currency?: string; onDone: () =>
               {parsed.length > 8 && <Text style={s.hint}>…and {parsed.length - 8} more</Text>}
             </>
           )}
+          {skipped.length > 0 && (
+            <Text style={[s.hint, { color: C.danger }]} accessibilityLiveRegion="polite">
+              {skipped.length} line{skipped.length === 1 ? '' : 's'} could not be read and will be skipped: {skipped.slice(0, 3).map((l) => `“${l}”`).join(', ')}{skipped.length > 3 ? '…' : ''}
+            </Text>
+          )}
+          {unpriced > 0 && (
+            <Text style={[s.hint, { color: C.amber }]}>
+              {unpriced} product{unpriced === 1 ? ' has' : 's have'} no price and will be added at {money(0)}. Add the price at the end of the line, or set it later.
+            </Text>
+          )}
           <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={save}
             accessibilityRole="button" accessibilityLabel={`Add ${parsed.length || ''} product(s)`} accessibilityState={{ disabled: busy, busy }}>
-            {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.primaryBtnText}>Add {parsed.length || ''} product(s)</Text>}
+            {busy ? <ActivityIndicator color={C.onFill} /> : <Text style={s.primaryBtnText}>Add {parsed.length || ''} product(s)</Text>}
           </TouchableOpacity>
         </ScrollView>
       </KeyboardSafe>
