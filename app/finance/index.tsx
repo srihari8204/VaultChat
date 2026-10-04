@@ -154,7 +154,7 @@ export default function FinanceDashboard() {
                 Interest, open loans (full term) {inrShort(t.pending)}
               </Text>
             </View>
-            {t.compounding && <Text style={s.heroNote}>{t.compounding}</Text>}
+            {t.compounding && <Text style={s.heroNote} numberOfLines={3} adjustsFontSizeToFit minimumFontScale={0.8}>{t.compounding}</Text>}
           </HeroCard>
 
           {/* Health tiles */}

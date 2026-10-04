@@ -129,6 +129,8 @@ export const makeStyles = (C: ReturnType<typeof makeC>) => StyleSheet.create({
   cartBadge: {
     position: 'absolute', top: 2, right: 2, backgroundColor: C.dangerFill,
     borderRadius: 9, minWidth: 18, height: 18, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 4,
+    // A 1px ring: the light red badge on the green header read at 1.21:1.
+    borderWidth: 1, borderColor: C.onFill,
   },
   cartBadgeText: { color: C.onFill, fontSize: 10, fontWeight: '800' },
 

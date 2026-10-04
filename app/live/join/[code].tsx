@@ -35,7 +35,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../../../constants/theme';
 import { useTheme } from '../../../lib/theme';
 import { redeemInviteLink, inviteCodeFrom } from '../../../lib/broadcast';
-import { getMyProfile } from '../../../lib/chatService';
+import { getMyProfile, type MyProfile } from '../../../lib/chatService';
 import { AuroraBackground, KeyboardSafe } from '../../../components/ui';
 
 type Phase =
@@ -91,7 +91,8 @@ export default function LiveJoinScreen() {
     let alive = true;
     (async () => {
       try {
-        const me: any = await getMyProfile();
+        // displayName/username: older servers' field names, kept as fallbacks.
+        const me: MyProfile & { displayName?: string | null; username?: string | null } = await getMyProfile();
         const n = (me?.name ?? me?.displayName ?? me?.username ?? '').trim();
         // Only into an UNTOUCHED field. This lands whenever the network feels
         // like it, and dropping a name on top of one somebody is halfway

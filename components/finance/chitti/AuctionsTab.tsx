@@ -61,8 +61,9 @@ export function AuctionsTab({ group: g, members, auctions, month, onMonth, onCha
       if (!go) return;
     }
     const winner = members.find(m => m.id === winnerId);
+    if (!winner) { setDraft(d => ({ ...d, winnerId: null })); return Alert.alert('Winner', 'That member was removed. Select the winning member again.'); }
     try {
-      await recordAuction(g, month, winnerId, winner?.name ?? '—', b, c);
+      await recordAuction(g, month, winnerId, winner.name, b, c);
     } catch (e: any) { return Alert.alert('Could not record the auction', e?.message ?? 'Nothing was saved. Try again.'); }
     setDraft(EMPTY_AUCTION_DRAFT);
     await onChanged();

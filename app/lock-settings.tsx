@@ -11,6 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import notifee from '@notifee/react-native';
 import * as Speech from 'expo-speech';
 import { useTheme } from '../lib/theme';
+import { tint } from '../lib/tintColor';
 import { VIBE_PATTERN } from '../lib/lock/alarmChannels';
 import { VOICE } from '../lib/lock/alarmController';
 import {
@@ -37,11 +38,24 @@ const HYSTS = [2, 3, 5, 10];
 /** The on/off channels: the only LockAlertSettings keys a Switch row may own. */
 type ChannelKey = { [K in keyof LockAlertSettings]: LockAlertSettings[K] extends boolean ? K : never }[keyof LockAlertSettings];
 
+/** The save() in progress; the next one waits for it. */
+let saveChain: Promise<void> = Promise.resolve();
+
 /** Persist, then hand the change to an armed lock, and SAY when either fails,
  *  in one alert even when both steps fail. Both used to end in .catch(() => {}):
  *  an alarm setting that silently did not stick, or did not reach the running
  *  lock, is a safety gap. */
 async function save(write: Promise<void>): Promise<void> {
+  // One save at a time, in tap order: rapid toggles used to apply and alert
+  // out of order.
+  const turn = saveChain;
+  let done!: () => void;
+  saveChain = new Promise<void>((r) => { done = r; });
+  await turn;
+  try { await saveNow(write); } finally { done(); }
+}
+
+async function saveNow(write: Promise<void>): Promise<void> {
   const saved = await write.then(() => true, () => false);
   const applied = await applyAlertSettings().then(() => true, () => false);
   if (!saved && !applied) {
@@ -71,7 +85,7 @@ function Row({ icon, label, keyName, on, onChange, colors }: {
         value={on}
         accessibilityLabel={label}
         onValueChange={(v) => { const patch: Partial<LockAlertSettings> = {}; patch[keyName] = v; onChange(patch); }}
-        trackColor={{ true: colors.primary + '88', false: colors.border }}
+        trackColor={{ true: tint(colors.primary, 0.53), false: colors.border }}
         // Off: the platform's own thumb, which is visible on both themes.
         thumbColor={on ? colors.primary : undefined}
       />
@@ -181,7 +195,7 @@ export default function LockSettingsScreen() {
             accessibilityState={{ busy: killBusy, disabled: !lock.active || killBusy }}
             disabled={!lock.active || killBusy}
             onValueChange={toggleKillSafe}
-            trackColor={{ true: colors.primary + '88', false: colors.border }}
+            trackColor={{ true: tint(colors.primary, 0.53), false: colors.border }}
             thumbColor={lock.active && lock.killSafe ? colors.primary : undefined}
           />
         </View>
@@ -252,7 +266,7 @@ export default function LockSettingsScreen() {
             value={a.repeat}
             accessibilityLabel="Repeat alarm until back inside"
             onValueChange={(v) => set({ repeat: v })}
-            trackColor={{ true: colors.primary + '88', false: colors.border }}
+            trackColor={{ true: tint(colors.primary, 0.53), false: colors.border }}
             thumbColor={a.repeat ? colors.primary : undefined}
           />
         </View>

@@ -372,10 +372,11 @@ export default function LocationLockScreen() {
 
         <Text style={[st.h, { color: colors.text, marginTop: 22 }]} accessibilityRole="header">Alerts</Text>
         <View style={[st.row, { gap: 8 }]}>
-          <TouchableOpacity onPress={() => router.push('/lock-settings')} accessibilityRole="button" accessibilityHint="Opens alarm and alert settings" style={[st.srcBtn, { borderColor: colors.glassStroke }]}>
+          <TouchableOpacity onPress={() => router.push('/lock-settings')} accessibilityRole="button" accessibilityHint="Opens alarm and alert settings" style={[st.srcBtn, { borderColor: colors.glassStroke, flex: 1 }]}>
             <Ionicons name="options" size={16} color={colors.primary} />
-            <Text style={{ color: colors.text, fontSize: 13 }}>
-              {[settings.alerts.siren && 'Siren', settings.alerts.vibration && 'Vibration',
+            {/* Shrinks and wraps: with every alert on, the summary is wider than a phone row. */}
+            <Text style={{ color: colors.text, fontSize: 13, flexShrink: 1 }}>
+              {[settings.alerts.siren && 'Siren', settings.alerts.continuousBeep && 'Beep', settings.alerts.vibration && 'Vibration',
                 settings.alerts.voice && 'Voice', settings.alerts.flash && 'Flash']
                 .filter(Boolean).join(' · ') || 'All off'} · {settings.alerts.graceS}s grace
             </Text>

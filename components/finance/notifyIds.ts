@@ -25,6 +25,12 @@ export function snoozedNotifIds(
   return { keep, cancel: oldSnoozes.filter(Boolean).join(',') || null };
 }
 
+/** The stored ids with the recurrence replaced by `recurringId`; snoozes are kept. */
+export function withRecurrence(stored: string | null, recurringId: string): string {
+  const [, ...snoozes] = (stored ?? '').split(',');
+  return [recurringId, ...snoozes.filter(Boolean)].join(',');
+}
+
 /**
  * True when the reminder will not alert on its own schedule: a one-off with no
  * id, or a recurring reminder whose recurrence slot is empty. A snooze id alone

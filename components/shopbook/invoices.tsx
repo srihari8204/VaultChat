@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { KeyboardSafe } from '../ui';
-import { View, Text, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Modal } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Modal, AccessibilityInfo, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import { formatMoney, dateLocale, isBlankOrNonNegative, num } from '../../utils/shopbook';
@@ -73,6 +73,17 @@ export function BillScreen({ orderId, onBack }: { orderId: string; onBack: () =>
 
   const money = (n: number) => formatMoney(n, bill?.currency ?? '₹');
 
+  // Back while quantities are queued behind an in-flight edit: the flush
+  // above cannot run once the screen is gone, so they would be lost unsaid.
+  const leave = () => {
+    if (queuedQty.length === 0) { onBack(); return; }
+    Alert.alert('Packed quantities not saved yet',
+      'They are sent as soon as the current change finishes. Leave now and they are lost.', [
+        { text: 'Stay', style: 'cancel' },
+        { text: 'Leave', style: 'destructive', onPress: onBack },
+      ]);
+  };
+
   if (loading || !bill) {
     // A failed load used to fall into the spinner forever: show it, and retry.
     return (
@@ -87,7 +98,7 @@ export function BillScreen({ orderId, onBack }: { orderId: string; onBack: () =>
 
   return (
     <>
-      <SubHeader title="Bill" onBack={onBack} />
+      <SubHeader title="Bill" onBack={leave} />
       <Modal visible={addOpen} transparent animationType="fade" onRequestClose={() => setAddOpen(false)}>
         {/* KeyboardSafe + scroller (2026-09-18): the tallest card on this
             screen — 3 inputs and 2 buttons — and the one that overflows a
@@ -190,7 +201,11 @@ export function BillScreen({ orderId, onBack }: { orderId: string; onBack: () =>
                       // Another edit is in flight: queue this one; it is sent
                       // when that settles (the effect above), not dropped.
                       if (busy) {
-                        if (!queuedQty.includes(l.id)) setQueuedQty([...queuedQty, l.id]);
+                        if (!queuedQty.includes(l.id)) {
+                          setQueuedQty([...queuedQty, l.id]);
+                          // The hint below is a live region on Android only.
+                          if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(`${l.name}: saving after the current change`);
+                        }
                         return;
                       }
                       void patch({ lines: [{ id: l.id, fulfilledQty: raw.trim() === '' ? null : num(raw) }] });

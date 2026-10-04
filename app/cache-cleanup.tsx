@@ -109,16 +109,26 @@ export default function CacheCleanupScreen() {
   const onSelected = () => runCleanup(selectedPlan, 'selected cache');
 
   // A setting that did not save goes back to what is stored, and says so.
+  // One save per setting at a time: a second tap while the first is saving is
+  // ignored, so an earlier tap's failure can no longer undo a later choice.
+  const autoBusy = useRef(false);
+  const logoutBusy = useRef(false);
   const chooseAutoDays = async (d: number) => {
+    if (autoBusy.current) return;
+    autoBusy.current = true;
     const prev = autoDays;
     setAutoDays(d);
     try { await setAutoCleanDays(d); }
-    catch { setAutoDays(prev); Alert.alert('Could not save', 'Automatic cleanup was not changed.'); }
+    catch { setAutoDays(prev); if (mounted.current) Alert.alert('Could not save', 'Automatic cleanup was not changed.'); }
+    finally { autoBusy.current = false; }
   };
   const toggleLogout = async (v: boolean) => {
+    if (logoutBusy.current) return;
+    logoutBusy.current = true;
     setClearLogout(v);
     try { await setClearOnLogout(v); }
-    catch { setClearLogout(!v); Alert.alert('Could not save', 'Clear cache on logout was not changed.'); }
+    catch { setClearLogout(!v); if (mounted.current) Alert.alert('Could not save', 'Clear cache on logout was not changed.'); }
+    finally { logoutBusy.current = false; }
   };
 
   return (
@@ -128,13 +138,13 @@ export default function CacheCleanupScreen() {
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => (router.canGoBack() ? router.back() : router.replace('/storage-manager'))} style={S.backBtn} hitSlop={10}>
           <Ionicons name="chevron-back" size={26} color={colors.text} />
         </TouchableOpacity>
-        <View style={{ flex: 1 }}>
+        <View style={S.flex1}>
           <Text style={S.headerTitle} accessibilityRole="header">Cache cleanup</Text>
           <Text style={S.headerSub}>Free storage — never your data</Text>
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={S.scroll} showsVerticalScrollIndicator={false}>
         <View style={S.hero}>
           <Text style={S.totalNum}>{loading ? '…' : formatBytes(summary.totalBytes)}</Text>
           <Text style={S.totalLabel}>reclaimable cache{lastClean ? ` · last cleared ${new Date(lastClean).toLocaleDateString()}` : ''}</Text>
@@ -167,7 +177,7 @@ export default function CacheCleanupScreen() {
                 <View key={c.id}>
                   <TouchableOpacity style={S.row} onPress={() => toggle(c.id)} activeOpacity={0.7} accessibilityRole="checkbox" accessibilityState={{ checked: on }} accessibilityLabel={`${c.label}, ${UNMEASURED.has(c.id) ? 'size not measured' : formatBytes(bytes)}`}>
                     <Ionicons name={on ? 'checkbox' : 'square-outline'} size={22} color={on ? colors.primary : colors.textFaint} />
-                    <View style={{ flex: 1 }}>
+                    <View style={S.flex1}>
                       <Text style={S.rowLabel}>{c.label}</Text>
                       <Text style={S.rowDesc}>{c.description}</Text>
                     </View>
@@ -199,7 +209,7 @@ export default function CacheCleanupScreen() {
           </View>
           <View style={S.divider} />
           <View style={S.settingRow}>
-            <View style={{ flex: 1 }}>
+            <View style={S.flex1}>
               <Text style={S.rowLabel}>Clear cache on logout</Text>
               <Text style={S.rowDesc}>Removes cache (not your data) when you sign out.</Text>
             </View>
@@ -221,6 +231,8 @@ export default function CacheCleanupScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
+  scroll: { paddingBottom: 40 },
+  flex1: { flex: 1 },
   header: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: HEADER_TOP, paddingBottom: 14, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: c.glassStroke },
   backBtn: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { color: c.text, fontSize: 18, fontWeight: '800' },

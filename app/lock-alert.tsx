@@ -73,7 +73,9 @@ export default function LockAlertScreen() {
   // each later phase change (grace → alarming → silenced) is announced too.
   const announcedLine = useRef<string | null>(null);
   useEffect(() => {
-    if (!alarmFace) return;
+    // Reset when the face hides, so a second exit in this mount is
+    // introduced again.
+    if (!alarmFace) { announcedLine.current = null; return; }
     if (announcedLine.current === null) {
       AccessibilityInfo.announceForAccessibility('Location Lock alarm. You have left the locked area. Head back now.');
     } else if (Platform.OS === 'ios' && announcedLine.current !== phaseLine) {
@@ -151,7 +153,7 @@ export default function LockAlertScreen() {
         </TouchableOpacity>
       )}
 
-      <Text style={[st.distLabel, { marginTop: 26 }]}>NAVIGATE BACK</Text>
+      <Text accessibilityRole="header" style={[st.distLabel, { marginTop: 26 }]}>NAVIGATE BACK</Text>
       <View style={st.navRow}>
         <NavBtn icon="walk" label="Walk" planning={planning} mode="pedestrian" onPress={navBack} />
         <NavBtn icon="bicycle" label="Cycle" planning={planning} mode="bicycle" onPress={navBack} />

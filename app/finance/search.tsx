@@ -156,12 +156,12 @@ export default function FinanceSearch() {
             return (
               <TouchableOpacity style={s.card} activeOpacity={0.85}
                 accessibilityRole="button"
-                accessibilityLabel={`${e.name}, ${e.direction === 'lend' ? 'lent' : 'borrowed'} ${formatINR(e.principal)}, ${sc.label}. Open ledger`}
+                accessibilityLabel={`${e.name}, ${e.direction === 'lend' ? 'lent' : 'borrowed'} ${formatINR(e.principal)}, ${formatINR(e.remaining)} remaining, ${sc.label}. Open ledger`}
                 onPress={() => router.push({ pathname: '/finance/ledger/[id]', params: { id: e.id } })}>
                 <View style={[s.dot, { backgroundColor: e.direction === 'lend' ? FIN.good : FIN.bad }]} />
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={s.title} numberOfLines={1}>{e.name}</Text>
-                  <Text style={s.sub} numberOfLines={1}>{e.direction === 'lend' ? 'Lent' : 'Borrowed'}{e.mobile ? ` · ${e.mobile}` : ''}</Text>
+                  <Text style={s.sub} numberOfLines={1}>{e.direction === 'lend' ? 'Lent' : 'Borrowed'} · {formatINR(e.remaining)} remaining{e.mobile ? ` · ${e.mobile}` : ''}</Text>
                 </View>
                 <View style={{ alignItems: 'flex-end', gap: 5 }}>
                   <Text style={s.amt}>{formatINR(e.principal)}</Text>

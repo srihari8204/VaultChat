@@ -212,6 +212,16 @@ export default function FamilyItemsScreen() {
    * answer to "where did I leave it", and it costs no extra permission — the
    * OS cache is read, never a fresh GPS fix.
    */
+  /** My own tags whose latest sighting the space did not take: the stamp
+   *  here is real, but other members cannot see it yet. */
+  const [unreported, setUnreported] = useState<ReadonlySet<string>>(new Set());
+  const markReported = useCallback((id: string, failed: boolean) => setUnreported((cur) => {
+    if (cur.has(id) === failed) return cur;
+    const next = new Set(cur);
+    if (failed) next.add(id); else next.delete(id);
+    return next;
+  }), []);
+
   const rememberSighting = useCallback(async (item: TrackedItem) => {
     try {
       const { pos, place } = await whereNow();
@@ -225,9 +235,13 @@ export default function FamilyItemsScreen() {
       // "where are my keys" — and it is why hearing someone ELSE's tag is
       // worth reporting at all.
       // Only the place NAME is shared — never this phone's coordinates.
-      if (circleId) reportSighting(circleId, item.id, place).catch(() => {});
+      // A failed report is said on the row and retried on the next due minute.
+      if (circleId) {
+        reportSighting(circleId, item.id, place)
+          .then(() => markReported(item.id, false), () => markReported(item.id, true));
+      }
     } catch { /* a sighting we could not stamp is still a sighting */ }
-  }, [whereNow, circleId]);
+  }, [whereNow, circleId, markReported]);
 
   /** Another member's tag heard by this phone: tell the space where (place
    *  name only), and show it here as heard by you — only once the space has
@@ -364,10 +378,11 @@ export default function FamilyItemsScreen() {
                   const at = byOther ? theirsAt : (it.lastSeenAt ?? undefined);
                   const place = byOther ? sh?.placeName : it.lastSeenPlace;
                   return (
-                    <Text style={{ color: colors.textDim, fontSize: 12.5 }} numberOfLines={1}>
+                    <Text style={{ color: colors.textDim, fontSize: 12.5 }} numberOfLines={2}>
                       Last seen {seenAgo(at)}
                       {place ? ` · ${place}` : ''}
                       {byOther ? '  · by family' : ''}
+                      {!byOther && unreported.has(it.id) ? '  · not shared with your space yet' : ''}
                     </Text>
                   );
                 })()}

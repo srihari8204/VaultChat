@@ -97,8 +97,8 @@ export default function OfflineModeScreen() {
       // against the old retry's snapshot.
       if (next.waiting === 0) retryBase.current = null;
       return next;
-    } catch (e: any) {
-      if (mounted.current) setLoadError(e?.message ?? 'Could not read the outbox');
+    } catch (e: unknown) {
+      if (mounted.current) setLoadError((e instanceof Error && e.message) || 'Could not read the outbox');
       return null;
     }
   }, []);
@@ -137,8 +137,8 @@ export default function OfflineModeScreen() {
       // flush() sends whatever was already waiting.
       for (const id of outbox.failedIds) await retry(id);
       await flush();
-    } catch (e: any) {
-      Alert.alert('Could not retry', e?.message ?? 'Try again');
+    } catch (e: unknown) {
+      Alert.alert('Could not retry', (e instanceof Error && e.message) || 'Try again');
     } finally {
       // Say what happened, from the recount — never assume success. From here
       // on every recount updates the line (see retryBase).

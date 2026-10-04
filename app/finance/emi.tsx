@@ -15,6 +15,8 @@ import { sharePdf, pdfDocument, kvTable, htmlTable } from '../../utils/financeIO
 const LOAN_TYPES = ['Home', 'Car', 'Bike', 'Personal', 'Education', 'Business'];
 
 const MAX_MONTHS = 600; // 50 years
+const FIRST_ROWS = 24;
+const PAGE_ROWS = 60;
 
 export default function EmiCalc() {
   const FIN = useFinanceTheme();
@@ -32,8 +34,9 @@ export default function EmiCalc() {
   // (2026-09-17).
   const [res, setRes] = useState<{ emi: number; totalInterest: number; totalPayment: number; months: number; P: number; R: number } | null>(null);
   const [showSchedule, setShowSchedule] = useState(false);
-  // On screen the schedule starts at 24 months; the rest is one tap away (and in the PDF).
-  const [showAll, setShowAll] = useState(false);
+  // On screen the schedule starts at 24 months and grows a page at a time
+  // (all of it is in the PDF): up to 600 unvirtualised rows at once was slow.
+  const [rowsShown, setRowsShown] = useState(FIRST_ROWS);
 
   const months = () => { const n = num(tenure) || 0; return unit === 'yr' ? Math.round(n * 12) : Math.round(n); };
 
@@ -51,6 +54,7 @@ export default function EmiCalc() {
     const r = emi(P, R, n);
     setRes({ ...r, months: n, P, R });
     setShowSchedule(false);
+    setRowsShown(FIRST_ROWS);
   };
 
   const schedule = useMemo(
@@ -132,13 +136,16 @@ export default function EmiCalc() {
 
               {showSchedule && (
                 <Card style={{ marginTop: 12, padding: 0, overflow: 'hidden' }}>
+                  {/* The EMI is the same every month (principal + interest), so
+                      it is stated once rather than as a fifth narrow column. */}
+                  <Text style={s.schEmi}>Each month you pay the EMI, {formatINR(res.emi)}: principal + interest.</Text>
                   <View style={[s.schRow, s.schHead]} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
                     <Text style={[s.schCell, s.schHeadTxt, { flex: 0.7 }]}>Mo</Text>
                     <Text style={[s.schCell, s.schHeadTxt]}>Principal</Text>
                     <Text style={[s.schCell, s.schHeadTxt]}>Interest</Text>
                     <Text style={[s.schCell, s.schHeadTxt]}>Balance</Text>
                   </View>
-                  {(showAll ? schedule : schedule.slice(0, 24)).map(r => (
+                  {schedule.slice(0, rowsShown).map(r => (
                     // One spoken row, not four separate numbers.
                     <View key={r.month} style={s.schRow} accessible
                       accessibilityLabel={`Month ${r.month}: EMI ${formatINR(r.emi)}, principal ${formatINR(r.principal)}, interest ${formatINR(r.interest)}, balance ${formatINR(r.balance)}`}>
@@ -148,12 +155,14 @@ export default function EmiCalc() {
                       <Text style={s.schCell} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{Math.round(r.balance).toLocaleString('en-IN')}</Text>
                     </View>
                   ))}
-                  {schedule.length > 24 && (<>
+                  {schedule.length > FIRST_ROWS && (<>
                     <Text style={s.schMore}>
-                      {showAll ? `All ${schedule.length} months` : `Showing first 24 of ${schedule.length} months · full schedule in the PDF`}
+                      {rowsShown >= schedule.length ? `All ${schedule.length} months` : `Showing first ${rowsShown} of ${schedule.length} months · full schedule in the PDF`}
                     </Text>
                     <View style={{ padding: 10, paddingTop: 0 }}>
-                      <Btn label={showAll ? 'Show first 24 months' : `Show all ${schedule.length} months`} kind="ghost" onPress={() => setShowAll(v => !v)} wide />
+                      {rowsShown >= schedule.length
+                        ? <Btn label={`Show first ${FIRST_ROWS} months`} kind="ghost" onPress={() => setRowsShown(FIRST_ROWS)} wide />
+                        : <Btn label={`Show ${Math.min(PAGE_ROWS, schedule.length - rowsShown)} more months`} kind="ghost" onPress={() => setRowsShown(n => n + PAGE_ROWS)} wide />}
                     </View>
                   </>)}
                 </Card>
@@ -203,4 +212,5 @@ const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   // thousands context. Shrink to fit instead of wrapping (2026-09-17).
   schCell: { flex: 1, fontSize: 12, color: FIN.text, textAlign: 'right', fontVariant: ['tabular-nums'] },
   schMore: { color: FIN.faint, fontSize: 11, textAlign: 'center', padding: 10 },
+  schEmi: { color: FIN.sub, fontSize: 12.5, padding: 10, paddingBottom: 6 },
 });

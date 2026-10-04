@@ -5,8 +5,11 @@
 <!-- Content-Security-Policy: script-src allows ONLY this page's one inline script, pinned by its SHA-256.
      After editing that script, recompute the hash, e.g.
      python3 -c "import re,hashlib,base64,sys;s=open(sys.argv[1]).read();print(base64.b64encode(hashlib.sha256(re.findall(r'<script>(.*?)</script>',s,re.S)[-1].encode()).digest()).decode())" FILE
-     The page refuses to run its script until the hash matches. frame-ancestors cannot be set from a meta tag: send it as a header. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-5MKCF2uc89gzepXJXg1gf/dMbQ74iXzrg6cgcsNVYz8='; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'" />
+     The page refuses to run its script until the hash matches. frame-ancestors cannot be set from a meta tag: send it as a header.
+     style-src likewise pins the ONE style element (no style="" attributes anywhere; the script sets el.style.* through the
+     CSSOM, which CSP allows). After editing the stylesheet, recompute with the same command, replacing script by style in
+     both tags; an unmatched hash leaves the page unstyled. admin/adminPages.selftest.ts checks both. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-5MKCF2uc89gzepXJXg1gf/dMbQ74iXzrg6cgcsNVYz8='; style-src 'sha256-i9lkKv+Rk6OQ4RFXK2Gle4bmlDyPgO+zOhdFSgtU2wI='; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'" />
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- A dark-only console: tell the browser, so its own form controls and
      scrollbars match instead of rendering light on a dark page. -->

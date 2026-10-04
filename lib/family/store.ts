@@ -52,9 +52,46 @@ export async function addIngested(circleId: string, ids: string[]): Promise<void
   try { await AsyncStorage.setItem(kIngested(circleId), JSON.stringify(next)); } catch {}
 }
 
-export async function getPlaces(circleId: string): Promise<Geofence[]> { return readJSON<Geofence[]>(kPlaces(circleId), []); }
-export async function setPlaces(circleId: string, places: Geofence[]): Promise<void> {
-  await AsyncStorage.setItem(kPlaces(circleId), JSON.stringify(places));
+/** Thrown when the stored places exist but could not be read. */
+export class PlacesUnreadable extends Error {
+  constructor() { super('saved places could not be read'); this.name = 'PlacesUnreadable'; }
+}
+
+/** The stored places, [] when none were ever saved. Throws PlacesUnreadable
+ *  when the read fails or what is stored is not a list — unlike getPlaces,
+ *  this never mistakes an unreadable list for an empty one. */
+export async function readPlaces(circleId: string): Promise<Geofence[]> {
+  let parsed: unknown;
+  try {
+    const raw = await AsyncStorage.getItem(kPlaces(circleId));
+    if (raw == null) return [];
+    parsed = JSON.parse(raw);
+  } catch { throw new PlacesUnreadable(); }
+  if (!Array.isArray(parsed)) throw new PlacesUnreadable();
+  return parsed as Geofence[];
+}
+
+/** For readers only (watchers, maps): an unreadable list reads as none. */
+export async function getPlaces(circleId: string): Promise<Geofence[]> { return readPlaces(circleId).catch(() => []); }
+
+// Pending updatePlaces per circle (see there).
+const placeChains = new Map<string, Promise<unknown>>();
+
+/** Re-read the stored places, apply `change` to THAT list, store and return
+ *  the result. The list is never written from a copy that was not read: a
+ *  failed read throws PlacesUnreadable and writes nothing, so a screen whose
+ *  own load failed (or has not finished) cannot replace saved places with
+ *  only what it shows. */
+export function updatePlaces(circleId: string, change: (stored: Geofence[]) => Geofence[]): Promise<Geofence[]> {
+  // One update at a time per circle, so two quick toggles cannot both read
+  // the same list and the second write undo the first.
+  const run = (placeChains.get(circleId) ?? Promise.resolve()).then(async () => {
+    const next = change(await readPlaces(circleId));
+    await AsyncStorage.setItem(kPlaces(circleId), JSON.stringify(next));
+    return next;
+  });
+  placeChains.set(circleId, run.catch(() => {}));
+  return run;
 }
 
 export async function getSettings(): Promise<FamilySettings> {

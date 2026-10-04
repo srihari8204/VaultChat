@@ -38,6 +38,7 @@ import { Avatar, AuroraBackground } from '../components/ui';
 import SpaceGround, { useSpaceGlass } from '../components/spaces/SpaceGround';
 import { listChats, createInvitation, attachmentUrl } from '../lib/chatService';
 import { circleInviteCode, circleMembers, INVITE_CODE_HOURS } from '../lib/family/circle';
+import { type CircleMember } from '../lib/family/types';
 
 interface Pick { userId: string; name: string; photoURL: string | null }
 
@@ -60,24 +61,27 @@ export default function FamilyAddScreen() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** The contacts themselves failed to load (not just the member check). */
+  const [contactsFailed, setContactsFailed] = useState(false);
   /** Bumped by Retry on the error bar; re-runs the load below. */
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let live = true;
     setError(null);
+    setContactsFailed(false);
     setLoading(true);
     (async () => {
       try {
         const [chats, members] = await Promise.all([
           listChats(),
           // null = the member list did not load (contacts still can).
-          circleId ? circleMembers(String(circleId)).catch(() => null) : Promise.resolve([]),
+          circleId ? circleMembers(String(circleId)).catch(() => null) : Promise.resolve([] as CircleMember[]),
         ]);
         if (!live) return;
         // Members already in the circle are shown but not selectable — clearer
         // than hiding them, which reads as "this contact is missing".
-        setAlready(new Set((members ?? []).map((m: any) => String(m.id))));
+        setAlready(new Set((members ?? []).map((m) => String(m.id))));
         // Without that list every contact looks selectable, and inviting an
         // existing member fails later, one by one. Say so up front.
         if (!members) {
@@ -96,7 +100,7 @@ export default function FamilyAddScreen() {
         }
         setPeople(Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name)));
       } catch (e: any) {
-        if (live) setError(e?.message ?? 'Failed to load contacts');
+        if (live) { setError(e?.message ?? 'Failed to load contacts'); setContactsFailed(true); }
       } finally {
         if (live) setLoading(false);
       }
@@ -256,9 +260,10 @@ export default function FamilyAddScreen() {
 
       {loading ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
-      ) : error && people.length === 0 ? (
-        // A failed load is not "no contacts" — the error bar above says what
-        // happened and offers the retry.
+      ) : contactsFailed && people.length === 0 ? (
+        // A failed contacts load is not "no contacts" — the error bar above
+        // says what happened and offers the retry. (A failed member check
+        // alone still shows the empty state: the contacts did load.)
         null
       ) : people.length === 0 ? (
         <View style={s.empty}>

@@ -168,6 +168,7 @@ export default function StorageManagerScreen() {
       // Rank chats by how much media they hold (WhatsApp "Manage storage").
       try {
         const chats = await listChats();
+        if (!mounted.current) return;
         const nameById = new Map(chats.map(c => [c.id, c.type === 'direct' ? (c.peerName || 'Direct chat') : (c.name || 'Group')]));
         const ranked = Object.entries(perChat.sizes)
           .map(([id, size]) => ({ id, size, name: nameById.get(id) || 'Chat' }))
@@ -175,7 +176,7 @@ export default function StorageManagerScreen() {
           .sort((a, b) => b.size - a.size)
           .slice(0, 12);
         setChatStores(ranked);
-      } catch { setChatStores([]); }
+      } catch { if (mounted.current) setChatStores([]); }
 
       // App key/value data (AsyncStorage) counts toward "Other".
       try {
@@ -183,6 +184,7 @@ export default function StorageManagerScreen() {
         const pairs = await AsyncStorage.multiGet(keys);
         for (const [k, v] of pairs) acc.other += (k?.length ?? 0) + (v?.length ?? 0);
       } catch {}
+      if (!mounted.current) return;
 
       const total = acc.img + acc.vid + acc.aud + acc.file + acc.other;
       setCategories([
@@ -194,7 +196,9 @@ export default function StorageManagerScreen() {
       ]);
       setTotalUsed(total);
 
-      try { setFreeSpace(await FileSystem.getFreeDiskStorageAsync()); } catch { setFreeSpace(0); }
+      // Every await above is re-checked: nothing is set once the screen is gone.
+      const free = await FileSystem.getFreeDiskStorageAsync().catch(() => 0);
+      if (mounted.current) setFreeSpace(free);
     } catch {
       failed = true;
       // Nothing from an earlier load may stay on screen as if it were current.

@@ -9,7 +9,7 @@
      style-src likewise pins the ONE style element (no style="" attributes anywhere; script code may still set
      el.style.* through the CSSOM, which CSP allows). After editing the stylesheet, recompute with the same command,
      replacing script by style in both tags; an unmatched hash leaves the page unstyled. admin/adminPages.selftest.ts checks both. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-jmQ2vnTRzPTdX0ThePVOflMGEyw7S3iM5il6yo3dYFY='; style-src 'sha256-pVEvHfamtkZcOlhrc5sUFOX/XkIkdAHI9cjL7yTnukQ='; font-src 'self'; connect-src https: http://localhost:* http://127.0.0.1:*; img-src data:; base-uri 'none'; form-action 'none'" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-GKBfoUr+EmprbU+01Ml8Kee/CwkM9KQfqMCutLtX5Vg='; style-src 'sha256-pVEvHfamtkZcOlhrc5sUFOX/XkIkdAHI9cjL7yTnukQ='; font-src 'self'; connect-src https: http://localhost:* http://127.0.0.1:*; img-src data:; base-uri 'none'; form-action 'none'" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="dark light" />
 <title>crazzychat · Admin Console</title>
@@ -159,7 +159,7 @@
       <input id="adminKey" type="password" placeholder="x-admin-key" autocomplete="off" />
     </div>
     <button class="btn" id="loginBtn">Connect</button>
-    <div id="loginErr" class="err-box hide"></div>
+    <div id="loginErr" class="err-box hide" role="alert"></div>
     <div class="muted mt-14">Key is kept in <b>sessionStorage</b> only — cleared when the tab closes.</div>
   </div>
 </div>
@@ -294,7 +294,13 @@
     }catch(e){
       throw new Error('Cannot reach server (network/CORS). Check the URL is correct and CORS allows this origin.');
     }
-    if(res.status===401) throw new Error('401 — invalid admin key');
+    if(res.status===401){
+      // A revoked key will not start working on the next poll: back to the
+      // login card, as the event stream does. (While logging in, the login
+      // card itself shows the error.)
+      if(!$('#app').classList.contains('hide')) signOut(KEY_REFUSED);
+      throw new Error('401 — invalid admin key');
+    }
     if(res.status===429) throw new Error('429 — rate limited, slow down');
     if(res.status===503){ const j=await res.json().catch(()=>({})); throw new Error('503 — '+(j.error||'service unavailable')); }
     if(!res.ok){ const j=await res.json().catch(()=>({})); throw new Error(res.status+' — '+(j.error||'request failed')); }
@@ -324,6 +330,7 @@
   };
   $('#adminKey').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#loginBtn').click(); });
 
+  const KEY_REFUSED = 'The server refused the admin key (401). Enter it again.';
   // Back to the login card. With a reason (a refused key), it is shown there.
   function signOut(reason){
     if(socket){ try{socket.disconnect();}catch{} socket=null; }
@@ -649,7 +656,7 @@
           if(res.status === 401){
             if(stopped || socket !== self) return;
             stopped = true; setStatus('off');
-            signOut('The server refused the admin key (401). Enter it again.');
+            signOut(KEY_REFUSED);
             return;
           }
           if(!res.ok || !res.body) throw new Error('HTTP ' + res.status);

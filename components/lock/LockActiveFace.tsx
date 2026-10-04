@@ -6,6 +6,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { View, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../lib/theme';
 import type { Palette } from '../../constants/theme';
@@ -61,6 +62,9 @@ export default function LockActiveFace({ myPos }: { myPos: LatLng | null }) {
   const router = useRouter();
   const lock = useLockView();
   const settings = useLockSettings();
+  // The screen has a native header, so the root layout adds no bottom inset:
+  // the card's own padding has to clear the home indicator.
+  const insets = useSafeAreaInsets();
   /** The mode whose route back is being planned; Navigate opens only once it exists. */
   const [planning, setPlanning] = useState<Costing | null>(null);
 
@@ -151,7 +155,7 @@ export default function LockActiveFace({ myPos }: { myPos: LatLng | null }) {
         style={{ flex: 1 }}
       />
 
-      <View style={[st.card, { backgroundColor: colors.glass, borderColor: zc }]}>
+      <View style={[st.card, { backgroundColor: colors.glass, borderColor: zc, paddingBottom: 22 + insets.bottom }]}>
         <View style={st.row}>
           <View style={[st.stateDot, { backgroundColor: zc }]} />
           <Text style={[st.stateTxt, { color: zc }]}>{STATE_LABEL[lock.state ?? 'safe']}</Text>
@@ -188,7 +192,7 @@ export default function LockActiveFace({ myPos }: { myPos: LatLng | null }) {
         )}
 
         {lock.state === 'outside' && !lock.navBack && (
-          <View style={[st.row, { marginTop: 12, gap: 8 }]}>
+          <View style={[st.row, st.wrap, { marginTop: 12, gap: 8 }]}>
             <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>Navigate back:</Text>
             <Chip active={false} busy={planning === 'pedestrian'} disabled={planning !== null} label="Walk" onPress={() => navBack('pedestrian')} colors={colors} />
             <Chip active={false} busy={planning === 'bicycle'} disabled={planning !== null} label="Cycle" onPress={() => navBack('bicycle')} colors={colors} />
@@ -197,7 +201,8 @@ export default function LockActiveFace({ myPos }: { myPos: LatLng | null }) {
           </View>
         )}
 
-        <View style={[st.row, { marginTop: 14, gap: 10 }]}>
+        {/* Wraps: with Stop alarm showing, four buttons do not fit one row on a phone. */}
+        <View style={[st.row, st.wrap, { marginTop: 14, gap: 10 }]}>
           <TouchableOpacity onPress={unlock} accessibilityRole="button" accessibilityLabel="Unlock and stop monitoring"
             style={[st.btn, { borderColor: colors.danger, borderWidth: 1.5 }]}>
             <Ionicons name="lock-open" size={16} color={colors.danger} />
@@ -238,12 +243,13 @@ function Stat({ label, value, colors, valueColor, spokenLabel, spokenValue }: {
 const st = StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   row: { flexDirection: 'row', alignItems: 'center' },
-  alarmBar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 10 },
+  wrap: { flexWrap: 'wrap' },
+  alarmBar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 10, minHeight: 44 },
   alarmBarTxt: { color: ALARM.ink, fontWeight: '800', fontSize: 13.5, flex: 1 },
-  card: { borderTopWidth: 3, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 22 },
+  card: { borderTopWidth: 3, paddingHorizontal: 16, paddingTop: 12 },
   stateDot: { width: 10, height: 10, borderRadius: 5, marginRight: 8 },
   stateTxt: { fontWeight: '900', fontSize: 15, letterSpacing: 0.4 },
-  bgBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 10, padding: 9, marginTop: 12 },
+  bgBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 10, padding: 9, minHeight: 44, marginTop: 12 },
   btn: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 10, paddingHorizontal: 12, minHeight: 44 },
   btnTxt: { fontWeight: '700', fontSize: 13.5 },
 });

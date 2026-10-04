@@ -125,12 +125,13 @@ export default function LiveScreen() {
         // if the app restarts mid-broadcast, which is why the field warns the
         // host to keep their own copy.
       } });
-    } catch (e: any) {
+    } catch (e: unknown) {
       // Three outcomes worth telling apart, because the user's next action
       // differs for each.
       // Told apart by the HTTP status lib/api puts on the error, not by matching
       // the message text (the server's wording is free to change).
-      const status = typeof e?.status === 'number' ? e.status : null;
+      const raw = (e as { status?: unknown } | null)?.status;
+      const status = typeof raw === 'number' ? raw : null;
       const already = status === 409;
       // 503 is the deployment saying Go Live has no LiveKit of its own. It does
       // NOT fall back to the calling cluster, so this is a real, final answer —
@@ -191,7 +192,7 @@ export default function LiveScreen() {
             {/* Who can watch. Two options, stated in plain words rather than a
                 toggle labelled "private" that leaves the user guessing what the
                 other state means. */}
-            <View style={S.segment}>
+            <View style={S.segment} accessibilityRole="radiogroup" accessibilityLabel="Who can watch">
               {(['public', 'private'] as const).map(v => {
                 const on = visibility === v;
                 return (

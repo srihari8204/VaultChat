@@ -69,10 +69,14 @@ export function historyOccurrences(r: ScheduledReminder, from: number, to: numbe
  * True when the phone will not alert on this occurrence. Calendar triggers
  * repeat on the anchor's own day number: a day-31 monthly reminder fires only
  * in 31-day months and a 29 February yearly one only in leap years, while the
- * app's series clamps to the month's last day (30 Apr, 28 Feb).
+ * app's series clamps to the month's last day (30 Apr, 28 Feb). Only series
+ * dates can be skipped: a snoozed day off the series alerts on its own.
  */
 export function phoneSkips(r: Pick<ScheduledReminder, 'freq' | 'next_at' | 'anchor_at'>, at: number): boolean {
   if (r.freq !== 'monthly' && r.freq !== 'yearly') return false;
+  // A snoozed next_at that is not one of the series' own dates has its own
+  // one-off alert (the snooze schedules it), so it is not skipped.
+  if (at === r.next_at && !occurrencesBetween(r.freq, anchorOf(r), at, at + 1).includes(at)) return false;
   return new Date(at).getDate() !== new Date(anchorOf(r)).getDate();
 }
 

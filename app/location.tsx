@@ -24,6 +24,7 @@ import {
   StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import { useTheme } from '../lib/theme';
+import { tint } from '../lib/tintColor';
 import { sendMessage } from '../lib/chatService';
 import { emit } from '../lib/socket';
 import { newLiveKey, encryptPosition } from '../lib/liveLocationCrypto';
@@ -98,10 +99,11 @@ export default function LocationScreen() {
   const reverseGeocode = useCallback(async (latitude: number, longitude: number) => {
     try {
       const g = await Location.reverseGeocodeAsync({ latitude, longitude });
+      if (!mountedRef.current) return;
       const a = g[0];
       setAddress(a ? [a.name, a.street, a.city, a.region].filter(Boolean).join(', ') || `${latitude.toFixed(5)}, ${longitude.toFixed(5)}` : `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`);
     } catch {
-      setAddress(`${latitude.toFixed(5)}, ${longitude.toFixed(5)}`);
+      if (mountedRef.current) setAddress(`${latitude.toFixed(5)}, ${longitude.toFixed(5)}`);
     }
   }, []);
 
@@ -399,7 +401,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   mapCard: { backgroundColor: c.glassSoft, borderRadius: 18, borderWidth: 1, borderColor: c.glassStroke, alignItems: 'center', padding: 22, gap: 6 },
   address: { color: c.text, fontSize: 15, fontWeight: '700', textAlign: 'center', marginTop: 6 },
   coords: { color: c.textDim, fontSize: 12.5 },
-  mapsBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 10, backgroundColor: brandAlpha(0.12) },
+  mapsBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, paddingHorizontal: 16, paddingVertical: 9, minHeight: 44, borderRadius: 10, backgroundColor: brandAlpha(0.12) },
   mapsBtnText: { color: c.primary, fontSize: 13, fontWeight: '700' },
 
   primaryBtn: { marginTop: 16, backgroundColor: c.primary, paddingVertical: 15, borderRadius: 14, alignItems: 'center' },
@@ -408,12 +410,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   sectionTitle: { color: c.textFaint, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginTop: 26, marginBottom: 10, marginLeft: 4 },
   durRow: { flexDirection: 'row', gap: 8 },
-  durBtn: { flex: 1, paddingVertical: 11, borderRadius: 12, backgroundColor: c.glassSoft, borderWidth: 1, borderColor: c.glassStroke, alignItems: 'center' },
+  durBtn: { flex: 1, paddingVertical: 11, minHeight: 44, justifyContent: 'center', borderRadius: 12, backgroundColor: c.glassSoft, borderWidth: 1, borderColor: c.glassStroke, alignItems: 'center' },
   durBtnActive: { backgroundColor: brandAlpha(0.15), borderColor: c.primary },
   durText: { color: c.textDim, fontSize: 13, fontWeight: '600' },
   durTextActive: { color: c.primary, fontWeight: '800' },
 
-  liveCard: { marginTop: 16, backgroundColor: c.danger + '12', borderRadius: 16, borderWidth: 1, borderColor: c.danger + '4D', padding: 16 },
+  liveCard: { marginTop: 16, backgroundColor: tint(c.danger, 0.07), borderRadius: 16, borderWidth: 1, borderColor: tint(c.danger, 0.3), padding: 16 },
   liveDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: c.danger },
   liveTitle: { color: c.text, fontSize: 15, fontWeight: '800' },
   liveSub: { color: c.textDim, fontSize: 12.5, marginTop: 4 },

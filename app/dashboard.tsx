@@ -8,6 +8,7 @@ import { AuroraBackground } from '../components/ui/AuroraBackground';
 import { brandAlpha, type Palette } from '../constants/theme';
 import { SafetyNavBar } from '../components/SafetyNavBar';
 import { useTheme } from '../lib/theme';
+import { tint } from '../lib/tintColor';
 import { readCache, writeCache } from '../lib/localCache';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { getSecurityOverview, type SecurityOverview } from '../lib/security';
@@ -92,10 +93,10 @@ function DashboardContent() {
       setOverview(fresh);
       setStale(false);
     }
-    catch (e: any) {
+    catch (e: unknown) {
       if (!mounted.current) return;
       if (cached) setStale(true);
-      else setError(e?.message ?? 'Failed to load');
+      else setError((e instanceof Error && e.message) || 'Failed to load');
     }
     finally { inFlight.current = false; if (mounted.current) setLoading(false); }
   }, []);
@@ -207,13 +208,13 @@ function DashboardContent() {
                 accessibilityLabel={`${c.name}, ${c.ok === null ? 'not scored' : c.ok ? 'OK' : 'needs review'}. ${c.desc}`}
                 accessibilityHint={href ? 'Opens the screen where you can change this' : undefined}
               >
-                <View style={[S.modIcon,{backgroundColor:col+'18',borderColor:col+'44'}]}>
+                <View style={[S.modIcon,{backgroundColor:tint(col,0.09),borderColor:tint(col,0.27)}]}>
                   <Ionicons name={c.icon} size={22} color={col} />
                 </View>
                 <View style={S.fill}>
                   <View style={S.modHead}>
                     <Text style={S.modName}>{c.name}</Text>
-                    <View style={[S.verdict,{backgroundColor:col+'18',borderColor:col}]}>
+                    <View style={[S.verdict,{backgroundColor:tint(col,0.09),borderColor:col}]}>
                       <Text style={[S.verdictText,{color:col}]}>{verdict}</Text>
                     </View>
                   </View>

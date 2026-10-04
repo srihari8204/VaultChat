@@ -89,7 +89,7 @@ export function HubSosButton({ progress, onPressIn, onPressOut, onSend }: {
         { text: 'Cancel', style: 'cancel' },
         { text: 'Send SOS', style: 'destructive', onPress: onSend },
       ])}
-      style={[st.sosBig, { borderColor: colors.danger, backgroundColor: colors.danger + (scheme === 'dark' ? '1F' : '14') }]}
+      style={[st.sosBig, { borderColor: colors.danger, backgroundColor: tint(colors.danger, scheme === 'dark' ? 0.12 : 0.08) }]}
     >
       <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: tint(colors.danger, 0.33), transform: [{ scaleX: progress }] }]} />
       <View style={[st.sosIcon, { backgroundColor: colors.danger }]}><Text style={{ fontSize: 20 }}>🆘</Text></View>

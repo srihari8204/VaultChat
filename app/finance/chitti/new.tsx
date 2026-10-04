@@ -1,9 +1,9 @@
 // app/finance/chitti/new.tsx — Create a Lucky Draw group.
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useFinanceTheme } from '../../../components/finance/useFinanceTheme';
 import { KeyboardSafe } from '../../../components/ui';
-import { View, Text, ScrollView, StyleSheet, Alert } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Alert, AccessibilityInfo } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useDatePicker } from '../../../components/finance/useDatePicker';
 import { type FinancePalette } from '../../../constants/financeTheme';
@@ -70,6 +70,14 @@ export default function NewChitti() {
     } catch (e: any) { Alert.alert('Could not save', e?.message ?? 'Try again'); }
   };
 
+  // Leaving an amount field says the mismatch once (each distinct one), so a
+  // screen-reader user hears it before Create, without per-keystroke chatter.
+  const saidMismatch = useRef<string | null>(null);
+  const sayMismatch = () => {
+    if (mismatch && mismatch !== saidMismatch.current) AccessibilityInfo.announceForAccessibility(mismatch);
+    saidMismatch.current = mismatch || null;
+  };
+
   return (
     <View style={s.screen}>
       <FinHeader title="New Lucky Draw Group" />
@@ -80,15 +88,15 @@ export default function NewChitti() {
           <Field label="Group name" value={name} onChangeText={setName} placeholder="e.g. Sundar Group" />
 
           <Label>Chit Value</Label>
-          <Field label="Chit value" value={chitValue} onChangeText={setChitValue} placeholder="₹ 0" keyboardType="numeric" />
+          <Field label="Chit value" onBlur={sayMismatch} value={chitValue} onChangeText={setChitValue} placeholder="₹ 0" keyboardType="numeric" />
 
           <Label>Monthly Installment</Label>
-          <Field label="Monthly installment" value={installment} onChangeText={setInstallment} placeholder="₹ 0" keyboardType="numeric" />
+          <Field label="Monthly installment" onBlur={sayMismatch} value={installment} onChangeText={setInstallment} placeholder="₹ 0" keyboardType="numeric" />
 
           <View style={s.row}>
             <View style={{ flex: 1 }}>
               <Label>Members</Label>
-              <Field label="Members" value={members} onChangeText={setMembers} placeholder="e.g. 20" keyboardType="numeric" />
+              <Field label="Members" onBlur={sayMismatch} value={members} onChangeText={setMembers} placeholder="e.g. 20" keyboardType="numeric" />
             </View>
             <View style={{ flex: 1 }}>
               <Label>Duration (months)</Label>
@@ -97,7 +105,8 @@ export default function NewChitti() {
           </View>
 
           {/* Not a live region: it is rebuilt on every keystroke, and Android
-              re-announced it while typing. Create confirms it out loud. */}
+              re-announced it while typing. It is spoken once when an amount
+              field loses focus (sayMismatch), and Create confirms it. */}
           {mismatch && <Text style={s.mismatch}>{mismatch} Check the amounts, or create it anyway if your group runs that way.</Text>}
 
           <Label hint="(optional)">Foreman</Label>

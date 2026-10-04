@@ -27,14 +27,25 @@ export async function ensureNotifyPermission(): Promise<boolean> {
  * come from lib/finance/reminderSchedule osTriggerFor: a recurring trigger is
  * built from the anchor's day and time, so the phone alerts when the app says
  * the reminder is due, even when the anchor is already in the past.
+ * Every shape carries its `type`: expo-notifications rejects one without it
+ * (a bare { date } made one-off and snooze reminders never alert). Typed, so
+ * tsc catches a shape the library would refuse.
  */
-function triggerFor(freq: ReminderFreq, at: number): any {
-  const { trigger: t } = osTriggerFor(freq, at, Date.now());
-  // expo-notifications rejects a date trigger without its type (one-off and
-  // snooze reminders were never scheduled), as app/message-reminder.tsx does.
-  return t.type === 'date'
-    ? { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(t.at) }
-    : t;
+export function triggerFor(freq: ReminderFreq, at: number, now = Date.now()): Notifications.SchedulableNotificationTriggerInput {
+  const { trigger: t } = osTriggerFor(freq, at, now);
+  const T = Notifications.SchedulableTriggerInputTypes;
+  switch (t.type) {
+    case 'date': return { type: T.DATE, date: new Date(t.at) };
+    case 'daily': return { type: T.DAILY, hour: t.hour, minute: t.minute };
+    case 'weekly': return { type: T.WEEKLY, weekday: t.weekday, hour: t.hour, minute: t.minute };
+    case 'monthly': return { type: T.MONTHLY, day: t.day, hour: t.hour, minute: t.minute };
+    case 'yearly': return { type: T.YEARLY, month: t.month, day: t.day, hour: t.hour, minute: t.minute };
+  }
+}
+
+/** Whether the app may post notifications now (no prompt). */
+export async function notificationsAllowed(): Promise<boolean> {
+  try { return (await Notifications.getPermissionsAsync()).granted; } catch { return false; }
 }
 
 /** Schedule a (possibly recurring) local notification. Returns its id, or null. */
@@ -44,7 +55,7 @@ export async function scheduleReminder(title: string, body: string, freq: Remind
   try {
     return await Notifications.scheduleNotificationAsync({
       content: { title, body },
-      trigger: triggerFor(freq, at) as any,   // trigger shape varies across versions
+      trigger: triggerFor(freq, at),
     });
   } catch { return null; }
 }

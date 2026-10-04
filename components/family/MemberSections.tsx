@@ -45,37 +45,41 @@ export function MemberIdentityCard({ name, userId, isGuardian, withheld, unknown
   const { colors, scheme } = useTheme();
   const G = useSpaceGlass();
   const fresh = tier === 'live';
+  const status = (withheld ? 'Location not shared with you'
+    : unknown ? 'Location not loaded'
+    : tier === 'live' ? 'Online'
+      : tier === 'recent' ? `Updated ${ago(last!.ts)}`
+        : tier === 'stale' ? `Last known · ${ago(last!.ts)}`
+          // Neutral on silence: this device cannot tell sharing-off
+          // from offline/permission/no-GPS for another member.
+          : 'No recent location')
+    + (currentPlace && tier !== 'unavailable' && tier !== 'stale' ? ` · at ${currentPlace.name}` : '');
+  const bat = last?.bat != null ? Math.round(last.bat) : null;
+  // One accessible summary: name, role, freshness and battery were read as
+  // separate fragments, and the battery icon had no name at all.
+  const summary = [name, isGuardian ? 'guardian' : null, status.split(' · ').join(', '),
+    bat != null ? `battery ${bat}%${bat <= 20 ? ', low' : ''}` : null].filter(Boolean).join(', ');
   return (
-    <View style={[st.card, { backgroundColor: G.paneStrong, borderColor: G.edge }]}>
+    <View style={[st.card, { backgroundColor: G.paneStrong, borderColor: G.edge }]} accessible accessibilityLabel={summary}>
       <View style={[st.avatar, { backgroundColor: colorFor(userId) }]}>
         <Text style={[st.avatarTxt, { color: AVATAR_INK[scheme] }]}>{initialOf(name)}</Text>
       </View>
       <View style={{ flex: 1 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <Text style={{ color: colors.text, fontSize: 17, fontWeight: '800' }} numberOfLines={1}>{name}</Text>
-          {isGuardian && <Ionicons name="star" size={13} color={colors.primary} accessible accessibilityLabel="Guardian" />}
+          {isGuardian && <Ionicons name="star" size={13} color={colors.primary} />}
         </View>
-        <Text style={{ color: fresh ? G.goodText : colors.textDim, fontSize: 12.5, marginTop: 2 }}>
-          {withheld ? 'Location not shared with you'
-            : unknown ? 'Location not loaded'
-            : tier === 'live' ? 'Online'
-              : tier === 'recent' ? `Updated ${ago(last!.ts)}`
-                : tier === 'stale' ? `Last known · ${ago(last!.ts)}`
-                  // Neutral on silence: this device cannot tell sharing-off
-                  // from offline/permission/no-GPS for another member.
-                  : 'No recent location'}
-          {currentPlace && tier !== 'unavailable' && tier !== 'stale' ? ` · at ${currentPlace.name}` : ''}
-        </Text>
+        <Text style={{ color: fresh ? G.goodText : colors.textDim, fontSize: 12.5, marginTop: 2 }}>{status}</Text>
       </View>
-      {last?.bat != null && (
+      {bat != null && (
         <View style={{ alignItems: 'center' }}>
           <Ionicons
-            name={last.bat <= 20 ? 'battery-dead' : 'battery-half'}
+            name={bat <= 20 ? 'battery-dead' : 'battery-half'}
             size={20}
-            color={last.bat <= 20 ? G.dangerText : colors.textDim}
+            color={bat <= 20 ? G.dangerText : colors.textDim}
           />
-          <Text style={{ color: last.bat <= 20 ? G.dangerText : colors.textDim, fontSize: 11, fontWeight: '700', fontVariant: ['tabular-nums'] }}>
-            {Math.round(last.bat)}%
+          <Text style={{ color: bat <= 20 ? G.dangerText : colors.textDim, fontSize: 11, fontWeight: '700', fontVariant: ['tabular-nums'] }}>
+            {bat}%
           </Text>
         </View>
       )}

@@ -27,7 +27,7 @@ import { useTheme } from '../lib/theme';
 import { brandAlpha } from '../constants/theme';
 import SpaceGround, { useSpaceGlass } from '../components/spaces/SpaceGround';
 import { geocodeSearch, type GeoHit } from '../lib/nav/geocode';
-import { getPlaces, setPlaces, getDefaultRef, setDefaultRef } from '../lib/family/store';
+import { readPlaces, updatePlaces, PlacesUnreadable, getDefaultRef, setDefaultRef } from '../lib/family/store';
 import { reloadPlaces } from '../lib/family/presence';
 import { isZoneActive, type Geofence } from '../lib/family/geofence';
 // v3 — shared Location Lock engine (ONE engine app-wide; see lib/family/lockBridge)
@@ -60,7 +60,21 @@ export default function FamilyPlacesScreen() {
   const router = useRouter();
   const lock = useLockView();   // shared engine's live state (chip on locked place)
 
-  useEffect(() => { if (cid) getPlaces(cid).then(setPlacesState).catch(() => {}); }, [cid]);
+  /** null while the saved places are being read, false when the read failed.
+   *  Nothing is written until it is true (and every write re-reads anyway,
+   *  see updatePlaces), so a failed or unfinished read can never save the
+   *  empty on-screen list over the stored one. */
+  const [readOk, setReadOk] = useState<boolean | null>(null);
+  const [readTry, setReadTry] = useState(0);
+  useEffect(() => {
+    if (!cid) return;
+    let live = true;
+    setReadOk(null);
+    readPlaces(cid)
+      .then((ps) => { if (live) { setPlacesState(ps); setReadOk(true); } })
+      .catch(() => { if (live) setReadOk(false); });
+    return () => { live = false; };
+  }, [cid, readTry]);
 
   // Which place my circle sees me measured against ("1.2 km from Home").
   // Never inferred — the spec is explicit that it must not be guessed from
@@ -91,16 +105,23 @@ export default function FamilyPlacesScreen() {
     })();
   }, [places]);
 
-  /** Saves and re-arms. On a failed save the list reverts and the user is
-   *  told — a switch or edit that looks saved but is not is worse than none.
+  /** Applies `change` to the STORED places (re-read first), saves and
+   *  re-arms. On a failed save the list reverts and the user is told — a
+   *  switch or edit that looks saved but is not is worse than none.
    *  Resolves to whether it saved; never rejects. */
-  const persist = async (next: Geofence[]): Promise<boolean> => {
+  const persist = async (change: (ps: Geofence[]) => Geofence[]): Promise<boolean> => {
+    if (readOk !== true) return false;
     const prev = places;
-    setPlacesState(next);
-    try { await setPlaces(cid, next); }
-    catch {
+    setPlacesState(change(places));
+    try { setPlacesState(await updatePlaces(cid, change)); }
+    catch (e) {
       setPlacesState(prev);
-      Alert.alert('Not saved', 'Your safe zones could not be saved on this phone. Try again.');
+      if (e instanceof PlacesUnreadable) {
+        setReadOk(false);
+        Alert.alert('Not saved', 'Your saved places could not be read on this phone, so nothing was changed. Try again.');
+      } else {
+        Alert.alert('Not saved', 'Your safe zones could not be saved on this phone. Try again.');
+      }
       return false;
     }
     await reloadPlaces(cid).catch(() => {});   // push the new fence set into the live watcher
@@ -140,7 +161,7 @@ export default function FamilyPlacesScreen() {
   };
 
   const add = async () => {
-    if (!name.trim() || busy || !cid) return;
+    if (!name.trim() || busy || !cid || readOk !== true) return;
     setBusy(true);
     try {
       const center = await resolveCenter();
@@ -153,14 +174,14 @@ export default function FamilyPlacesScreen() {
         enabled: true,
         icon: iconFor(name),
       };
-      if (await persist([g, ...places])) { setName(''); setWhere(''); }
+      if (await persist((ps) => [g, ...ps])) { setName(''); setWhere(''); }
     } catch (e: any) {
       Alert.alert('Could not add place', e?.message ?? 'Try again.');
     } finally { setBusy(false); }
   };
 
   const toggle = (id: string, on: boolean) =>
-    persist(places.map((p) => (p.id === id ? { ...p, enabled: on } : p)));
+    persist((ps) => ps.map((p) => (p.id === id ? { ...p, enabled: on } : p)));
 
   const remove = (p: Geofence) => {
     Alert.alert('Delete place?', `"${p.name}" will stop producing arrive/leave alerts.`, [
@@ -171,7 +192,7 @@ export default function FamilyPlacesScreen() {
         // reference line silently disappears with no way to see why. Only
         // AFTER the delete saved: a failed delete keeps the place, and with it
         // the choice.
-        if (!(await persist(places.filter((x) => x.id !== p.id)))) return;
+        if (!(await persist((ps) => ps.filter((x) => x.id !== p.id)))) return;
         setEditing(null);
         if (p.name === refName) {
           setRefName(null);
@@ -225,7 +246,7 @@ export default function FamilyPlacesScreen() {
     setSaving(true);
     let ok = false;
     try {
-      ok = await persist(places.map((p) => (p.id === editing.id ? {
+      ok = await persist((ps) => ps.map((p) => (p.id === editing.id ? {
         ...p, name: nm, radiusM: patch.radiusM, icon: iconFor(nm),
         schedule: patch.schedule, expiresAt: patch.expiresAt,
       } : p)));
@@ -243,6 +264,7 @@ export default function FamilyPlacesScreen() {
   };
 
   const activeCount = places.filter((p) => p.enabled !== false).length;
+  const canAdd = !!name.trim() && readOk === true;
 
   return (
     <KeyboardSafe style={{ flex: 1, backgroundColor: G.bgMid }}>
@@ -280,87 +302,106 @@ export default function FamilyPlacesScreen() {
           ))}
         </View>
 
-        <TouchableOpacity onPress={add} disabled={!name.trim() || busy}
-          accessibilityRole="button" accessibilityState={{ disabled: !name.trim() || busy, busy }}
-          style={[st.btn, { backgroundColor: name.trim() && !busy ? colors.brandOnLight : colors.border }]}>
+        <TouchableOpacity onPress={add} disabled={!canAdd || busy}
+          accessibilityRole="button" accessibilityState={{ disabled: !canAdd || busy, busy }}
+          style={[st.btn, { backgroundColor: canAdd && !busy ? colors.brandOnLight : colors.border }]}>
           {busy
             ? <ActivityIndicator color={colors.onPrimary} />
-            : <><Ionicons name="add-circle" size={18} color={colors.onPrimary} /><Text style={[st.btnTxt, { color: colors.onPrimary }]}>{where.trim() ? 'Add place' : 'Add here'}</Text></>}
+            : <><Ionicons name="add-circle" size={18} color={canAdd ? colors.onPrimary : colors.textDim} /><Text style={[st.btnTxt, { color: canAdd ? colors.onPrimary : colors.textDim }]}>{where.trim() ? 'Add place' : 'Add here'}</Text></>}
         </TouchableOpacity>
 
-        <View style={st.secHead}>
-          <Text accessibilityRole="header" style={[st.h, { color: colors.textDim, marginBottom: 0 }]}>Places ({places.length})</Text>
-          {places.length > 0 && (
-            <Text style={{ color: colors.textDim, fontSize: 12 }}>{activeCount} active</Text>
-          )}
-        </View>
-
-        {places.length === 0 && (
-          <Text style={{ color: colors.textDim, fontSize: 13.5 }}>
-            No places yet. Add one and your circle gets an alert when you arrive or leave.
-          </Text>
+        {readOk === null && (
+          <View style={st.loadRow}>
+            <ActivityIndicator color={colors.textDim} accessibilityLabel="Loading your places" />
+          </View>
         )}
-
-        {/* Reference place (spec §14). What the circle sees is the DISTANCE —
-            "3.7 km from Business" — computed on this device. The place's
-            coordinate is never published, synced, or stored on the server, so
-            choosing one tells your family how far away you are without telling
-            them where your home, shop or school actually is. */}
-        {places.length > 0 && (
-          <View style={{ marginTop: 14 }}>
-            <Text style={{ color: colors.text, fontSize: 12.5, fontWeight: '700' }}>Measure me from</Text>
-            <Text style={{ color: colors.textDim, fontSize: 11.5, marginTop: 3, marginBottom: 9 }}>
-              Your circle sees the distance only — never where this place is.
+        {readOk === false && (
+          <View style={[st.failRow, { borderColor: G.line }]} accessibilityLiveRegion="polite">
+            <Text style={{ color: colors.text, fontSize: 13.5, flex: 1 }}>
+              Couldn’t read your saved places. Nothing can be added or changed until they load.
             </Text>
-            {/* Single choice; tapping the chosen one clears it. */}
-            <View style={st.radii} accessibilityRole="radiogroup" accessibilityLabel="Measure me from">
-              {places.map((p) => (
-                <ZoneChoice key={p.id} on={refName === p.name} label={p.name} a11y={`Measure me from ${p.name}`}
-                  fontSize={13} onPress={() => chooseRef(p.name)} />
-              ))}
-            </View>
-            {!refName && (
-              <Text style={{ color: colors.textDim, fontSize: 11.5, marginTop: 7 }}>
-                None chosen — your first place leads.
-              </Text>
-            )}
+            <TouchableOpacity onPress={() => setReadTry((n) => n + 1)} accessibilityRole="button"
+              accessibilityLabel="Retry loading places" style={st.retryBtn}>
+              <Text style={{ color: colors.primary, fontWeight: '700' }}>Retry</Text>
+            </TouchableOpacity>
           </View>
         )}
 
-        {places.map((p) => {
-          const on = p.enabled !== false;
-          // "On" is the user's switch; "live" also accounts for schedule and
-          // expiry, so a zone that is armed but asleep reads as asleep.
-          const live = isZoneActive(p, new Date());
-          return (
-            <TouchableOpacity key={p.id} activeOpacity={0.7} onPress={() => openEdit(p)}
-              accessibilityRole="button" accessibilityLabel={`${p.name}, ${describeZone(p, new Date())}`} accessibilityHint="Edit this place"
-              style={[st.row, { borderColor: G.line }]}>
-              <View style={[st.rowIcon, { backgroundColor: live ? brandAlpha(0.14) : G.paneFaint }]}>
-                <Ionicons name={(p.icon as keyof typeof Ionicons.glyphMap) ?? iconFor(p.name)} size={18}
-                  color={live ? colors.primary : colors.textFaint} />
+        {readOk === true && <>
+          <View style={st.secHead}>
+            <Text accessibilityRole="header" style={[st.h, { color: colors.textDim, marginBottom: 0 }]}>Places ({places.length})</Text>
+            {places.length > 0 && (
+              <Text style={{ color: colors.textDim, fontSize: 12 }}>{activeCount} active</Text>
+            )}
+          </View>
+
+          {places.length === 0 && (
+            <Text style={{ color: colors.textDim, fontSize: 13.5 }}>
+              No places yet. Add one and your circle gets an alert when you arrive or leave.
+            </Text>
+          )}
+
+          {/* Reference place (spec §14). What the circle sees is the DISTANCE —
+              "3.7 km from Business" — computed on this device. The place's
+              coordinate is never published, synced, or stored on the server, so
+              choosing one tells your family how far away you are without telling
+              them where your home, shop or school actually is. */}
+          {places.length > 0 && (
+            <View style={{ marginTop: 14 }}>
+              <Text style={{ color: colors.text, fontSize: 12.5, fontWeight: '700' }}>Measure me from</Text>
+              <Text style={{ color: colors.textDim, fontSize: 11.5, marginTop: 3, marginBottom: 9 }}>
+                Your circle sees the distance only — never where this place is.
+              </Text>
+              {/* Single choice; tapping the chosen one clears it. */}
+              <View style={st.radii} accessibilityRole="radiogroup" accessibilityLabel="Measure me from">
+                {places.map((p) => (
+                  <ZoneChoice key={p.id} on={refName === p.name} label={p.name} a11y={`Measure me from ${p.name}`}
+                    fontSize={13} onPress={() => chooseRef(p.name)} />
+                ))}
               </View>
-              <View style={{ flex: 1 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Text style={{ color: on ? colors.text : colors.textDim, fontWeight: '600' }} numberOfLines={1}>{p.name}</Text>
-                  {lockedHere(p) && (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 2, backgroundColor: tint(zoneColor(lock.state ?? 'safe'), 0.13) }}>
-                      <Ionicons name="lock-closed" size={9} color={zoneColor(lock.state ?? 'safe')} />
-                      <Text style={{ color: colors.text, fontSize: 11, fontWeight: '800' }}>
-                        {(lock.state ?? 'safe') === 'safe' ? 'LOCKED · SAFE' : (lock.state ?? '').toUpperCase()}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-                <Text style={{ color: colors.textDim, fontSize: 11.5 }} numberOfLines={1}>
-                  {describeZone(p, new Date())}
-                  {lockStats[p.name]?.visits ? ` · ${lockStats[p.name].visits} lock${lockStats[p.name].visits > 1 ? 's' : ''}` : ''}
+              {!refName && (
+                <Text style={{ color: colors.textDim, fontSize: 11.5, marginTop: 7 }}>
+                  None chosen — your first place leads.
                 </Text>
-              </View>
-              <Switch value={on} onValueChange={(v) => { toggle(p.id, v); }} accessibilityLabel={`${p.name} alerts`} trackColor={{ true: colors.primary }} />
-            </TouchableOpacity>
-          );
-        })}
+              )}
+            </View>
+          )}
+
+          {places.map((p) => {
+            const on = p.enabled !== false;
+            // "On" is the user's switch; "live" also accounts for schedule and
+            // expiry, so a zone that is armed but asleep reads as asleep.
+            const live = isZoneActive(p, new Date());
+            return (
+              <TouchableOpacity key={p.id} activeOpacity={0.7} onPress={() => openEdit(p)}
+                accessibilityRole="button" accessibilityLabel={`${p.name}, ${describeZone(p, new Date())}`} accessibilityHint="Edit this place"
+                style={[st.row, { borderColor: G.line }]}>
+                <View style={[st.rowIcon, { backgroundColor: live ? brandAlpha(0.14) : G.paneFaint }]}>
+                  <Ionicons name={(p.icon as keyof typeof Ionicons.glyphMap) ?? iconFor(p.name)} size={18}
+                    color={live ? colors.primary : colors.textFaint} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={{ color: on ? colors.text : colors.textDim, fontWeight: '600' }} numberOfLines={1}>{p.name}</Text>
+                    {lockedHere(p) && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 2, backgroundColor: tint(zoneColor(lock.state ?? 'safe'), 0.13) }}>
+                        <Ionicons name="lock-closed" size={9} color={zoneColor(lock.state ?? 'safe')} />
+                        <Text style={{ color: colors.text, fontSize: 11, fontWeight: '800' }}>
+                          {(lock.state ?? 'safe') === 'safe' ? 'LOCKED · SAFE' : (lock.state ?? '').toUpperCase()}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={{ color: colors.textDim, fontSize: 11.5 }} numberOfLines={1}>
+                    {describeZone(p, new Date())}
+                    {lockStats[p.name]?.visits ? ` · ${lockStats[p.name].visits} lock${lockStats[p.name].visits > 1 ? 's' : ''}` : ''}
+                  </Text>
+                </View>
+                <Switch value={on} onValueChange={(v) => { toggle(p.id, v); }} accessibilityLabel={`${p.name} alerts`} trackColor={{ true: colors.primary }} />
+              </TouchableOpacity>
+            );
+          })}
+        </>}
       </ScrollView>
 
       <PlaceEditSheet
@@ -385,5 +426,8 @@ const st = {
     secHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 28, marginBottom: 10 },
     row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
     rowIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+    loadRow: { marginTop: 28, alignItems: 'center' },
+    failRow: { marginTop: 28, flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderWidth: StyleSheet.hairlineWidth, borderRadius: 12 },
+    retryBtn: { minHeight: 44, minWidth: 44, paddingHorizontal: 8, alignItems: 'center', justifyContent: 'center' },
   }),
 };

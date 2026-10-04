@@ -40,13 +40,23 @@ export default function NotificationSoundsScreen() {
   }, []);
 
   // A failed save must not look saved: setSoundPrefs keeps the old value and throws.
+  // Optimistic: the Switch moves on tap instead of snapping back until the
+  // write lands. Only the LAST queued save writes the stored truth back, so a
+  // queued later toggle does not flicker; a failed last save re-reads it.
+  const lastSave = useRef(0);
   const patch = (p: Partial<SoundPrefs>): Promise<boolean> => {
+    setPrefs((cur) => (cur ? { ...cur, ...p } : cur));
+    const seq = ++lastSave.current;
     const run = saveChain.current.then(async () => {
       try {
         const next = await setSoundPrefs(p);
-        if (mounted.current) setPrefs(next);
+        if (mounted.current && seq === lastSave.current) setPrefs(next);
         return true;
       } catch {
+        if (!mounted.current) return false;
+        if (seq === lastSave.current) {
+          await getSoundPrefs().then((cur) => { if (mounted.current) setPrefs(cur); }).catch(() => {});
+        }
         if (mounted.current) Alert.alert('Could not save', 'Your sound setting was not changed. Please try again.');
         return false;
       }
@@ -98,7 +108,7 @@ export default function NotificationSoundsScreen() {
       <Stack.Screen options={{ headerShown: false }} />
       {header}
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
+      <ScrollView contentContainerStyle={s.scroll}>
         {/* Message tones */}
         <Text style={s.section} accessibilityRole="header">MESSAGES</Text>
         <View style={s.row}>
@@ -170,6 +180,7 @@ export default function NotificationSoundsScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: 'transparent' },
+  scroll: { paddingBottom: 40 },
   loading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   header: { flexDirection: 'row', alignItems: 'center', paddingTop: HEADER_TOP, paddingHorizontal: 12, paddingBottom: 12, backgroundColor: c.bg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke, gap: 8 },
   iconBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },

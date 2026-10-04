@@ -255,6 +255,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   discText: { color: c.textDim, fontSize: 12.5, lineHeight: 19 },
   discBold: { color: c.text, fontWeight: '800' },
 
-  alertsLink: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 22 },
+  alertsLink: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 22, minHeight: 44 },
   alertsLinkText: { color: c.primary, fontSize: 14, fontWeight: '700' },
 });

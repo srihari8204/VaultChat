@@ -5,8 +5,12 @@
 <!-- Content-Security-Policy: script-src allows ONLY this page's one inline script, pinned by its SHA-256.
      After editing that script, recompute the hash, e.g.
      python3 -c "import re,hashlib,base64,sys;s=open(sys.argv[1]).read();print(base64.b64encode(hashlib.sha256(re.findall(r'<script>(.*?)</script>',s,re.S)[-1].encode()).digest()).decode())" FILE
-     The page refuses to run its script until the hash matches. frame-ancestors cannot be set from a meta tag: send it as a header. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-6Dnm3V/P4gk2FPmZ9nctzCR3JSKTFhwtSW13Uw3Atao='; style-src 'unsafe-inline'; connect-src https: http://localhost:* http://127.0.0.1:*; img-src data:; base-uri 'none'; form-action 'none'" />
+     The page refuses to run its script until the hash matches. frame-ancestors cannot be set from a meta tag: send it as a header.
+     style-src likewise pins the ONE style element (no style="" attributes anywhere, script templates included: use a
+     class; script code may still set el.style.* through the CSSOM, which CSP allows). After editing the stylesheet,
+     recompute with the same command, replacing script by style in both tags; an unmatched hash leaves the page
+     unstyled. admin/adminPages.selftest.ts checks both. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-sjHKLii3zOpSQmI7s6iKCYJUffuxw5mD+5FZ4mIcpQE='; style-src 'sha256-lOECk7y8rKDkkGrCHJLanEMR8aSN6dQn7zhEqHsyBa4='; connect-src https: http://localhost:* http://127.0.0.1:*; img-src data:; base-uri 'none'; form-action 'none'" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="dark light" />
 <title>Shop Book · Admin</title>
@@ -66,7 +70,8 @@
   .fld{display:flex;flex-direction:column;gap:4px;margin-bottom:10px;max-width:380px}
   .fld label{font-size:12px;font-weight:700}
   .entform .summary{font-weight:700;margin:0 0 10px}
-  .entform .summary:empty,.entform .err:empty{display:none}
+  .entform .summary:empty,.entform .err:empty{margin:0}
+  .mt8{margin-top:8px}
   #msg{position:fixed;bottom:16px;right:16px;background:var(--panel2);border:1px solid var(--line);padding:10px 16px;border-radius:10px;opacity:0;transition:opacity .3s}
 </style>
 </head>
@@ -247,7 +252,7 @@ function loadShops(filter){
         <span class="muted">${esc(sh.category)} · ${esc(sh.country)}</span>
       </div>
       <div class="muted">${esc(sh.address)} · Owner: ${esc(sh.ownerName)} ${esc(sh.ownerPhone)}</div>
-      <div class="row" style="margin-top:8px">
+      <div class="row mt8">
         ${sh.approved ? '' : `<button data-act="approve" data-id="${esc(sh.id)}" data-verified="false" ${named('Approve', sh.name)}>Approve</button>
         <button data-act="approve" data-id="${esc(sh.id)}" data-verified="true" ${named('Approve + Verified', sh.name)}>Approve + Verified ✓</button>
         <button class="danger" data-act="reject-shop" data-id="${esc(sh.id)}" ${named('Reject…', sh.name)}>Reject…</button>`}
@@ -284,7 +289,7 @@ function loadCountries(){
         <span class="muted">${esc(c.currencySymbol)} ${esc(c.currencyCode)} · ${esc(c.taxType)}</span>
         <span class="tag ${c.enabled ? 'ok':'pend'}">${c.enabled ? 'ENABLED':'DISABLED'}</span></div>
       <textarea id="country-${i}" aria-label="${esc(c.name)} tax configuration JSON">${esc(JSON.stringify(c, null, 2))}</textarea>
-      <div class="row" style="margin-top:8px"><button data-act="save-json" data-src="country-${i}" data-kind="countries" ${named('Save', c.name)}>Save</button></div>
+      <div class="row mt8"><button data-act="save-json" data-src="country-${i}" data-kind="countries" ${named('Save', c.name)}>Save</button></div>
     </div>`).join('');
   });
 }
@@ -295,7 +300,7 @@ function newCountry(){
   const div = document.createElement('div');
   div.className = 'card';
   div.innerHTML = `<textarea id="country-new" aria-label="New country JSON">${esc(JSON.stringify(tpl, null, 2))}</textarea>
-    <div class="row" style="margin-top:8px"><button data-act="save-json" data-src="country-new" data-kind="countries">Create</button></div>`;
+    <div class="row mt8"><button data-act="save-json" data-src="country-new" data-kind="countries">Create</button></div>`;
   $('countries').appendChild(div);
 }
 
@@ -306,7 +311,7 @@ function loadCategories(){
     <div class="card">
       <div class="row"><b>${esc(c.icon)} ${esc(c.label)}</b><span class="muted">${esc(c.id)} · ${num((c.items || []).length)} starter item(s)</span></div>
       <textarea id="cat-${i}" aria-label="${esc(c.label)} category JSON">${esc(JSON.stringify(c, null, 2))}</textarea>
-      <div class="row" style="margin-top:8px"><button data-act="save-json" data-src="cat-${i}" data-kind="categories" ${named('Save', c.label)}>Save</button></div>
+      <div class="row mt8"><button data-act="save-json" data-src="cat-${i}" data-kind="categories" ${named('Save', c.label)}>Save</button></div>
     </div>`).join('');
   });
 }
@@ -398,7 +403,7 @@ function loadVerifications(state){
       <div class="muted">${esc(sh.address)} · Owner: ${esc(sh.ownerName)} ${esc(sh.ownerPhone)}
         ${sh.hasFrontPhoto ? '· shop-front photo ✓' : '· no shop-front photo'}</div>
       ${sh.verifyNote ? `<div class="muted">Last note: ${esc(sh.verifyNote)}</div>` : ''}
-      <div class="row" style="margin-top:8px">
+      <div class="row mt8">
         <button class="ghost" data-act="documents" data-id="${esc(sh.id)}" ${named('Documents…', sh.name)}>Documents…</button>
         ${VERIFY_STATES.filter((v) => v !== sh.verifyState).map((v) =>
           `<button class="${v === 'verified' ? '' : 'ghost'}" data-act="set-verify" data-id="${esc(sh.id)}" data-state="${v}" ${named(v.replace('_',' '), sh.name)}>${v.replace('_',' ')}</button>`).join('')}
@@ -429,14 +434,14 @@ async function loadDocuments(shopId){
     const shopName = shopNames.get(shopId) || shopId;
     // Only an https link is offered: a stored URL is still data from the server.
     box.innerHTML = documents.length ? documents.map((d) => `
-      <div class="card" style="margin-top:8px">
+      <div class="card mt8">
         <div class="row">
           <b>${esc(d.kind)}</b>
           <span class="tag ${d.status === 'accepted' ? 'ok':'pend'}">${esc(d.status).toUpperCase()}</span>
           <span class="muted">${esc(d.filename)} · ${num(Math.round((Number(d.sizeBytes)||0)/1024))} KB · ${esc(d.uploadedAt)}</span>
         </div>
         ${d.reviewNote ? `<div class="muted">Note: ${esc(d.reviewNote)}</div>` : ''}
-        <div class="row" style="margin-top:8px">
+        <div class="row mt8">
           ${/^https:\/\//i.test(d.viewUrl || '') ? `<a class="button ghost" href="${esc(d.viewUrl)}" target="_blank" rel="noopener noreferrer">Open (15 min)</a>`
                       : '<span class="muted">No view link — object storage is off</span>'}
           <button data-act="review-doc" data-id="${esc(d.id)}" data-shop="${esc(shopId)}" data-status="accepted" ${named('Accept', d.kind + ' of ' + shopName)}>Accept</button>
@@ -474,7 +479,7 @@ function loadLocations(status){
       <div class="muted">To: ${esc(q.to && q.to.address) || '—'} (${num(q.to && q.to.lat)}, ${num(q.to && q.to.lng)})</div>
       <div class="muted">Reason: ${esc(q.reason)}</div>
       ${q.reviewNote ? `<div class="muted">Review: ${esc(q.reviewNote)}</div>` : ''}
-      ${q.status === 'pending' ? `<div class="row" style="margin-top:8px">
+      ${q.status === 'pending' ? `<div class="row mt8">
         <button data-act="decide-location" data-id="${esc(q.id)}" data-approve="true" ${named('Approve move', q.shopName)}>Approve move</button>
         <button class="danger" data-act="decide-location" data-id="${esc(q.id)}" data-approve="false" ${named('Refuse…', q.shopName)}>Refuse…</button>
       </div>` : ''}
@@ -596,7 +601,7 @@ function loadSubscriptions(){
           ${s.expiresAt ? '· expires ' + esc(s.expiresAt) : '· no expiry'}
           ${s.source ? '· ' + esc(s.source) : ''} ${s.reference ? '· ' + esc(s.reference) : ''}</span>
       </div>
-      <div class="row" style="margin-top:8px">
+      <div class="row mt8">
         <button data-act="entitlement" data-id="${esc(s.shopId)}" data-plan="pro" data-state="active" ${named('Grant Pro…', s.shopName)}>Grant Pro…</button>
         <button class="ghost" data-act="entitlement" data-id="${esc(s.shopId)}" data-plan="pro" data-state="trial" ${named('Pro trial…', s.shopName)}>Pro trial…</button>
         <button class="ghost" data-act="entitlement" data-id="${esc(s.shopId)}" data-plan="free" data-state="cancelled" ${named('Back to Free…', s.shopName)}>Back to Free…</button>
@@ -730,6 +735,13 @@ document.addEventListener('input', (ev) => {
 // (or send a note twice) without a second, deliberate press.
 document.addEventListener('keydown', (ev) => {
   if (ev.key === 'Enter' && ev.repeat && ev.target.closest('form[data-ent-form], form[data-note-form]')) ev.preventDefault();
+  // Escape closes the open note or entitlement form, as its Cancel does.
+  if (ev.key === 'Escape') {
+    const f = ev.target.closest && ev.target.closest('form[data-ent-form], form[data-note-form]');
+    if (!f) return;
+    ev.preventDefault();
+    if (f.hasAttribute('data-note-form')) closeNote(f); else closeEntitlement(f.dataset.id);
+  }
 });
 
 // ── read-only support windows ───────────────────────────────────

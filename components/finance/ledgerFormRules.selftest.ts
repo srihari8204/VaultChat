@@ -26,5 +26,8 @@ eq('end on the start day', title({ end: day(10) }), 'ok');
 const field = (f: Partial<LedgerFormText>) => { const r = checkLedgerForm({ ...good, ...f }); return 'problem' in r ? r.problem.field : 'ok'; };
 eq('each problem names its field', [field({ name: '' }), field({ principal: '' }), field({ rate: 'x' }), field({ mobile: '1' }), field({ end: day(1) })],
   ['name', 'principal', 'rate', 'mobile', 'end']);
+const all = checkLedgerForm({ ...good, name: ' ', rate: '-2', end: day(1) });
+eq('every failing field is listed, first one leads the Alert',
+  'problems' in all ? [all.problem.field, all.problems.map((p) => p.field)] : 'ok', ['name', ['name', 'rate', 'end']]);
 
 console.log(`ledgerFormRules: ${n} assertions passed`);

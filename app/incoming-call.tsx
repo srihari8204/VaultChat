@@ -166,7 +166,9 @@ export default function IncomingCallScreen() {
       off = () => s.off('webrtc_end', onEnd);
     })();
     return () => { dead = true; if (off) off(); };
-  }, [peerUid, router]);
+    // chatId, displayName and type are this screen's route params: fixed for
+    // its life, so listing them never re-subscribes in practice.
+  }, [peerUid, router, chatId, displayName, type]);
 
   const leave = () => leaveRef.current();
 

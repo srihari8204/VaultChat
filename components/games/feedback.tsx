@@ -444,9 +444,9 @@ export function VoiceSheet({
               icon={voice.speaker ? 'speaker' : 'headset'}
               compact
               onPress={voice.toggleSpeaker}
-              // A toggle: its state is announced, not folded into a label that changes.
-              selected={voice.speaker}
-              accessibilityLabel="Loudspeaker"
+              // The accessible name is the visible text ("Speaker on/off"), so
+              // Voice Control users can say what they see; it also carries the
+              // state, so no separate `selected` is added.
             />
             <Btn label="Leave voice" kind="danger" compact onPress={voice.leave} accessibilityLabel="Leave voice but stay at the table" />
           </>

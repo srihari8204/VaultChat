@@ -11,6 +11,7 @@ import type { LedgerStatus } from '../constants/financeTheme';
 import type { LedgerPeriod } from '../utils/finance';
 import { ledgerStatusFor } from '../utils/financeRules';
 import { fmtDate } from '../utils/financeFormat';
+import { ledgerInterestTypeLabel } from '../lib/finance/compounding';
 
 export interface LedgerEntry {
   id: string;
@@ -219,7 +220,9 @@ export async function updateLedgerDetails(id: string, f: EditableFields): Promis
     `UPDATE ledger_entries SET name=?, mobile=?, interest_type=?, principal=?, rate=?, rate_mode=?, period=?, start_date=?, end_date=?, notes=?, compounding=?, remaining=?, last_updated=? WHERE id=?`,
     [f.name, f.mobile, f.interest_type, principal, f.rate, f.rate_mode, f.period, f.start_date, f.end_date, f.notes, f.compounding, remaining, now(), id],
   );
-  await addTimeline('ledger', id, 'edit', `Terms edited · ${f.name} · ₹${f.principal.toLocaleString('en-IN')} @ ${f.rate}${f.rate_mode === 'rupees' ? '₹' : '%'} ${f.period}`);
+  // The interest type and compounding are terms too: a change to only those
+  // used to log an entry that showed nothing changed.
+  await addTimeline('ledger', id, 'edit', `Terms edited · ${f.name} · ₹${f.principal.toLocaleString('en-IN')} @ ${f.rate}${f.rate_mode === 'rupees' ? '₹' : '%'} ${f.period} · ${ledgerInterestTypeLabel(f)}`);
 }
 
 export async function setLedgerStatus(id: string, status: LedgerStatus): Promise<void> {

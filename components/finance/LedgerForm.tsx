@@ -5,8 +5,8 @@
 // that copy, once. The checks are components/finance/ledgerFormRules. The form
 // owns its field state and the date picker; the screen decides what Save does.
 
-import React, { useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, Alert } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, Text, ScrollView, StyleSheet, Alert, AccessibilityInfo } from 'react-native';
 import { KeyboardSafe } from '../ui';
 import { useFinanceTheme } from './useFinanceTheme';
 import { useDatePicker } from './useDatePicker';
@@ -63,8 +63,9 @@ export function LedgerForm({ initial, directionEditable, saveLabel, onSave }: {
   };
 
   const checked = checkLedgerForm({ name, mobile, principal, rate, start, end });
-  const problem = tried && 'problem' in checked ? checked.problem : null;
-  const errorAt = (f: string) => (problem?.field === f ? problem.message : undefined);
+  // Every failing field is marked, not only the first.
+  const problems = tried && 'problems' in checked ? checked.problems : [];
+  const errorAt = (f: string) => problems.find((p) => p.field === f)?.message;
   const compounding = itype === 'compound' ? perYear : null;
   // What these terms come to, and what the stored ones did, so an edit shows
   // its effect on the interest before it is saved.
@@ -73,6 +74,18 @@ export function LedgerForm({ initial, directionEditable, saveLabel, onSave }: {
   });
   const preview = 'ok' in checked ? ledgerInterest(terms(checked.ok)) : null;
   const was = initial ? ledgerInterest(initial) : null;
+  const previewLine = preview
+    ? `${ledgerInterestTypeLabel({ interest_type: itype, compounding })}. ${preview.projected ? 'Interest over 1 year (no end date)' : 'Interest to end date'}: ${formatINR(preview.interest)}${was && was.interest !== preview.interest ? ` (was ${formatINR(was.interest)})` : ''}`
+    : null;
+  // A change of interest type or compounding is spoken with its effect; the
+  // line is not a live region because typing a rate would re-read it per key.
+  const choiceKey = `${itype}:${perYear}`;
+  const lastChoice = useRef(choiceKey);
+  useEffect(() => {
+    if (lastChoice.current === choiceKey) return;
+    lastChoice.current = choiceKey;
+    if (previewLine) AccessibilityInfo.announceForAccessibility(previewLine);
+  }, [choiceKey, previewLine]);
 
   const submit = async () => {
     setTried(true);
@@ -142,13 +155,7 @@ export function LedgerForm({ initial, directionEditable, saveLabel, onSave }: {
           <Label hint="(optional)">Notes</Label>
           <Field label="Notes, optional" value={notes} onChangeText={setNotes} placeholder="Add a note" multiline />
 
-          {preview && (
-            <Text style={s.preview}>
-              {ledgerInterestTypeLabel({ interest_type: itype, compounding })}.{' '}
-              {preview.projected ? 'Interest over 1 year (no end date)' : 'Interest to end date'}: {formatINR(preview.interest)}
-              {was && was.interest !== preview.interest ? ` (was ${formatINR(was.interest)})` : ''}
-            </Text>
-          )}
+          {previewLine && <Text style={s.preview}>{previewLine}</Text>}
 
           <View style={{ marginTop: 20 }}>
             <Btn label={saveLabel} icon="checkmark" onPress={submit} wide />

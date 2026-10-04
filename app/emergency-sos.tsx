@@ -386,9 +386,9 @@ export default function EmergencySOSScreen() {
 
         {/* Shake detection toggle */}
         <View style={styles.shakeRow}>
-          <View>
+          <View style={{ flex: 1, marginRight: 12 }}>
             <Text style={styles.shakeTitle}>Shake Detection</Text>
-            <Text style={styles.shakeSub}>Shake 3 times to trigger SOS</Text>
+            <Text style={styles.shakeSub}>Shake 3 times to trigger SOS while this screen is open. Turns back on each visit.</Text>
           </View>
           <TouchableOpacity
             style={[styles.toggleBtn, shakeEnabled && styles.toggleBtnActive]}

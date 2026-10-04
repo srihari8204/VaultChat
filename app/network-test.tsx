@@ -89,11 +89,13 @@ export default function NetworkTestScreen() {
   useEffect(() => () => { mounted.current = false; abort.current.abort(); }, []);
   const signal = () => abort.current.signal;
 
+  // Mount only: these are plain functions re-created each render, and the
+  // probe must not re-run on every render.
   useEffect(() => {
     loadHistory();
     checkConnection();
     checkServerStatus();
-  }, []);
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
 
   /** Reads the connection, shows it, and returns the label — the caller uses
@@ -104,7 +106,7 @@ export default function NetworkTestScreen() {
     let details: string;
     if (state.type === 'wifi') details = 'WiFi';
     else if (state.type === 'cellular') {
-      const gen = (state as any).details?.cellularGeneration || '';
+      const gen = state.details?.cellularGeneration || '';
       details = gen ? gen.toUpperCase() : 'Cellular';
     } else details = state.type || 'Unknown';
     if (mounted.current) setConnectionDetails(details);
@@ -319,9 +321,9 @@ export default function NetworkTestScreen() {
           server: t.host,
         });
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (!mounted.current) return;
-      setRunError(e?.message ?? 'The test stopped unexpectedly');
+      setRunError((e instanceof Error && e.message) || 'The test stopped unexpectedly');
       setPhase('failed');
     }
   };

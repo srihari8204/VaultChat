@@ -52,6 +52,7 @@ export default function LedgerDetail() {
   // end date, so a paid-off loan no longer shows interest still growing.
   const soFar = ledgerInterestSoFar(e, Date.now());
   const accruing = soFar != null;
+  const overdue = e.status !== 'completed' && e.end_date != null && e.end_date <= Date.now();
   const sc = STATUS_COLORS[e.status];
   const lent = e.direction === 'lend';
 
@@ -65,7 +66,8 @@ export default function LedgerDetail() {
       { k: c.projected ? 'Interest (1-year projection)' : 'Interest to end date', v: formatINR(c.interest) },
       { k: c.projected ? 'Total after 1 year' : 'Total at end date', v: formatINR(c.total), tot: true },
       ...(accruing ? [{ k: 'Interest so far (to today)', v: formatINR(soFar ?? 0) }] : []),
-      { k: 'Remaining', v: formatINR(e.remaining) },
+      { k: 'Remaining (excl. interest)', v: formatINR(e.remaining) },
+      ...(overdue ? [{ k: 'Interest after end date', v: 'Not counted' }] : []),
       { k: 'Start date', v: fmtDate(e.start_date) },
       { k: 'End date', v: e.end_date ? fmtDate(e.end_date) : '—' },
     ]));
@@ -135,7 +137,10 @@ export default function LedgerDetail() {
           <RowLine k={c.projected ? 'Interest, 1-year projection' : 'Interest to end date'} v={formatINR(c.interest)} />
           <RowLine k={c.projected ? 'Total after 1 year' : 'Total at end date'} v={formatINR(c.total)} bold />
           {accruing && <RowLine k="Interest so far (to today)" v={formatINR(soFar ?? 0)} />}
-          <RowLine k="Remaining" v={formatINR(e.remaining)} bold tone={e.remaining > 0 ? 'warn' : 'good'} />
+          <RowLine k="Remaining (excl. interest)" v={formatINR(e.remaining)} bold tone={e.remaining > 0 ? 'warn' : 'good'} />
+          {/* Interest is counted to the end date only; an overdue loan says so
+              rather than looking like it stopped growing by mistake. */}
+          {overdue && <RowLine k="Interest after end date" v="Not counted" />}
           <RowLine k="Start date" v={fmtDate(e.start_date)} />
           <RowLine k="End date" v={e.end_date ? fmtDate(e.end_date) : '—'} />
           <RowLine k="Last updated" v={fmtDateTime(e.last_updated)} />

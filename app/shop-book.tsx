@@ -313,7 +313,8 @@ function OwnerApp({ me, open, onOpened }: {
   // From the inbox: an order (over the current tab) or the returns list.
   useEffect(() => {
     if (!open) return;
-    if (open.kind === 'returns') setSub('returns');
+    // An order opened earlier would otherwise stay on top of the returns list.
+    if (open.kind === 'returns') { setOrderOpen(null); setSub('returns'); }
     else if (open.side === 'owner') { setSub(null); setOrderOpen(open.orderId); }
     else return;   // a customer-side target is CustomerApp's
     onOpened();

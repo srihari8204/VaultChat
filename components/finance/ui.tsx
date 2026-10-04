@@ -124,11 +124,12 @@ export function Field(props: {
   keyboardType?: KeyboardTypeOptions; multiline?: boolean; error?: string;
   /** Password fields (the Full Backup password). */
   secureTextEntry?: boolean; autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters'; autoCorrect?: boolean;
+  onBlur?: () => void;
   style?: ViewStyle | TextStyle | (ViewStyle | TextStyle)[];
 }) {
   const FIN = useFinanceTheme();
   const s = React.useMemo(() => makeStyles(FIN), [FIN]);
-  const { style, multiline, error, label, ...rest } = props;
+  const { style, multiline, error, label, onBlur, ...rest } = props;
   const [focused, setFocused] = useState(false);
   return (
     <View>
@@ -136,7 +137,7 @@ export function Field(props: {
         {...rest}
         multiline={multiline}
         onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
+        onBlur={() => { setFocused(false); onBlur?.(); }}
         placeholderTextColor={FIN.faint}
         accessibilityLabel={label ?? rest.placeholder}
         style={[

@@ -42,7 +42,8 @@ export default function CallReliabilityScreen() {
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const ifMounted = <T,>(set: (v: T) => void) => (v: T) => { if (mounted.current) set(v); };
-  const setBattOk = ifMounted(setBattOkState);
+  // Stable, so refresh (and the focus effect) can list it.
+  const setBattOk = useCallback((v: boolean | null) => { if (mounted.current) setBattOkState(v); }, []);
   useEffect(() => { getLowDataMode().then(ifMounted(setLowData)).catch(() => {}); }, []);
 
   useEffect(() => {
@@ -79,13 +80,14 @@ export default function CallReliabilityScreen() {
   // When it cannot be read (readBatteryExemption → null) the card says so and
   // still offers the settings, rather than claiming it is done.
   const [fsiOk, setFsiOk] = useState(true);
-  const refresh = () => {
-    canUseFullScreenIntent().then(ifMounted(setFsiOk)).catch(() => {});
+  // Stable (refs and stable setters only), so the focus effect lists it honestly.
+  const refresh = useCallback(() => {
+    canUseFullScreenIntent().then((v) => { if (mounted.current) setFsiOk(v); }).catch(() => {});
     if (Platform.OS === 'android') {
       readBatteryExemption().then(setBattOk).catch(() => setBattOk(null));
     }
-  };
-  useFocusEffect(useCallback(() => { refresh(); }, []));
+  }, [setBattOk]);
+  useFocusEffect(refresh);
 
   return (
     <View style={S.screen}>

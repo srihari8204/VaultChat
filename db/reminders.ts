@@ -70,9 +70,15 @@ export async function snoozeReminder(id: string, nextAt: number, notifId: string
   await d.runAsync(`UPDATE reminders SET next_at = ?, status = 'active', notif_id = ? WHERE id = ?`, [nextAt, notifId, id]);
 }
 
+/** Replace only the row's notification ids (a re-scheduled alert). */
+export async function setReminderNotifId(id: string, notifId: string | null): Promise<void> {
+  const d = await financeDb();
+  await d.runAsync(`UPDATE reminders SET notif_id = ? WHERE id = ?`, [notifId, id]);
+}
+
 export async function deleteReminder(id: string): Promise<void> {
   const d = await financeDb();
   await d.runAsync(`DELETE FROM reminders WHERE id = ?`, [id]);
 }
 
-export default { insertReminder, listReminders, setReminderStatus, snoozeReminder, deleteReminder };
+export default { insertReminder, listReminders, setReminderStatus, snoozeReminder, deleteReminder, setReminderNotifId };

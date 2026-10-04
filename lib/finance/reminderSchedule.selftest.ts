@@ -108,6 +108,15 @@ eq('daily never skips', skipsSomePeriods('daily', at(2026, 1, 31)), false);
 eq('a leap-day yearly series is skipped on 28 Feb 2029',
   phoneSkips({ freq: 'yearly', next_at: 0, anchor_at: at(2028, 2, 29) }, at(2029, 2, 28)), true);
 eq('… but not on 29 Feb 2032', phoneSkips({ freq: 'yearly', next_at: 0, anchor_at: at(2028, 2, 29) }, at(2032, 2, 29)), false);
+// A snoozed day off the series has its own one-off alert: not "no phone alert".
+// (Monthly on the 5th, snoozed to the 6th: 5 Oct unlabelled, 6 Oct too.)
+{
+  const snoozed = { freq: 'monthly' as const, next_at: at(2026, 10, 6), anchor_at: at(2026, 9, 5) };
+  eq('a snoozed day off the series is not skipped', phoneSkips(snoozed, at(2026, 10, 6)), false);
+  eq('… nor is the series day it was snoozed from', phoneSkips(snoozed, at(2026, 10, 5)), false);
+  const d31Snoozed = { freq: 'monthly' as const, next_at: at(2026, 9, 30), anchor_at: at(2026, 8, 31) };
+  eq('a clamped series day that is also next_at is still skipped', phoneSkips(d31Snoozed, at(2026, 9, 30)), true);
+}
 
 // ── done reminders keep their history ──
 {

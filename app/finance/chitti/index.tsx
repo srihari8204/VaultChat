@@ -61,6 +61,13 @@ export default function ChittiList() {
           value={tab} tabs onChange={setTab}
         />
       </View>
+      {/* Before the list in the tree, so a screen reader reaches the only add
+          action without passing every card; drawn over the list by zIndex. */}
+      <TouchableOpacity style={[s.fab, { bottom: insets.bottom + 20 }]} activeOpacity={0.9} onPress={() => router.push('/finance/chitti/new')}
+        accessibilityRole="button" accessibilityLabel="New Lucky Draw group">
+        <Ionicons name="add" size={22} color={FIN.onBrand} />
+        <Text style={s.fabTxt}>New Lucky Draw Group</Text>
+      </TouchableOpacity>
       <FlatList
         data={status === 'ready' ? shown : []}
         keyExtractor={(g) => g.id}
@@ -90,11 +97,6 @@ export default function ChittiList() {
         // Clears the button at the foot, which sits above the home indicator.
         ListFooterComponent={<View style={{ height: 90 + insets.bottom }} />}
       />
-      <TouchableOpacity style={[s.fab, { bottom: insets.bottom + 20 }]} activeOpacity={0.9} onPress={() => router.push('/finance/chitti/new')}
-        accessibilityRole="button" accessibilityLabel="New Lucky Draw group">
-        <Ionicons name="add" size={22} color={FIN.onBrand} />
-        <Text style={s.fabTxt}>New Lucky Draw Group</Text>
-      </TouchableOpacity>
     </View>
   );
 }
@@ -107,6 +109,6 @@ const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   name: { color: FIN.text, fontSize: 15.5, fontWeight: '700' },
   sub: { color: FIN.sub, fontSize: 12.5, marginTop: 2 },
   chit: { color: FIN.brandDeep, fontSize: 12, fontWeight: '700', marginTop: 3 },
-  fab: { position: 'absolute', left: 16, right: 16, bottom: 20, flexDirection: 'row', gap: 8, backgroundColor: FIN.brandDeep, borderRadius: 14, paddingVertical: 15, alignItems: 'center', justifyContent: 'center', elevation: 6 },
+  fab: { position: 'absolute', left: 16, right: 16, bottom: 20, flexDirection: 'row', gap: 8, backgroundColor: FIN.brandDeep, borderRadius: 14, paddingVertical: 15, alignItems: 'center', justifyContent: 'center', elevation: 6, zIndex: 2 },
   fabTxt: { color: FIN.onBrand, fontSize: 15, fontWeight: '800' },
 });

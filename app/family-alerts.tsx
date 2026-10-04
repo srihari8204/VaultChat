@@ -146,18 +146,18 @@ export default function FamilyAlertsScreen() {
           // An empty FILTER is not an empty inbox: the All tab has rows.
           <View style={st.empty}>
             <Ionicons name="filter-outline" size={30} color={colors.textFaint} />
-            <Text style={{ color: colors.text, fontWeight: '700', marginTop: 10 }}>
+            <Text style={[st.emptyTitle, { color: colors.text }]}>
               No {FILTERS.find((f) => f.key === filter)?.label.toLowerCase()} alerts
             </Text>
-            <Text style={{ color: colors.textDim, fontSize: 13, textAlign: 'center', marginTop: 4, paddingHorizontal: 40 }}>
+            <Text style={[st.emptySub, { color: colors.textDim }]}>
               Other alerts are under All.
             </Text>
           </View>
         ) : (
           <View style={st.empty}>
             <Ionicons name="notifications-off-outline" size={30} color={colors.textFaint} />
-            <Text style={{ color: colors.text, fontWeight: '700', marginTop: 10 }}>No alerts yet</Text>
-            <Text style={{ color: colors.textDim, fontSize: 13, textAlign: 'center', marginTop: 4, paddingHorizontal: 40 }}>
+            <Text style={[st.emptyTitle, { color: colors.text }]}>No alerts yet</Text>
+            <Text style={[st.emptySub, { color: colors.textDim }]}>
               Arrivals, departures, check-ins, SOS and low-battery warnings land here.
             </Text>
           </View>
@@ -201,6 +201,8 @@ export default function FamilyAlertsScreen() {
 }
 
 const st = StyleSheet.create({
+  emptyTitle: { fontWeight: '700', marginTop: 10 },
+  emptySub: { fontSize: 13, textAlign: 'center', marginTop: 4, paddingHorizontal: 40 },
   tabs: { flexDirection: 'row', gap: 8, padding: 12, borderBottomWidth: StyleSheet.hairlineWidth },
   tab: { flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 999, borderWidth: 1 },
   sec: { fontSize: 11.5, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 6 },

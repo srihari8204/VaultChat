@@ -59,7 +59,7 @@ export default function CheckinSheet({ visible, onClose, picked, onPick, note, o
                     accessibilityState={{ selected: on, checked: on }}
                     accessibilityLabel={c.label}
                     style={[st.checkBtn, {
-                      backgroundColor: c.color + (on ? '33' : '1e'),
+                      backgroundColor: tint(c.color, on ? 0.2 : 0.12),
                       borderColor: on ? c.color : tint(c.color, 0.33),
                       borderWidth: on ? 2 : 1,
                     }]}

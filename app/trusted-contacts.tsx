@@ -12,6 +12,7 @@ import { View, Text, TouchableOpacity, StyleSheet, FlatList, Alert, ActivityIndi
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
+import { tint } from '../lib/tintColor';
 import { readCache, writeCache } from '../lib/localCache';
 import { listTrustedContacts, addTrustedContact, removeTrustedContact, type TrustedContact } from '../lib/chatService';
 import { AuroraBackground, KeyboardSafe } from '../components/ui';
@@ -32,6 +33,8 @@ export default function TrustedContactsScreen() {
   const s = useS();
   const router = useRouter();
   const [trusted, setTrusted] = useState<TrustedContact[]>([]);
+  const trustedRef = useRef(trusted);
+  trustedRef.current = trusted;
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [searchId, setSearchId] = useState('');
@@ -71,11 +74,16 @@ export default function TrustedContactsScreen() {
     })();
   }, [load]);
 
+  /** An add is in flight. A ref, not `searching`: the keyboard's submit can
+   *  fire again before the disabled Add button re-renders. */
+  const addInFlight = useRef(false);
   const addByVaultId = async () => {
+    if (addInFlight.current) return;
     const id = searchId.trim().toLowerCase().replace(/@/g, '');
     if (!id) return;
     if (!isVaultId(id)) { setIdError('A VaultID is 3–64 letters, digits, dots, dashes or underscores.'); return; }
     if (trusted.length >= MAX_TRUSTED) { Alert.alert('Maximum reached', `You can have up to ${MAX_TRUSTED} trusted contacts.`); return; }
+    addInFlight.current = true;
     setSearching(true);
     try {
       const added = await addTrustedContact(id);
@@ -87,6 +95,7 @@ export default function TrustedContactsScreen() {
     } catch (e: unknown) {
       if (mounted.current) Alert.alert('Could not add', errText(e, 'Try again'));
     } finally {
+      addInFlight.current = false;
       if (mounted.current) setSearching(false);
     }
   };
@@ -95,13 +104,16 @@ export default function TrustedContactsScreen() {
     Alert.alert('Remove trusted contact?', `Remove ${c.name || 'this contact'} from your emergency contacts?`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: async () => {
-        const prev = trusted;
-        const next = trusted.filter(t => t.userId !== c.userId);
-        setTrusted(next);
-        try { await removeTrustedContact(c.userId); writeCache(CACHE_KEY, next); }
+        // Functional updates on the CURRENT list: two overlapping removals
+        // used to roll back to a stale copy and resurrect the other contact.
+        const at = trusted.findIndex(t => t.userId === c.userId);
+        setTrusted(cur => cur.filter(t => t.userId !== c.userId));
+        try { await removeTrustedContact(c.userId); writeCache(CACHE_KEY, trustedRef.current.filter(t => t.userId !== c.userId)); }
         catch (e: unknown) {
           if (!mounted.current) return;
-          setTrusted(prev); Alert.alert('Could not remove', errText(e, 'Try again'));
+          setTrusted(cur => (cur.some(t => t.userId === c.userId) ? cur
+            : [...cur.slice(0, Math.max(0, at)), c, ...cur.slice(Math.max(0, at))]));
+          Alert.alert('Could not remove', errText(e, 'Try again'));
         }
       } },
     ]);
@@ -269,7 +281,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   contactName: { color: c.text, fontSize: 15, fontWeight: '700' },
   contactId: { color: c.textDim, fontSize: 12, marginTop: 2 },
   statusDot: { width: 8, height: 8, borderRadius: 4, marginRight: 12 },
-  removeBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: c.danger + '1A', borderWidth: 1, borderColor: c.danger + '4D' },
+  removeBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: tint(c.danger, 0.1), borderWidth: 1, borderColor: tint(c.danger, 0.3) },
   removeTxt: { color: c.danger, fontSize: 12, fontWeight: '700' },
   addBtn: { backgroundColor: brandAlpha(0.13), borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 12, borderWidth: 1, borderColor: brandAlpha(0.3) },
   addBtnTxt: { color: c.primary, fontSize: 14, fontWeight: '700' },

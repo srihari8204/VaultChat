@@ -116,10 +116,12 @@ export default function SplitScreen() {
 
       {/* Split control bar — swap / close, per the design's pane header */}
       <View style={[st.bar, { borderBottomColor: colors.glassStroke }]}>
+        {/* Stacked, the icon alone names the bar, so it is the accessible
+            element (a label on a non-accessible icon is never spoken). */}
         <Ionicons name={vertical ? 'tablet-landscape-outline' : 'phone-portrait-outline'} size={15} color={colors.textDim}
-          accessibilityLabel="Split view" />
+          accessible={!vertical} accessibilityRole="header" accessibilityLabel="Split view" />
         {/* Stacked means a narrow window: the three buttons need the room. */}
-        {vertical && <Text style={[st.barTxt, { color: colors.textDim }]}>Split view</Text>}
+        {vertical && <Text accessibilityRole="header" style={[st.barTxt, { color: colors.textDim }]}>Split view</Text>}
         <View style={{ flex: 1 }} />
         <TouchableOpacity onPress={swap} hitSlop={{ left: 6, right: 6 }} style={st.barBtn}
           accessibilityRole="button" accessibilityLabel="Swap the two chats">

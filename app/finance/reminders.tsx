@@ -14,14 +14,45 @@ import { FinHeader, Label, Field, Segment, Btn, Pill, EmptyState, Card, LoadingS
 import { useLoadStatus } from '../../components/finance/useLoad';
 import { useMe } from '../../components/finance/useMe';
 import { fmtDateTime } from '../../utils/financeFormat';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  insertReminder, listReminders, setReminderStatus, snoozeReminder, deleteReminder,
+  insertReminder, listReminders, setReminderStatus, snoozeReminder, deleteReminder, setReminderNotifId,
   type Reminder, type ReminderFreq,
 } from '../../db/reminders';
-import { scheduleReminder, scheduleAt, cancel, snoozedNotifIds } from '../../components/finance/notify';
-import { isUnscheduled } from '../../components/finance/notifyIds';
+import { scheduleReminder, scheduleAt, cancel, snoozedNotifIds, notificationsAllowed } from '../../components/finance/notify';
+import { isUnscheduled, withRecurrence } from '../../components/finance/notifyIds';
 import { nextOccurrence } from '../../utils/financeRules';
-import { osTriggerFor, skipsSomePeriods } from '../../lib/finance/reminderSchedule';
+import { osTriggerFor, skipsSomePeriods, anchorOf } from '../../lib/finance/reminderSchedule';
+
+/** Set once every recurring alert has been rebuilt from its anchor (below). */
+const RETRIGGER_KEY = 'vc_fin_retrigger_anchor_v1';
+
+/**
+ * Recurring alerts scheduled before the trigger was built from the anchor
+ * (it used max(now, picked time), so the phone alerted on a different day or
+ * time than the app shows) are re-scheduled once from their anchor. The new
+ * alert is stored before the old one is cancelled, so a failure keeps the old
+ * alert rather than none. Never prompts: without permission it waits for a
+ * later visit. Resolves true when every row was rebuilt; a row changed
+ * meanwhile is left alone and retried on a later visit.
+ */
+async function retriggerFromAnchors(userId: string, rows: Reminder[]): Promise<boolean> {
+  if (!(await notificationsAllowed())) return false;
+  let all = true;
+  for (const r of rows) {
+    const old = (r.notif_id ?? '').split(',')[0];
+    if (r.status !== 'active' || r.freq === 'once' || !old) continue;
+    const fresh = await scheduleReminder('Vault Finance', r.title, r.freq, anchorOf(r));
+    if (!fresh) { all = false; continue; }
+    // Done, snoozed or deleted meanwhile: that action owns the row's alerts.
+    const now = (await listReminders(userId).catch(() => [] as Reminder[])).find((x) => x.id === r.id);
+    if (!now || now.status !== 'active' || now.notif_id !== r.notif_id) { await cancel(fresh); all = false; continue; }
+    try { await setReminderNotifId(r.id, withRecurrence(r.notif_id, fresh)); }
+    catch { await cancel(fresh); all = false; continue; }
+    await cancel(old);
+  }
+  return all;
+}
 
 const FREQ_LABEL: Record<ReminderFreq, string> = { once: 'Once', daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', yearly: 'Yearly' };
 
@@ -38,10 +69,20 @@ export default function Reminders() {
 
   // aliased: this screen already has a `done` list of completed reminders
   const { status, begin: beginLoad, done: loadOk, fail: loadFail } = useLoadStatus();
+  const retriggered = useRef(false);
   const reload = useCallback(() => {
     if (!me) return;
     beginLoad();
-    listReminders(me.id).then(r => { setRows(r); loadOk(); }).catch(loadFail);
+    listReminders(me.id).then(r => {
+      setRows(r); loadOk();
+      if (retriggered.current) return;
+      retriggered.current = true;
+      (async () => {
+        if ((await AsyncStorage.getItem(RETRIGGER_KEY)) === '1') return;
+        if (await retriggerFromAnchors(me.id, r)) await AsyncStorage.setItem(RETRIGGER_KEY, '1');
+        setRows(await listReminders(me.id));   // the rebuilt ids
+      })().catch(() => {});
+    }).catch(loadFail);
   }, [me, beginLoad, loadOk, loadFail]);
   useFocusEffect(reload);
 
@@ -71,10 +112,16 @@ export default function Reminders() {
   // A reminder whose notification could not be scheduled (permission denied,
   // or the OS refused) is still worth keeping as a note, but it must not look
   // like it will alert anyone.
-  const warnUnscheduled = () => Alert.alert(
-    'Notifications are off',
-    'The reminder is saved, but it will not alert you. Allow notifications for this app in your phone settings, then add it again.',
-  );
+  // Permission is checked here, so a trigger the OS refused is not blamed on it.
+  const warnUnscheduled = async () => {
+    if (await notificationsAllowed()) {
+      Alert.alert('Alert not scheduled',
+        'The reminder is saved, but your phone did not accept its alert, so it will not alert you. Delete it and add it again.');
+    } else {
+      Alert.alert('Notifications are off',
+        'The reminder is saved, but it will not alert you. Allow notifications for this app in your phone settings, then add it again.');
+    }
+  };
 
   const confirm = (t: string, msg: string, ok: string) => new Promise<boolean>((resolve) => Alert.alert(t, msg, [
     { text: 'Go back', style: 'cancel', onPress: () => resolve(false) },
@@ -113,7 +160,7 @@ export default function Reminders() {
         // The picked time anchors the series; next_at is its next occurrence.
         title: title.trim(), freq, next_at: nextOccurrence(freq, when, Date.now()), anchor_at: when, notif_id: notifId,
       });
-      if (!notifId) warnUnscheduled();
+      if (!notifId) void warnUnscheduled();
       setShowAdd(false); setTitle(''); reload();
     } catch (e: any) { Alert.alert('Could not add the reminder', e?.message ?? 'Try again.'); }
   };
@@ -132,7 +179,7 @@ export default function Reminders() {
       const ids = snoozedNotifIds(r.freq, r.notif_id, snoozeId);
       await cancel(ids.cancel);
       await snoozeReminder(r.id, next, ids.keep);
-      if (!snoozeId) warnUnscheduled();
+      if (!snoozeId) void warnUnscheduled();
       // The snooze itself may be fine while the repeating alert never was.
       else if (isUnscheduled(r.freq, ids.keep)) {
         Alert.alert('Snoozed, but not repeating',
@@ -199,7 +246,7 @@ export default function Reminders() {
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={s.title} numberOfLines={2}>{r.title}</Text>
                 <Text style={s.sub}>{fmtDateTime(r.next_at)}</Text>
-                {isUnscheduled(r.freq, r.notif_id) && <Text style={[s.sub, { color: FIN.bad }]}>Not scheduled: notifications are off</Text>}
+                {isUnscheduled(r.freq, r.notif_id) && <Text style={[s.sub, { color: FIN.bad }]}>Not scheduled: no phone alert</Text>}
               </View>
             </View>
             <View style={s.actions}>

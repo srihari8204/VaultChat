@@ -105,8 +105,9 @@ export default function Reports() {
   };
   const onExcel = async () => {
     if (r.ledgers.length === 0) return Alert.alert('Nothing to export', `No ledgers were created ${label.toLowerCase()}.`);
-    const headers = ['Name', 'Direction', 'Principal', 'Remaining', 'Status', 'Rate', 'Period', 'Interest type', 'Created'];
-    const data = r.ledgers.map(l => [l.name, l.direction, l.principal, l.remaining, l.status, l.rate, l.period, ledgerInterestTypeLabel(l), fmtDate(l.created_at)]);
+    // The same full-term interest the tiles add up, so the sheet reconciles with them.
+    const headers = ['Name', 'Direction', 'Principal', 'Remaining', 'Status', 'Rate', 'Period', 'Interest type', 'Interest (full term)', 'Created'];
+    const data = r.ledgers.map(l => [l.name, l.direction, l.principal, l.remaining, l.status, l.rate, l.period, ledgerInterestTypeLabel(l), ledgerInterest(l).interest, fmtDate(l.created_at)]);
     try {
       const uri = await exportExcel(`vault-finance-${period}`, headers, data);
       // Names and amounts: once the share sheet has handed the file on, the

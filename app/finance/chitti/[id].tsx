@@ -54,7 +54,12 @@ export default function ChittiDetail() {
     // than failing the screen — and never shown as "No activity yet".
     listTimeline('chitti', id).then((t) => { setTimeline(t); setHistoryFailed(false); }).catch(() => setHistoryFailed(true));
     return Promise.all([getGroup(id), listMembers(id), listCollections(id), listAuctions(id)])
-      .then(([grp, mem, col, auc]) => { setG(grp); setMembers(mem); setCollections(col); setAuctions(auc); done(); })
+      .then(([grp, mem, col, auc]) => {
+        setG(grp); setMembers(mem); setCollections(col); setAuctions(auc);
+        // A picked winner who has since been removed would be recorded as "—".
+        setAuctionDraft((d) => (d.winnerId && !mem.some((m) => m.id === d.winnerId) ? { ...d, winnerId: null } : d));
+        done();
+      })
       .catch(fail);
   }, [id, begin, done, fail]);
   useFocusEffect(useCallback(() => { reload(); }, [reload]));

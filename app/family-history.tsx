@@ -220,7 +220,7 @@ export default function FamilyHistoryScreen() {
             <TouchableOpacity key={r.key} onPress={() => setRange(r.key)}
               accessibilityRole="tab" accessibilityState={{ selected: on }}
               style={[st.tab, { backgroundColor: on ? brandAlpha(0.14) : G.paneFaint, borderColor: on ? colors.primary : G.chipEdge }]}>
-              <Text style={{ color: on ? G.accentText : colors.textDim, fontWeight: on ? '800' : '600', fontSize: 13 }}>{r.label}</Text>
+              <Text style={[st.tabTxt, on && st.tabTxtOn, { color: on ? G.accentText : colors.textDim }]}>{r.label}</Text>
             </TouchableOpacity>
           );
         })}
@@ -236,7 +236,7 @@ export default function FamilyHistoryScreen() {
             // button itself never sits in a busy state.
             onPress={() => { setLoading(true); setReload((n) => n + 1); }}
             accessibilityRole="button" accessibilityLabel="Retry loading history"
-            style={[st.tab, { marginTop: 12, flex: 0, paddingHorizontal: 20, borderColor: colors.primary, backgroundColor: brandAlpha(0.14) }]}
+            style={[st.tab, st.retryBtn, { borderColor: colors.primary, backgroundColor: brandAlpha(0.14) }]}
           >
             <Text style={{ color: G.accentText, fontWeight: '800' }}>Retry</Text>
           </TouchableOpacity>
@@ -261,8 +261,8 @@ export default function FamilyHistoryScreen() {
                   <TouchableOpacity key={id} onPress={() => { setPick(id); setTripSel(null); }}
                     accessibilityRole="radio" accessibilityState={{ checked: on, selected: on }}
                     accessibilityLabel={`Show ${nameOf(id)}'s track`}
-                    style={[st.tab, { flex: 0, paddingHorizontal: 14, backgroundColor: on ? brandAlpha(0.14) : G.paneFaint, borderColor: on ? colors.primary : G.chipEdge }]}>
-                    <Text style={{ color: on ? G.accentText : colors.textDim, fontWeight: on ? '800' : '600', fontSize: 13 }}>{nameOf(id)}</Text>
+                    style={[st.tab, st.pickChip, { backgroundColor: on ? brandAlpha(0.14) : G.paneFaint, borderColor: on ? colors.primary : G.chipEdge }]}>
+                    <Text style={[st.tabTxt, on && st.tabTxtOn, { color: on ? G.accentText : colors.textDim }]}>{nameOf(id)}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -384,6 +384,10 @@ export default function FamilyHistoryScreen() {
 }
 
 const st = StyleSheet.create({
+  tabTxt: { fontSize: 13, fontWeight: '600' },
+  tabTxtOn: { fontWeight: '800' },
+  pickChip: { flex: 0, paddingHorizontal: 14 },
+  retryBtn: { marginTop: 12, flex: 0, paddingHorizontal: 20 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   tabs: { flexDirection: 'row', gap: 8, padding: 12, borderBottomWidth: StyleSheet.hairlineWidth },
   tab: { flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 999, borderWidth: 1 },

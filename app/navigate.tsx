@@ -3,13 +3,15 @@
 // banner, and once active the live map (NavMap) becomes the hero with the route,
 // destination, and a moving "you" dot. Real flow against self-hosted Valhalla.
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert, ActivityIndicator, Platform } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { geocodeSearch, type GeoHit } from '../lib/nav/geocode';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useTheme } from '../lib/theme';
+import { tint } from '../lib/tintColor';
 import { LOCATION_LOCK } from '../constants/flags';
 import { useLockView } from '../lib/lock/lockService';
 import { useNavSettings, setNavSettings, loadNavSettings } from '../lib/nav/navSettings';
@@ -40,6 +42,9 @@ const MODES: { key: DisplayMode; label: string }[] = [
 export default function NavigateScreen() {
   const { colors } = useTheme();
   const router = useRouter();
+  // Native header: the root layout adds no bottom inset, so the active sheet
+  // clears the home indicator itself.
+  const insets = useSafeAreaInsets();
   const s = useNavSettings();
   const banner = useNavBanner();
   const lock = useLockView();
@@ -49,6 +54,8 @@ export default function NavigateScreen() {
   const [dest, setDest] = useState<{ name: string; coords: LatLng } | null>(null);
   const [searching, setSearching] = useState(false);
   const [starting, setStarting] = useState(false);
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
   const [preview, setPreview] = useState<NavGeo | null>(null);
   // Primary route + any genuine Valhalla alternatives (never invented — the
   // chips render only when the engine actually returned more than one).
@@ -159,7 +166,7 @@ export default function NavigateScreen() {
       await startNavigation({ to: dest.coords, profile: s.profile, mode: s.mode, timing: s.timing, costing: s.costing, custom: s.custom, routeOpts: s.routeOpts, route: chosen });
     } catch (e: unknown) {
       Alert.alert('Could not start', (e instanceof Error && e.message) || 'Check location permission and that the routing engine is up.');
-    } finally { setStarting(false); }
+    } finally { if (mounted.current) setStarting(false); }
   };
 
   const setRouteOpt = (patch: Partial<typeof s.routeOpts>) => {
@@ -190,7 +197,7 @@ export default function NavigateScreen() {
               }} />
             </View>
           )}
-          <View style={[st.sheet, { backgroundColor: colors.glassSoft, borderTopColor: colors.glassStroke }]}>
+          <View style={[st.sheet, { backgroundColor: colors.glassSoft, borderTopColor: colors.glassStroke, paddingBottom: 22 + insets.bottom }]}>
             <View style={{ flex: 1 }}>
               {/* The next instruction and road live in NavBanner (with its live
                   region); repeating them here made screen readers read each
@@ -225,7 +232,7 @@ export default function NavigateScreen() {
                 : 'Location Lock'}
               accessibilityHint={lock.active ? 'Opens the active lock' : 'Lock a spot and get alarmed if you leave it'}
               style={[st.lockEntry, { borderColor: lock.active ? colors.success : colors.border, backgroundColor: colors.glassSoft }]}>
-              <View style={[st.lockEntryIcon, { backgroundColor: (lock.active ? colors.success : colors.primary) + '1a' }]}>
+              <View style={[st.lockEntryIcon, { backgroundColor: tint(lock.active ? colors.success : colors.primary, 0.1) }]}>
                 <Ionicons name={lock.active ? 'lock-closed' : 'radio-button-on'} size={20}
                   color={lock.active ? colors.success : colors.primary} />
               </View>
@@ -268,7 +275,7 @@ export default function NavigateScreen() {
             </View>
           )}
           {dest && (
-            <View style={[st.destPill, { backgroundColor: colors.primary + '14' }]}>
+            <View style={[st.destPill, { backgroundColor: tint(colors.primary, 0.08) }]}>
               <Ionicons name="flag" size={16} color={colors.primary} />
               <Text numberOfLines={1} style={{ color: colors.text, flex: 1 }}>{dest.name}</Text>
               <Text style={{ color: colors.textFaint, fontSize: 12 }}>{dest.coords.lat.toFixed(4)}, {dest.coords.lng.toFixed(4)}</Text>
@@ -366,7 +373,7 @@ function Chip({ active, label, onPress, role }: { active: boolean; label: string
   return (
     <TouchableOpacity onPress={onPress}
       accessibilityRole={role} accessibilityState={{ checked: active }}
-      style={[st.chip, { borderColor: active ? colors.primary : colors.border, backgroundColor: active ? colors.primary + '1a' : 'transparent' }]}>
+      style={[st.chip, { borderColor: active ? colors.primary : colors.border, backgroundColor: active ? tint(colors.primary, 0.1) : 'transparent' }]}>
       <Text style={{ color: active ? colors.primary : colors.text, fontWeight: active ? '700' : '500', fontSize: 13.5 }}>{label}</Text>
     </TouchableOpacity>
   );
@@ -383,7 +390,7 @@ const st = StyleSheet.create({
   // minHeight is the same size at scale 1.0 and stays over the 44dp tap floor.
   searchRow: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, minHeight: 48, paddingVertical: 8 },
   sugBox: { borderWidth: 1, borderRadius: 12, marginTop: 6, overflow: 'hidden' },
-  sugRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 11 },
+  sugRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 11, minHeight: 44 },
   input: { flex: 1, fontSize: 15 },
   destPill: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, padding: 12, borderRadius: 10 },
   previewMap: { height: 210, borderRadius: 14, borderWidth: 1, marginTop: 14 },
@@ -392,7 +399,7 @@ const st = StyleSheet.create({
   chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8, minHeight: 44, justifyContent: 'center' },
   startBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 52, paddingVertical: 10, borderRadius: 14, marginTop: 30 },
   startTxt: { fontSize: 16, fontWeight: '800' },
-  sheet: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14, paddingBottom: 22, borderTopWidth: StyleSheet.hairlineWidth },
+  sheet: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14, borderTopWidth: StyleSheet.hairlineWidth },
   sheetInstr: { fontSize: 17, fontWeight: '800' },
   endBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44, paddingVertical: 8, paddingHorizontal: 18, borderRadius: 12 },
   rerouteBtn: { alignItems: 'center', justifyContent: 'center', width: 44, height: 44, borderRadius: 12, borderWidth: 1.5 },

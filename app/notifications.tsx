@@ -7,6 +7,7 @@ import { Alert, Animated, Easing, ActivityIndicator, RefreshControl, ScrollView,
 import { brandAlpha, type Palette } from '../constants/theme';
 import { SafetyNavBar } from '../components/SafetyNavBar';
 import { useTheme } from '../lib/theme';
+import { tint } from '../lib/tintColor';
 import { AppText as Text, AuroraBackground } from '../components/ui';
 import { readCache, writeCache } from '../lib/localCache';
 import * as Location from 'expo-location';
@@ -154,9 +155,11 @@ function NotificationsContent() {
       // "Sent to N" until the server reports who the push actually reached.
       const t = sosReachText(r.contactsNotified, sosReachedOf(r), lat != null);
       Alert.alert('Emergency alert sent', [t.line, lat == null ? 'Your location was unavailable.' : null, t.warn && `${t.warn} Call or text them too.`].filter(Boolean).join(' '));
-      loadSos();
-    } catch (e: any) {
-      Alert.alert('Could not send alert', e?.message ?? 'Please try again.');
+      // A failed reload is shown on the list (it would otherwise read as
+      // complete, or as "No emergency alerts sent yet").
+      loadSos().then((ok) => { if (!ok && mounted.current) setSosFailed(true); });
+    } catch (e: unknown) {
+      Alert.alert('Could not send alert', (e instanceof Error && e.message) || 'Please try again.');
     } finally {
       if (mounted.current) setSending(false);
     }
@@ -209,7 +212,7 @@ function NotificationsContent() {
   // A cold deep link has nothing to go back to.
   const goBack = () => (router.canGoBack() ? router.back() : router.replace('/settings'));
 
-  const panicBorderColor=glowAnim.interpolate({inputRange:[0,1],outputRange:[colors.danger+'4D',colors.danger+'CC']});
+  const panicBorderColor=glowAnim.interpolate({inputRange:[0,1],outputRange:[tint(colors.danger,0.3),tint(colors.danger,0.8)]});
 
   return (
     <View style={S.container}>
@@ -247,6 +250,10 @@ function NotificationsContent() {
             </View>
           )}
 
+          {!loading && activeTab==='alerts' && sosFailed && sos.length>0 && (
+            <Text style={S.errorText} accessibilityLiveRegion="polite">This list may be out of date. Pull down to refresh.</Text>
+          )}
+
           {!loading && activeTab==='alerts' && !(sosFailed && sos.length===0) && (sos.length===0
             ? <Text style={S.emptyText}>No emergency alerts sent yet.{'\n'}Your SOS history will appear here.</Text>
             : sos.map((a)=>{
@@ -256,7 +263,7 @@ function NotificationsContent() {
                   <View key={a.id} style={[S.alertRow,{borderLeftColor:col}]}>
                     <View style={S.flex1}>
                       <View style={S.alertHead}>
-                        <View style={[S.typeBadge,{backgroundColor:col+'18',borderColor:col}]}><Text style={[S.typeBadgeText,{color:col}]}>{a.type==='emergency'?'EMERGENCY':'TEST'}</Text></View>
+                        <View style={[S.typeBadge,{backgroundColor:tint(col,0.09),borderColor:col}]}><Text style={[S.typeBadgeText,{color:col}]}>{a.type==='emergency'?'EMERGENCY':'TEST'}</Text></View>
                         <Text style={S.alertTitle}>SOS alert sent</Text>
                       </View>
                       <Text style={S.alertBody}>{reach.line}</Text>
@@ -362,13 +369,13 @@ function NotificationsContent() {
                     <Text style={S.rowDesc}>No trusted contacts yet. <Text style={S.linkText}>Add trusted contacts</Text> so they’re alerted in an emergency.</Text>
                   </TouchableOpacity>
                 : contacts.map((c)=>(
-                    <View key={c.userId} style={[S.settingRow,{borderColor:colors.danger+'26'}]} accessible accessibilityLabel={`${c.name || c.vaultId || 'Contact'}, ${c.online ? 'online' : 'offline'}`}>
+                    <View key={c.userId} style={[S.settingRow,{borderColor:tint(colors.danger,0.15)}]} accessible accessibilityLabel={`${c.name || c.vaultId || 'Contact'}, ${c.online ? 'online' : 'offline'}`}>
                       <Ionicons name="people-circle-outline" size={30} color={colors.danger} />
                       <View style={S.flex1}>
                         <Text numberOfLines={1} style={S.rowTitle}>{c.name || c.vaultId || 'Contact'}</Text>
                         {c.vaultId && <Text style={S.handle}>@{c.vaultId}</Text>}
                       </View>
-                      <View style={[S.presence,{backgroundColor:(c.online?colors.accent:colors.textFaint)+'18',borderColor:c.online?colors.accent:colors.textFaint}]}><Text style={[S.presenceText,{color:c.online?colors.accent:colors.textFaint}]}>{c.online?'ONLINE':'OFFLINE'}</Text></View>
+                      <View style={[S.presence,{backgroundColor:tint(c.online?colors.accent:colors.textFaint,0.09),borderColor:c.online?colors.accent:colors.textFaint}]}><Text style={[S.presenceText,{color:c.online?colors.accent:colors.textFaint}]}>{c.online?'ONLINE':'OFFLINE'}</Text></View>
                     </View>
                   ))}
             </View>
@@ -430,7 +437,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   presence:{borderRadius:8,paddingHorizontal:8,paddingVertical:4,borderWidth:1},
   presenceText:{fontSize:11,fontWeight:'700'},
   panicWrap:{gap:16},
-  panicNotice:{backgroundColor:c.danger+'14',borderRadius:16,padding:16,borderWidth:1,borderColor:c.danger+'40'},
+  panicNotice:{backgroundColor:tint(c.danger,0.08),borderRadius:16,padding:16,borderWidth:1,borderColor:tint(c.danger,0.25)},
   panicNoticeTitle:{color:c.danger,fontSize:12,fontWeight:'800',marginBottom:6},
   panicNoticeBody:{color:c.textDim,fontSize:12,lineHeight:18},
   panicFrame:{borderRadius:22,borderWidth:2,overflow:'hidden'},

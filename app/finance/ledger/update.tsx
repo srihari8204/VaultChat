@@ -13,6 +13,7 @@ import { formatINR, fmtDateTime, num } from '../../../utils/financeFormat';
 import { getLedger, addLedgerUpdate, type LedgerEntry } from '../../../db/ledger';
 import { round2 } from '../../../utils/interest';
 import { ledgerInterest, ledgerInterestSoFar } from '../../../utils/financeRules';
+import { ledgerInterestTypeLabel } from '../../../lib/finance/compounding';
 
 export default function UpdateAmount() {
   const FIN = useFinanceTheme();
@@ -103,6 +104,7 @@ export default function UpdateAmount() {
             <RowLine k="Current remaining" v={formatINR(e.remaining)} bold tone={e.remaining > 0 ? 'warn' : 'good'} />
             {/* The same interest figures as the ledger detail, so the amount
                 received can be judged against them; Remaining excludes interest. */}
+            <RowLine k="Interest type" v={ledgerInterestTypeLabel(e)} />
             {soFar != null && <RowLine k="Interest so far (to today)" v={formatINR(soFar)} />}
             <RowLine k={full.projected ? 'Interest, 1-year projection' : 'Interest to end date'} v={formatINR(full.interest)} />
             <RowLine k="Last updated" v={fmtDateTime(e.last_updated)} />

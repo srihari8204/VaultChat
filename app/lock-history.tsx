@@ -95,6 +95,8 @@ export default function LockHistoryScreen() {
   const [events, setEvents] = useState<LockEventRow[]>([]);
   /** The open session's timeline could not be read (not "no events"). */
   const [eventsFailed, setEventsFailed] = useState(false);
+  /** The open session's events are being read (first open or Retry). */
+  const [eventsLoading, setEventsLoading] = useState(false);
   /** The session whose events are wanted now: a slower read for a session
    *  toggled earlier must not land under this one. */
   const openRef = useRef<number | null>(null);
@@ -112,6 +114,8 @@ export default function LockHistoryScreen() {
   /** The newest reload: an older read (previous filter, range or limit) that
    *  resolves later must not overwrite it. */
   const reqRef = useRef(0);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   const reload = useCallback(async () => {
     const rows = await getSessions(filter, limit);
@@ -129,11 +133,11 @@ export default function LockHistoryScreen() {
   const refresh = useCallback(() => {
     const req = ++reqRef.current;
     return reload().then((d) => {
-      if (req !== reqRef.current) return;
+      if (req !== reqRef.current || !mountedRef.current) return;
       setSessions(d.rows); setStats(d.stat); setTrend(d.tr);
       setLoad('ok'); setRetrying(false);
     }, () => {
-      if (req !== reqRef.current) return;
+      if (req !== reqRef.current || !mountedRef.current) return;
       setLoad('error'); setRetrying(false);
     });
   }, [reload]);
@@ -143,10 +147,12 @@ export default function LockHistoryScreen() {
 
   const loadEvents = async (id: number) => {
     setEventsFailed(false);
+    setEventsLoading(true);
     try {
       const evs = await getEvents(id);
-      if (openRef.current === id) setEvents(evs);
-    } catch { if (openRef.current === id) setEventsFailed(true); }
+      if (openRef.current === id && mountedRef.current) setEvents(evs);
+    } catch { if (openRef.current === id && mountedRef.current) setEventsFailed(true); }
+    finally { if (openRef.current === id && mountedRef.current) setEventsLoading(false); }
   };
 
   const toggle = (id: number) => {
@@ -255,11 +261,11 @@ export default function LockHistoryScreen() {
         </View>
       </View>
       <View style={[st.rowBetween, { marginTop: 10, marginBottom: 6 }]}>
-        <TouchableOpacity onPress={doExport} accessibilityRole="button" accessibilityLabel="Export history" style={st.linkRow}>
+        <TouchableOpacity onPress={doExport} accessibilityRole="button" accessibilityLabel="Export history" style={st.linkBtn}>
           <Ionicons name="share-outline" size={15} color={colors.primary} />
           <Text style={{ color: colors.primary, fontWeight: '600', fontSize: 13 }}>Export</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={doClear} accessibilityRole="button" accessibilityLabel="Delete all history" style={st.linkRow}>
+        <TouchableOpacity onPress={doClear} accessibilityRole="button" accessibilityLabel="Delete all history" style={st.linkBtn}>
           <Ionicons name="trash-outline" size={15} color={colors.danger} />
           <Text style={{ color: colors.danger, fontWeight: '600', fontSize: 13 }}>Delete all</Text>
         </TouchableOpacity>
@@ -294,9 +300,9 @@ export default function LockHistoryScreen() {
         keyExtractor={(s) => String(s.id)}
         ListHeaderComponent={header}
         // Progress for a filter, range or "Show more" reload of a listed history
-        // (the empty list shows its own spinner).
+        // (the empty list shows its own spinner; a Retry shows it in the banner).
         ListFooterComponent={sessions.length > 0 && load === 'loading' ? (
-          <ActivityIndicator color={colors.primary} style={{ marginTop: 16 }} accessibilityLabel="Loading sessions" />
+          retrying ? null : <ActivityIndicator color={colors.primary} style={{ marginTop: 16 }} accessibilityLabel="Loading sessions" />
         ) : sessions.length >= limit ? (
           <TouchableOpacity onPress={() => setLimit((l) => l + PAGE)} accessibilityRole="button"
             accessibilityLabel={`Showing the latest ${sessions.length} sessions. Show more`}
@@ -358,7 +364,11 @@ export default function LockHistoryScreen() {
 
             {open === s.id && (
               <View style={[st.timeline, { borderColor: colors.glassStroke }]}>
-                {eventsFailed && (
+                {eventsLoading && (
+                  <ActivityIndicator size="small" color={colors.primary} style={{ alignSelf: 'flex-start', marginVertical: 4 }}
+                    accessibilityLabel="Loading this session's events" />
+                )}
+                {eventsFailed && !eventsLoading && (
                   <View style={[st.rowBetween, { gap: 10 }]}>
                     <Text style={{ color: colors.textDim, fontSize: 12.5, paddingVertical: 4, flex: 1 }} accessibilityLiveRegion="polite">
                       Couldn’t read this session’s events.
@@ -392,7 +402,7 @@ export default function LockHistoryScreen() {
                     placeholder="Add a note (e.g. “parked at north gate”)…"
                     placeholderTextColor={colors.textFaint}
                     accessibilityLabel="Note for this session"
-                    style={{ flex: 1, borderWidth: 1, borderColor: colors.glassStroke, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5, color: colors.text, fontSize: 12, backgroundColor: colors.glass }}
+                    style={{ flex: 1, minHeight: 44, borderWidth: 1, borderColor: colors.glassStroke, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5, color: colors.text, fontSize: 12, backgroundColor: colors.glass }}
                   />
                   <TouchableOpacity
                     accessibilityRole="button" accessibilityLabel="Save note"
@@ -413,7 +423,7 @@ export default function LockHistoryScreen() {
                   </Text>
                   {/* A visible delete — long-press alone could not be found. */}
                   <TouchableOpacity onPress={() => removeOne(s.id)} accessibilityRole="button"
-                    accessibilityLabel="Delete this session" hitSlop={12} style={st.linkRow}>
+                    accessibilityLabel="Delete this session" hitSlop={12} style={st.linkBtn}>
                     <Ionicons name="trash-outline" size={14} color={colors.danger} />
                     <Text style={{ color: colors.danger, fontWeight: '600', fontSize: 12 }}>Delete</Text>
                   </TouchableOpacity>
@@ -450,6 +460,8 @@ const st = StyleSheet.create({
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   errBanner: { gap: 10, borderWidth: 1, borderRadius: 12, padding: 10, marginBottom: 8 },
   linkRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  /** linkRow as a tap target: 44 tall. */
+  linkBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 44 },
   session: { borderWidth: 1, borderRadius: 12, padding: 12, marginTop: 10 },
   timeline: { borderTopWidth: StyleSheet.hairlineWidth, marginTop: 10, paddingTop: 8 },
   eventRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 },
