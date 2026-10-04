@@ -17,6 +17,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import type { ViewStyle } from 'react-native';
 import { C, S, R, E, white } from '../../lib/games/theme';
+import { CONFETTI } from '../../constants/gamesPalette';
 import { Btn, useType } from './ui';
 import { KeyboardSafe } from '../ui/KeyboardSafe';
 
@@ -97,7 +98,7 @@ export function Toasts({ events }: { events: string[] }) {
 
 /* ── confetti ───────────────────────────────────────────────────────── */
 
-const CONFETTI_COLORS = [C.gold, C.gold2, '#5fe08c', '#6fa9ff', '#ff6b78', '#ffffff'];
+const CONFETTI_COLORS = [C.gold, C.gold2, ...CONFETTI];
 
 /**
  * A win needs a moment.

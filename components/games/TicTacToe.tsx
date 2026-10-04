@@ -28,6 +28,7 @@ import { useRematch } from '../../lib/games/useRematch';
 import { RulesSheet, useFirstTimeRules } from './rules';
 import { useCountdown } from '../../lib/games/useCountdown';
 import { C, S, R, D3, alpha, white, ACCENT } from '../../lib/games/theme';
+import { HIGHLIGHT } from '../../constants/gamesPalette';
 import { playSfx, preloadSfx } from '../../lib/games/sfx';
 import { Toasts, Confetti, VoiceBar } from './feedback';
 import { useTableVoice } from '../../lib/games/useTableVoice';
@@ -372,7 +373,7 @@ function Mark({ cross, size, color }: { cross: boolean; size: number; color: str
   const shape = cross ? <Path d="M 24 24 L 76 76 M 76 24 L 24 76" /> : <Circle cx="50" cy="50" r="29" />;
   return (
     <Svg width={size} height={size} viewBox="0 0 100 100">
-      <Defs><SvgLinear id={gradientId} x1="0" y1="0" x2="1" y2="1"><Stop offset="0" stopColor="#FFFFFF" /><Stop offset="0.35" stopColor={color} /><Stop offset="1" stopColor={color} /></SvgLinear></Defs>
+      <Defs><SvgLinear id={gradientId} x1="0" y1="0" x2="1" y2="1"><Stop offset="0" stopColor={HIGHLIGHT} /><Stop offset="0.35" stopColor={color} /><Stop offset="1" stopColor={color} /></SvgLinear></Defs>
       <G transform="translate(0 3)" fill="none" stroke="rgba(0,0,0,0.45)" strokeWidth="14" strokeLinecap="round">{shape}</G>
       <G fill="none" stroke={`url(#${gradientId})`} strokeWidth="10" strokeLinecap="round">{shape}</G>
     </Svg>

@@ -259,7 +259,7 @@ function VideoCallEngine() {
     // meant an accept that beat the offer ran startOutgoing and rang the caller
     // back; acceptIncoming with a null wire is equally wrong, because it reads
     // that as a dead ratchet and fires a re-key at a healthy session.
-    let wire: any = null;
+    let wire: unknown = null;
     if (incoming && initialOffer) { try { wire = JSON.parse(String(initialOffer)); } catch {} }
     // RE-ENTERING A CALL THAT IS ALREADY RUNNING.
     //
@@ -289,6 +289,10 @@ function VideoCallEngine() {
       setRingingPeer(null);
       setRingScreenPeer(null);
     };
+    // `resume` is read once, on entry: it says whether this mount attaches to
+    // a live session. Re-running on a later change would leave and re-attach
+    // the call, so it is deliberately not a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatId, peerUid, peerName, isIncoming, initialOffer]);
 
   // BACK SHRINKS THE CALL, IT DOES NOT END IT — see voicecall.tsx for why.
@@ -320,7 +324,7 @@ function VideoCallEngine() {
     // being judged against a value that stopped updating the moment the screen
     // appeared. voicecall.tsx has always had this dependency, which is why PiP
     // worked there and not here.
-  }, [status]);
+  }, [status, router]);
 
 
   useEffect(() => { if (status === 'connected') engine.onConnected(); }, [status]);
@@ -347,8 +351,9 @@ function VideoCallEngine() {
 
   const toggleScreenShare = useCallback(() => {
     if (sharing) engine.stopScreenShare().catch(() => {});
-    else engine.startScreenShare().catch((e: any) => {
-      const msg = e?.message ? String(e.message) : String(e);
+    else engine.startScreenShare().catch((e: unknown) => {
+      const m = (e as { message?: unknown } | null)?.message;
+      const msg = m ? String(m) : String(e);
       // warn (not log): console.log is stripped from release builds, and a
       // suppressed alert previously left NO trace anywhere — the failure was
       // invisible in both the UI and logcat.
@@ -616,7 +621,7 @@ function VideoCallLegacy() {
   const cameraTrackRef  = useRef<any>(null);           // camera track held for swap-back
   const meIdRef         = useRef<string>('');
   const ringTimerRef    = useRef<any>(null);
-  const offsRef         = useRef<Array<() => void>>([]);
+  const offsRef         = useRef<(() => void)[]>([]);
   // Connect instant; elapsed time is DERIVED from it by <CallTimer> rather than
   // counted in screen state — see components/call/CallTimer for why that matters
   // most on this screen (the 1 Hz tick used to re-render the <RTCView> subtree).
@@ -656,7 +661,7 @@ function VideoCallLegacy() {
     setState('ended');
     teardown(notify);
     setTimeout(() => router.back(), 200);
-  }, [teardown, router, peerUid, peerName, isIncoming]);
+  }, [teardown, router, chatId, peerUid, peerName, isIncoming]);
 
   // ── call-waiting / hold registration (pause mic + camera on hold) ──
   const mutedRef = useRef(false);
@@ -721,26 +726,26 @@ function VideoCallLegacy() {
         if (!me?.id) throw new Error('Not signed in');
         meIdRef.current = me.id;
 
-        const stream: any = await mediaDevices.getUserMedia({
+        const stream = await mediaDevices.getUserMedia({
           audio: true,
           video: { facingMode: 'user' },
-        } as any);
-        if (cancelled) { stream.getTracks().forEach((t: any) => t.stop()); return; }
+        });
+        if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
         localStreamRef.current = stream;
         setLocalUrl(stream.toURL());
 
         // Cached TURN credentials (lib/iceConfig) — same STUN-only fallback.
         const iceServers = await getIceServers();
 
-        const pc = new RTCPeerConnection({ iceServers: iceServers as any });
+        const pc = new RTCPeerConnection({ iceServers });
         pcRef.current = pc;
-        stream.getTracks().forEach((t: any) => pc.addTrack(t, stream));
+        stream.getTracks().forEach(t => pc.addTrack(t, stream));
 
-        (pc as any).ontrack = (e: any) => {
+        pc.addEventListener('track', (e) => {
           const remoteStream = e.streams?.[0];
           if (remoteStream) setRemoteUrl(remoteStream.toURL());
           if (state !== 'connected') { setState('connected'); startTimer(); }
-        };
+        });
 
         const s = await getSocket();
         const onAnswer = async (data: any) => {
@@ -782,7 +787,7 @@ function VideoCallLegacy() {
         offsRef.current.push(() => s.off('screen_share_start', onPeerShareStart));
         offsRef.current.push(() => s.off('screen_share_stop',  onPeerShareStop));
 
-        (pc as any).onicecandidate = (event: any) => {
+        pc.addEventListener('icecandidate', (event) => {
           // FAIL CLOSED at the one place a candidate reaches the wire (mirrors
           // lib/vaultBeamDirect.ts's emitIce). `enc === false` is callCrypto's
           // plaintext passthrough — sealing with it is a no-op, so the raw
@@ -791,21 +796,21 @@ function VideoCallLegacy() {
           // Not yet sealable: HOLD, do not drop.
           if (!cipherRef.current.enc) { pendingIceRef.current.push(event.candidate); return; }
           s.emit('webrtc_ice', { to: peerUid, from: meIdRef.current, candidate: cipherRef.current.seal(event.candidate) });
-        };
+        });
         // `disconnected` is TRANSIENT and usually recovers — see the same guard
         // in app/voicecall.tsx and lib/call/peer.ts. Only failed/closed end it.
-        (pc as any).onconnectionstatechange = () => {
-          const st = (pc as any).connectionState;
+        pc.onconnectionstatechange = () => {
+          const st = pc.connectionState;
           if (st !== 'disconnected' && disconnectGraceRef.current) {
             clearTimeout(disconnectGraceRef.current);
             disconnectGraceRef.current = null;
           }
           if (st === 'failed' || st === 'closed') { endCall(true); return; }
           if (st === 'disconnected' && !disconnectGraceRef.current) {
-            try { (pc as any).restartIce?.(); } catch {}
+            try { pc.restartIce(); } catch {}
             disconnectGraceRef.current = setTimeout(() => {
               disconnectGraceRef.current = null;
-              if ((pc as any).connectionState === 'disconnected') endCall(true);
+              if (pc.connectionState === 'disconnected') endCall(true);
             }, DISCONNECT_GRACE_MS);
           }
         };
@@ -943,13 +948,13 @@ function VideoCallLegacy() {
       Alert.alert('Screen share', `Not connected yet — no video track to swap (call state: ${state}).`);
       return;
     }
-    if (typeof (mediaDevices as any).getDisplayMedia !== 'function') {
+    if (typeof mediaDevices.getDisplayMedia !== 'function') {
       Alert.alert('Screen share', 'getDisplayMedia is unavailable in this build (react-native-webrtc).');
       return;
     }
     try {
       console.warn('[screenshare] calling getDisplayMedia…');
-      const screen: any = await (mediaDevices as any).getDisplayMedia();   // → system "Start recording?" prompt
+      const screen = await mediaDevices.getDisplayMedia();   // → system "Start recording?" prompt
       console.warn('[screenshare] stream:', !!screen, 'tracks:', screen?.getVideoTracks?.().length);
       const screenTrack = screen?.getVideoTracks?.()[0];
       if (!screenTrack) { screen?.getTracks?.().forEach((t: any) => t.stop()); Alert.alert('Screen share', 'No screen track was returned by capture.'); return; }
@@ -970,7 +975,7 @@ function VideoCallLegacy() {
         Alert.alert('Screen share failed', msg || 'Unknown error');
       }
     }
-  }, [stopScreenShare, state]);
+  }, [stopScreenShare, state, peerUid, chatId]);
 
   const toggleScreenShare = useCallback(() => {
     if (sharing) stopScreenShare(); else startScreenShare();
@@ -1030,7 +1035,7 @@ function VideoCallLegacy() {
           both can share at once, and knowing what I'M broadcasting matters more. */}
       {(sharing || peerSharing) && (
         <View style={S.shareBanner} pointerEvents="none">
-          <Ionicons name="phone-portrait" size={14} color="#fff" />
+          <Ionicons name="phone-portrait" size={14} color={CALL.text} />
           <Text style={S.shareBannerTxt}>
             {sharing
               ? "You're sharing your screen"
@@ -1062,6 +1067,9 @@ function VideoCallLegacy() {
                 style={[S.filterChip, filter === opt.id && S.filterChipActive]}
                 onPress={() => setFilter(opt.id)}
                 activeOpacity={0.8}
+                accessibilityRole="radio"
+                accessibilityLabel={opt.id === 'none' ? 'No tint' : `${opt.label} tint`}
+                accessibilityState={{ checked: filter === opt.id }}
               >
                 <View
                   style={[
@@ -1113,9 +1121,9 @@ function makeStyles() { return StyleSheet.create({
 
   topBar:     { position: 'absolute', left: 24, right: 24, alignItems: 'center', gap: 4 },
   addTopBtn:  { position: 'absolute', left: 16, width: 40, height: 40, borderRadius: 20,
-                alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.16)' },
-  shareBanner:{ position: 'absolute', top: 110, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(157,111,208,0.92)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
-  shareBannerInline: { marginTop: 6, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(157,111,208,0.92)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
+                alignItems: 'center', justifyContent: 'center', backgroundColor: CALL.pill },
+  shareBanner:{ position: 'absolute', top: 110, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: CALL.shareBanner, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
+  shareBannerInline: { marginTop: 6, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: CALL.shareBanner, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
   shareBannerTxt: { color: CALL.text, fontSize: 12, fontWeight: '700' },
   name:       { color: CALL.text, fontSize: 22, fontWeight: '700', ...CALL_TEXT_SHADOW },
   status:     { color: CALL.textDim, fontSize: 14, ...CALL_TEXT_SHADOW },
@@ -1124,14 +1132,14 @@ function makeStyles() { return StyleSheet.create({
   localWrap:  { position: 'absolute', right: 16, width: 110, height: 150, borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: CALL.ctrlBorder },
   local:      { width: '100%', height: '100%' },
 
-  filterStrip:     { position: 'absolute', left: 0, right: 0, backgroundColor: 'rgba(10,10,15,0.7)', paddingVertical: 12 },
+  filterStrip:     { position: 'absolute', left: 0, right: 0, backgroundColor: CALL.stripScrim, paddingVertical: 12 },
   filterRow:       { paddingHorizontal: 16, gap: 12, alignItems: 'center' },
   filterChip:      { alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4 },
   filterChipActive:{ },
   filterSwatch:    { width: 38, height: 38, borderRadius: 19, borderWidth: 2, borderColor: 'transparent' },
-  filterLabel:     { color: 'rgba(255,255,255,0.65)', fontSize: 11, fontWeight: '600' },
+  filterLabel:     { color: CALL.textDim, fontSize: 11, fontWeight: '600' },
   filterLabelActive:{ color: CALL.text },
-  filterNote:      { color: 'rgba(255,255,255,0.7)', fontSize: 12, paddingHorizontal: 16, paddingBottom: 8 },
+  filterNote:      { color: CALL.textDim, fontSize: 12, paddingHorizontal: 16, paddingBottom: 8 },
 
   // flexWrap → the 7 controls fold onto a second centered row on narrow phones
   // instead of overflowing off-screen.

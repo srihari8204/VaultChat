@@ -138,7 +138,7 @@ export const CallChatSheet = memo(CallChatSheetImpl);
 const S = StyleSheet.create({
   backdrop:  { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
   sheet:     { position: 'absolute', left: 0, right: 0, bottom: 0, maxHeight: '72%', minHeight: 280,
-               backgroundColor: '#15151C', borderTopLeftRadius: 18, borderTopRightRadius: 18 },
+               backgroundColor: CALL.sheet, borderTopLeftRadius: 18, borderTopRightRadius: 18 },
   grabber:   { alignSelf: 'center', width: 38, height: 4, borderRadius: 2, marginTop: 8,
                backgroundColor: 'rgba(255,255,255,0.25)' },
   head:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -148,7 +148,7 @@ const S = StyleSheet.create({
   empty:     { color: 'rgba(255,255,255,0.45)', fontSize: 13, textAlign: 'center',
                paddingHorizontal: 30, paddingTop: 40, lineHeight: 19 },
   line:      { maxWidth: '82%', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8, marginVertical: 3 },
-  mine:      { alignSelf: 'flex-end', backgroundColor: '#2F6BFF' },
+  mine:      { alignSelf: 'flex-end', backgroundColor: CALL.chatMine },
   theirs:    { alignSelf: 'flex-start', backgroundColor: 'rgba(255,255,255,0.10)' },
   who:       { color: 'rgba(255,255,255,0.6)', fontSize: 11, fontWeight: '700', marginBottom: 2 },
   text:      { color: CALL.text, fontSize: 15, lineHeight: 20 },

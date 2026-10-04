@@ -1,6 +1,6 @@
 // lib/speedTarget.selftest.ts — npx tsx lib/speedTarget.selftest.ts
 import assert from 'node:assert/strict';
-import { appTarget, cloudflareTarget, probeVerdict, rateLimitMessage, CLOUDFLARE_HOST } from './speedTarget';
+import { appTarget, cloudflareTarget, probeVerdict, rateLimitMessage, CLOUDFLARE_HOST, historyServers, filterHistory, UNRECORDED_SERVER } from './speedTarget';
 
 let n = 0;
 const ok = (cond: boolean, what: string) => { assert.ok(cond, what); n++; };
@@ -22,5 +22,15 @@ ok(rateLimitMessage('120') === 'Too many speed tests. Try again in 2 min.', '12.
 ok(rateLimitMessage('5') === 'Too many speed tests. Try again in 1 min.', '13. under a minute rounds up to 1');
 ok(rateLimitMessage(null) === 'Too many speed tests. Try again later.' && rateLimitMessage('soon') === 'Too many speed tests. Try again later.',
   '14. a missing or unreadable Retry-After still gives a sentence');
+
+// History by server: results from different servers are not comparable.
+const rows = [{ id: 'a', server: 'speed.cloudflare.com' }, { id: 'b', server: 'api.example.com' }, { id: 'c' }, { id: 'd', server: 'speed.cloudflare.com' }];
+ok(JSON.stringify(historyServers(rows)) === JSON.stringify(['speed.cloudflare.com', 'api.example.com', UNRECORDED_SERVER]),
+  '15. servers listed once each, most recent first, old rows under one label');
+ok(historyServers([]).length === 0 && historyServers([{}]).length === 1, '16. empty list has no servers; an old row is still one');
+ok(filterHistory(rows, null).length === 4, '17. no filter keeps every row');
+ok(filterHistory(rows, 'speed.cloudflare.com').map(r => r.id).join() === 'a,d', '18. a filter keeps only that server, in order');
+ok(filterHistory(rows, UNRECORDED_SERVER).map(r => r.id).join() === 'c', '19. rows saved before the server was recorded can be picked');
+ok(filterHistory(rows, 'gone.example').length === 4, '20. a server no longer in the list falls back to all rows, never an empty list');
 
 console.log(`speedTarget.selftest: ${n} assertions passed`);

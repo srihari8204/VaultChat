@@ -26,6 +26,7 @@ import {
   C, S, R, E, D3, T, glass, goldLine, mix, alpha, white, MOTION, AMBIENT, GRAIN,
   GOLD_FILL, GOLD_STOPS, RED_FILL, RED_STOPS, typeScale, ACCENT, type GameAccent,
 } from '../../lib/games/theme';
+import { HIGHLIGHT, VIGNETTE, GOOD_FILL, GOOD_STOPS, BTN_EDGE, ON_FILL, DOCK_DANGER_INK } from '../../constants/gamesPalette';
 import { boardFit } from '../../lib/games/boardFit';
 // The four rooms, for ROOM_BG below. Imported rather than re-typed: a hex
 // copied here is a hex that drifts the first time a room is repainted.
@@ -230,7 +231,7 @@ export function Coin({ size = 14 }: { size?: number }) {
       {/* The inner ring is what makes a disc read as STRUCK rather than drawn. */}
       <Circle cx="12" cy="12" r="7.2" fill="none" stroke={C.gold2} strokeWidth="0.9" opacity="0.55" />
       {/* A single specular highlight. Two would read as plastic. */}
-      <Circle cx="8.6" cy="8.2" r="2.5" fill="#FFFFFF" opacity="0.34" />
+      <Circle cx="8.6" cy="8.2" r="2.5" fill={HIGHLIGHT} opacity="0.34" />
     </Svg>
   );
 }
@@ -310,9 +311,9 @@ export function TableBackground({
           ))}
           {vignette > 0 ? (
             <RadialGradient id="vig" cx="50%" cy="46%" rx="70%" ry="62%">
-              <Stop offset="0" stopColor="#000000" stopOpacity={0} />
-              <Stop offset="0.55" stopColor="#000000" stopOpacity={vignette * 0.24} />
-              <Stop offset="1" stopColor="#000000" stopOpacity={vignette} />
+              <Stop offset="0" stopColor={VIGNETTE} stopOpacity={0} />
+              <Stop offset="0.55" stopColor={VIGNETTE} stopOpacity={vignette * 0.24} />
+              <Stop offset="1" stopColor={VIGNETTE} stopOpacity={vignette} />
             </RadialGradient>
           ) : null}
           <Pattern id="grain" width={GRAIN.size} height={GRAIN.size} patternUnits="userSpaceOnUse">
@@ -346,9 +347,6 @@ export function Panel({ children, style }: { children?: React.ReactNode; style?:
  */
 type BtnKind = 'gold' | 'secondary' | 'danger' | 'good' | 'ghost';
 
-/** Deep felt-green fill for `good`, matched to the table it sits on. */
-const GOOD_FILL = ['#2FA36A', '#15794A', '#0B5233'];
-const GOOD_STOPS = [0, 0.55, 1];
 
 /**
  * The one button.
@@ -412,8 +410,8 @@ export function Btn({
   const isGlass = kind === 'secondary';
   const fill = kind === 'gold' ? GOLD_FILL : kind === 'danger' ? RED_FILL : GOOD_FILL;
   const stops = kind === 'gold' ? GOLD_STOPS : kind === 'danger' ? RED_STOPS : GOOD_STOPS;
-  const fg = kind === 'gold' ? C.onGold : kind === 'danger' || kind === 'good' ? '#fff' : C.text;
-  const border = kind === 'gold' ? C.goldDeep : kind === 'danger' ? '#7d0f2a' : kind === 'good' ? '#0a4a2e' : goldLine[18];
+  const fg = kind === 'gold' ? C.onGold : kind === 'danger' || kind === 'good' ? ON_FILL : C.text;
+  const border = kind === 'gold' ? C.goldDeep : kind === 'danger' ? BTN_EDGE.danger : kind === 'good' ? BTN_EDGE.good : goldLine[18];
 
   const shadow =
     kind === 'gold' ? '0 8px 24px rgba(243,194,69,0.35), ' + D3.rim
@@ -702,7 +700,7 @@ function DockBtn({ a, accent }: { a: DockAction; accent: string }) {
   const aStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
   const lit = a.tone === 'accent';
   const danger = a.tone === 'danger';
-  const fg = lit ? accent : danger ? '#FFB3B8' : C.text;
+  const fg = lit ? accent : danger ? DOCK_DANGER_INK : C.text;
 
   const press = () => {
     if (a.disabled) return;

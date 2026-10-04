@@ -5,7 +5,7 @@
 // non-drag way to move the corner (a chrome button and a screen-reader action).
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Animated, PanResponder } from 'react-native';
+import { Animated, PanResponder, type GestureResponderEvent } from 'react-native';
 import type { EdgeInsets } from 'react-native-safe-area-context';
 import {
   clampPip, clampZoom, clampZoomPan, nextPipCorner, pipSize, ZOOM_MAX,
@@ -81,7 +81,7 @@ export function useStageGestures({
     zoomPan.setValue({ x: 0, y: 0 });
   }, [mainStream, zoom, zoomPan]);
 
-  const stageTouchStart = useCallback((e: any) => {
+  const stageTouchStart = useCallback((e: GestureResponderEvent) => {
     const t = e.nativeEvent.touches;
     touch.current.moved = false;
     touch.current.scale = zoomAt.current.scale;
@@ -97,7 +97,7 @@ export function useStageGestures({
     }
   }, []);
 
-  const stageTouchMove = useCallback((e: any) => {
+  const stageTouchMove = useCallback((e: GestureResponderEvent) => {
     const t = e.nativeEvent.touches;
     if (touch.current.pinch && t.length === 2) {
       const d = Math.hypot(t[1].pageX - t[0].pageX, t[1].pageY - t[0].pageY);

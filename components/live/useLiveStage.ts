@@ -14,6 +14,9 @@ import { getBroadcastToken } from '../../lib/call/sfuToken';
 // it pulls in livekit-client, which needs polyfills installed at import time.
 type SfuSession = Awaited<ReturnType<typeof import('../../lib/golive/room').joinSfuRoom>>;
 
+/** What a log line shows for a caught value: the message when there is one. */
+const errText = (e: unknown): unknown => (e as { message?: unknown } | null)?.message ?? e;
+
 export function useLiveStage({
   id, onStage, privateLive, startCam, startMic, title, setWaiting, setFailed,
 }: {
@@ -306,17 +309,17 @@ export function useLiveStage({
         // moment and belong to the viewer's readiness, not the host's.
         console.warn('[broadcast] host published to', cred.room);
         setWaiting(false);
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (!cancelled && !onStage) {
           // An AUDIENCE member failing to get a seat is not a failure — it is
           // the fallback working. Drop to HLS silently; they still watch.
-          console.warn('[GOLIVE] low-latency seat refused, falling back to HLS —', e?.message ?? e);
+          console.warn('[GOLIVE] low-latency seat refused, falling back to HLS —', errText(e));
           setLlFailed(true);
           setWaiting(false);
           return;
         }
         if (!cancelled) {
-          console.warn('[GOLIVE] could not join the stage —', e?.message ?? e);
+          console.warn('[GOLIVE] could not join the stage —', errText(e));
           // A FULL STAGE LOOKS EXACTLY LIKE A NETWORK FAILURE from here.
           //
           // The seat limit is enforced by the media server (room.max_participants
@@ -326,7 +329,7 @@ export function useLiveStage({
           // possibilities rather than asserting the wrong one. Telling a co-host
           // "nothing was published" when the truth is "the stage is full" sends
           // them to retry forever.
-          setStageFull(/signal connection|could not connect/i.test(String(e?.message ?? '')));
+          setStageFull(/signal connection|could not connect/i.test(String((e as { message?: unknown } | null)?.message ?? '')));
           setFailed(true);
           setWaiting(false);
           // This catch also covers everything AFTER hostSession.current was
@@ -390,14 +393,14 @@ export function useLiveStage({
       // The camera toggle creates and destroys the local track, so the
       // preview URL changes with it — a stale one renders a frozen frame.
       setPreview(m.localPreviewURL(s.room));
-    } catch (e: any) {
+    } catch (e: unknown) {
       // A declined system capture prompt is the common case and is not an
       // error worth an alert — say so only for screen share, where the user
       // just dismissed a dialog and needs to know nothing happened.
       if (what === 'screen') {
         Alert.alert('Screen share', 'Screen sharing did not start. Nothing is being shared.');
       }
-      console.warn('[GOLIVE] toggle', what, '—', e?.message ?? e);
+      console.warn('[GOLIVE] toggle', what, '—', errText(e));
       try { setMedia((await import('../../lib/golive/hostMedia')).hostMediaState(s.room)); } catch {}
     } finally {
       setBusy(null);

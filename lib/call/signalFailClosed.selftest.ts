@@ -40,7 +40,7 @@ const strip = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, '')
   .split('\n').filter(l => !/^\s*(\/\/|\*|\{\/\*)/.test(l)).join('\n');
 const read = (rel: string) => strip(readFileSync(join(ROOT, rel), 'utf8'));
 
-const SCREENS: Array<[string, string]> = [
+const SCREENS: [string, string][] = [
   ['voicecall', read('app/voicecall.tsx')],
   ['videocall', read('app/videocall.tsx')],
   ['group-call-active', read('app/group-call-active.tsx')],
@@ -124,7 +124,9 @@ for (const [name, SRC] of SCREENS) {
 // that the held ones are actually sealed on the way out — otherwise "hold" is
 // just a slower drop.
 for (const [name, SRC] of SCREENS) {
-  const h = SRC.slice(SRC.indexOf('onicecandidate'));
+  // The handler is either the `onicecandidate` attribute or the typed
+  // `addEventListener('icecandidate', …)` form; both put a candidate on the wire.
+  const h = SRC.slice(SRC.search(/onicecandidate|addEventListener\('icecandidate'/));
   const guard = h.slice(0, h.indexOf("emit('webrtc_ice'"));
 
   const returnsEarly = /\.enc\)?\s*\)?\s*return;/.test(guard) || /!c\?\.enc\) return;/.test(guard);

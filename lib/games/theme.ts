@@ -239,8 +239,8 @@ export const glass = {
 export const GOLD_FILL = [C.gold2, C.gold, C.goldDeep] as const;
 export const GOLD_STOPS = [0, 0.55, 1] as const;
 
-/** Danger button fill. */
-export const RED_FILL = ['#fb7185', '#e11d48', '#a30f2e'] as const;
+/** Danger button fill — lives in constants/gamesPalette.ts, where its label contrast is tested. */
+export { RED_FILL } from '../../constants/gamesPalette';
 export const RED_STOPS = [0, 0.6, 1] as const;
 
 /**

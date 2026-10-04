@@ -17,6 +17,7 @@ import {
 } from '../../../lib/games/handGroups';
 import { analyzeHand } from '../../../lib/games/meldHint';
 import type { Card, Zone } from './shared';
+import type { GamesMessage } from '../../../lib/gamesSocket';
 
 /* ── the remembered sort mode ───────────────────────────────────────── */
 //
@@ -45,11 +46,11 @@ export function useHand({ hand, wildRank, live, send, mustDraw, mustDiscard, act
   wildRank: string | null | undefined;
   /** A game frame exists (the arrangement is only sent to a running hand). */
   live: boolean;
-  send: (m: any) => void;
+  send: (m: GamesMessage) => void;
   mustDraw: boolean;
   mustDiscard: boolean;
   /** The one-action-at-a-time lock from the board. */
-  act: (key: string, msg: Record<string, unknown>) => void;
+  act: (key: string, msg: GamesMessage) => void;
   notify: (msg: string) => void;
 }) {
   /* ── the player's arrangement ────────────────────────────────────── */

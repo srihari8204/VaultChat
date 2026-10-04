@@ -70,7 +70,8 @@ export const S = StyleSheet.create({
   badge: {
     position: 'absolute', top: -2, right: -2, minWidth: 17, height: 17,
     borderRadius: 9, paddingHorizontal: 4,
-    alignItems: 'center', justifyContent: 'center', backgroundColor: LIVE.live,
+    // liveDeep, not live: white 10 pt on #EF4444 is 3.76:1, on #B91C1C 6.47:1.
+    alignItems: 'center', justifyContent: 'center', backgroundColor: LIVE.liveDeep,
   },
   badgeText: { color: LIVE.text, fontSize: 10, fontWeight: '800' },
 

@@ -30,6 +30,16 @@ export const CALL = {
   pill:       'rgba(255,255,255,0.16)', // small chip on the dark surface
   swatchIdle:     'rgba(255,255,255,0.05)', // filter swatch with no colour of its own ("None")
   swatchIdleEdge: 'rgba(255,255,255,0.4)',  // its outline, so the empty swatch still shows
+  shareBanner: 'rgba(148,102,203,0.92)', // "You're sharing your screen" banner on video: white 12 pt bold at 4.82:1 over black (was 157,111,208 — 4.33:1)
+  stripScrim: 'rgba(10,10,15,0.7)',   // behind the video Tint strip, so its labels read over any frame
+  // The in-app "call in progress" strip (components/CallBar.tsx). It carries
+  // white 14 pt names and 12 pt hints, so it is a deep green that holds them to
+  // AA (6.58:1 white, 4.84:1 for the 80% hint). The old #1F9D55 was 3.49:1.
+  bar:        '#0F6B3E',
+  barHint:    'rgba(255,255,255,0.8)',
+  // In-call chat sheet (components/call/CallChatSheet.tsx).
+  sheet:      '#15151C',              // sheet surface on the dark call screen
+  chatMine:   '#2B66FA',              // my message bubble: white 15 pt text at 4.79:1 (was #2F6BFF, 4.499:1)
 };
 
 // Text over live video needs a shadow to stay legible on bright frames.

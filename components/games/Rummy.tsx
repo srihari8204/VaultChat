@@ -48,6 +48,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { useGameSocket, type AutoStart } from '../../lib/games/useGameSocket';
+import type { GamesMessage } from '../../lib/gamesSocket';
 import { TableBackground, Btn, useType, useReduceMotion, useAnnounce } from './ui';
 import { useCountdown } from '../../lib/games/useCountdown';
 import { useRematch } from '../../lib/games/useRematch';
@@ -386,10 +387,10 @@ export default function Rummy({ tableId = '', auto, autoBot, seat }: { tableId?:
     return () => clearTimeout(id);
   }, [pending]);
 
-  const act = useCallback((key: string, msg: Record<string, unknown>) => {
+  const act = useCallback((key: string, msg: GamesMessage) => {
     if (pending) return;
     setPending(key);
-    send(msg as any);
+    send(msg);
   }, [pending, send]);
   // Dropping forfeits the hand, and DROP sits beside Discard on the bar, so it
   // asks first — the same way Declare does.

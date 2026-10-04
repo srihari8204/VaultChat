@@ -133,7 +133,7 @@ A(/pickFit\(stageFrame\?\.width, stageFrame\?\.height, win\.width, win\.height, 
 A(/const fill = fillPref \?\? \(autoFit !== null \? autoFit === 'cover' : !lowLatency\)/.test(code),
   '21b. with no frame size to read — HLS — it still fills, because that canvas is landscape by construction');
 A(/setStageDims/.test(code) && /stageDims\[mainStream\]/.test(code)
-  && /onReadyForDisplay=\{\(e: any\) =>/.test(code),
+  && /onReadyForDisplay=\{\(e\) =>/.test(code),
   '21c. the frame size is READ — off the publication on WebRTC, off the player on HLS — never guessed');
 // A HOST WHO TURNS THEIR PHONE. The publication's dimensions are captured once,
 // at subscribe; the renderer's keep coming. Measured on device 2026-08-25: a

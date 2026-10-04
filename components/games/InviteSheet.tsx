@@ -60,7 +60,7 @@ export default function InviteSheet() {
       const ok = await sendGameInvite(chat.id, target.game, target.room);
       if (!ok) Alert.alert('No table to share', 'This table has no code to send yet.');
       else Alert.alert('Invite sent', `The card is in your chat with ${chatLabel(chat)}.`);
-    } catch (e: any) {
+    } catch (e: unknown) {
       // THE INVITE STILL HAS TO REACH THEM.
       //
       // A server that will not carry the card is not a reason to leave the
@@ -68,7 +68,7 @@ export default function InviteSheet() {
       // send a link. This is also the exact state of production right now — the
       // card's message type is refused with "invalid type" until its migration
       // is applied — so without this fallback the button is simply broken.
-      const msg = String(e?.message ?? '');
+      const msg = String((e as { message?: unknown } | null)?.message ?? '');
       Alert.alert(
         'Card could not be sent',
         `${msg || 'The server refused it.'}

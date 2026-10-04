@@ -62,3 +62,24 @@ export function rateLimitMessage(retryAfter: string | null): string {
   const min = Math.max(1, Math.ceil(s / 60));
   return `Too many speed tests. Try again in ${min} min.`;
 }
+
+/** The server label a history row is filed under; rows saved before it was recorded share one. */
+export const UNRECORDED_SERVER = 'Server not recorded';
+export const historyServer = (row: { server?: string }): string => row.server || UNRECORDED_SERVER;
+
+/**
+ * The servers a history list was measured by, most recent first. Results from
+ * different servers are not comparable, so the screen offers these as a filter
+ * once there is more than one.
+ */
+export function historyServers(rows: { server?: string }[]): string[] {
+  const out: string[] = [];
+  for (const r of rows) { const s = historyServer(r); if (!out.includes(s)) out.push(s); }
+  return out;
+}
+
+/** Rows measured by `server`, or every row when `server` is null or no longer present. */
+export function filterHistory<T extends { server?: string }>(rows: T[], server: string | null): T[] {
+  if (server === null || !rows.some(r => historyServer(r) === server)) return rows;
+  return rows.filter(r => historyServer(r) === server);
+}

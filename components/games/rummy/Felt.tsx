@@ -270,8 +270,10 @@ export function TablePanel({
       { position: 'absolute', left: S[1], top: '28%', width: Math.max(88, width), padding: S[2], gap: 5 },
     ]}>
       {rows.map(([k, v]) => (
-        <View key={k}>
-          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={{ color: INK_DIM, fontSize: 9.5, fontWeight: '800', letterSpacing: 0.3 }}>{k}</Text>
+        // One stop per fact ("Players: 3 / 6"), not a key and a value read apart.
+        <View key={k} accessible accessibilityLabel={`${k} ${v}`}>
+          {/* 10.5 where it fits; the shrink floor (8.4) is still above the old 9.5 × 0.8. */}
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={{ color: INK_DIM, fontSize: 10.5, fontWeight: '800', letterSpacing: 0.3 }}>{k}</Text>
           <Text numberOfLines={1} style={{ color: INK_ON_FELT, fontSize: 11, fontWeight: '800' }}>{v}</Text>
         </View>
       ))}

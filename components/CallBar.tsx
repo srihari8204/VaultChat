@@ -139,7 +139,7 @@ const styles = StyleSheet.create({
   wrap: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1F9D55',
+    backgroundColor: CALL.bar,
     // paddingTop is applied at the element from live insets - see above.
     paddingBottom: 8,
     paddingHorizontal: 14,
@@ -155,7 +155,7 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   cta: {
-    color: 'rgba(255,255,255,0.75)',
+    color: CALL.barHint,
     fontSize: 12,
     marginLeft: 'auto',
     flexShrink: 0,

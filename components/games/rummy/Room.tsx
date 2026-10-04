@@ -9,6 +9,7 @@ import { TableBackground, Panel, Btn, PlayerRow, useType } from '../ui';
 import { Toasts, VoiceSheet } from '../feedback';
 import type { TableVoice } from '../../../lib/games/useTableVoice';
 import type { RummyMatch } from '../../../lib/games/useRummyMatch';
+import type { GamesMessage } from '../../../lib/gamesSocket';
 import { VARIANTS, variantLabel, standings, progressLabel } from '../../../lib/games/match';
 import { allowsBots } from '../../../lib/games/rummyTable';
 import { openInvite, tableLink } from '../../../lib/games/invite';
@@ -168,7 +169,7 @@ export function Room({
   voice: TableVoice;
   voiceOpen: boolean;
   setVoiceOpen: (v: boolean) => void;
-  onSend: (m: any) => void;
+  onSend: (m: GamesMessage) => void;
   onLeave: () => void;
   feed: string[];
   notify: (m: string) => void;

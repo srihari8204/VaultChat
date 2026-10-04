@@ -20,6 +20,7 @@ import { ActivityIndicator, Alert, Pressable, View } from 'react-native';
 import { Sheet } from './feedback';
 import { Btn, useType } from './ui';
 import { S, R, mix, goldLine } from '../../lib/games/theme';
+import { HIGHLIGHT } from '../../constants/gamesPalette';
 import { readHistory, clearHistory, whenLabel, MOVES_KEPT, type GameRecord } from '../../lib/games/history';
 import { gameName } from '../../lib/games/inviteLink';
 
@@ -43,7 +44,7 @@ function Row({ rec }: { rec: GameRecord }) {
   return (
     <View style={{
       borderRadius: R[2], borderWidth: 1, borderColor: C.light ? C.line : goldLine[14],
-      backgroundColor: mix(C.panel2, 88, '#ffffff'), padding: S[3], gap: 4,
+      backgroundColor: mix(C.panel2, 88, HIGHLIGHT), padding: S[3], gap: 4,
     }}>
       <Pressable
         onPress={() => canOpen && setOpen(o => !o)}

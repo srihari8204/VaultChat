@@ -609,7 +609,7 @@ export default function LiveViewScreen() {
           // orientation rule deliberately ignores it. The day the composite is
           // made to match the publisher, this line starts telling the truth and
           // public behaves exactly like private with no further change.
-          onReadyForDisplay={(e: any) => {
+          onReadyForDisplay={(e) => {
             const n = e?.naturalSize;
             if (!n || !(n.width > 0) || !(n.height > 0) || !b?.hlsUrl) return;
             // `orientation` is the player's own word for whether it had to

@@ -114,7 +114,7 @@ export default function IncomingCallScreen() {
     let dead = false;
     (async () => {
       const s = await getSocket();
-      const onOffer = (d: any) => {
+      const onOffer = (d: { from?: string; fromUid?: string; offer?: unknown } | null) => {
         const from = d?.from ?? d?.fromUid;
         if (from !== peerUid || !d?.offer) return;
         const next = JSON.stringify(d.offer);
@@ -149,7 +149,7 @@ export default function IncomingCallScreen() {
     let dead = false;
     (async () => {
       const s = await getSocket();
-      const onEnd = (data: any) => {
+      const onEnd = (data: { from?: string; fromUid?: string } | null) => {
         if (decidedRef.current) return;
         if (data?.from === peerUid || data?.fromUid === peerUid) {
           decidedRef.current = true;

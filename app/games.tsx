@@ -33,6 +33,7 @@ import { useQuickMatch } from '../lib/games/useQuickMatch';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { TableBackground, Panel, Btn, useType, GameGlyph, Coin, GameTopBar, GameChrome, useAnnounce } from '../components/games/ui';
 import { C, S, R, E, white, alpha, ACCENT } from '../lib/games/theme';
+import { LIGHT_HUB } from '../constants/gamesPalette';
 import { playSfx, setSoundEnabled, soundEnabled } from '../lib/games/sfx';
 import { useWallet } from '../lib/games/useWallet';
 import { useLiveTables, agoLabel } from '../lib/games/useLiveTables';
@@ -494,7 +495,7 @@ function SoundToggle() {
 function GameCard({ entry, onOpen, onQuick }: { entry: Entry; onOpen: () => void; onQuick: () => void }) {
   const C = useGamePalette();
   const t = useType();
-  const accent = C.light ? { chess: '#05603A', rummy: '#00695C', ludo: '#925B00', tictactoe: '#1552E0' }[entry.kind] : ACCENT[entry.kind];
+  const accent = C.light ? LIGHT_HUB.accent[entry.kind] : ACCENT[entry.kind];
   const scale = useSharedValue(1);
   const a = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
 

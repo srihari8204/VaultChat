@@ -146,7 +146,7 @@ function VoiceCallEngine() {
     // requestPeerRekey, which would reset a perfectly healthy session over a
     // race. The caller re-emits the offer every 3s, so the honest move is to go
     // back to the ring and let it arrive.
-    let wire: any = null;
+    let wire: unknown = null;
     if (incoming && initialOffer) { try { wire = JSON.parse(String(initialOffer)); } catch {} }
     // RE-ENTERING A CALL THAT IS ALREADY RUNNING.
     //
@@ -179,6 +179,10 @@ function VoiceCallEngine() {
       setRingingPeer(null);
       setRingScreenPeer(null);
     };
+    // `resume` is read once, on entry: it says whether this mount attaches to
+    // a live session. Re-running on a later change would leave and re-attach
+    // the call, so it is deliberately not a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatId, peerUid, peerName, isIncoming, initialOffer]);
 
   // BACK SHRINKS THE CALL, IT DOES NOT END IT.
@@ -209,7 +213,7 @@ function VoiceCallEngine() {
       return true;
     });
     return () => sub.remove();
-  }, [status]);
+  }, [status, router]);
 
   // Foreground service + clear the OS ring, once, on connect.
   useEffect(() => { if (status === 'connected') engine.onConnected(); }, [status]);
@@ -398,7 +402,7 @@ function VoiceCallLegacy() {
   const localStreamRef  = useRef<any>(null);
   const meIdRef         = useRef<string>('');
   const ringTimerRef    = useRef<any>(null);
-  const offsRef         = useRef<Array<() => void>>([]);
+  const offsRef         = useRef<(() => void)[]>([]);
   // Epoch ms the call connected. The elapsed time is DERIVED from this (see
   // components/call/CallTimer) instead of being counted in screen state, so the
   // 1 Hz tick no longer re-renders this whole screen — and so the duration stays
@@ -444,7 +448,7 @@ function VoiceCallLegacy() {
     setState('ended');
     teardown(notify);
     setTimeout(() => router.back(), 200);
-  }, [teardown, router, peerUid, peerName, isIncoming]);
+  }, [teardown, router, chatId, peerUid, peerName, isIncoming]);
 
   // ── call-waiting / hold registration ───────────────────────
   // Lets a call arriving while we're busy become "call waiting": the incoming
@@ -528,11 +532,11 @@ function VoiceCallLegacy() {
         const iceServers = await getIceServers();
 
         // 5. Build peer connection
-        const pc = new RTCPeerConnection({ iceServers: iceServers as any });
+        const pc = new RTCPeerConnection({ iceServers });
         pcRef.current = pc;
         stream.getTracks().forEach((track: any) => pc.addTrack(track, stream));
 
-        (pc as any).ontrack = (e: any) => {
+        pc.ontrack = () => {
           // Remote audio plays automatically on native; no <RTCView> needed for audio.
           if (state !== 'connected') {
             setState('connected');
@@ -569,7 +573,7 @@ function VoiceCallLegacy() {
         offsRef.current.push(() => s.off('webrtc_ice',    onIce));
         offsRef.current.push(() => s.off('webrtc_end',    onEnd));
 
-        (pc as any).onicecandidate = (event: any) => {
+        pc.addEventListener('icecandidate', (event) => {
           // FAIL CLOSED at the one place a candidate reaches the wire (mirrors
           // lib/vaultBeamDirect.ts's emitIce). `enc === false` is callCrypto's
           // plaintext passthrough — sealing with it is a no-op, so the raw
@@ -578,24 +582,24 @@ function VoiceCallLegacy() {
           // Not yet sealable: HOLD, do not drop. See pendingIceRef.
           if (!cipherRef.current.enc) { pendingIceRef.current.push(event.candidate); return; }
           s.emit('webrtc_ice', { to: peerUid, from: meIdRef.current, candidate: cipherRef.current.seal(event.candidate) });
-        };
+        });
 
         // `disconnected` is TRANSIENT — a Wi-Fi→LTE handover, a lift, a tunnel —
         // and usually recovers on its own. Ending the call on it drops a call on
         // every blip. Only `failed`/`closed` are terminal; `disconnected` gets an
         // ICE restart and a grace window first. (Mirrors lib/call/peer.ts.)
-        (pc as any).onconnectionstatechange = () => {
-          const st = (pc as any).connectionState;
+        pc.onconnectionstatechange = () => {
+          const st = pc.connectionState;
           if (st !== 'disconnected' && disconnectGraceRef.current) {
             clearTimeout(disconnectGraceRef.current);
             disconnectGraceRef.current = null;
           }
           if (st === 'failed' || st === 'closed') { endCall(true); return; }
           if (st === 'disconnected' && !disconnectGraceRef.current) {
-            try { (pc as any).restartIce?.(); } catch {}
+            try { pc.restartIce(); } catch {}
             disconnectGraceRef.current = setTimeout(() => {
               disconnectGraceRef.current = null;
-              if ((pc as any).connectionState === 'disconnected') endCall(true);
+              if (pc.connectionState === 'disconnected') endCall(true);
             }, DISCONNECT_GRACE_MS);
           }
         };
@@ -749,7 +753,7 @@ function VoiceCallLegacy() {
 function makeStyles() { return StyleSheet.create({
   screen:     { flex: 1, backgroundColor: CALL.bg },
   addTopBtn:  { position: 'absolute', left: 16, zIndex: 5, width: 40, height: 40, borderRadius: 20,
-                alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.16)' },
+                alignItems: 'center', justifyContent: 'center', backgroundColor: CALL.pill },
   body:       { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24, gap: 16 },
   avatarWrap: { marginBottom: 16 },
   avatar:     { width: 140, height: 140, borderRadius: 70, backgroundColor: CALL.active, alignItems: 'center', justifyContent: 'center', shadowColor: CALL.active, shadowOpacity: 0.6, shadowRadius: 30 },

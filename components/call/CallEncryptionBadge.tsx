@@ -68,7 +68,7 @@ export function protectionFor(
   return links.every(c => !!c && c.enc === true) ? 'e2ee' : 'transport';
 }
 
-const COPY: Record<CallProtection, { icon: any; label: string }> = {
+const COPY: Record<CallProtection, { icon: React.ComponentProps<typeof Ionicons>['name']; label: string }> = {
   e2ee:      { icon: 'lock-closed', label: 'End-to-end encrypted' },
   transport: { icon: 'shield-checkmark-outline', label: 'Encrypted in transit' },
 };

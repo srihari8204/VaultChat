@@ -11,7 +11,7 @@
 // encrypted", so if an encrypted broadcast mode ever ships this screen tells
 // the truth without being edited.
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, ScrollView, TouchableOpacity, StyleSheet, TextInput,
   ActivityIndicator, Alert, RefreshControl,
@@ -21,7 +21,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useColors } from '../lib/theme';
 import { AppText } from '../components/ui/Text';
-import { SPACING, RADIUS } from '../constants/theme';
+import { SPACING, RADIUS, DANGER_GRADIENT_CTA, GRADIENT_INK, type Palette } from '../constants/theme';
 import {
   listLive, startBroadcast, inviteCodeFrom, type Broadcast, type BroadcastVisibility,
 } from '../lib/broadcast';
@@ -29,6 +29,7 @@ import { rememberHostPasscode } from '../lib/golive/hostPasscodeMemo';
 
 export default function LiveScreen() {
   const colors = useColors();
+  const t = useMemo(() => makeThemed(colors), [colors]);
   const router = useRouter();
   const [live, setLive] = useState<Broadcast[]>([]);
   const [loading, setLoading] = useState(true);
@@ -152,7 +153,7 @@ export default function LiveScreen() {
   };
 
   return (
-    <View style={[S.root, { backgroundColor: colors.surfaceSolid }]}>
+    <View style={[S.root, t.solid]}>
       <Stack.Screen options={{
         headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */  title: 'Live' }} />
 
@@ -161,15 +162,15 @@ export default function LiveScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.textDim} />}
       >
         {/* Said plainly, and BEFORE the go-live button. */}
-        <View style={[S.notice, { backgroundColor: colors.glassSoft }]}>
+        <View style={[S.notice, t.glass]}>
           <Ionicons name="eye-outline" size={18} color={colors.textDim} />
           {/* Matches the visibility being composed: "public" under the Private
               option contradicted the hint right below it. */}
-          <AppText style={[S.noticeText, { color: colors.textDim }]}>
+          <AppText style={[S.noticeText, t.dim]}>
             {composing && visibility === 'private'
               ? 'Private broadcasts reach only the people you invite, but are '
               : 'Broadcasts are public and '}
-            <AppText style={{ color: colors.text, fontWeight: '700' }}>not
+            <AppText style={t.strong}>not
             end-to-end encrypted</AppText>.{composing && visibility === 'private'
               ? ' Anyone holding your invitation can watch.'
               : ' Anyone with the link can watch.'} Your calls and messages are unaffected.
@@ -177,14 +178,14 @@ export default function LiveScreen() {
         </View>
 
         {composing ? (
-          <View style={[S.card, { backgroundColor: colors.glassSoft }]}>
+          <View style={[S.card, t.glass]}>
             <TextInput
               value={title}
               onChangeText={setTitle}
               placeholder="What are you streaming?"
               accessibilityLabel="Broadcast title"
               placeholderTextColor={colors.textFaint}
-              style={[S.input, { color: colors.text }]}
+              style={[S.input, t.text]}
               maxLength={200}
               autoFocus
             />
@@ -199,10 +200,7 @@ export default function LiveScreen() {
                   <TouchableOpacity
                     key={v}
                     onPress={() => setVisibility(v)}
-                    style={[
-                      S.segmentBtn,
-                      { backgroundColor: on ? colors.surfaceSolid : 'transparent' },
-                    ]}
+                    style={[S.segmentBtn, on && t.solid]}
                     activeOpacity={0.85}
                     accessibilityRole="radio"
                     accessibilityState={{ checked: on }}
@@ -220,7 +218,7 @@ export default function LiveScreen() {
                 );
               })}
             </View>
-            <AppText style={[S.segmentHint, { color: colors.textFaint }]}>
+            <AppText style={[S.segmentHint, t.faint]}>
               {visibility === 'public'
                 ? 'Anyone on crazzychat can find and watch this.'
                 : 'Only people you invite can watch. It will not appear in Live now.'}
@@ -244,12 +242,12 @@ export default function LiveScreen() {
                   placeholder="Passcode (optional)"
                   accessibilityLabel="Passcode, optional"
                   placeholderTextColor={colors.textFaint}
-                  style={[S.input, { color: colors.text }]}
+                  style={[S.input, t.text]}
                   maxLength={64}
                   autoCapitalize="none"
                   autoCorrect={false}
                 />
-                <AppText style={[S.segmentHint, { color: colors.textFaint }]}>
+                <AppText style={[S.segmentHint, t.faint]}>
                   {passcode.trim()
                     ? 'Viewers must enter this as well as opening your link. Send it separately — a forwarded link alone will not get anyone in.'
                     : 'Add one if you want the link to be useless on its own. You cannot read it back later, so keep your own copy.'}
@@ -263,7 +261,7 @@ export default function LiveScreen() {
               placeholder="Description (optional)"
               accessibilityLabel="Description, optional"
               placeholderTextColor={colors.textFaint}
-              style={[S.input, S.inputDesc, { color: colors.text }]}
+              style={[S.input, S.inputDesc, t.text]}
               maxLength={1000}
               multiline
             />
@@ -276,7 +274,7 @@ export default function LiveScreen() {
                   <TouchableOpacity
                     key={key}
                     onPress={() => set(v => !v)}
-                    style={[S.device, { backgroundColor: colors.surfaceSolid }]}
+                    style={[S.device, t.solid]}
                     accessibilityRole="switch"
                     accessibilityState={{ checked: on }}
                     accessibilityLabel={label}
@@ -287,7 +285,7 @@ export default function LiveScreen() {
                       size={16}
                       color={on ? colors.text : colors.textFaint}
                     />
-                    <AppText style={{ color: on ? colors.text : colors.textFaint, fontSize: 13 }}>
+                    <AppText style={[S.deviceText, on ? t.text : t.faint]}>
                       {label} {on ? 'on' : 'off'}
                     </AppText>
                   </TouchableOpacity>
@@ -298,20 +296,23 @@ export default function LiveScreen() {
               <TouchableOpacity
                 // The passcode is cleared too: it is the one secret on this form.
                 onPress={() => { setComposing(false); setTitle(''); setDesc(''); setPasscode(''); }}
-                style={[S.btn, { backgroundColor: colors.surfaceSolid }]}
+                style={[S.btn, t.solid]}
                 accessibilityRole="button"
               >
-                <AppText style={{ color: colors.textDim }}>Cancel</AppText>
+                <AppText style={t.dim}>Cancel</AppText>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={goLive} disabled={starting} style={S.btnPrimary}
                 accessibilityRole="button" accessibilityLabel="Go live now"
                 accessibilityState={{ disabled: starting, busy: starting }}
               >
-                {/* The "on air" red gradient is a fixed brand mark for Go Live in both themes. */}
-                <LinearGradient colors={['#EF4444', '#B91C1C']} style={S.btnGrad}>
+                {/* The "on air" red is the app's danger CTA gradient in both
+                    themes: it is AA under its white label at the lightest stop
+                    (constants/theme.ts DANGER_GRADIENT_CTA), which the old
+                    #EF4444 top stop (3.76:1) was not. */}
+                <LinearGradient colors={DANGER_GRADIENT_CTA} style={S.btnGrad}>
                   {starting
-                    ? <ActivityIndicator color="#fff" size="small" />
+                    ? <ActivityIndicator color={GRADIENT_INK} size="small" />
                     : <AppText style={S.btnPrimaryText}>Go live</AppText>}
                 </LinearGradient>
               </TouchableOpacity>
@@ -320,8 +321,8 @@ export default function LiveScreen() {
         ) : (
           <>
             <TouchableOpacity onPress={() => setComposing(true)} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel="Go live">
-              <LinearGradient colors={['#EF4444', '#B91C1C']} style={S.goLive}>
-                <Ionicons name="radio-outline" size={22} color="#fff" />
+              <LinearGradient colors={DANGER_GRADIENT_CTA} style={S.goLive}>
+                <Ionicons name="radio-outline" size={22} color={GRADIENT_INK} />
                 <AppText style={S.goLiveText}>Go live</AppText>
               </LinearGradient>
             </TouchableOpacity>
@@ -338,9 +339,9 @@ export default function LiveScreen() {
                 this asks for; the passcode and your name are then asked for on
                 the join screen itself. */}
             {joinOpen ? (
-              <View style={[S.card, { backgroundColor: colors.glassSoft, marginTop: SPACING.md }]}>
-                <AppText style={[S.title, { color: colors.text }]}>Join a private live</AppText>
-                <AppText style={[S.segmentHint, { color: colors.textFaint }]}>
+              <View style={[S.card, S.joinCard, t.glass]}>
+                <AppText style={[S.title, t.text]}>Join a private live</AppText>
+                <AppText style={[S.segmentHint, t.faint]}>
                   Paste the invitation link the host sent you. You will be asked for
                   your name and the passcode next.
                 </AppText>
@@ -350,7 +351,7 @@ export default function LiveScreen() {
                   placeholder="Paste invitation link or code"
                   accessibilityLabel="Invitation link or code"
                   placeholderTextColor={colors.textFaint}
-                  style={[S.input, { color: colors.text }]}
+                  style={[S.input, t.text]}
                   autoCapitalize="none"
                   autoCorrect={false}
                   onSubmitEditing={goJoin}
@@ -358,22 +359,22 @@ export default function LiveScreen() {
                 />
                 <View style={S.row}>
                   <TouchableOpacity
-                    style={[S.btn, { backgroundColor: colors.glassSoft }]}
+                    style={[S.btn, t.glass]}
                     onPress={() => { setJoinOpen(false); setJoinCode(''); }}
                     activeOpacity={0.85}
                     accessibilityRole="button"
                   >
-                    <AppText style={{ color: colors.textDim, fontWeight: '600' }}>Cancel</AppText>
+                    <AppText style={[t.dim, S.w600]}>Cancel</AppText>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={[S.btn, { backgroundColor: colors.primary, opacity: joinCode.trim() ? 1 : 0.5 }]}
+                    style={[S.btn, t.primary, !joinCode.trim() && S.dim]}
                     onPress={goJoin}
                     disabled={!joinCode.trim()}
                     activeOpacity={0.85}
                     accessibilityRole="button"
                     accessibilityState={{ disabled: !joinCode.trim() }}
                   >
-                    <AppText style={{ color: colors.onPrimary, fontWeight: '700' }}>Continue</AppText>
+                    <AppText style={t.onPrimary}>Continue</AppText>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -381,17 +382,17 @@ export default function LiveScreen() {
               <TouchableOpacity
                 onPress={() => setJoinOpen(true)}
                 activeOpacity={0.85}
-                style={[S.joinBtn, { borderColor: colors.glassStroke }]}
+                style={[S.joinBtn, t.stroke]}
                 accessibilityRole="button"
               >
                 <Ionicons name="lock-closed-outline" size={18} color={colors.textDim} />
-                <AppText style={{ color: colors.text, fontWeight: '600' }}>Join a private live</AppText>
+                <AppText style={[t.text, S.w600]}>Join a private live</AppText>
               </TouchableOpacity>
             )}
           </>
         )}
 
-        <AppText style={[S.section, { color: colors.textDim }]} accessibilityRole="header">LIVE NOW</AppText>
+        <AppText style={[S.section, t.dim]} accessibilityRole="header">LIVE NOW</AppText>
 
         {/* A failed refresh over a list already shown keeps the list, and says
             it may be out of date (the empty case has its own state below). */}
@@ -401,28 +402,28 @@ export default function LiveScreen() {
             accessibilityLabel="Could not refresh live broadcasts. This list may be out of date. Try again"
           >
             <Ionicons name="cloud-offline-outline" size={14} color={colors.danger} />
-            <AppText style={[S.staleText, { color: colors.textDim }]}>
-              Couldn’t refresh — this list may be out of date. <AppText style={{ color: colors.primary, fontWeight: '600' }}>Try again</AppText>
+            <AppText style={[S.staleText, t.dim]}>
+              Couldn’t refresh — this list may be out of date. <AppText style={[t.link, S.w600]}>Try again</AppText>
             </AppText>
           </TouchableOpacity>
         )}
 
         {loading ? (
-          <ActivityIndicator style={{ marginTop: SPACING.xl }} color={colors.textDim} />
+          <ActivityIndicator style={S.spinner} color={colors.textDim} />
         ) : loadError && live.length === 0 ? (
           <View style={S.empty}>
             <Ionicons name="cloud-offline-outline" size={34} color={colors.textFaint} />
-            <AppText style={[S.emptyText, { color: colors.textDim }]}>
+            <AppText style={[S.emptyText, t.dim]}>
               Could not load live broadcasts. Check your connection.
             </AppText>
-            <TouchableOpacity onPress={refresh} accessibilityRole="button" style={[S.joinBtn, { borderColor: colors.glassStroke, paddingHorizontal: SPACING.xl }]}>
-              <AppText style={{ color: colors.text, fontWeight: '600' }}>Try again</AppText>
+            <TouchableOpacity onPress={refresh} accessibilityRole="button" style={[S.joinBtn, S.retryBtn, t.stroke]}>
+              <AppText style={[t.text, S.w600]}>Try again</AppText>
             </TouchableOpacity>
           </View>
         ) : live.length === 0 ? (
           <View style={S.empty}>
             <Ionicons name="videocam-off-outline" size={34} color={colors.textFaint} />
-            <AppText style={[S.emptyText, { color: colors.textFaint }]}>
+            <AppText style={[S.emptyText, t.faint]}>
               Nobody is live right now
             </AppText>
           </View>
@@ -431,14 +432,14 @@ export default function LiveScreen() {
             <TouchableOpacity
               key={b.id}
               onPress={() => router.push({ pathname: '/live-view', params: { id: b.id } })}
-              style={[S.card, { backgroundColor: colors.glassSoft }]}
+              style={[S.card, t.glass]}
               activeOpacity={0.85}
               accessibilityRole="button"
               accessibilityLabel={`Watch ${b.title || 'Untitled broadcast'}, live${b.visibility === 'private' ? ', private' : ''}, ${b.viewerCount} watching`}
             >
               <View style={S.cardTop}>
-                <View style={S.liveDot} />
-                <AppText style={[S.liveLabel, { color: colors.danger }]}>LIVE</AppText>
+                <View style={[S.liveDot, t.liveDot]} />
+                <AppText style={[S.liveLabel, t.danger]}>LIVE</AppText>
                 {/* A private stream only reaches this list for its host and the
                     people invited to it, so the badge explains WHY it is here
                     rather than flagging something unusual. From the server's
@@ -446,16 +447,16 @@ export default function LiveScreen() {
                 {b.visibility === 'private' && (
                   <Ionicons name="lock-closed" size={11} color={colors.textFaint} />
                 )}
-                <AppText style={[S.viewers, { color: colors.textFaint }]}>
+                <AppText style={[S.viewers, t.faint]}>
                   {b.viewerCount} watching
                 </AppText>
               </View>
-              <AppText style={[S.title, { color: colors.text }]} numberOfLines={2}>
+              <AppText style={[S.title, t.text]} numberOfLines={2}>
                 {b.title || 'Untitled broadcast'}
               </AppText>
               {/* Rendered from the server's value, never assumed. */}
               {!b.e2ee && (
-                <AppText style={[S.notEncrypted, { color: colors.textFaint }]}>
+                <AppText style={[S.notEncrypted, t.faint]}>
                   Not end-to-end encrypted
                 </AppText>
               )}
@@ -479,7 +480,7 @@ const S = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     gap: SPACING.sm, paddingVertical: SPACING.lg, borderRadius: RADIUS.lg,
   },
-  goLiveText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  goLiveText: { color: GRADIENT_INK, fontSize: 16, fontWeight: '700' },
   joinBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     gap: SPACING.sm, paddingVertical: SPACING.md, borderRadius: RADIUS.md,
@@ -487,10 +488,10 @@ const S = StyleSheet.create({
   },
   card: { padding: SPACING.lg, borderRadius: RADIUS.lg, marginBottom: SPACING.md },
   cardTop: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, marginBottom: SPACING.sm },
-  // The LIVE dot/label are the same fixed "on air" red as the Go Live gradient.
-  liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#EF4444' },
-  // The label takes the theme's danger red: the fixed #EF4444 is ~3.3:1 on the
-  // light glass card, below AA for 12 pt text. Dark danger is the same #EF4444.
+  // The LIVE dot and label take the theme's danger red (t.liveDot / t.danger):
+  // a fixed #EF4444 is ~3.3:1 on the light glass card, below AA for 12 pt text.
+  // Dark danger is that same #EF4444.
+  liveDot: { width: 8, height: 8, borderRadius: 4 },
   liveLabel: { fontSize: 12, fontWeight: '800', letterSpacing: 0.5 },
   viewers: { fontSize: 12, marginLeft: 'auto' },
   title: { fontSize: 16, fontWeight: '600' },
@@ -513,9 +514,32 @@ const S = StyleSheet.create({
   btn: { flex: 1, paddingVertical: SPACING.md, borderRadius: RADIUS.md, alignItems: 'center' },
   btnPrimary: { flex: 1, borderRadius: RADIUS.md, overflow: 'hidden' },
   btnGrad: { paddingVertical: SPACING.md, alignItems: 'center' },
-  btnPrimaryText: { color: '#fff', fontWeight: '700' },
+  btnPrimaryText: { color: GRADIENT_INK, fontWeight: '700' },
+  deviceText: { fontSize: 13 },
+  joinCard: { marginTop: SPACING.md },
+  retryBtn: { paddingHorizontal: SPACING.xl },
+  spinner: { marginTop: SPACING.xl },
+  w600: { fontWeight: '600' },
+  dim: { opacity: 0.5 },
   empty: { alignItems: 'center', gap: SPACING.md, paddingVertical: SPACING.xxl },
   stale: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, marginBottom: SPACING.md, minHeight: 44 },
   staleText: { flex: 1, fontSize: 13 },
   emptyText: { fontSize: 14 },
+});
+
+// Theme colours, built once per palette rather than as new objects each render.
+// Only the state-driven segment label stays inline.
+const makeThemed = (c: Palette) => StyleSheet.create({
+  solid: { backgroundColor: c.surfaceSolid },
+  glass: { backgroundColor: c.glassSoft },
+  primary: { backgroundColor: c.primary },
+  stroke: { borderColor: c.glassStroke },
+  liveDot: { backgroundColor: c.danger },
+  text: { color: c.text },
+  dim: { color: c.textDim },
+  faint: { color: c.textFaint },
+  danger: { color: c.danger },
+  link: { color: c.primary },
+  strong: { color: c.text, fontWeight: '700' },
+  onPrimary: { color: c.onPrimary, fontWeight: '700' },
 });

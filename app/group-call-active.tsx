@@ -31,7 +31,7 @@ import { CALL } from '../constants/callTheme';
 import { SFU_MAX as CALL_MAX } from '../lib/call/mode';
 import { useTheme } from '../lib/theme';
 import { getIceServers } from '../lib/iceConfig';
-import { getChat, type ChatMember } from '../lib/chatService';
+import { getChat, type ChatMember, type IceServer } from '../lib/chatService';
 import { getSocket } from '../lib/socket';
 import { newCallCipher, openCallOffer, plainCipher, type CallCipher } from '../lib/callCrypto';
 import { getCurrentUserAsync } from './(constants)/authService';
@@ -557,9 +557,9 @@ function GroupCallLegacy() {
 
   const meRef = useRef<string>('');
   const localStreamRef = useRef<any>(null);
-  const iceRef = useRef<any[]>([]);
+  const iceRef = useRef<IceServer[]>([]);
   const pcsRef = useRef<Record<string, RTCPeerConnection>>({});
-  const offsRef = useRef<Array<() => void>>([]);
+  const offsRef = useRef<(() => void)[]>([]);
   const pendingIce = useRef<Record<string, any[]>>({});
   // F6: per-peer E2EE signaling cipher (mesh = one ratchet-wrapped call key per
   // link). Defaults to plaintext passthrough for legacy peers.
@@ -603,11 +603,11 @@ function GroupCallLegacy() {
 
   const ensurePeer = useCallback(async (uid: string, shouldOffer: boolean) => {
     if (pcsRef.current[uid]) return pcsRef.current[uid];
-    const pc = new RTCPeerConnection({ iceServers: iceRef.current as any });
+    const pc = new RTCPeerConnection({ iceServers: iceRef.current });
     pcsRef.current[uid] = pc;
     setPeers(prev => ({ ...prev, [uid]: { pc, url: null, name: '' } }));
     try { localStreamRef.current?.getTracks().forEach((t: any) => pc.addTrack(t, localStreamRef.current)); } catch {}
-    (pc as any).onicecandidate = (e: any) => {
+    pc.addEventListener('icecandidate', (e) => {
       // FAIL CLOSED at the one place a candidate reaches the wire (mirrors
       // lib/vaultBeamDirect.ts's emitIce). `cipherFor` falls back to
       // plainCipher, whose seal() is a no-op — so without this the raw
@@ -618,10 +618,10 @@ function GroupCallLegacy() {
       // Not yet sealable for THIS link: hold, do not drop.
       if (!c?.enc) { (pendingOutIce.current[uid] ||= []).push(e.candidate); return; }
       getSocket().then(s => s.emit('webrtc_ice', { to: uid, chatId, candidate: c.seal(e.candidate) })).catch(() => {});
-    };
-    (pc as any).ontrack = (e: any) => { const rs = e.streams?.[0]; if (rs) setPeerUrl(uid, rs.toURL()); };
-    (pc as any).oniceconnectionstatechange = () => {
-      const st = (pc as any).iceConnectionState;
+    });
+    pc.addEventListener('track', (e) => { const rs = e.streams?.[0]; if (rs) setPeerUrl(uid, rs.toURL()); });
+    pc.oniceconnectionstatechange = () => {
+      const st = pc.iceConnectionState;
       if (st === 'failed' || st === 'closed' || st === 'disconnected') {/* peer-left handles removal */}
     };
     if (shouldOffer) {
@@ -649,6 +649,9 @@ function GroupCallLegacy() {
   // ── setup ──────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
+    // The map object is never replaced, only filled, so this is the same one
+    // the cleanup must close — including peers that joined after this ran.
+    const pcs = pcsRef.current;
     (async () => {
       try {
         const me = await getCurrentUserAsync();
@@ -708,7 +711,7 @@ function GroupCallLegacy() {
           const pc = pcsRef.current[from];
           const cand = cipherFor(from).open(candidate);   // F6: decrypt; buffer plaintext
           if (!cand) return;
-          if (pc && (pc as any).remoteDescription) { pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {}); }
+          if (pc && pc.remoteDescription) { pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {}); }
           else { (pendingIce.current[from] = pendingIce.current[from] || []).push(cand); }
         };
 
@@ -749,7 +752,7 @@ function GroupCallLegacy() {
       try { InCallManager.stop(); } catch {}
       offsRef.current.forEach(fn => { try { fn(); } catch {} });
       getSocket().then(s => s.emit('leave_call', { chatId })).catch(() => {});
-      Object.keys(pcsRef.current).forEach(uid => { try { pcsRef.current[uid].close(); } catch {} });
+      Object.keys(pcs).forEach(uid => { try { pcs[uid].close(); } catch {} });
       try { localStreamRef.current?.getTracks().forEach((t: any) => t.stop()); } catch {}
     };
   }, [chatId, isVideo, ensurePeer, closePeer, router]);

@@ -13,7 +13,7 @@ import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   ActivityIndicator, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { type Palette } from '../constants/theme';
+import { GRADIENT_INK, type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { useRouter, Stack } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -21,7 +21,7 @@ import NetInfo from '@react-native-community/netinfo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AuroraBackground } from '../components/ui';
 import { pingStats, throughputMbps, type TransferSample } from '../lib/speedTest';
-import { appTarget, cloudflareTarget, probeVerdict, rateLimitMessage, type SpeedTarget } from '../lib/speedTarget';
+import { appTarget, cloudflareTarget, probeVerdict, rateLimitMessage, historyServers, filterHistory, type SpeedTarget } from '../lib/speedTarget';
 import { getAccessToken } from '../lib/api';
 import { SERVER_URL } from '../constants/server';
 
@@ -72,6 +72,9 @@ export default function NetworkTestScreen() {
   const [history, setHistory] = useState<TestResult[]>([]);
   // A history that could not be read is not "No previous tests".
   const [historyError, setHistoryError] = useState(false);
+  // Results from different servers are not comparable: once the history holds
+  // more than one, the list can be narrowed to one of them (null = all).
+  const [serverFilter, setServerFilter] = useState<string | null>(null);
   const [serverOnline, setServerOnline] = useState<boolean | null>(null);
   // Where the test runs; null until the probe has answered (or after a 429).
   const [target, setTarget] = useState<SpeedTarget | null>(null);
@@ -395,6 +398,10 @@ export default function NetworkTestScreen() {
     }
   };
 
+  // A filter on a server that has since dropped out of the 20 kept rows shows all.
+  const servers = historyServers(history);
+  const activeServer = serverFilter !== null && servers.includes(serverFilter) ? serverFilter : null;
+
   return (
     <View style={styles.container}>
       <AuroraBackground />
@@ -512,7 +519,26 @@ export default function NetworkTestScreen() {
           ) : history.length === 0 ? (
             <Text style={styles.noHistory}>No previous tests</Text>
           ) : (
-            history.map(item => (
+            <>
+            {servers.length > 1 && (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}
+                accessibilityRole="radiogroup" accessibilityLabel="Show results measured by">
+                {[null, ...servers].map(s => {
+                  const on = activeServer === s;
+                  return (
+                    <TouchableOpacity
+                      key={s ?? 'all'} onPress={() => setServerFilter(s)}
+                      style={[styles.filterChip, on && styles.filterChipOn]}
+                      accessibilityRole="radio" accessibilityState={{ checked: on }}
+                      accessibilityLabel={s === null ? 'All servers' : `Measured by ${s}`}
+                    >
+                      <Text style={[styles.filterChipText, on && styles.filterChipTextOn]} numberOfLines={1}>{s ?? 'All'}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            )}
+            {filterHistory(history, activeServer).map(item => (
               <View
                 key={item.id} style={styles.historyRow} accessible
                 // The arrows and stopwatch are read raw by a screen reader, so the
@@ -539,11 +565,12 @@ export default function NetworkTestScreen() {
                   </View>
                 </View>
               </View>
-            ))
+            ))}
+            </>
           )}
         </View>
 
-        <View style={{ height: 40 }} />
+        <View style={styles.bottomSpacer} />
       </ScrollView>
     </View>
   );
@@ -593,8 +620,9 @@ const makeStyles = (c: Palette, SW: number) => StyleSheet.create({
   testButton: { borderRadius: 14, overflow: 'hidden', marginVertical: 16, elevation: 4, shadowColor: c.accent, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 10 },
   testButtonDisabled: { opacity: 0.7 },
   testButtonGradient: { paddingVertical: 16, alignItems: 'center', borderRadius: 14 },
-  // White on the brand-blue gradient (accent → accentDeep) in both themes.
-  testButtonText: { color: '#FFF', fontSize: 18, fontWeight: '800', letterSpacing: 1 },
+  // White on the brand-blue gradient (accent → accentDeep) in both themes:
+  // GRADIENT_INK is the documented ink for filled brand gradients.
+  testButtonText: { color: GRADIENT_INK, fontSize: 18, fontWeight: '800', letterSpacing: 1 },
 
   // Results
   resultsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 16 },
@@ -616,4 +644,10 @@ const makeStyles = (c: Palette, SW: number) => StyleSheet.create({
   historyMetric: { alignItems: 'center' },
   historyMetricLabel: { color: c.accent, fontSize: 12 },
   historyMetricValue: { color: c.text, fontSize: 13, fontWeight: '700', marginTop: 2 },
+  filterRow: { gap: 8, paddingBottom: 10 },
+  filterChip: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 14, borderRadius: 22, borderWidth: 1, borderColor: c.hairline, backgroundColor: c.glassSoft },
+  filterChipOn: { borderColor: c.primary },
+  filterChipText: { color: c.textDim, fontSize: 13, fontWeight: '600' },
+  filterChipTextOn: { color: c.text },
+  bottomSpacer: { height: 40 },
 });
