@@ -83,6 +83,14 @@ export function isRestorable(data: any): data is FinanceBackup {
     && Array.isArray(data.groups) && Array.isArray(data.ledgers);
 }
 
+/** One restorable row: a plain object carrying a non-empty string id. */
+export function isBackupRow(raw: unknown): raw is Record<string, unknown> & { id: string } {
+  return !!raw && typeof raw === 'object' && !Array.isArray(raw)
+    && typeof (raw as { id?: unknown }).id === 'string' && (raw as { id: string }).id !== '';
+}
+
+const isScalar = (v: unknown) => v === null || typeof v === 'string' || typeof v === 'number';
+
 /**
  * Merge a backup into the local database. Existing rows with the same id are
  * replaced; anything not in the backup is left alone (never a destructive wipe).
@@ -103,10 +111,14 @@ export async function restoreBackup(userId: string, data: FinanceBackup): Promis
     const cols = await colsOf(table);
     let n = 0;
     for (const raw of rows) {
+      // A backup file is untrusted input: only a plain object with a string id
+      // is a row. Anything else (a string, an array, a null) is skipped rather
+      // than spread into a half-empty INSERT OR REPLACE.
+      if (!isBackupRow(raw)) continue;
       const row = { ...raw, ...(stamp ?? {}) };
-      // Only columns this build actually has, and only if the row carries an id.
-      const use = cols.filter(c => row[c] !== undefined);
-      if (!use.includes('id') || row.id == null) continue;
+      // Only columns this build has, and only scalar values SQLite can bind.
+      const use = cols.filter(c => row[c] !== undefined && isScalar(row[c]));
+      if (!use.includes('id')) continue;
       await d.runAsync(
         `INSERT OR REPLACE INTO ${table} (${use.join(',')}) VALUES (${use.map(() => '?').join(',')})`,
         use.map(c => row[c] ?? null),

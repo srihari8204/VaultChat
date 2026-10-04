@@ -9,6 +9,8 @@ import { addTimeline } from './financeTimeline';
 import { toPaise, fromPaise } from '../utils/money';
 import type { LedgerStatus } from '../constants/financeTheme';
 import type { LedgerPeriod } from '../utils/finance';
+import { ledgerStatusFor } from '../utils/financeRules';
+import { fmtDate } from '../utils/financeFormat';
 
 export interface LedgerEntry {
   id: string;
@@ -70,16 +72,53 @@ export async function insertLedger(row: NewLedger): Promise<LedgerEntry> {
   return full;
 }
 
+/** Insert many ledgers all-or-nothing (CSV import): a failure part-way rolls
+ *  back instead of leaving half a file imported. */
+export async function insertLedgers(rows: NewLedger[]): Promise<number> {
+  const d = await financeDb();
+  let n = 0;
+  await d.withTransactionAsync(async () => {
+    for (const row of rows) { await insertLedger(row); n++; }
+  });
+  return n;
+}
+
+/**
+ * Bring stored statuses up to date (utils/financeRules ledgerStatusFor): a
+ * balance left after the end day is overdue, an overdue loan whose end date
+ * moved later runs again. Done on every read, so the dashboard's Overdue tile,
+ * reports and lists agree without a background job. `last_updated` is the
+ * user's last change and is not touched; the timeline records the transition.
+ */
+async function syncLedgerStatuses(rows: LedgerEntry[]): Promise<LedgerEntry[]> {
+  const t = now();
+  const out: LedgerEntry[] = [];
+  for (const e of rows) {
+    const next = ledgerStatusFor(e, t);
+    if (next !== e.status) {
+      const d = await financeDb();
+      await d.runAsync(`UPDATE ledger_entries SET status = ? WHERE id = ? AND status = ?`, [next, e.id, e.status]);
+      await addTimeline('ledger', e.id, 'status',
+        next === 'overdue' ? `Marked overdue · the end date ${e.end_date ? fmtDate(e.end_date) : ''} has passed`
+          : next === 'completed' ? 'Marked completed · nothing remains'
+            : 'Running again · the end date is now later');
+      out.push({ ...e, status: next });
+    } else out.push(e);
+  }
+  return out;
+}
+
 export async function listLedger(userId: string, direction?: 'lend' | 'borrow'): Promise<LedgerEntry[]> {
   const d = await financeDb();
-  return direction
+  return syncLedgerStatuses(await (direction
     ? d.getAllAsync<LedgerEntry>(`SELECT * FROM ledger_entries WHERE user_id = ? AND direction = ? ORDER BY created_at DESC`, [userId, direction])
-    : d.getAllAsync<LedgerEntry>(`SELECT * FROM ledger_entries WHERE user_id = ? ORDER BY created_at DESC`, [userId]);
+    : d.getAllAsync<LedgerEntry>(`SELECT * FROM ledger_entries WHERE user_id = ? ORDER BY created_at DESC`, [userId])));
 }
 
 export async function getLedger(id: string): Promise<LedgerEntry | null> {
   const d = await financeDb();
-  return d.getFirstAsync<LedgerEntry>(`SELECT * FROM ledger_entries WHERE id = ?`, [id]);
+  const e = await d.getFirstAsync<LedgerEntry>(`SELECT * FROM ledger_entries WHERE id = ?`, [id]);
+  return e ? (await syncLedgerStatuses([e]))[0] : null;
 }
 
 export async function deleteLedger(id: string): Promise<void> {
@@ -111,7 +150,10 @@ export async function addLedgerUpdate(ledgerId: string, rawReceived: number, raw
   // `remaining`, so an unrounded value would carry forward into the next one.
   const received = fromPaise(toPaise(rawReceived));
   const remaining = fromPaise(toPaise(rawRemaining));
-  const status: LedgerStatus = remaining <= 0 ? 'completed' : 'running';
+  // A part-payment on an overdue loan leaves it overdue; 'running' here used
+  // to flip it back until the next read re-marked it (and re-timelined it).
+  const cur = await d.getFirstAsync<{ end_date: number | null }>(`SELECT end_date FROM ledger_entries WHERE id = ?`, [ledgerId]);
+  const status: LedgerStatus = ledgerStatusFor({ status: 'running', remaining, end_date: cur?.end_date ?? null }, t);
   await d.runAsync(
     `INSERT INTO ledger_updates (id,ledger_id,received,remaining,note,updated_at) VALUES (?,?,?,?,?,?)`,
     [uuid(), ledgerId, received, remaining, note, t],
@@ -150,4 +192,4 @@ export async function setLedgerStatus(id: string, status: LedgerStatus): Promise
   await d.runAsync(`UPDATE ledger_entries SET status = ?, last_updated = ? WHERE id = ?`, [status, now(), id]);
 }
 
-export default { insertLedger, listLedger, getLedger, deleteLedger, restoreLedger, addLedgerUpdate, listLedgerUpdates, updateLedgerDetails, setLedgerStatus };
+export default { insertLedger, insertLedgers, listLedger, getLedger, deleteLedger, restoreLedger, addLedgerUpdate, listLedgerUpdates, updateLedgerDetails, setLedgerStatus };

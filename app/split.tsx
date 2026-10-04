@@ -17,14 +17,14 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  PanResponder, Platform, StyleSheet, Text, TouchableOpacity, View,
+  PanResponder, StyleSheet, Text, TouchableOpacity, View,
   useWindowDimensions,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../lib/theme';
-import { brandAlpha } from '../constants/theme';
+import { brandAlpha, type Palette } from '../constants/theme';
 import { DIVIDER_DP, clampRatio, paneSizes, preferredAxis } from '../lib/responsive';
 import ChatScreen from './chat';
 
@@ -43,6 +43,10 @@ export default function SplitScreen() {
   const [right, setRight] = useState((params.b ?? '') + '');
   const [ratio, setRatio] = useState(0.5);
   const ratioAtGrab = useRef(0.5);
+  // Read through a ref so the PanResponder is not rebuilt on every frame of
+  // a drag (it used to depend on `ratio`, which the drag itself changes).
+  const ratioRef = useRef(ratio);
+  ratioRef.current = ratio;
 
   // Space actually available to the panes, excluding the system insets, so a
   // notch or gesture bar cannot push a pane under the minimum.
@@ -71,14 +75,18 @@ export default function SplitScreen() {
   const pan = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: () => true,
-    onPanResponderGrant: () => { ratioAtGrab.current = ratio; },
+    onPanResponderGrant: () => { ratioAtGrab.current = ratioRef.current; },
     onPanResponderMove: (_e, g) => {
       const delta = axis === 'vertical' ? g.dx : g.dy;
       // clampRatio is what stops a drag from collapsing a pane; it is unit
       // tested in lib/responsive.selftest.ts against real device sizes.
       setRatio(clampRatio(ratioAtGrab.current + delta / Math.max(1, total - DIVIDER_DP), total));
     },
-  }), [axis, ratio, total]);
+  }), [axis, total]);
+
+  // The same resize for screen readers: the divider is an adjustable control
+  // that steps 10% per swipe, through the same clampRatio as a drag.
+  const nudge = useCallback((dir: 1 | -1) => setRatio(r => clampRatio(r + dir * 0.1, total)), [total]);
 
   const swap = useCallback(() => {
     setLeft(right); setRight(left);
@@ -111,11 +119,13 @@ export default function SplitScreen() {
         <Ionicons name={vertical ? 'tablet-landscape-outline' : 'phone-portrait-outline'} size={15} color={colors.textDim} />
         <Text style={[st.barTxt, { color: colors.textDim }]}>Split view</Text>
         <View style={{ flex: 1 }} />
-        <TouchableOpacity onPress={swap} hitSlop={10} style={st.barBtn}>
+        <TouchableOpacity onPress={swap} hitSlop={10} style={st.barBtn}
+          accessibilityRole="button" accessibilityLabel="Swap the two chats">
           <Ionicons name="swap-horizontal" size={17} color={colors.text} />
           <Text style={[st.barBtnTxt, { color: colors.text }]}>Swap</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={closeSplit} hitSlop={10} style={st.barBtn}>
+        <TouchableOpacity onPress={closeSplit} hitSlop={10} style={st.barBtn}
+          accessibilityRole="button" accessibilityLabel="Close split view">
           <Ionicons name="close" size={17} color={colors.text} />
           <Text style={[st.barBtnTxt, { color: colors.text }]}>Close</Text>
         </TouchableOpacity>
@@ -130,6 +140,15 @@ export default function SplitScreen() {
             what lib/responsive reserved when sizing the panes. */}
         <View
           {...pan.panHandlers}
+          accessible
+          accessibilityRole="adjustable"
+          accessibilityLabel={vertical ? 'Divider between the left and right chats' : 'Divider between the top and bottom chats'}
+          accessibilityValue={{ text: `${Math.round(ratio * 100)}% ${vertical ? 'left' : 'top'}` }}
+          accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+          onAccessibilityAction={(e) => {
+            if (e.nativeEvent.actionName === 'increment') nudge(1);
+            else if (e.nativeEvent.actionName === 'decrement') nudge(-1);
+          }}
           style={[
             vertical ? { width: DIVIDER_DP } : { height: DIVIDER_DP },
             st.divider,
@@ -152,7 +171,7 @@ export default function SplitScreen() {
 }
 
 function Refusal({ title, body, onBack, colors }: {
-  title: string; body: string; onBack: () => void; colors: any;
+  title: string; body: string; onBack: () => void; colors: Palette;
 }) {
   return (
     <View style={[st.refusal, { backgroundColor: colors.bg }]}>
@@ -160,7 +179,8 @@ function Refusal({ title, body, onBack, colors }: {
       <Ionicons name="git-compare-outline" size={44} color={colors.textDim} />
       <Text numberOfLines={1} style={[st.refusalTitle, { color: colors.text }]}>{title}</Text>
       <Text style={[st.refusalBody, { color: colors.textDim }]}>{body}</Text>
-      <TouchableOpacity onPress={onBack} style={[st.refusalBtn, { borderColor: colors.glassStroke }]}>
+      <TouchableOpacity onPress={onBack} style={[st.refusalBtn, { borderColor: colors.glassStroke }]}
+        accessibilityRole="button" accessibilityLabel="Go back">
         <Text style={{ color: colors.text, fontWeight: '700' }}>Go back</Text>
       </TouchableOpacity>
     </View>
@@ -173,7 +193,7 @@ const st = StyleSheet.create({
     paddingHorizontal: 14, borderBottomWidth: StyleSheet.hairlineWidth,
   },
   barTxt: { fontSize: 12, fontWeight: '700', letterSpacing: 0.4 },
-  barBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4 },
+  barBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, minHeight: 32 },
   barBtnTxt: { fontSize: 12, fontWeight: '600' },
   divider: { alignItems: 'center', justifyContent: 'center' },
   grip: { borderRadius: 2 },

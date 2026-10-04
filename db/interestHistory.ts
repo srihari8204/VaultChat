@@ -14,17 +14,25 @@ export interface InterestRow {
   rate: number;
   time_years: number;
   frequency: number | null;   // NULL for simple
+  rate_mode?: 'rupees' | 'percent' | null;   // NULL on rows saved before 2026-10
+  period?: 'daily' | 'weekly' | 'monthly' | 'yearly' | null;
   interest: number;
   total_amount: number;
   created_at: number;         // epoch ms
 }
 
-let _db: SQLite.SQLiteDatabase | null = null;
+// The OPENING is memoised, not the handle: two first calls at once (Saved
+// listing while a calculation saves) must both wait for the schema below.
+let _db: Promise<SQLite.SQLiteDatabase> | null = null;
 
-async function db(): Promise<SQLite.SQLiteDatabase> {
-  if (_db) return _db;
-  _db = await SQLite.openDatabaseAsync('interest.db');
-  await _db.execAsync(`
+function db(): Promise<SQLite.SQLiteDatabase> {
+  if (!_db) _db = open().catch((e) => { _db = null; throw e; });
+  return _db;
+}
+
+async function open(): Promise<SQLite.SQLiteDatabase> {
+  const conn = await SQLite.openDatabaseAsync('interest.db');
+  await conn.execAsync(`
     CREATE TABLE IF NOT EXISTS interest_history (
       id            TEXT PRIMARY KEY,
       user_id       TEXT NOT NULL,
@@ -40,7 +48,12 @@ async function db(): Promise<SQLite.SQLiteDatabase> {
     );
     CREATE INDEX IF NOT EXISTS idx_interest_user ON interest_history(user_id, created_at DESC);
   `);
-  return _db;
+  // Additive: the rate is meaningless without its unit (₹ per ₹100 or %) and
+  // period, so Saved & History could not say what "2" meant. Old rows keep NULL.
+  const have = (await conn.getAllAsync<{ name: string }>(`PRAGMA table_info(interest_history)`)).map(c => c.name);
+  if (!have.includes('rate_mode')) await conn.execAsync(`ALTER TABLE interest_history ADD COLUMN rate_mode TEXT`);
+  if (!have.includes('period')) await conn.execAsync(`ALTER TABLE interest_history ADD COLUMN period TEXT`);
+  return conn;
 }
 
 function uuid(): string {
@@ -57,10 +70,11 @@ export async function insertInterest(
   const full: InterestRow = { ...row, id: row.id ?? uuid(), created_at: row.created_at ?? Date.now() } as InterestRow;
   await d.runAsync(
     `INSERT INTO interest_history
-       (id, user_id, user_name, type, principal, rate, time_years, frequency, interest, total_amount, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, user_id, user_name, type, principal, rate, time_years, frequency, interest, total_amount, created_at, rate_mode, period)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [full.id, full.user_id, full.user_name, full.type, full.principal, full.rate,
-     full.time_years, full.frequency, full.interest, full.total_amount, full.created_at],
+     full.time_years, full.frequency, full.interest, full.total_amount, full.created_at,
+     full.rate_mode ?? null, full.period ?? null],
   );
   return full;
 }

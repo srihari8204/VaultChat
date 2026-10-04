@@ -66,6 +66,8 @@ export default function EmiCalc() {
       { k: 'Monthly EMI', v: formatINR(res.emi), tot: true },
       { k: 'Total interest', v: formatINR(res.totalInterest) },
       { k: 'Total payment', v: formatINR(res.totalPayment) },
+    // A printed document, not a themed screen: its colours match pdfDocument's
+    // fixed print palette (utils/financeIO), in light or dark mode alike.
     ]) + '<h3 style="margin-top:20px;font-size:14px;color:#6D3FA8">Amortization schedule</h3>' +
     htmlTable(['Month', 'EMI', 'Principal', 'Interest', 'Balance'],
       schedule.map(r => [r.month, formatINR(r.emi), formatINR(r.principal), formatINR(r.interest), formatINR(r.balance)]));
@@ -77,8 +79,10 @@ export default function EmiCalc() {
       <FinHeader title="EMI Calculator" />
       <KeyboardSafe style={{ flex: 1 }} >
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-          <Label>Loan Type</Label>
-          <View style={s.chipRow}>
+          {/* Loan type names the PDF report only; it does not change the maths
+              (rates differ by lender, so no preset rate is implied). */}
+          <Label hint="(names the PDF)">Loan Type</Label>
+          <View style={s.chipRow} accessibilityRole="radiogroup" accessibilityLabel="Loan type, used as the PDF title">
             {LOAN_TYPES.map(t => (
               <Chip key={t} label={t} active={loanType === t} onPress={() => setLoanType(t)} />
             ))}
@@ -175,6 +179,7 @@ const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   chip: { minHeight: 44, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 999, borderWidth: 1, borderColor: FIN.border, backgroundColor: FIN.card, justifyContent: 'center' },
   chipText: { color: FIN.sub, fontSize: 13, fontWeight: '700' },
   btnRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 14 },
+  // Fixed white on the always-dark FIN_HERO gradient (no scheme token applies).
   heroLabel: { color: 'rgba(255,255,255,0.85)', fontSize: 10.5, fontWeight: '700', letterSpacing: 0.8 },
   heroVal: { color: '#fff', fontSize: 30, fontWeight: '800', marginTop: 6, ...TABULAR },
 

@@ -42,8 +42,24 @@ check('wrong-shaped groups refused', !isRestorable({ version: 1, groups: {}, led
 // A chat backup blob must not be mistaken for a finance one.
 check('a chat bundle is not restorable as finance', !isRestorable({ v: 4, messages: [], chats: [] }));
 
+// ── each row of an untrusted file is checked before INSERT OR REPLACE ──
+// Mirror of isBackupRow in db/financeBackup.ts (asserted against the source below).
+function isBackupRow(raw: any): boolean {
+  return !!raw && typeof raw === 'object' && !Array.isArray(raw)
+    && typeof raw.id === 'string' && raw.id !== '';
+}
+check('a plain row with a string id is accepted', isBackupRow({ id: 'g1', name: 'x' }));
+check('a string row is refused', !isBackupRow('g1'));
+check('an array row is refused', !isBackupRow(['g1']));
+check('a numeric id is refused', !isBackupRow({ id: 7 }));
+check('an empty id is refused', !isBackupRow({ id: '' }));
+check('null is refused', !isBackupRow(null));
+
 // ── source invariants: db/financeBackup.ts ──
 const src = readFileSync(join(__dirname, 'financeBackup.ts'), 'utf8');
+check('the row guard mirrored above is the real one',
+  src.includes("typeof (raw as { id?: unknown }).id === 'string'") && src.includes('if (!isBackupRow(raw)) continue;'));
+check('only scalar column values are bound', src.includes('isScalar(row[c])'));
 
 check('restore is idempotent (INSERT OR REPLACE, keyed on original id)',
   src.includes('INSERT OR REPLACE INTO'));

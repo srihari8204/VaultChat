@@ -18,6 +18,7 @@
 
 import type { LedgerEntry } from '../../db/ledger';
 import type { LedgerPeriod } from '../../utils/finance';
+import { normalizeMobile } from '../../utils/financeRules';
 import { fmtDate, num as parseAmount } from '../../utils/financeFormat';
 
 export const LEDGER_HEADERS = [
@@ -102,6 +103,7 @@ export interface ImportPlan {
   badPrincipal: number;     // principal missing, zero or unreadable
   badRemaining: number;     // Remaining present but unreadable
   badDate: number;          // StartDate / EndDate present but unreadable
+  badMobile: number;        // imported, but without a Mobile that is not a valid number
 }
 
 /**
@@ -109,7 +111,7 @@ export interface ImportPlan {
  * start date for files exported before StartDate existed.
  */
 export function planLedgerImport(text: string, existing: LedgerEntry[], now: number): ImportPlan {
-  const plan: ImportPlan = { rows: [], duplicates: 0, badPrincipal: 0, badRemaining: 0, badDate: 0 };
+  const plan: ImportPlan = { rows: [], duplicates: 0, badPrincipal: 0, badRemaining: 0, badDate: 0, badMobile: 0 };
   const [header, ...body] = parseCsv(text);
   if (!header) return plan;
   const col = (name: string) => header.findIndex(h => h.trim().toLowerCase() === name.toLowerCase());
@@ -147,10 +149,16 @@ export function planLedgerImport(text: string, existing: LedgerEntry[], now: num
     const createdKey = `${name.toLowerCase()}|${direction}|${Math.round(principal * 100)}|${at(c, 'Created', 11).trim()}`;
     if (seen.has(key) || (start === null && seenCreated.has(createdKey))) { plan.duplicates++; continue; }
     seen.add(key);
+    // Same rule as the ledger forms: stored as 10 digits or not at all. A bad
+    // number does not cost the user the whole ledger row — it is dropped and
+    // counted, so the import summary can say so.
+    const mobRaw = at(c, 'Mobile', 1).trim();
+    const mobile = mobRaw ? normalizeMobile(mobRaw) : null;
+    if (mobRaw && !mobile) plan.badMobile++;
     const period = at(c, 'Period', 7);
     const status = at(c, 'Status', 9);
     plan.rows.push({
-      direction, name, mobile: at(c, 'Mobile', 1).trim() || null,
+      direction, name, mobile,
       interest_type: at(c, 'InterestType', 3) === 'compound' ? 'compound' : 'simple',
       principal, rate: amount(at(c, 'Rate', 5)),
       rate_mode: at(c, 'RateMode', 6) === 'rupees' ? 'rupees' : 'percent',

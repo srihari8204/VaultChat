@@ -1,16 +1,16 @@
 // app/finance/reports.tsx — period reports with totals, breakdown and export.
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
 import { View, Text, ScrollView, StyleSheet, Alert } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { type FinancePalette } from '../../constants/financeTheme';
-import { FinHeader, Segment, StatTile, Card, RowLine, Btn, LoadingState, ErrorState } from '../../components/finance/ui';
+import { FinHeader, Segment, StatTile, Card, RowLine, Btn, EmptyState, LoadingState, ErrorState } from '../../components/finance/ui';
 import { useLoadStatus } from '../../components/finance/useLoad';
 import { useMe } from '../../components/finance/useMe';
 import { inrShort, fmtDate } from '../../utils/financeFormat';
-import { formatINR, round2, simpleInterest } from '../../utils/interest';
-import { periodRateToAnnualPct } from '../../utils/finance';
+import { formatINR } from '../../utils/interest';
+import { ledgerInterest } from '../../utils/financeRules';
 import { sumRupees } from '../../utils/money';
 import { listLedger, type LedgerEntry } from '../../db/ledger';
 import { listGroups } from '../../db/chitti';
@@ -39,9 +39,13 @@ export default function Reports() {
   const [period, setPeriod] = useState<Period>('month');
   const [r, setR] = useState<Report>(ZERO);
   const { status, begin, done, fail } = useLoadStatus();
+  // Switching Month → Year quickly starts two loads; only the newest may land,
+  // or a slow Month read could overwrite the Year report under a Year heading.
+  const seq = useRef(0);
 
   const reload = useCallback(() => {
     if (!me) return;
+    const mine = ++seq.current;
     begin();
     (async () => {
       const from = periodStart(period);
@@ -49,9 +53,9 @@ export default function Reports() {
       const ledgers = all.filter(l => l.created_at >= from);
       const acc: Report = { ...ZERO, ledgers };
       for (const l of ledgers) {
-        const annual = periodRateToAnnualPct(l.rate, l.rate_mode, l.period);
-        const years = l.end_date ? Math.max(0, (l.end_date - l.start_date) / 31536000000) : 1;
-        const interest = round2(simpleInterest(l.principal, annual, years).interest);
+        // The ledger detail's own calculator: compound loans compound here too.
+        // Statuses (overdue) are brought up to date by listLedger itself.
+        const { interest } = ledgerInterest(l);
         // Paise-exact accumulation — a report that disagrees with the ledger by
         // a few paise is worse than no report.
         if (l.direction === 'lend') {
@@ -65,9 +69,10 @@ export default function Reports() {
         if (l.status === 'completed') acc.completed += 1;
       }
       acc.chitti = groups.filter(g => g.status === 'active').length;
+      if (mine !== seq.current) return;
       setR(acc);
       done();
-    })().catch(fail);
+    })().catch(() => { if (mine === seq.current) fail(); });
   }, [me, period, begin, done, fail]);
   useFocusEffect(reload);
 
@@ -109,7 +114,11 @@ export default function Reports() {
         {status === 'error' && (
           <ErrorState title="Could not build the report" sub="Your ledgers could not be read. Nothing has been lost." onRetry={reload} />
         )}
-        {status === 'ready' && (<>
+        {status === 'ready' && r.ledgers.length === 0 && (
+          <EmptyState icon="bar-chart-outline" title={`No ledgers ${label.toLowerCase()}`}
+            sub={period === 'all' ? 'Add a ledger to see totals here.' : 'No ledger was created in this period. Try Year or All Time.'} />
+        )}
+        {status === 'ready' && r.ledgers.length > 0 && (<>
         <Text style={s.heading}>{label}</Text>
         <View style={s.tileRow}>
           <StatTile value={inrShort(r.lent)} label="Total lent" tone="good" />

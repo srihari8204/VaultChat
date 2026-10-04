@@ -55,6 +55,20 @@ export default function UpdateAmount() {
     const rec = num(received), rem = num(remaining);
     if (!(rec > 0)) return Alert.alert('Received', 'Enter the amount received (greater than 0).');
     if (!(rem >= 0)) return Alert.alert('Remaining', 'Enter a valid remaining amount.');
+    // Both are legitimate (an overpayment; interest added to the balance) but
+    // both are also what a slipped digit looks like, so they are confirmed.
+    const odd = rec > e.remaining
+      ? `${formatINR(rec)} received is more than the ${formatINR(e.remaining)} still owed.`
+      : rem > e.remaining
+        ? `The new remaining, ${formatINR(rem)}, is more than the current ${formatINR(e.remaining)}.`
+        : null;
+    if (odd) {
+      const go = await new Promise<boolean>((resolve) => Alert.alert('Check the amounts', `${odd} Save anyway?`, [
+        { text: 'Go back', style: 'cancel', onPress: () => resolve(false) },
+        { text: 'Save', onPress: () => resolve(true) },
+      ], { cancelable: true, onDismiss: () => resolve(false) }));
+      if (!go) return;
+    }
     try {
       await addLedgerUpdate(e.id, rec, rem, note.trim() || null);
       router.back();

@@ -7,11 +7,13 @@
 // one identical 10-digit string, and anything that is not an Indian mobile is
 // rejected outright rather than silently stored.
 //
-// Pure function, no DB — importing db/chitti.ts would pull in expo-sqlite, so
-// the regex is mirrored here and checked against the source to stay in sync.
+// The function itself now lives in utils/financeRules.ts (pure, so the CSV
+// importer and the ledger forms can share it) and is imported and run for
+// real. db/chitti.ts re-exports it; the source checks below keep both honest.
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { normalizeMobile } from '../utils/financeRules';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail?: string) {
@@ -21,15 +23,6 @@ function check(name: string, ok: boolean, detail?: string) {
 function eq(name: string, actual: unknown, expected: unknown) {
   const ok = JSON.stringify(actual) === JSON.stringify(expected);
   check(name, ok, ok ? undefined : `got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)}`);
-}
-
-// Mirror of normalizeMobile in db/chitti.ts (kept honest by the source check below).
-function normalizeMobile(raw: string): string | null {
-  let s = (raw ?? '').replace(/[\s\-()]/g, '');
-  if (s.startsWith('+')) s = s.slice(1);
-  if (s.length === 12 && s.startsWith('91')) s = s.slice(2);
-  else if (s.length === 11 && s.startsWith('0')) s = s.slice(1);
-  return /^[6-9]\d{9}$/.test(s) ? s : null;
 }
 
 console.log('\nLucky Draw — mobile normalization self-test\n');
@@ -62,10 +55,11 @@ for (const p of [6, 7, 8, 9]) {
 eq('9123456789 survives (country-code false positive)', normalizeMobile('9123456789'), '9123456789');
 eq('+919123456789 still strips correctly', normalizeMobile('+919123456789'), '9123456789');
 
-// ── the mirror above must match the real implementation ──
-const src = readFileSync(join(__dirname, 'chitti.ts'), 'utf8');
-check('db/chitti.ts still exports normalizeMobile', /export function normalizeMobile/.test(src));
-check('source regex matches this mirror', src.includes('/^[6-9]\\d{9}$/'));
+// ── the real implementation keeps its guards; db/chitti.ts still exports it ──
+check('db/chitti.ts still exports normalizeMobile',
+  /export \{ normalizeMobile \}/.test(readFileSync(join(__dirname, 'chitti.ts'), 'utf8')));
+const src = readFileSync(join(__dirname, '..', 'utils', 'financeRules.ts'), 'utf8');
+check('source keeps the 10-digit [6-9] rule', src.includes('/^[6-9]\\d{9}$/'));
 // The length guards are the fix for "9123456789 is itself a valid mobile" —
 // if someone reverts to an unconditional strip, this fails.
 check('source strips 91 only at length 12', src.includes(`s.length === 12 && s.startsWith('91')`));

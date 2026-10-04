@@ -14,9 +14,9 @@ import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
 import { useTheme } from '../../lib/theme';
 import { View, Text, ScrollView, StyleSheet, StatusBar, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useRouter, useFocusEffect } from 'expo-router';
+import { Stack, useRouter, useFocusEffect, type Href } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { TABULAR, type FinancePalette } from '../../constants/financeTheme';
+import { TABULAR, FIN_SHADOW, type FinancePalette } from '../../constants/financeTheme';
 import {
   HeroCard, HeroSplit, StatTile, QuickAction, TileGrid, ActionGrid, FinBody, IconBtn, LoadingState, ErrorState,
 } from '../../components/finance/ui';
@@ -26,17 +26,14 @@ import { inrShort } from '../../utils/financeFormat';
 import { listLedger } from '../../db/ledger';
 import { listGroups } from '../../db/chitti';
 import { listReminders } from '../../db/reminders';
-import { round2 } from '../../utils/interest';
 import { sumRupees } from '../../utils/money';
-import { periodRateToAnnualPct } from '../../utils/finance';
+import { ledgerInterest, startOfDay } from '../../utils/financeRules';
 
 interface Totals {
   lent: number; borrowed: number; earned: number; pending: number;
   active: number; overdue: number; today: number; chitti: number;
 }
 const ZERO: Totals = { lent: 0, borrowed: 0, earned: 0, pending: 0, active: 0, overdue: 0, today: 0, chitti: 0 };
-
-const startOfDay = (ms: number) => { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d.getTime(); };
 
 export default function FinanceDashboard() {
   const { scheme } = useTheme();
@@ -58,10 +55,11 @@ export default function FinanceDashboard() {
       const acc = { ...ZERO };
       const todayStart = startOfDay(Date.now());
       const todayEnd = todayStart + 86400000;
+      // Statuses (overdue, closed) are brought up to date by listLedger /
+      // listGroups themselves; the interest is the ledger detail's own
+      // calculator, so a compound loan is no longer summed as simple.
       for (const l of ledgers) {
-        const annual = periodRateToAnnualPct(l.rate, l.rate_mode, l.period);
-        const years = l.end_date ? Math.max(0, (l.end_date - l.start_date) / 31536000000) : 1;
-        const interest = round2((l.principal * annual * years) / 100);
+        const { interest } = ledgerInterest(l);
         // Accumulate in paise: `acc.lent += l.principal` over many rows drifts,
         // and these are the headline numbers on the dashboard.
         if (l.direction === 'lend') {
@@ -81,7 +79,7 @@ export default function FinanceDashboard() {
 
   useFocusEffect(reload);
 
-  const go = (path: string) => router.push(path as any);
+  const go = (path: Href) => router.push(path);
 
   return (
     <View style={s.screen}>
@@ -204,6 +202,9 @@ const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   },
   badgeTxt: { color: FIN.onBrand, fontSize: 9.5, fontWeight: '800' },
 
+  // Hero text is fixed white: the FIN_HERO gradient behind it is saturated
+  // and dark in BOTH schemes, so no scheme token applies (FIN.onBrand turns
+  // dark in dark mode and would vanish on it).
   heroLabel: { color: 'rgba(255,255,255,0.8)', fontSize: 10.5, fontWeight: '700', letterSpacing: 0.9 },
   heroKey: { color: 'rgba(255,255,255,0.85)', fontSize: 12 },
   heroVal: { color: '#fff', fontSize: 25, fontWeight: '800', marginTop: 2, letterSpacing: -0.6, ...TABULAR },
@@ -219,7 +220,7 @@ const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 24,
     backgroundColor: FIN.card, borderRadius: 16, padding: 14,
     borderWidth: 1, borderColor: FIN.glassEdge,
-    shadowColor: '#101828', shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 2,
+    ...FIN_SHADOW.rest,
     minHeight: 44,
   },
   ioIcon: { width: 40, height: 40, borderRadius: 12, backgroundColor: FIN.brandSoft, alignItems: 'center', justifyContent: 'center' },

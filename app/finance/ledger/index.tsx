@@ -3,11 +3,11 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFinanceTheme } from '../../../components/finance/useFinanceTheme';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Animated } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Animated, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { financeStatusColors, TABULAR, type FinancePalette } from '../../../constants/financeTheme';
+import { financeStatusColors, TABULAR, FIN_SHADOW, type FinancePalette } from '../../../constants/financeTheme';
 import { FinHeader, Segment, Pill, EmptyState, LoadingState, ErrorState } from '../../../components/finance/ui';
 import { useLoadStatus } from '../../../components/finance/useLoad';
 import { useMe } from '../../../components/finance/useMe';
@@ -69,17 +69,26 @@ export default function LedgerList() {
   useEffect(() => () => {
     if (timer.current) clearTimeout(timer.current);
     const p = pendingRef.current;
+    // The screen is gone, so there is nowhere to show a failure; the row simply
+    // reappears on the next visit, which is the truthful outcome.
     if (p) deleteLedger(p.id).catch(() => {});
   }, []);
   const finalizeDelete = (id: string) => {
-    deleteLedger(id).catch(() => {});
+    // A failed delete used to vanish silently while the snackbar said
+    // "deleted"; the ledger came back on the next visit with no explanation.
+    deleteLedger(id).catch((err: any) => {
+      Alert.alert('Could not delete the ledger', `${err?.message ?? 'It is still in your ledger book.'}`);
+      reload();
+    });
     setPendingDelete(null);
     Animated.timing(snack, { toValue: 0, duration: 180, useNativeDriver: true }).start();
   };
   const undo = () => {
     if (!pendingDelete) return;
     if (timer.current) clearTimeout(timer.current);
-    restoreLedger(pendingDelete).finally(reload);
+    restoreLedger(pendingDelete)
+      .catch((err: any) => Alert.alert('Could not undo', err?.message ?? 'The ledger could not be restored.'))
+      .finally(reload);
     setPendingDelete(null);
     Animated.timing(snack, { toValue: 0, duration: 180, useNativeDriver: true }).start();
   };
@@ -113,6 +122,11 @@ export default function LedgerList() {
             <TouchableOpacity key={e.id} style={s.card} activeOpacity={0.85}
               onPress={() => router.push({ pathname: '/finance/ledger/[id]', params: { id: e.id } })}
               onLongPress={() => askDelete(e)}
+              accessibilityRole="button"
+              accessibilityLabel={`${e.name}, ${lent ? 'lent' : 'borrowed'} ${formatINR(e.principal)}${e.remaining < e.principal ? `, ${formatINR(e.remaining)} left` : ''}, ${sc.label}. Open ledger`}
+              // Long-press is the only delete gesture; screen-reader users get the same action here.
+              accessibilityActions={[{ name: 'delete', label: 'Delete, with 30 seconds to undo' }]}
+              onAccessibilityAction={(ev) => { if (ev.nativeEvent.actionName === 'delete') askDelete(e); }}
             >
               <View style={[s.avatar, { backgroundColor: lent ? FIN.goodSoft : FIN.badSoft }]}>
                 <Ionicons name={lent ? 'arrow-up' : 'arrow-down'} size={16} color={lent ? FIN.good : FIN.bad} />
@@ -143,15 +157,16 @@ export default function LedgerList() {
         <View style={{ height: 90 }} />
       </ScrollView>
 
-      <TouchableOpacity style={[s.fab, { bottom: insets.bottom + 20 }]} activeOpacity={0.9} onPress={() => router.push('/finance/ledger/new')}>
+      <TouchableOpacity style={[s.fab, { bottom: insets.bottom + 20 }]} activeOpacity={0.9} onPress={() => router.push('/finance/ledger/new')}
+        accessibilityRole="button" accessibilityLabel="Add new ledger">
         <Ionicons name="add" size={22} color={FIN.onBrand} />
         <Text style={s.fabTxt}>Add New Ledger</Text>
       </TouchableOpacity>
 
       {pendingDelete && (
-        <Animated.View style={[s.snack, { bottom: insets.bottom + 84, opacity: snack, transform: [{ translateY: snack.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }]}>
+        <Animated.View accessibilityLiveRegion="polite" style={[s.snack, { bottom: insets.bottom + 84, opacity: snack, transform: [{ translateY: snack.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }]}>
           <Text style={s.snackTxt}>Ledger deleted</Text>
-          <TouchableOpacity onPress={undo} hitSlop={8}><Text style={s.snackBtn}>UNDO</Text></TouchableOpacity>
+          <TouchableOpacity onPress={undo} hitSlop={12} accessibilityRole="button" accessibilityLabel={`Undo deleting ${pendingDelete.name}`}><Text style={s.snackBtn}>UNDO</Text></TouchableOpacity>
         </Animated.View>
       )}
     </View>
@@ -162,7 +177,7 @@ const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
   filterWrap: { paddingHorizontal: 16, paddingTop: 12, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   body: { padding: 16, paddingTop: 12, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
-  card: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: FIN.card, borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: FIN.glassEdge, shadowColor: '#101828', shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
+  card: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: FIN.card, borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: FIN.glassEdge, ...FIN_SHADOW.rest },
   avatar: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
   name: { color: FIN.text, fontSize: 15, fontWeight: '700' },
   sub: { color: FIN.sub, fontSize: 12.5, marginTop: 2 },

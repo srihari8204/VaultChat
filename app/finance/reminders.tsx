@@ -3,11 +3,12 @@
 
 import React, { useCallback, useState } from 'react';
 import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
+import { KeyboardSafe } from '../../components/ui';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useDatePicker } from '../../components/finance/useDatePicker';
-import { type FinancePalette } from '../../constants/financeTheme';
+import { FIN_SHADOW, type FinancePalette } from '../../constants/financeTheme';
 import { FinHeader, Label, Field, Segment, Btn, Pill, EmptyState, Card, LoadingState, ErrorState } from '../../components/finance/ui';
 import { useLoadStatus } from '../../components/finance/useLoad';
 import { useMe } from '../../components/finance/useMe';
@@ -18,6 +19,7 @@ import {
 } from '../../db/reminders';
 import { scheduleReminder, scheduleAt, cancel, snoozedNotifIds } from '../../components/finance/notify';
 import { isUnscheduled } from '../../components/finance/notifyIds';
+import { nextOccurrence } from '../../utils/financeRules';
 
 const FREQ_LABEL: Record<ReminderFreq, string> = { once: 'Once', daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', yearly: 'Yearly' };
 
@@ -52,16 +54,31 @@ export default function Reminders() {
     'The reminder is saved, but it will not alert you. Allow notifications for this app in your phone settings, then add it again.',
   );
 
+  const confirm = (t: string, msg: string, ok: string) => new Promise<boolean>((resolve) => Alert.alert(t, msg, [
+    { text: 'Go back', style: 'cancel', onPress: () => resolve(false) },
+    { text: ok, onPress: () => resolve(true) },
+  ], { cancelable: true, onDismiss: () => resolve(false) }));
+
   const onAdd = async () => {
     if (!me) return;
     if (!title.trim()) return Alert.alert('Title', 'Enter a reminder title.');
+    // A one-off in the past can never fire; a recurring one just starts at
+    // its next occurrence.
+    if (freq === 'once' && when <= Date.now()) return Alert.alert('When', 'Pick a time in the future.');
+    const day = new Date(when).getDate();
+    if (freq === 'monthly' && day > 28 && !await confirm(
+      `Day ${day} is not in every month`,
+      `Phones schedule a monthly reminder on day ${day} only in months that have it, so some months will have no alert. Pick day 28 or earlier to be reminded every month.`,
+      'Keep day ' + day,
+    )) return;
+    const ref = params.refType === 'ledger' || params.refType === 'chitti' ? params.refType : null;
     try {
       const notifId = await scheduleReminder('Vault Finance', title.trim(), freq, when);
       await insertReminder({
         user_id: me.id,
-        ref_type: (params.refType as any) ?? null,
-        ref_id: params.refId ?? null,
-        title: title.trim(), freq, next_at: when, notif_id: notifId,
+        ref_type: ref,
+        ref_id: ref ? params.refId ?? null : null,
+        title: title.trim(), freq, next_at: nextOccurrence(freq, when, Date.now()), notif_id: notifId,
       });
       if (!notifId) warnUnscheduled();
       setShowAdd(false); setTitle(''); reload();
@@ -83,6 +100,11 @@ export default function Reminders() {
       await cancel(ids.cancel);
       await snoozeReminder(r.id, next, ids.keep);
       if (!snoozeId) warnUnscheduled();
+      // The snooze itself may be fine while the repeating alert never was.
+      else if (isUnscheduled(r.freq, ids.keep)) {
+        Alert.alert('Snoozed, but not repeating',
+          'You will be reminded tomorrow, but the repeating reminder is not scheduled, so it will not alert you after that. Allow notifications for this app in your phone settings, then add it again.');
+      }
       reload();
     } catch (e: any) { Alert.alert('Could not snooze the reminder', e?.message ?? 'Try again.'); }
   };
@@ -101,18 +123,20 @@ export default function Reminders() {
     <View style={s.screen}>
       {picker.element}
       <FinHeader title="Reminders" right={
-        <TouchableOpacity accessibilityLabel={showAdd ? "Close the new reminder form" : "Add a reminder"} onPress={() => setShowAdd(v => !v)} hitSlop={8}>
+        <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: showAdd }}
+          accessibilityLabel={showAdd ? 'Close the new reminder form' : 'Add a reminder'} onPress={() => setShowAdd(v => !v)} hitSlop={8}>
           <Ionicons name={showAdd ? 'close' : 'add-circle'} size={26} color={FIN.brandDeep} />
         </TouchableOpacity>
       } />
-      <ScrollView contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
+      <KeyboardSafe>
+      <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         {showAdd && (
           <Card style={{ marginBottom: 8 }}>
             <Label>Title</Label>
             <Field label="Reminder title" value={title} onChangeText={setTitle} placeholder="e.g. Ramesh — interest due" />
             <Label>Repeat</Label>
             <Segment<ReminderFreq>
-              options={[{ k: 'once', label: 'Once' }, { k: 'daily', label: 'Daily' }, { k: 'weekly', label: 'Weekly' }, { k: 'monthly', label: 'Monthly' }]}
+              options={[{ k: 'once', label: 'Once' }, { k: 'daily', label: 'Daily' }, { k: 'weekly', label: 'Weekly' }, { k: 'monthly', label: 'Monthly' }, { k: 'yearly', label: 'Yearly' }]}
               value={freq} onChange={setFreq} small
             />
             <Label>When</Label>
@@ -167,6 +191,7 @@ export default function Reminders() {
         ))}
         <View style={{ height: 30 }} />
       </ScrollView>
+      </KeyboardSafe>
     </View>
   );
 }
@@ -175,7 +200,7 @@ const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
   body: { padding: 16, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   section: { color: FIN.text, fontSize: 14, fontWeight: '800', marginTop: 16, marginBottom: 10 },
-  card: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: FIN.card, borderRadius: 12, padding: 13, marginBottom: 9, borderWidth: 1, borderColor: FIN.glassEdge, shadowColor: '#101828', shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
+  card: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: FIN.card, borderRadius: 12, padding: 13, marginBottom: 9, borderWidth: 1, borderColor: FIN.glassEdge, ...FIN_SHADOW.rest },
   dot: { width: 9, height: 9, borderRadius: 5, backgroundColor: FIN.good },
   title: { color: FIN.text, fontSize: 14.5, fontWeight: '700' },
   sub: { color: FIN.sub, fontSize: 12, marginTop: 2 },

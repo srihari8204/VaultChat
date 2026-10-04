@@ -32,7 +32,7 @@ const plan = planLedgerImport(csv, [], now);
 assert.equal(plan.rows.length, 1);
 const r = plan.rows[0];
 assert.equal(r.name, '=Ramesh, Jr');
-assert.equal(r.mobile, '+919876543210');
+assert.equal(r.mobile, '9876543210');               // stored normalised, like the forms
 assert.equal(r.notes, 'paid in two parts\n"cash", then UPI');
 assert.equal(r.principal, 125000.5);
 assert.equal(r.remaining, 0);                     // settled stays settled
@@ -75,5 +75,15 @@ assert.equal(planLedgerImport(oldCsv.replace('=Ramesh, Jr', '"=Ramesh, Jr"'), [b
 const badDate = planLedgerImport(toCsv(LEDGER_HEADERS, [[...ledgerCsvRow(base).slice(0, 12), 'not a date', '']]), [], now);
 assert.equal(badDate.badDate, 1);
 assert.equal(badDate.rows.length, 0);
+
+// a mobile is stored normalised; an invalid one is dropped and counted, the row kept
+const mob = planLedgerImport(
+  'Name,Mobile,Direction,InterestType,Principal,Rate,RateMode,Period,Remaining,Status\n' +
+  'E,+91 98765 43210,lend,simple,100,1,percent,monthly,,running\n' +
+  'F,12345,lend,simple,200,1,percent,monthly,,running\n', [], now);
+assert.equal(mob.rows.length, 2);
+assert.equal(mob.rows[0].mobile, '9876543210');
+assert.equal(mob.rows[1].mobile, null);
+assert.equal(mob.badMobile, 1);
 
 console.log('ledgerCsv selftest: all passed');

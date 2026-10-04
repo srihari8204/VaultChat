@@ -3,7 +3,8 @@
 
 import { financeDb, uuid, now } from './financeDb';
 
-export type TimelineKind = 'created' | 'update' | 'reminder' | 'edit' | 'note';
+// 'status' = an automatic status change (overdue, closed) the app made on load.
+export type TimelineKind = 'created' | 'update' | 'reminder' | 'edit' | 'note' | 'status';
 export interface TimelineRow {
   id: string;
   ref_type: 'ledger' | 'chitti';

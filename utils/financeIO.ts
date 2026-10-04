@@ -9,11 +9,18 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { formatINR } from './interest';
 
 // ── PDF ─────────────────────────────────────────────────────────────
-/** Render an HTML string to a PDF and open the share sheet. Returns the file uri. */
+/** Render an HTML string to a PDF, open the share sheet, then delete the file. */
 export async function sharePdf(html: string, _name = 'vault-finance'): Promise<string | null> {
   const { uri } = await Print.printToFileAsync({ html });
-  if (await Sharing.isAvailableAsync()) {
-    await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: 'Share PDF' });
+  try {
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: 'Share PDF' });
+    }
+  } finally {
+    // The PDF carries names, phones and amounts. Once the share sheet has
+    // handed it on, the cache copy goes — as app/finance/io.tsx does for its
+    // exports. Nothing reads the returned uri afterwards.
+    await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
   }
   return uri;
 }

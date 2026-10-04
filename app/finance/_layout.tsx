@@ -13,6 +13,7 @@ import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
 import { View, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { type FinancePalette } from '../../constants/financeTheme';
+import { ErrorBoundary } from '../../components/ErrorBoundary';
 
 export default function FinanceLayout() {
   const FIN = useFinanceTheme();
@@ -25,6 +26,11 @@ export default function FinanceLayout() {
         style={StyleSheet.absoluteFill}
         pointerEvents="none"
       />
+      {/* A render throw in any finance screen stops here, with a Try again,
+          instead of unwinding to the app-wide boundary. The data is on disk
+          and untouched by a render failure, which the message says. */}
+      <ErrorBoundary screen="finance" fallbackTitle="Vault Finance hit a problem"
+        fallbackMessage="Your ledgers and Lucky Draw groups are safe on this phone. Tap Try again; if it keeps happening, go back and reopen Vault Finance.">
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: FIN.bg } }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="ledger/index" />
@@ -45,6 +51,7 @@ export default function FinanceLayout() {
         <Stack.Screen name="customer" />
         <Stack.Screen name="search" />
       </Stack>
+      </ErrorBoundary>
     </View>
   );
 }

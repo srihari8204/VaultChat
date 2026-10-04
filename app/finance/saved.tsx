@@ -2,20 +2,28 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { TABULAR, type FinancePalette } from '../../constants/financeTheme';
+import { TABULAR, FIN_SHADOW, type FinancePalette } from '../../constants/financeTheme';
 import { FinHeader, Segment, Pill, EmptyState, LoadingState, ErrorState } from '../../components/finance/ui';
 import { useLoadStatus } from '../../components/finance/useLoad';
 import { useMe } from '../../components/finance/useMe';
-import { formatINR, fmtDate } from '../../utils/financeFormat';
+import { formatINR, fmtDate, PERIOD_LABEL } from '../../utils/financeFormat';
 import { listLedger } from '../../db/ledger';
-import { listInterest } from '../../db/interestHistory';
+import { listInterest, deleteInterest, type InterestRow } from '../../db/interestHistory';
 import { listGroups } from '../../db/chitti';
 
 type Kind = 'ledger' | 'interest' | 'chitti';
-interface SavedItem { id: string; kind: Kind; title: string; sub: string; amount: number; at: number; onPress?: () => void; }
+interface SavedItem {
+  id: string; kind: Kind; title: string; sub: string; amount: number; at: number;
+  onPress: () => void; onDelete?: () => void;
+}
+
+/** "2₹/₹100 · Monthly" — rows saved before the unit was stored show the bare rate. */
+const rateText = (r: InterestRow) => r.rate_mode
+  ? `${r.rate}${r.rate_mode === 'rupees' ? '₹/₹100' : '%'}${r.period ? ` · ${PERIOD_LABEL[r.period]}` : ''}`
+  : `Rate ${r.rate}`;
 type Tab = 'all' | Kind;
 
 const getKindMeta = (FIN: FinancePalette): Record<Kind, { label: string; fg: string; bg: string }> => ({
@@ -34,6 +42,24 @@ export default function Saved() {
   const [items, setItems] = useState<SavedItem[]>([]);
 
   const { status, begin, done, fail } = useLoadStatus();
+  // Interest calculations have no detail screen, so a tap shows the saved
+  // figures with a Delete; Delete then asks once more before removing it.
+  const reloadRef = React.useRef<() => void>(() => {});
+  const deleteCalc = useCallback((r: InterestRow) => Alert.alert('Delete this calculation?',
+    'It is removed from Saved & History. This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => {
+        deleteInterest(r.id).then(() => reloadRef.current())
+          .catch((e: any) => Alert.alert('Could not delete', e?.message ?? 'Try again.'));
+      } },
+    ]), []);
+  const viewCalc = useCallback((r: InterestRow) => Alert.alert(
+    `${r.type === 'simple' ? 'Simple' : 'Compound'} interest`,
+    [`Principal ${formatINR(r.principal)}`, rateText(r), `${r.time_years} years`,
+     `Interest ${formatINR(r.interest)}`, `Total ${formatINR(r.total_amount)}`, `Saved ${fmtDate(r.created_at)}`].join('\n'),
+    [{ text: 'Close', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => deleteCalc(r) }],
+  ), [deleteCalc]);
+
   const reload = useCallback(() => {
     if (!me) return;
     begin();
@@ -51,8 +77,9 @@ export default function Saved() {
         ...interest.map(r => ({
           id: r.id, kind: 'interest' as Kind,
           title: `${r.type === 'simple' ? 'Simple' : 'Compound'} interest`,
-          sub: `${r.rate} · ${r.time_years} yr · ${fmtDate(r.created_at)}`,
+          sub: `${rateText(r)} · ${r.time_years} yr · ${fmtDate(r.created_at)}`,
           amount: r.total_amount, at: r.created_at,
+          onPress: () => viewCalc(r), onDelete: () => deleteCalc(r),
         })),
         ...groups.map(g => ({
           id: g.id, kind: 'chitti' as Kind,
@@ -64,7 +91,8 @@ export default function Saved() {
       setItems(out);
       done();
     })().catch(fail);
-  }, [me, router, begin, done, fail]);
+  }, [me, router, begin, done, fail, viewCalc, deleteCalc]);
+  reloadRef.current = reload;
   useFocusEffect(reload);
 
   const shown = useMemo(() => (tab === 'all' ? items : items.filter(i => i.kind === tab)), [items, tab]);
@@ -88,7 +116,11 @@ export default function Saved() {
         ) : shown.map(item => {
           const m = KIND_META[item.kind];
           return (
-            <TouchableOpacity key={`${item.kind}-${item.id}`} style={s.card} activeOpacity={item.onPress ? 0.85 : 1} onPress={item.onPress}>
+            <TouchableOpacity key={`${item.kind}-${item.id}`} style={s.card} activeOpacity={0.85} onPress={item.onPress}
+              accessibilityRole="button"
+              accessibilityLabel={`${m.label}: ${item.title}, ${formatINR(item.amount)}. ${item.sub}. ${item.kind === 'interest' ? 'Show details' : 'Open'}`}
+              accessibilityActions={item.onDelete ? [{ name: 'delete', label: 'Delete' }] : undefined}
+              onAccessibilityAction={item.onDelete ? (ev) => { if (ev.nativeEvent.actionName === 'delete') item.onDelete?.(); } : undefined}>
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={s.title} numberOfLines={1}>{item.title}</Text>
                 <Text style={s.sub} numberOfLines={1}>{item.sub}</Text>
@@ -97,7 +129,7 @@ export default function Saved() {
                 <Text style={s.amt}>{formatINR(item.amount)}</Text>
                 <Pill label={m.label} fg={m.fg} bg={m.bg} />
               </View>
-              {item.onPress && <Ionicons name="chevron-forward" size={16} color={FIN.faint} style={{ marginLeft: 6 }} />}
+              <Ionicons name="chevron-forward" size={16} color={FIN.faint} style={{ marginLeft: 6 }} />
             </TouchableOpacity>
           );
         })}
@@ -111,7 +143,7 @@ const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
   filterWrap: { paddingHorizontal: 16, paddingTop: 12, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   body: { padding: 16, paddingTop: 12, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
-  card: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: FIN.card, borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: FIN.glassEdge, shadowColor: '#101828', shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
+  card: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: FIN.card, borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: FIN.glassEdge, ...FIN_SHADOW.rest },
   title: { color: FIN.text, fontSize: 15, fontWeight: '700' },
   sub: { color: FIN.sub, fontSize: 12.5, marginTop: 2 },
   amt: { color: FIN.text, fontSize: 14.5, fontWeight: '800', ...TABULAR },

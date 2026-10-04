@@ -6,12 +6,12 @@ import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-nati
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { type FinancePalette } from '../../../constants/financeTheme';
+import { FIN_SHADOW, type FinancePalette } from '../../../constants/financeTheme';
 import { FinHeader, Segment, ProgressRing, EmptyState, LoadingState, ErrorState } from '../../../components/finance/ui';
 import { useLoadStatus } from '../../../components/finance/useLoad';
 import { useMe } from '../../../components/finance/useMe';
 import { inrShort } from '../../../utils/financeFormat';
-import { listGroups, listCollections, type ChittiGroup } from '../../../db/chitti';
+import { listGroups, paidCountsByGroup, type ChittiGroup } from '../../../db/chitti';
 
 type Tab = 'active' | 'closed' | 'draft';
 
@@ -34,16 +34,14 @@ export default function ChittiList() {
     begin();
     // This had no .catch at all: a failed read was an unhandled rejection and
     // the screen silently showed "No active groups".
+    // listGroups also closes groups whose last auction has passed, so the
+    // Active / Closed tabs are current. One grouped COUNT replaces a
+    // per-group read of every collection row.
     (async () => {
-      const gs = await listGroups(me.id);
+      const [gs, paid] = await Promise.all([listGroups(me.id), paidCountsByGroup(me.id)]);
       setGroups(gs);
       const prog: Record<string, number> = {};
-      for (const g of gs) {
-        const cols = await listCollections(g.id);
-        const paid = cols.filter(c => c.status === 'paid').length;
-        const totalSlots = g.members * g.duration || 1;
-        prog[g.id] = (paid / totalSlots) * 100;
-      }
+      for (const g of gs) prog[g.id] = ((paid[g.id] ?? 0) / (g.members * g.duration || 1)) * 100;
       setProgress(prog);
       done();
     })().catch(fail);
@@ -74,6 +72,8 @@ export default function ChittiList() {
           <EmptyState icon="people-outline" title={`No ${tab} groups`} sub="Create a Lucky Draw group to track members and collections." />
         ) : shown.map(g => (
           <TouchableOpacity key={g.id} style={s.card} activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel={`${g.name}, ${g.members} members, ${inrShort(g.installment)} a month, ${Math.round(progress[g.id] ?? 0)}% collected. Open group`}
             onPress={() => router.push({ pathname: '/finance/chitti/[id]', params: { id: g.id } })}>
             <ProgressRing pct={progress[g.id] ?? 0} />
             <View style={{ flex: 1, minWidth: 0 }}>
@@ -86,7 +86,8 @@ export default function ChittiList() {
         ))}
         <View style={{ height: 90 }} />
       </ScrollView>
-      <TouchableOpacity style={[s.fab, { bottom: insets.bottom + 20 }]} activeOpacity={0.9} onPress={() => router.push('/finance/chitti/new')}>
+      <TouchableOpacity style={[s.fab, { bottom: insets.bottom + 20 }]} activeOpacity={0.9} onPress={() => router.push('/finance/chitti/new')}
+        accessibilityRole="button" accessibilityLabel="New Lucky Draw group">
         <Ionicons name="add" size={22} color={FIN.onBrand} />
         <Text style={s.fabTxt}>New Lucky Draw Group</Text>
       </TouchableOpacity>
@@ -98,7 +99,7 @@ const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
   filterWrap: { paddingHorizontal: 16, paddingTop: 12, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   body: { padding: 16, paddingTop: 12, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
-  card: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: FIN.card, borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: FIN.glassEdge, shadowColor: '#101828', shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
+  card: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: FIN.card, borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: FIN.glassEdge, ...FIN_SHADOW.rest },
   name: { color: FIN.text, fontSize: 15.5, fontWeight: '700' },
   sub: { color: FIN.sub, fontSize: 12.5, marginTop: 2 },
   chit: { color: FIN.brandDeep, fontSize: 12, fontWeight: '700', marginTop: 3 },

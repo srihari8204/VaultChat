@@ -8,6 +8,8 @@
 import { financeDb, uuid, now } from './financeDb';
 import { addTimeline } from './financeTimeline';
 import { splitEvenly, toPaise, fromPaise } from '../utils/money';
+import { normalizeMobile, groupStatusFor, chittiTermEnd } from '../utils/financeRules';
+import { fmtDate } from '../utils/financeFormat';
 
 export type ChittiStatus = 'active' | 'closed' | 'draft';
 export type CollectionStatus = 'paid' | 'pending' | 'overdue';
@@ -36,24 +38,9 @@ export interface ChittiMember {
   created_at: number;
 }
 
-/**
- * Loose validator for an Indian mobile number: 10 digits, optional +91/91/0
- * prefix, tolerant of spaces/hyphens/parens the user typed. Returns the
- * normalized 10-digit form, or null if the input doesn't look like a mobile
- * number. Deliberately not a hashing/matching engine — Lucky Draw members are
- * local notebook entries, not linked to any account (see product decision:
- * local-only, no cross-user matching).
- */
-export function normalizeMobile(raw: string): string | null {
-  let s = (raw ?? '').replace(/[\s\-()]/g, '');
-  if (s.startsWith('+')) s = s.slice(1);
-  // Strip a country code / trunk prefix ONLY when what remains is still a
-  // 10-digit number. A valid mobile can itself begin with "91" (9123456789),
-  // so an unconditional strip would eat its first two digits and reject it.
-  if (s.length === 12 && s.startsWith('91')) s = s.slice(2);
-  else if (s.length === 11 && s.startsWith('0')) s = s.slice(1);
-  return /^[6-9]\d{9}$/.test(s) ? s : null;
-}
+// Mobile validation is pure and shared with the ledger forms and CSV import,
+// so it lives in utils/financeRules; re-exported here for existing callers.
+export { normalizeMobile };
 
 export interface ChittiCollection {
   id: string;
@@ -85,16 +72,48 @@ export async function insertGroup(row: Omit<ChittiGroup, 'id' | 'created_at'>): 
   return full;
 }
 
+/**
+ * Close every ACTIVE group whose last auction day has passed (utils/financeRules
+ * groupStatusFor). Run on every read, so the Active / Closed tabs, the dashboard
+ * and reports agree without a background job. Each change is timelined.
+ */
+async function syncGroupStatuses(rows: ChittiGroup[]): Promise<ChittiGroup[]> {
+  const t = now();
+  const out: ChittiGroup[] = [];
+  for (const g of rows) {
+    const next = groupStatusFor(g, t);
+    if (next !== g.status) {
+      const d = await financeDb();
+      await d.runAsync(`UPDATE chitti_groups SET status = ? WHERE id = ? AND status = ?`, [next, g.id, g.status]);
+      await addTimeline('chitti', g.id, 'status',
+        `Closed automatically · the last auction (month ${g.duration}) was on ${fmtDate(chittiTermEnd(g))}`);
+      out.push({ ...g, status: next });
+    } else out.push(g);
+  }
+  return out;
+}
+
 export async function listGroups(userId: string, status?: ChittiStatus): Promise<ChittiGroup[]> {
   const d = await financeDb();
-  return status
-    ? d.getAllAsync<ChittiGroup>(`SELECT * FROM chitti_groups WHERE user_id = ? AND status = ? ORDER BY created_at DESC`, [userId, status])
-    : d.getAllAsync<ChittiGroup>(`SELECT * FROM chitti_groups WHERE user_id = ? ORDER BY created_at DESC`, [userId]);
+  const rows = await syncGroupStatuses(await d.getAllAsync<ChittiGroup>(
+    `SELECT * FROM chitti_groups WHERE user_id = ? ORDER BY created_at DESC`, [userId]));
+  return status ? rows.filter(g => g.status === status) : rows;
 }
 
 export async function getGroup(id: string): Promise<ChittiGroup | null> {
   const d = await financeDb();
-  return d.getFirstAsync<ChittiGroup>(`SELECT * FROM chitti_groups WHERE id = ?`, [id]);
+  const g = await d.getFirstAsync<ChittiGroup>(`SELECT * FROM chitti_groups WHERE id = ?`, [id]);
+  return g ? (await syncGroupStatuses([g]))[0] : null;
+}
+
+/** Paid installments per group in one query (the list screen's progress rings). */
+export async function paidCountsByGroup(userId: string): Promise<Record<string, number>> {
+  const d = await financeDb();
+  const rows = await d.getAllAsync<{ group_id: string; n: number }>(
+    `SELECT c.group_id AS group_id, COUNT(*) AS n FROM chitti_collections c
+       JOIN chitti_groups g ON g.id = c.group_id
+      WHERE g.user_id = ? AND c.status = 'paid' GROUP BY c.group_id`, [userId]);
+  return Object.fromEntries(rows.map(r => [r.group_id, r.n]));
 }
 
 /**
@@ -130,6 +149,13 @@ export async function insertMember(row: Omit<ChittiMember, 'id' | 'created_at'>)
   );
   await addTimeline('chitti', full.group_id, 'update', `Member added · ${full.name}`);
   return full;
+}
+
+/** Every member of every group the user owns (finance search). */
+export async function listAllMembers(userId: string): Promise<ChittiMember[]> {
+  const d = await financeDb();
+  return d.getAllAsync<ChittiMember>(
+    `SELECT m.* FROM chitti_members m JOIN chitti_groups g ON g.id = m.group_id WHERE g.user_id = ? ORDER BY m.name`, [userId]);
 }
 
 export async function listMembers(groupId: string): Promise<ChittiMember[]> {
@@ -251,11 +277,18 @@ export async function listAuctions(groupId: string): Promise<ChittiAuction[]> {
 
 export async function deleteAuction(id: string): Promise<void> {
   const d = await financeDb();
+  const before = await d.getFirstAsync<ChittiAuction>(`SELECT * FROM chitti_auctions WHERE id = ?`, [id]);
   await d.runAsync(`DELETE FROM chitti_auctions WHERE id = ?`, [id]);
+  // A deleted auction (month, bid, winner) is exactly what a dispute is about,
+  // so it leaves a trace like every other change to the group.
+  if (before) {
+    await addTimeline('chitti', before.group_id, 'update',
+      `M${before.month} auction deleted · winner ${before.winner_name} · bid ${before.winning_bid}`);
+  }
 }
 
 export default {
   insertGroup, listGroups, getGroup, deleteGroup, setGroupStatus,
   insertMember, listMembers, updateMember, deleteMember, markCollection, listCollections,
-  recordAuction, listAuctions, deleteAuction, normalizeMobile,
+  recordAuction, listAuctions, deleteAuction, normalizeMobile, paidCountsByGroup, listAllMembers,
 };

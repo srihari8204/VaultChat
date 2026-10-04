@@ -3,6 +3,9 @@
 // passes the resulting notif_id in here so it can be cancelled on delete/done.
 
 import { financeDb, uuid, now } from './financeDb';
+import { addTimeline } from './financeTimeline';
+import { advanceReminders } from '../utils/financeRules';
+import { fmtDateTime } from '../utils/financeFormat';
 
 export type ReminderFreq = 'once' | 'daily' | 'weekly' | 'monthly' | 'yearly';
 export type ReminderStatus = 'active' | 'done';
@@ -28,12 +31,28 @@ export async function insertReminder(row: Omit<Reminder, 'id' | 'created_at' | '
      VALUES (?,?,?,?,?,?,?,?,?,?)`,
     [full.id, full.user_id, full.ref_type, full.ref_id, full.title, full.freq, full.next_at, full.status, full.notif_id, full.created_at],
   );
+  // A reminder set from a ledger or group belongs in that record's history.
+  if (full.ref_type && full.ref_id) {
+    await addTimeline(full.ref_type, full.ref_id, 'reminder',
+      `Reminder set · ${full.title} · ${full.freq === 'once' ? '' : `${full.freq} from `}${fmtDateTime(full.next_at)}`);
+  }
   return full;
 }
 
+/**
+ * Lists reminders with every recurring one moved to its next occurrence (see
+ * utils/financeRules advanceReminders). The OS keeps firing a recurring
+ * notification on its own; without this `next_at` stayed on the first date
+ * forever, so Calendar and the dashboard's "due today" never saw it again.
+ */
 export async function listReminders(userId: string): Promise<Reminder[]> {
   const d = await financeDb();
-  return d.getAllAsync<Reminder>(`SELECT * FROM reminders WHERE user_id = ? ORDER BY next_at ASC`, [userId]);
+  const rows = await d.getAllAsync<Reminder>(`SELECT * FROM reminders WHERE user_id = ? ORDER BY next_at ASC`, [userId]);
+  const moves = advanceReminders(rows, now());
+  if (moves.length === 0) return rows;
+  for (const m of moves) await d.runAsync(`UPDATE reminders SET next_at = ? WHERE id = ?`, [m.next_at, m.id]);
+  const byId = new Map(moves.map(m => [m.id, m.next_at]));
+  return rows.map(r => (byId.has(r.id) ? { ...r, next_at: byId.get(r.id)! } : r)).sort((a, b) => a.next_at - b.next_at);
 }
 
 export async function setReminderStatus(id: string, status: ReminderStatus): Promise<void> {

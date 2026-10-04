@@ -9,7 +9,8 @@ import { useDatePicker } from '../../../components/finance/useDatePicker';
 import { type FinancePalette } from '../../../constants/financeTheme';
 import { FinHeader, Label, Field, Btn, DateField, Segment } from '../../../components/finance/ui';
 import { useMe } from '../../../components/finance/useMe';
-import { fmtDate, num } from '../../../utils/financeFormat';
+import { fmtDate, num, formatINR } from '../../../utils/financeFormat';
+import { toPaise } from '../../../utils/money';
 import { insertGroup, type ChittiStatus } from '../../../db/chitti';
 
 export default function NewChitti() {
@@ -33,12 +34,26 @@ export default function NewChitti() {
     const cv = num(chitValue), inst = num(installment), mem = num(members), dur = num(duration);
     if (!(cv > 0)) return Alert.alert('Chit value', 'Enter a chit value greater than 0.');
     if (!(inst > 0)) return Alert.alert('Installment', 'Enter a monthly installment.');
-    if (!(mem > 0)) return Alert.alert('Members', 'Enter the number of members.');
-    if (!(dur > 0)) return Alert.alert('Duration', 'Enter the duration in months.');
+    // Whole numbers of at least 1: 0.4 members used to pass `> 0` and then
+    // round to a group of 0, and 2.5 months has no third auction.
+    if (!(Number.isInteger(mem) && mem >= 1)) return Alert.alert('Members', 'Enter the number of members as a whole number, 1 or more.');
+    if (!(Number.isInteger(dur) && dur >= 1)) return Alert.alert('Duration', 'Enter the duration as a whole number of months, 1 or more.');
+    // In a standard chit every member pays the installment each month, so
+    // installment × members is the chit value. A mismatch is usually a typo —
+    // but some groups do run that way, so it is a question, not a refusal.
+    if (toPaise(inst) * mem !== toPaise(cv)) {
+      const go = await new Promise<boolean>((resolve) => Alert.alert(
+        'Check the amounts',
+        `${formatINR(inst)} × ${mem} members is ${formatINR((toPaise(inst) * mem) / 100)}, but the chit value is ${formatINR(cv)}. Create the group anyway?`,
+        [{ text: 'Go back', style: 'cancel', onPress: () => resolve(false) }, { text: 'Create', onPress: () => resolve(true) }],
+        { cancelable: true, onDismiss: () => resolve(false) },
+      ));
+      if (!go) return;
+    }
     try {
       const g = await insertGroup({
         user_id: me.id, name: name.trim(), chit_value: cv, installment: inst,
-        members: Math.round(mem), duration: Math.round(dur), start_date: start,
+        members: mem, duration: dur, start_date: start,
         foreman: foreman.trim() || null, status,
       });
       router.replace({ pathname: '/finance/chitti/[id]', params: { id: g.id } });
@@ -75,7 +90,7 @@ export default function NewChitti() {
           <Field label="Foreman, optional" value={foreman} onChangeText={setForeman} placeholder="Organizer name" />
 
           <Label>Start Date</Label>
-          <DateField value={fmtDate(start)} onPress={() => picker.open(new Date(start), (d) => setStart(d.getTime()))} />
+          <DateField label="Start date" value={fmtDate(start)} onPress={() => picker.open(new Date(start), (d) => setStart(d.getTime()))} />
 
           <Label>Status</Label>
           <Segment<ChittiStatus> options={[{ k: 'active', label: 'Active' }, { k: 'draft', label: 'Draft' }, { k: 'closed', label: 'Closed' }]} value={status} onChange={setStatus} small />

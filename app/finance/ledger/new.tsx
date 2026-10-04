@@ -12,6 +12,7 @@ import { useMe } from '../../../components/finance/useMe';
 import { fmtDate, num } from '../../../utils/financeFormat';
 import { insertLedger } from '../../../db/ledger';
 import type { LedgerPeriod } from '../../../utils/finance';
+import { normalizeMobile, ledgerDatesProblem } from '../../../utils/financeRules';
 
 export default function NewLedger() {
   const FIN = useFinanceTheme();
@@ -49,9 +50,18 @@ export default function NewLedger() {
     // positive — NaN (a half-typed "1,2") and negatives are still refused.
     // app/finance/emi.tsx has used this exact shape since 2026-09-17.
     if (!Number.isFinite(R) || R < 0) return Alert.alert('Rate', 'Enter an interest rate of 0 or more.');
+    // Stored normalised (10 digits), like Lucky Draw members, so the customer
+    // profile can match the same person typed as "+91 98765 43210" elsewhere.
+    let mob: string | null = null;
+    if (mobile.trim()) {
+      mob = normalizeMobile(mobile);
+      if (!mob) return Alert.alert('Mobile number', 'Enter a valid 10-digit mobile number, or leave it empty.');
+    }
+    const dateProblem = ledgerDatesProblem(start, end);
+    if (dateProblem) return Alert.alert('End date', dateProblem);
     try {
       await insertLedger({
-        user_id: me.id, direction, name: name.trim(), mobile: mobile.trim() || null,
+        user_id: me.id, direction, name: name.trim(), mobile: mob,
         interest_type: itype, principal: P, rate: R, rate_mode: rateMode, period,
         start_date: start, end_date: end, notes: notes.trim() || null,
       });
@@ -97,9 +107,9 @@ export default function NewLedger() {
           />
 
           <Label>Start Date</Label>
-          <DateField value={fmtDate(start)} onPress={() => pickDate('start')} />
+          <DateField label="Start date" value={fmtDate(start)} onPress={() => pickDate('start')} />
           <Label hint="(optional)">End Date</Label>
-          <DateField value={end ? fmtDate(end) : ''} onPress={() => pickDate('end')} />
+          <DateField label="End date" value={end ? fmtDate(end) : ''} onPress={() => pickDate('end')} onClear={() => setEnd(null)} />
 
           <Label hint="(optional)">Notes</Label>
           <Field label="Notes, optional" value={notes} onChangeText={setNotes} placeholder="Add a note" multiline />

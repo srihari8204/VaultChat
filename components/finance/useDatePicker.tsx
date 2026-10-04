@@ -54,7 +54,13 @@ export function useDatePicker() {
   const element = req ? (
     <Modal visible transparent animationType="fade" onRequestClose={close}>
       <View style={styles.wrap}>
-        <Pressable style={styles.scrim} onPress={close} accessibilityRole="button" accessibilityLabel="Close the date picker" />
+        {/* Scrim from theme ink: the darkest ink of each scheme, faded by
+            opacity, so it dims the screen in light and dark alike. */}
+        <Pressable
+          style={[styles.scrim, scheme === 'dark'
+            ? { backgroundColor: FIN.bgBottom, opacity: 0.7 }
+            : { backgroundColor: FIN.text, opacity: 0.4 }]}
+          onPress={close} accessibilityRole="button" accessibilityLabel="Close the date picker" />
         <View style={[styles.sheet, { backgroundColor: FIN.cardSolid, borderColor: FIN.glassEdge }]}>
           <DateTimePicker
             value={draft}
@@ -78,7 +84,7 @@ export function useDatePicker() {
 
 const styles = StyleSheet.create({
   wrap: { flex: 1, justifyContent: 'flex-end', padding: 16, paddingBottom: 32 },
-  scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)' },
+  scrim: { ...StyleSheet.absoluteFillObject },
   sheet: { width: '100%', maxWidth: 600, alignSelf: 'center', borderRadius: 16, borderWidth: 1, padding: 12 },
   row: { flexDirection: 'row', gap: 12, marginTop: 8 },
 });

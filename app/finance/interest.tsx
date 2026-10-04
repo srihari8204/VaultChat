@@ -44,7 +44,8 @@ export default function InterestCalc() {
   const onCalc = async () => {
     const P = num(principal), R = num(rate);
     if (!(P > 0)) return Alert.alert('Principal', 'Enter a principal greater than 0.');
-    if (!(R > 0)) return Alert.alert('Rate', 'Enter a rate greater than 0.');
+    // 0% is a real (family) loan — same rule as the ledger forms and EMI.
+    if (!Number.isFinite(R) || R < 0) return Alert.alert('Rate', 'Enter an interest rate of 0 or more.');
     let years: number;
     if (timeMode === 'dates') {
       if (!from) return Alert.alert('From date', 'Pick a start date.');
@@ -63,6 +64,9 @@ export default function InterestCalc() {
       if (!Number.isFinite(dY) || !Number.isFinite(dM) || !Number.isFinite(dD)) {
         return Alert.alert('Duration', 'Years, months and days must be plain numbers. Use digits only — 1200 or 1,200 both work — or leave a box empty.');
       }
+      // "2 years, −6 months" used to pass as 1.5 years because only the total
+      // was checked; a negative part is a typo, not an instruction.
+      if (dY < 0 || dM < 0 || dD < 0) return Alert.alert('Duration', 'Years, months and days cannot be negative.');
       years = dY + dM / 12 + dD / 365;
       if (!(years > 0)) return Alert.alert('Duration', 'Enter a duration greater than 0.');
     }
@@ -83,7 +87,7 @@ export default function InterestCalc() {
     setRes(out);
     if (me) {
       try {
-        await insertInterest({ user_id: me.id, user_name: me.name, type, principal: P, rate: R, time_years: round2(years), frequency: type === 'compound' ? 1 : null, interest: out.interest, total_amount: out.total });
+        await insertInterest({ user_id: me.id, user_name: me.name, type, principal: P, rate: R, time_years: round2(years), frequency: type === 'compound' ? 1 : null, interest: out.interest, total_amount: out.total, rate_mode: rateMode, period });
       } catch (e: any) {
         // `catch {}` made this file's own header comment ("Saves to on-device
         // history") a lie (2026-09-22). The result above is real and on screen,
@@ -148,9 +152,9 @@ export default function InterestCalc() {
           {timeMode === 'dates' ? (
             <>
               <Label>From Date</Label>
-              <DateField value={from ? fmtDate(from) : ''} onPress={() => pick('from')} />
+              <DateField label="From date" value={from ? fmtDate(from) : ''} onPress={() => pick('from')} />
               <Label>To Date</Label>
-              <DateField value={fmtDate(to)} onPress={() => pick('to')} />
+              <DateField label="To date" value={fmtDate(to)} onPress={() => pick('to')} />
             </>
           ) : (
             <>
@@ -199,6 +203,7 @@ const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   durRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   durationField: { flexGrow: 1, flexBasis: 100, minWidth: 0 },
   btnRow: { flexDirection: 'row', gap: 12, marginTop: 20 },
+  // Fixed white on the always-dark FIN_HERO gradient (no scheme token applies).
   heroLabel: { color: 'rgba(255,255,255,0.85)', fontSize: 10.5, fontWeight: '700', letterSpacing: 0.8 },
   heroVal: { color: '#fff', fontSize: 28, fontWeight: '800', marginTop: 6, ...TABULAR },
 });

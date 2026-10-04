@@ -60,7 +60,9 @@ export function FinHeader({ title, right }: { title: string; right?: React.React
     <View style={[s.header, { paddingTop: insets.top + 8 }]}>
       <StatusBar barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
       <TouchableOpacity
-        onPress={() => router.back()}
+        // Opened from a deep link (or the legacy /interest-calculator redirect)
+        // there is nothing to go back to; land on the finance dashboard.
+        onPress={() => (router.canGoBack() ? router.back() : router.replace('/finance'))}
         hitSlop={10}
         style={s.hBtn}
         accessibilityRole="button"
@@ -120,6 +122,8 @@ export function Field(props: {
   label?: string;
   value: string; onChangeText: (t: string) => void; placeholder?: string;
   keyboardType?: KeyboardTypeOptions; multiline?: boolean; error?: string;
+  /** Password fields (the Full Backup password). */
+  secureTextEntry?: boolean; autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters'; autoCorrect?: boolean;
   style?: ViewStyle | TextStyle | (ViewStyle | TextStyle)[];
 }) {
   const FIN = useFinanceTheme();
@@ -148,18 +152,30 @@ export function Field(props: {
   );
 }
 
-export function DateField({ value, onPress }: { value: string; onPress: () => void }) {
+/**
+ * Date button. `label` is the field's name ("Start date", "End date"), so two
+ * date fields on one form do not both read "Date … Change date". `onClear`
+ * (optional fields only) adds a clear button once a date is set.
+ */
+export function DateField({ value, onPress, label = 'Date', onClear }: {
+  value: string; onPress: () => void; label?: string; onClear?: () => void;
+}) {
   const FIN = useFinanceTheme();
   const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   return (
-    <TouchableOpacity
-      style={s.dateField} onPress={onPress} activeOpacity={0.85}
-      accessibilityRole="button"
-      accessibilityLabel={value ? `Date ${value}. Change date` : 'Choose a date'}
-    >
-      <Text style={[s.dateTxt, !value && { color: FIN.faint }]}>{value || 'dd/mm/yyyy'}</Text>
-      <View style={s.dateBtn}><Ionicons name="calendar" size={18} color={FIN.onBrand} /></View>
-    </TouchableOpacity>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+      <TouchableOpacity
+        style={[s.dateField, { flex: 1 }]} onPress={onPress} activeOpacity={0.85}
+        accessibilityRole="button"
+        accessibilityLabel={value ? `${label}: ${value}. Change ${label.toLowerCase()}` : `${label}: not set. Choose a date`}
+      >
+        <Text style={[s.dateTxt, !value && { color: FIN.faint }]}>{value || 'dd/mm/yyyy'}</Text>
+        <View style={s.dateBtn}><Ionicons name="calendar" size={18} color={FIN.onBrand} /></View>
+      </TouchableOpacity>
+      {onClear && value ? (
+        <IconBtn icon="close-circle-outline" label={`Clear ${label.toLowerCase()}`} onPress={onClear} />
+      ) : null}
+    </View>
   );
 }
 

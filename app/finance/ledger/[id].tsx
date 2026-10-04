@@ -6,23 +6,13 @@ import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'rea
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { financeStatusColors, FIN_HERO, TABULAR, type FinancePalette } from '../../../constants/financeTheme';
-import { FinHeader, Card, HeroCard, RowLine, Pill, LoadingState, ErrorState } from '../../../components/finance/ui';
+import { FinHeader, Card, HeroCard, RowLine, Pill, Btn, LoadingState, ErrorState } from '../../../components/finance/ui';
 import { useLoadStatus } from '../../../components/finance/useLoad';
 import { formatINR, fmtDate, fmtDateTime, PERIOD_LABEL } from '../../../utils/financeFormat';
 import { getLedger, deleteLedger, type LedgerEntry } from '../../../db/ledger';
 import { listTimeline, type TimelineRow } from '../../../db/financeTimeline';
-import { simpleInterest, compoundInterest, round2 } from '../../../utils/interest';
-import { periodRateToAnnualPct } from '../../../utils/finance';
+import { ledgerInterest } from '../../../utils/financeRules';
 import { sharePdf, pdfDocument, kvTable } from '../../../utils/financeIO';
-
-function computeInterest(e: LedgerEntry) {
-  const annual = periodRateToAnnualPct(e.rate, e.rate_mode, e.period);
-  const years = e.end_date ? Math.max(0, (e.end_date - e.start_date) / 31536000000) : 1;
-  const res = e.interest_type === 'simple'
-    ? simpleInterest(e.principal, annual, years)
-    : compoundInterest(e.principal, annual, years, 1);
-  return { interest: round2(res.interest), total: round2(res.total), years, annual };
-}
 
 export default function LedgerDetail() {
   const FIN = useFinanceTheme();
@@ -32,13 +22,15 @@ export default function LedgerDetail() {
   const router = useRouter();
   const [e, setE] = useState<LedgerEntry | null>(null);
   const [tl, setTl] = useState<TimelineRow[]>([]);
+  const [tlFailed, setTlFailed] = useState(false);
 
   const { status, begin, done, fail } = useLoadStatus();
   const reload = useCallback(() => {
     if (!id) { fail(); return; }
     begin();
     getLedger(id).then((row) => { setE(row); done(); }).catch(fail);
-    listTimeline('ledger', id).then(setTl).catch(() => {});
+    // Secondary: a failed read is said in the Timeline section, not as "No events".
+    listTimeline('ledger', id).then((r) => { setTl(r); setTlFailed(false); }).catch(() => setTlFailed(true));
   }, [id, begin, done, fail]);
   useFocusEffect(reload);
 
@@ -53,7 +45,8 @@ export default function LedgerDetail() {
     );
   }
 
-  const c = computeInterest(e);
+  // The same calculator the dashboard and reports sum with (utils/financeRules).
+  const c = ledgerInterest(e);
   const sc = STATUS_COLORS[e.status];
   const lent = e.direction === 'lend';
 
@@ -64,8 +57,8 @@ export default function LedgerDetail() {
       { k: 'Principal', v: formatINR(e.principal) },
       { k: 'Interest type', v: e.interest_type === 'simple' ? 'Simple' : 'Compound' },
       { k: 'Rate', v: `${e.rate}${e.rate_mode === 'rupees' ? '₹ per ₹100' : '%'} ${PERIOD_LABEL[e.period]}` },
-      { k: 'Interest', v: formatINR(c.interest) },
-      { k: 'Total amount', v: formatINR(c.total), tot: true },
+      { k: c.projected ? 'Interest (1-year projection)' : 'Interest to end date', v: formatINR(c.interest) },
+      { k: c.projected ? 'Total after 1 year' : 'Total at end date', v: formatINR(c.total), tot: true },
       { k: 'Remaining', v: formatINR(e.remaining) },
       { k: 'Start date', v: fmtDate(e.start_date) },
       { k: 'End date', v: e.end_date ? fmtDate(e.end_date) : '—' },
@@ -96,7 +89,9 @@ export default function LedgerDetail() {
             <Ionicons name={lent ? 'arrow-up' : 'arrow-down'} size={20} color={lent ? FIN.good : FIN.bad} />
           </View>
           <TouchableOpacity style={{ flex: 1 }} activeOpacity={0.7}
-            onPress={() => router.push({ pathname: '/finance/customer', params: { name: e.name } })}>
+            accessibilityRole="link"
+            accessibilityLabel={`${e.name}${e.mobile ? `, ${e.mobile}` : ''}. View customer profile`}
+            onPress={() => router.push({ pathname: '/finance/customer', params: { name: e.name, mobile: e.mobile ?? '' } })}>
             <Text numberOfLines={1} style={s.name}>{e.name}</Text>
             <Text style={s.mobile}>{e.mobile ? `${e.mobile} · ` : ''}View profile ›</Text>
           </TouchableOpacity>
@@ -104,7 +99,11 @@ export default function LedgerDetail() {
         </View>
 
         <HeroCard colors={lent ? FIN_HERO.good : FIN_HERO.bad}>
-          <Text style={s.heroLabel}>{lent ? 'LENT AMOUNT (P + I)' : 'BORROWED AMOUNT (P + I)'}</Text>
+          {/* Not an amount due today: the interest runs to the end date, or is
+              a one-year projection when there is none — the label says which. */}
+          <Text style={s.heroLabel}>
+            {lent ? 'LENT' : 'BORROWED'} · P + I {c.projected ? 'AFTER 1 YEAR (PROJECTION)' : 'AT END DATE'}
+          </Text>
           <Text style={s.heroVal}>{formatINR(c.total)}</Text>
           <Text style={s.heroSub}>Principal {formatINR(e.principal)} · Interest {formatINR(c.interest)}</Text>
         </HeroCard>
@@ -113,8 +112,8 @@ export default function LedgerDetail() {
           <RowLine k="Principal amount" v={formatINR(e.principal)} />
           <RowLine k="Interest type" v={e.interest_type === 'simple' ? 'Simple' : 'Compound'} />
           <RowLine k="Rate" v={`${e.rate}${e.rate_mode === 'rupees' ? '₹/₹100' : '%'} · ${PERIOD_LABEL[e.period]}`} />
-          <RowLine k="Interest amount" v={formatINR(c.interest)} />
-          <RowLine k="Total amount" v={formatINR(c.total)} bold />
+          <RowLine k={c.projected ? 'Interest, 1-year projection' : 'Interest to end date'} v={formatINR(c.interest)} />
+          <RowLine k={c.projected ? 'Total after 1 year' : 'Total at end date'} v={formatINR(c.total)} bold />
           <RowLine k="Remaining" v={formatINR(e.remaining)} bold tone={e.remaining > 0 ? 'warn' : 'good'} />
           <RowLine k="Start date" v={fmtDate(e.start_date)} />
           <RowLine k="End date" v={e.end_date ? fmtDate(e.end_date) : '—'} />
@@ -133,7 +132,12 @@ export default function LedgerDetail() {
 
         {/* Timeline */}
         <Text style={s.section}>Timeline</Text>
-        {tl.length === 0 ? (
+        {tlFailed ? (
+          <View style={{ gap: 8 }}>
+            <Text style={s.tlEmpty} accessibilityRole="alert">Could not load the timeline. Nothing has been lost.</Text>
+            <Btn label="Try again" kind="ghost" icon="refresh" onPress={reload} />
+          </View>
+        ) : tl.length === 0 ? (
           <Text style={s.tlEmpty}>No events yet.</Text>
         ) : (
           <View style={s.tl}>
@@ -159,8 +163,13 @@ export default function LedgerDetail() {
 }
 
 function tlLabel(k: TimelineRow['kind']): string {
-  return { created: 'Ledger created', update: 'Amount updated', reminder: 'Reminder added', edit: 'Details edited', note: 'Note updated' }[k] ?? k;
+  return { created: 'Ledger created', update: 'Amount updated', reminder: 'Reminder added', edit: 'Details edited', note: 'Note updated', status: 'Status changed' }[k] ?? k;
 }
+
+/** The visible words are terse; the spoken name says what happens. */
+const ACTION_LABEL: Record<string, string> = {
+  Update: 'Record a payment', Remind: 'Set a reminder', PDF: 'Share as PDF', Delete: 'Delete this ledger',
+};
 
 function Action({ icon, label, onPress, primary, danger }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; primary?: boolean; danger?: boolean }) {
   const FIN = useFinanceTheme();
@@ -168,7 +177,8 @@ function Action({ icon, label, onPress, primary, danger }: { icon: keyof typeof 
   const color = danger ? FIN.bad : primary ? FIN.brandDeep : FIN.text;
   const bg = danger ? FIN.badSoft : primary ? FIN.brandSoft : FIN.card;
   return (
-    <TouchableOpacity style={[s.action, { backgroundColor: bg }]} onPress={onPress} activeOpacity={0.85}>
+    <TouchableOpacity style={[s.action, { backgroundColor: bg }]} onPress={onPress} activeOpacity={0.85}
+      accessibilityRole="button" accessibilityLabel={ACTION_LABEL[label] ?? label}>
       <Ionicons name={icon} size={20} color={color} />
       <Text style={[s.actionLbl, { color }]}>{label}</Text>
     </TouchableOpacity>
@@ -183,6 +193,7 @@ const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   name: { color: FIN.text, fontSize: 18, fontWeight: '800' },
   mobile: { color: FIN.sub, fontSize: 13, marginTop: 1 },
 
+  // Fixed white on the always-dark FIN_HERO gradient (no scheme token applies).
   heroLabel: { color: 'rgba(255,255,255,0.85)', fontSize: 10.5, fontWeight: '700', letterSpacing: 0.8 },
   heroVal: { color: '#fff', fontSize: 30, fontWeight: '800', marginTop: 6, ...TABULAR },
   heroSub: { color: 'rgba(255,255,255,0.9)', fontSize: 12.5, marginTop: 6 },
