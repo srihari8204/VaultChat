@@ -210,10 +210,8 @@ purgeRetiredKeys().catch(() => {});
 // header already owns the status-bar inset, so leaving them here padded them a
 // second time — the exact double-inset this list's own note warns about.
 const INSET_SCREENS = [
-  'creator-channels',
   'emergency-sos',
   'filevault',
-  'group-chat',
   'interest-calculator',
   'lock-alert',
   'network-test',

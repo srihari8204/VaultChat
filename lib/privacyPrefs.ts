@@ -87,6 +87,12 @@ export async function getNotifPreview(): Promise<NotifPreview> {
 export async function setNotifPreview(v: NotifPreview): Promise<void> {
   notifCached = v;
   try { await (await store()).setItem(NOTIF_KEY, v); } catch {}
+  // Calendar reminders already booked keep the title they were booked with;
+  // rewrite them now rather than on the next calendar visit. Dynamic import:
+  // this module is loaded by the notification path and must stay light.
+  if (v !== 'name') {
+    import('./groups/taskReminders').then((m) => m.hideBookedEventReminderTitles()).catch(() => {});
+  }
 }
 
 export async function getRemoteLinkPreviews(): Promise<boolean> {
