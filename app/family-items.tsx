@@ -207,11 +207,6 @@ export default function FamilyItemsScreen() {
     return { pos, place: pos ? (placeAt(places, pos)?.name ?? null) : null };
   }, [places]);
 
-  /**
-   * Record a sighting: WHERE the phone was when it heard the tag. This is the
-   * answer to "where did I leave it", and it costs no extra permission — the
-   * OS cache is read, never a fresh GPS fix.
-   */
   /** My own tags whose latest sighting the space did not take: the stamp
    *  here is real, but other members cannot see it yet. */
   const [unreported, setUnreported] = useState<ReadonlySet<string>>(new Set());
@@ -222,6 +217,11 @@ export default function FamilyItemsScreen() {
     return next;
   }), []);
 
+  /**
+   * Record a sighting: WHERE the phone was when it heard the tag. This is the
+   * answer to "where did I leave it", and it costs no extra permission — the
+   * OS cache is read, never a fresh GPS fix.
+   */
   const rememberSighting = useCallback(async (item: TrackedItem) => {
     try {
       const { pos, place } = await whereNow();
@@ -275,8 +275,10 @@ export default function FamilyItemsScreen() {
       const it = items.find((x) => x.id === id);
       if (it) rememberSighting(it); else reportFamilySighting(id);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tick, scanning, items, family, nearby]);
+  // `tick` (every 0.8 s while scanning) re-checks what is due; a re-run on new
+  // callbacks stamps nothing early, because dueSightings keeps each tag to
+  // once a minute.
+  }, [tick, scanning, items, family, nearby, rememberSighting, reportFamilySighting]);
 
   const familyIds = useMemo(() => new Set(family.map((f) => f.bleId)), [family]);
   const discoverable = useMemo(
@@ -286,6 +288,8 @@ export default function FamilyItemsScreen() {
       .filter((s) => !pairedIds.has(s.id) && !familyIds.has(s.id))
       .sort((a, b) => (rssiRef.current.get(b.id) ?? -999) - (rssiRef.current.get(a.id) ?? -999))
       .slice(0, 12),
+    // `tick` (not read) re-sorts by the live RSSI in rssiRef every 0.8 s; a
+    // ref is not a dependency the lint rule can see, hence the disable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [nearby, pairedIds, familyIds, tick],
   );

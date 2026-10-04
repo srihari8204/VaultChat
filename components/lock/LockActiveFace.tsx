@@ -14,6 +14,7 @@ import type { Palette } from '../../constants/theme';
 import { ALARM } from '../../lib/lock/alarmPalette';
 import { type LatLng } from '../../lib/nav/geo';
 import { type Costing } from '../../lib/nav/routing';
+import { navErrorText } from '../../lib/nav/navErrorText';
 import NavMap from '../nav/NavMap';
 import { zoneColor } from '../../lib/lock/zoneMachine';
 import { useLockSettings } from '../../lib/lock/lockSettings';
@@ -86,7 +87,7 @@ export default function LockActiveFace({ myPos }: { myPos: LatLng | null }) {
       await navigateBackToLock(costing);
       router.push('/navigate');
     } catch (e: unknown) {
-      Alert.alert('Navigate back', userErrorText(e, 'Could not plan a route back to the locked spot.'));
+      Alert.alert('Navigate back', navErrorText(e, 'Could not plan a route back to the locked spot.'));
     } finally { setPlanning(null); }
   };
 

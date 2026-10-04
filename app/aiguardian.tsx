@@ -14,7 +14,7 @@
 import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityInfo, ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
@@ -49,6 +49,9 @@ export default function SecurityHubScreen() {
   const [readFailed, setReadFailed] = useState(false);
   /** Summary of the scan just run, shown in-screen (the actions themselves are listed below). */
   const [scanResult, setScanResult] = useState<{ title: string; body: string } | null>(null);
+  /** False once the screen has closed: a read or scan finishing later sets nothing. */
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
 
   // Never rejects: a secure-store read failure used to surface as an unhandled
   // rejection. The last rendered view stays, and a notice says it may be stale.
@@ -59,9 +62,10 @@ export default function SecurityHubScreen() {
     setScanResult(null);
     try {
       const snapshot = await getCurrentSnapshot();
+      if (!mounted.current) return;
       setShown({ snapshot, at: Date.now() });
       setReadFailed(false);
-    } catch { setReadFailed(true); }
+    } catch { if (mounted.current) setReadFailed(true); }
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -74,6 +78,7 @@ export default function SecurityHubScreen() {
       // audit chain + fires the "Security" channel, so the screen just renders.
       const { outcome } = await runMonitoringScan('manual');
       const snapshot = outcome?.snapshot ?? (await getCurrentSnapshot());
+      if (!mounted.current) return;
       const at = Date.now();
       const view = buildDashboardViewModel(snapshot, at);
       // The scan produced a fresh snapshot: no reload, which could otherwise
@@ -91,10 +96,11 @@ export default function SecurityHubScreen() {
       // The card's live region speaks on Android only; VoiceOver needs this.
       if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(`${result.title}. ${result.body}`);
     } catch {
+      if (!mounted.current) return;
       Alert.alert('Scan failed', 'The device scan could not complete. Please try again.');
       load();
     } finally {
-      setScanning(false);
+      if (mounted.current) setScanning(false);
     }
   }, [scanning, load]);
 
@@ -246,7 +252,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   checkRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 },
   checkLabel: { color: c.text, fontSize: 14.5, fontWeight: '700' },
   checkDetail: { color: c.textDim, fontSize: 12.5, marginTop: 2, lineHeight: 17 },
-  statusPill: { fontSize: 10.5, fontWeight: '800', borderWidth: 1, borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2, overflow: 'hidden' },
+  statusPill: { fontSize: 12, fontWeight: '800', borderWidth: 1, borderRadius: 8, paddingHorizontal: 7, paddingVertical: 3, overflow: 'hidden' },
 
   emptyCard: { padding: 18 },
   emptyText: { color: c.textDim, fontSize: 13, lineHeight: 19, textAlign: 'center' },

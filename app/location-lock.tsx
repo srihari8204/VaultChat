@@ -191,12 +191,18 @@ export default function LocationLockScreen() {
       } else if (Platform.OS === 'android') {
         // OEM battery killers are the #1 cause of silently dropped geofences
         // (design.md risk) — offer the exemption once monitoring is kill-safe.
+        // "Don't ask again" stops the prompt on every arm; Lock settings keeps
+        // the battery-exemption row for later.
         try {
-          if (await notifee.isBatteryOptimizationEnabled()) {
+          if (!settings.batteryPromptOff && await notifee.isBatteryOptimizationEnabled()) {
             Alert.alert(
               'Keep the lock reliable',
-              'Battery optimization can pause background monitoring. Exempt crazzychat so the alarm always fires.',
-              [{ text: 'Later' }, { text: 'Open settings', onPress: () => { notifee.openBatteryOptimizationSettings().catch(() => {}); } }],
+              'Battery optimization can pause background monitoring. Exempt crazzychat so the alarm always fires. You can also do this later in Lock settings.',
+              [
+                { text: "Don't ask again", onPress: () => { setLockSettings({ batteryPromptOff: true }).catch(() => {}); } },
+                { text: 'Later' },
+                { text: 'Open settings', onPress: () => { notifee.openBatteryOptimizationSettings().catch(() => {}); } },
+              ],
             );
           }
         } catch {}
@@ -419,7 +425,7 @@ const st = StyleSheet.create({
   destPill: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, padding: 12, borderRadius: 10 },
   previewMap: { height: 230, borderRadius: 14, borderWidth: 1, marginTop: 14 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  customInput: { flex: 1, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, minHeight: 42, paddingVertical: 6, fontSize: 14 },
+  customInput: { flex: 1, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, minHeight: 44, paddingVertical: 6, fontSize: 14 },
   warn: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderRadius: 10, marginTop: 10 },
   lockBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 52, paddingVertical: 10, borderRadius: 14, marginTop: 28 },
   lockTxt: { fontSize: 16, fontWeight: '800' },

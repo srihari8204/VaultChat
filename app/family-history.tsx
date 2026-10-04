@@ -11,7 +11,7 @@
 // length and stores nothing. Circle-wide, one member is shown at a time.
 
 import { AppText as Text } from '../components/ui/Text';
-import React, { useCallback, useMemo, useState, useEffect } from 'react';
+import React, { useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import { View, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -161,18 +161,22 @@ export default function FamilyHistoryScreen() {
   const trackKey = useMemo(
     () => (samples.length < 2 ? '' : `${samples.length}:${samples[0]?.ts}:${samples[samples.length - 1]?.ts}`),
     [samples]);
+  // Keyed on trackKey only (a new array each load must not re-request the
+  // same track); the samples are read from a ref holding the latest render's.
+  const samplesRef = useRef(samples);
+  samplesRef.current = samples;
   useEffect(() => {
     if (!trackKey) { setRoadTravelledM(null); return; }
     let cancel = false;
     (async () => {
       try {
         // Rounded to ~11 m and de-duplicated before it leaves the phone.
-        const r = await fetchTraceDistance(traceShape(samples));
+        const r = await fetchTraceDistance(traceShape(samplesRef.current));
         if (!cancel) setRoadTravelledM(r?.distanceM ?? null);
       } catch { if (!cancel) setRoadTravelledM(null); }
     })();
     return () => { cancel = true; };
-  }, [trackKey]);   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [trackKey]);
 
   // Trips are re-derived from the same samples on every load — computed on
   // read cannot be stale, and nothing is ever stored or uploaded for them.

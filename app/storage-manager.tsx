@@ -311,7 +311,7 @@ export default function StorageManagerScreen() {
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.headerTitle} accessibilityRole="header">Storage Manager</Text>
-        <View style={{ width: 24 }} />
+        <View style={s.headerSpacer} />
       </View>
     </LinearGradient>
   );
@@ -348,7 +348,7 @@ export default function StorageManagerScreen() {
         <LinearGradient colors={[colors.glass, colors.glassSoft]} style={s.card}>
           <View style={s.storageHeader}>
             <Ionicons name="pie-chart-outline" size={28} color={colors.accent} />
-            <View style={{ marginLeft: 12, flex: 1 }}>
+            <View style={s.storageInfo}>
               <Text style={s.cardTitle}>crazzychat Storage Used</Text>
               <Text style={s.storageBig}>{loadFailed ? '—' : formatBytes(totalUsed)}</Text>
             </View>
@@ -365,15 +365,15 @@ export default function StorageManagerScreen() {
         <LinearGradient colors={[colors.glass, colors.glassSoft]} style={s.card}>
           <Text style={s.cardTitle}>Storage Breakdown</Text>
           {loadFailed ? (
-            <View style={{ gap: 12 }}>
-              <Text style={{ color: colors.danger, fontSize: 13 }}>Storage could not be measured just now.</Text>
+            <View style={s.failBox}>
+              <Text style={s.failText}>Storage could not be measured just now.</Text>
               <TouchableOpacity style={s.actionBtn} onPress={loadStorageData} accessibilityRole="button" accessibilityLabel="Measure storage again" activeOpacity={0.7}>
                 <Ionicons name="refresh-outline" size={20} color={colors.primary} />
                 <Text style={[s.actionText, { color: colors.primary }]}>Try again</Text>
               </TouchableOpacity>
             </View>
           ) : totalUsed === 0 ? (
-            <Text style={{ color: colors.textDim, fontSize: 13 }}>No app files on disk yet.</Text>
+            <Text style={s.emptyText}>No app files on disk yet.</Text>
           ) : categories.map((cat) => (
             <View key={cat.key} style={s.catRow} accessible accessibilityLabel={`${cat.label}, ${formatBytes(cat.size)}`}>
               <View style={s.catInfo}>
@@ -465,7 +465,7 @@ export default function StorageManagerScreen() {
           </View>
         </LinearGradient>
 
-        <View style={{ height: 40 }} />
+        <View style={s.bottomSpacer} />
       </ScrollView>
     </View>
   );
@@ -477,6 +477,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   loadingText: { color: c.textDim, marginTop: 12 },
   header: { paddingBottom: 16, paddingHorizontal: 20 },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  headerSpacer: { width: 24 },
+  storageInfo: { marginLeft: 12, flex: 1 },
+  failBox: { gap: 12 },
+  failText: { color: c.danger, fontSize: 13 },
+  emptyText: { color: c.textDim, fontSize: 13 },
+  bottomSpacer: { height: 40 },
   headerTitle: { color: c.text, fontSize: 20, fontWeight: '700' },
   scroll: { flex: 1 },
   scrollContent: { padding: 16, paddingBottom: 40 },

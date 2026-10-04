@@ -9,6 +9,7 @@
 
 import { type LatLng } from './geo';
 import { type HapticEvent } from './hapticLanguage';
+import { navUserError, NO_ROUTE_TEXT } from './navErrorText';
 // NOTE: `api` is lazy-required inside fetchRoute (not imported at top) so this
 // module's pure half (decode/map/parse) stays free of the react-native graph and
 // remains runnable under tsx for the self-check.
@@ -86,7 +87,7 @@ export const valhallaAngle = (type: number): number => TYPE_ANGLE[type] ?? 0;
 /** Parse a Valhalla /route response into our Route (pure). */
 export function parseRoute(resp: any): Route {
   const trip = resp?.trip;
-  if (!trip?.legs?.length) throw new Error('no route');
+  if (!trip?.legs?.length) throw navUserError(NO_ROUTE_TEXT);
   const shape: LatLng[] = [];
   const maneuvers: Maneuver[] = [];
   for (const leg of trip.legs) {

@@ -41,6 +41,7 @@ import { permissionDenied } from '../lib/permissionDenied';
 import { RADII, COORD_RE, describeZone, iconFor } from '../lib/family/placeOptions';
 import PlaceEditSheet, { ZoneChoice, st as formSt, type PlacePatch } from '../components/family/PlaceEditSheet';
 import { tint } from '../lib/tintColor';
+import { userErrorText } from '../lib/userErrorText';
 
 export default function FamilyPlacesScreen() {
   const { colors } = useTheme();
@@ -175,8 +176,8 @@ export default function FamilyPlacesScreen() {
         icon: iconFor(name),
       };
       if (await persist((ps) => [g, ...ps])) { setName(''); setWhere(''); }
-    } catch (e: any) {
-      Alert.alert('Could not add place', e?.message ?? 'Try again.');
+    } catch (e: unknown) {
+      Alert.alert('Could not add place', userErrorText(e, 'Try again.'));
     } finally { setBusy(false); }
   };
 
@@ -218,7 +219,7 @@ export default function FamilyPlacesScreen() {
           circleId: cid, place: p,
           myId: String(me?.id ?? 'me'), myName: me?.name || me?.email || 'Me',
         });
-      } catch (e: any) { res = { ok: false, reason: e?.message }; }
+      } catch (e: unknown) { res = { ok: false, reason: userErrorText(e, 'Try again.') }; }
       if (!res.ok) { Alert.alert('Could not lock', res.reason ?? 'Try again.'); return; }
       setEditing(null);
     };
@@ -233,7 +234,7 @@ export default function FamilyPlacesScreen() {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Unlock', style: 'destructive', onPress: async () => {
         try { await unlockLock(); setEditing(null); }
-        catch (e: any) { Alert.alert('Still locked', e?.message ?? 'Could not stop the lock. Try again.'); }
+        catch (e: unknown) { Alert.alert('Still locked', userErrorText(e, 'Could not stop the lock. Try again.')); }
       } },
     ]);
   };

@@ -21,6 +21,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useColors } from '../lib/theme';
 import { AppText } from '../components/ui/Text';
+import { KeyboardSafe } from '../components/ui';
 import { SPACING, RADIUS, DANGER_GRADIENT_CTA, GRADIENT_INK, type Palette } from '../constants/theme';
 import {
   listLive, startBroadcast, inviteCodeFrom, type Broadcast, type BroadcastVisibility,
@@ -152,13 +153,17 @@ export default function LiveScreen() {
     }
   };
 
+  // KeyboardSafe: the composer's four fields sat in a plain ScrollView, and on
+  // edge-to-edge Android nothing moved them clear of the keyboard. Native
+  // header, so only the keyboard is padded (as lock-history does).
   return (
-    <View style={[S.root, t.solid]}>
+    <KeyboardSafe keyboardOnly style={[S.root, t.solid]}>
       <Stack.Screen options={{
         headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */  title: 'Live' }} />
 
       <ScrollView
         contentContainerStyle={S.scroll}
+        keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.textDim} />}
       >
         {/* Said plainly, and BEFORE the go-live button. */}
@@ -464,7 +469,7 @@ export default function LiveScreen() {
           ))
         )}
       </ScrollView>
-    </View>
+    </KeyboardSafe>
   );
 }
 

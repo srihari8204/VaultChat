@@ -84,3 +84,9 @@ declare const require: any; declare const module: any;
 if (typeof require !== 'undefined' && require.main === module) _selfCheck();
 
 export default {};
+
+/** A position rounded to 2 decimals (about 1 km): enough to bias place
+ *  suggestions toward the right town without sending where the person is. */
+export function coarseLatLng(p: LatLng): LatLng {
+  return { lat: Math.round(p.lat * 100) / 100, lng: Math.round(p.lng * 100) / 100 };
+}

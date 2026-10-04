@@ -28,7 +28,7 @@ import FamilyMap, { type FamilyMarker } from '../components/family/FamilyMap';
 // back a phone retrying a dead circle on every focus.
 import { getSettings, removeCircle, getPlaces } from '../lib/family/store';
 import { memberLabel } from '../lib/family/relations';
-import { useVisibleTick } from '../lib/family/useVisibleTick';
+import { useVisibleClock } from '../lib/family/useVisibleTick';
 import { type Geofence } from '../lib/family/geofence';
 // Groups & Circles: the registry is now typed groups. A Family Space circle is
 // one of them (migrated on first load by lib/groups/store), so this screen is
@@ -64,6 +64,7 @@ import { useHubTrip, useHubHighlights, useHubRuns, useHubRelations } from '../co
 import { useWatchAlerts, useCrashDetection } from '../components/family/useHubSafety';
 import { useHubSos } from '../components/family/useHubSos';
 import { useHubCircleActions } from '../components/family/useHubCircleActions';
+import { userErrorText } from '../lib/userErrorText';
 
 // The dusk-glass ground (gradient + identity aura) is shared with every other
 // Space screen — see components/spaces/SpaceGround.tsx. Switching spaces
@@ -111,7 +112,9 @@ export default function FamilySpaceScreen() {
   // Ticks only while the app is FOREGROUNDED — a backgrounded hub re-rendering
   // its roster and summary every 30 s is pure battery for pixels nobody sees.
   // Publishing is unaffected: that lives in presence.ts and the background task.
-  const tick = useVisibleTick(30_000);
+  // `now` is the wall-clock time of the latest tick: the time-derived memos
+  // below key on it instead of reading Date.now() behind a lint disable.
+  const { tick, now } = useVisibleClock(30_000);
   const [loading, setLoading] = useState(true);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -201,7 +204,8 @@ export default function FamilySpaceScreen() {
     circleMembers(id).then((m) => {
       if (activeIdRef.current !== id) return;
       setMembers(m); setMembersLoaded(true);
-    }).catch(async (e: any) => {
+    }).catch(async (err: unknown) => {
+      const e = err as { status?: number; message?: string } | null | undefined;
       const current = activeIdRef.current === id;
       // Kicked, or the circle was deleted: the group now 403/404s forever.
       // Forget it locally instead of hammering the server from every focus
@@ -280,7 +284,6 @@ export default function FamilySpaceScreen() {
   }, [router, activeId, refreshMembers]));
 
   const markers: FamilyMarker[] = useMemo(() => {
-    const now = Date.now();
     const nameById = new Map(members.map((m) => [m.id, m.name]));
     return Object.entries(presences).map(([uid, p]) => ({
       id: uid, name: uid === me?.id ? 'You' : (nameById.get(uid) || 'Member'),
@@ -288,9 +291,8 @@ export default function FamilySpaceScreen() {
       // A sharing-off member's last-known dot renders dimmed, never live.
       stale: now - p.ts > STALE_MS || !!p.sharingOff,
     }));
-  // `tick` keeps the stale fade honest when no new ping ever arrives.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [presences, members, me?.id, tick]);
+  // `now` keeps the stale fade honest when no new ping ever arrives.
+  }, [presences, members, me?.id, now]);
 
   // Members this device has no position for. Markers come only from
   // `presences`, so a member who has not turned sharing on simply does not
@@ -355,7 +357,6 @@ export default function FamilySpaceScreen() {
   // Identity for this group's type — its accent tints the ground.
   const ident = groupIdentity(active ?? {});
   const liveCount = useMemo(() => {
-    const now = Date.now();
     return Object.entries(presences).filter(([uid, p]) => {
       // An explicit sharing-off never counts as live — neither another
       // member's stop, nor my own switch being off. Without this the map
@@ -366,8 +367,7 @@ export default function FamilySpaceScreen() {
       if (uid === me?.id && !share) return false;
       return now - p.ts <= STALE_MS;
     }).length;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [presences, tick, share, me?.id]);
+  }, [presences, now, share, me?.id]);
 
   const { roadM, summary: distanceSummary, anyoneLocatable, sortedIds } = useHubDistances({
     presences, members, myId: me?.id ?? null, tick, originName, places, relations, sortMode,
@@ -403,7 +403,7 @@ export default function FamilySpaceScreen() {
       setNote('');
       setPicked(null);
       setBump((b) => b + 1);
-    } catch (e: any) { Alert.alert('Check-in', e?.message ?? 'Could not send.'); }
+    } catch (e: unknown) { Alert.alert('Check-in', userErrorText(e, 'Could not send.')); }
   };
 
   /** Member answers a request. Harmless when no ladder is running for them. */
@@ -413,7 +413,7 @@ export default function FamilySpaceScreen() {
     try {
       await confirmImOk(active.id, me.id, me.name);
       setBump((b) => b + 1);
-    } catch (e: any) { Alert.alert('Check-in', e?.message ?? 'Could not send.'); }
+    } catch (e: unknown) { Alert.alert('Check-in', userErrorText(e, 'Could not send.')); }
   };
 
   // ── Announcement ─────────────────────────────────────────────────────
@@ -429,10 +429,10 @@ export default function FamilySpaceScreen() {
       });
       setAnnouncing(false); setAnnounceTxt('');
       setBump((b) => b + 1);
-    } catch (e: any) {
+    } catch (e: unknown) {
       // The server re-checks the permission, so this can legitimately fail
-      // even though the button was drawn.
-      Alert.alert('Not posted', e?.message ?? 'Could not post the announcement.');
+      // even though the button was drawn (its 403 copy passes through).
+      Alert.alert('Not posted', userErrorText(e, 'Could not post the announcement.'));
     } finally { setBusy(false); }
   };
 

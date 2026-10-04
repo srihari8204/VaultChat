@@ -1,6 +1,6 @@
 // lib/sosReachCopy.selftest.ts — run: npx tsx lib/sosReachCopy.selftest.ts
 import assert from 'node:assert/strict';
-import { sosReachedOf, sosReachText, sosSentAnnouncement, sosSentLine } from './sosReachCopy';
+import { sosCountdownAnnouncement, sosReachedOf, sosReachText, sosSentAnnouncement, sosSentLine } from './sosReachCopy';
 
 let n = 0;
 const ok = (label: string, fn: () => void) => { fn(); n++; console.log('  ok  ' + label); };
@@ -55,6 +55,13 @@ ok('the announcement says everything the Sent face shows', () => {
   assert.equal(sosSentAnnouncement(true, null, null, true),
     'Test SOS sent. Your trusted contacts are being alerted. Sent without your location.');
   assert.match(sosSentAnnouncement(false, 4, 2, false), /^SOS sent\. Reached 2 of 4 trusted contacts\. 2 could not be reached .* Call or text them too\.$/);
+});
+
+ok('the countdown is announced at the start and on each second', () => {
+  assert.equal(sosCountdownAnnouncement(false, 5, true), 'SOS sends in 5 seconds. Tap Cancel SOS to stop it.');
+  assert.equal(sosCountdownAnnouncement(true, 5, true), 'Test SOS sends in 5 seconds. Tap Cancel SOS to stop it.');
+  assert.equal(sosCountdownAnnouncement(false, 3, false), 'SOS in 3 seconds.');
+  assert.equal(sosCountdownAnnouncement(false, 1, false), 'SOS in 1 second.');
 });
 
 console.log(`sosReachCopy.selftest: ${n} groups passed`);

@@ -12,6 +12,7 @@ import notifee from '@notifee/react-native';
 import * as Speech from 'expo-speech';
 import { useTheme } from '../lib/theme';
 import { tint } from '../lib/tintColor';
+import { userErrorText } from '../lib/userErrorText';
 import { VIBE_PATTERN } from '../lib/lock/alarmChannels';
 import { VOICE } from '../lib/lock/alarmController';
 import {
@@ -38,6 +39,9 @@ const HYSTS = [2, 3, 5, 10];
 /** The on/off channels: the only LockAlertSettings keys a Switch row may own. */
 type ChannelKey = { [K in keyof LockAlertSettings]: LockAlertSettings[K] extends boolean ? K : never }[keyof LockAlertSettings];
 
+/** The longest a running lock may take to pick up a change. */
+const APPLY_TIMEOUT_MS = 10_000;
+
 /** The save() in progress; the next one waits for it. */
 let saveChain: Promise<void> = Promise.resolve();
 
@@ -57,7 +61,14 @@ async function save(write: Promise<void>): Promise<void> {
 
 async function saveNow(write: Promise<void>): Promise<void> {
   const saved = await write.then(() => true, () => false);
-  const applied = await applyAlertSettings().then(() => true, () => false);
+  // A stuck apply must not hold every later save in the chain: after 10 s it
+  // counts as "not applied" (the alert says so) and the next save runs.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const applied = await Promise.race([
+    applyAlertSettings().then(() => true, () => false),
+    new Promise<boolean>((r) => { timer = setTimeout(() => r(false), APPLY_TIMEOUT_MS); }),
+  ]);
+  clearTimeout(timer);
   if (!saved && !applied) {
     Alert.alert('Setting not saved or applied', 'This change could not be saved (it will reset when the app restarts), and the running lock could not pick it up. Try again, or unlock and lock again.');
   } else if (!saved) {
@@ -132,7 +143,7 @@ export default function LockSettingsScreen() {
         await disableKillSafe();
       }
     } catch (e: unknown) {
-      Alert.alert('Background tracking', (e instanceof Error && e.message) || 'Could not change background tracking. Try again.');
+      Alert.alert('Background tracking', userErrorText(e, 'Could not change background tracking. Try again.'));
     } finally { setKillBusy(false); }
   };
 

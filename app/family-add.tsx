@@ -39,6 +39,7 @@ import SpaceGround, { useSpaceGlass } from '../components/spaces/SpaceGround';
 import { listChats, createInvitation, attachmentUrl } from '../lib/chatService';
 import { circleInviteCode, circleMembers, INVITE_CODE_HOURS } from '../lib/family/circle';
 import { type CircleMember } from '../lib/family/types';
+import { userErrorText } from '../lib/userErrorText';
 
 interface Pick { userId: string; name: string; photoURL: string | null }
 
@@ -99,8 +100,8 @@ export default function FamilyAddScreen() {
           }
         }
         setPeople(Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name)));
-      } catch (e: any) {
-        if (live) { setError(e?.message ?? 'Failed to load contacts'); setContactsFailed(true); }
+      } catch (e: unknown) {
+        if (live) { setError(userErrorText(e, 'Failed to load contacts')); setContactsFailed(true); }
       } finally {
         if (live) setLoading(false);
       }
@@ -136,9 +137,9 @@ export default function FamilyAddScreen() {
       try {
         await createInvitation(String(circleId), { userId });
         sent++;
-      } catch (e: any) {
+      } catch (e: unknown) {
         const who = people.find((p) => p.userId === userId)?.name ?? 'Someone';
-        failed.push(`${who}: ${e?.message ?? 'failed'}`);
+        failed.push(`${who}: ${userErrorText(e, 'failed')}`);
       }
     }
     setBusy(false);
@@ -173,8 +174,8 @@ export default function FamilyAddScreen() {
             await Share.share({
               message: `Join ${circleName ? `"${circleName}"` : 'my space'} on crazzychat.\nCode: ${code}\n(One use, expires in ${INVITE_CODE_HOURS} hours.)`,
             });
-          } catch (e: any) {
-            Alert.alert('Invite', e?.message ?? 'Could not create an invite.');
+          } catch (e: unknown) {
+            Alert.alert('Invite', userErrorText(e, 'Could not create an invite.'));
           }
         } },
       ],

@@ -47,3 +47,11 @@ export function sosSentAnnouncement(isTest: boolean, notified: number | null, re
     withoutLocation ? 'Sent without your location.' : null,
   ].filter(Boolean).join(' ');
 }
+
+/** What a screen reader hears while the SOS counts down: the start names the
+ *  Cancel button, each later second just the time left. */
+export function sosCountdownAnnouncement(isTest: boolean, seconds: number, start: boolean): string {
+  const what = isTest ? 'Test SOS' : 'SOS';
+  const left = `${seconds} second${seconds === 1 ? '' : 's'}`;
+  return start ? `${what} sends in ${left}. Tap Cancel SOS to stop it.` : `${what} in ${left}.`;
+}

@@ -37,6 +37,7 @@ import { colorFor, ago } from '../lib/family/memberFormat';
 import * as routing from '../lib/nav/routing';
 import { traceShape } from '../lib/family/traceShape';
 import { formatMetres as dist } from '../lib/family/distance';
+import { userErrorText } from '../lib/userErrorText';
 import {
   MemberIdentityCard, MemberActivityList, MemberFixRow, MemberPlaceRow,
 } from '../components/family/MemberSections';
@@ -232,20 +233,29 @@ export default function FamilyMemberScreen() {
     () => (today.length < 2 ? '' : `${today[0]?.ts}:${Math.floor(today[today.length - 1].ts / TRACE_EVERY_MS)}`),
     [today]);
 
+  // Both road effects are keyed on their throttled keys only; the data they
+  // send is read from refs holding the latest render's values.
+  const todayRef = useRef(today);
+  todayRef.current = today;
+  const lastRef = useRef(last);
+  lastRef.current = last;
+  const placesRef = useRef(places);
+  placesRef.current = places;
+
   useEffect(() => {
     if (!trackKey) { setRoadTravelledM(null); return; }
     let cancel = false;
     (async () => {
       try {
         // Rounded to ~11 m and de-duplicated before it leaves the phone.
-        const r = await routing.fetchTraceDistance(traceShape(today));
+        const r = await routing.fetchTraceDistance(traceShape(todayRef.current));
         if (!cancel) setRoadTravelledM(r?.distanceM ?? null);
       } catch {
         if (!cancel) setRoadTravelledM(null);
       }
     })();
     return () => { cancel = true; };
-  }, [trackKey]);   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [trackKey]);
 
   /**
    * Road distance from this member's last fix to each of MY places.
@@ -264,6 +274,7 @@ export default function FamilyMemberScreen() {
   }, [last, places]);
 
   useEffect(() => {
+    const last = lastRef.current, places = placesRef.current;
     if (!roadKey || !last || !places.length) { setRoadToPlace({}); return; }
     let cancel = false;
     (async () => {
@@ -288,7 +299,7 @@ export default function FamilyMemberScreen() {
       }
     })();
     return () => { cancel = true; };
-  }, [roadKey]);   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [roadKey]);
 
   // Which place are they sitting in right now?
   const currentPlace = useMemo(() => {
@@ -311,8 +322,8 @@ export default function FamilyMemberScreen() {
       router.push(target === 'chat'
         ? { pathname: '/chat', params: { id: chat.id } }
         : { pathname: '/voicecall', params: { chatId: chat.id, peerUid: userId, peerName: name } });
-    } catch (e: any) {
-      Alert.alert(target === 'chat' ? 'Message' : 'Call', e?.message ?? 'Could not open a direct chat.');
+    } catch (e: unknown) {
+      Alert.alert(target === 'chat' ? 'Message' : 'Call', userErrorText(e, 'Could not open a direct chat.'));
     } finally { setOpening(false); }
   };
 

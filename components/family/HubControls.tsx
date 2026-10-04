@@ -14,6 +14,9 @@ import { locationRationale } from '../../lib/spaces/layout';
 import { st } from './hubStyles';
 import { tint } from '../../lib/tintColor';
 
+/** What sharing stores, in today's terms (no retention sweep runs yet). */
+const SHARE_STORAGE_NOTE = 'Each position you share is also stored on crazzychat’s server so your space can see last-known spots and history. Nothing deletes them automatically yet.';
+
 export function HubShareRow({ share, onToggle, locDenied, groupType }: {
   share: boolean;
   onToggle: (v: boolean) => void;
@@ -33,6 +36,9 @@ export function HubShareRow({ share, onToggle, locDenied, groupType }: {
         </View>
         <Switch value={share} onValueChange={onToggle} accessibilityLabel="Share my location" trackColor={{ true: colors.primary }} />
       </View>
+      {/* Server storage is said where sharing is switched on, not only once at
+          setup. Retention itself is an open decision (fix_status §5). */}
+      <Text style={[st.shareNote, { color: colors.textDim }]}>{SHARE_STORAGE_NOTE}</Text>
       {/* Explains itself in the SPACE'S OWN TERMS, and only where it matters.
           The old copy said "Location permission is required for Family Circle"
           in every space type — including a school, where a parent needs no

@@ -110,9 +110,13 @@ export default function TrustedContactsScreen() {
         setTrusted(cur => cur.filter(t => t.userId !== c.userId));
         try { await removeTrustedContact(c.userId); writeCache(CACHE_KEY, trustedRef.current.filter(t => t.userId !== c.userId)); }
         catch (e: unknown) {
+          const restore = (cur: TrustedContact[]) => (cur.some(t => t.userId === c.userId) ? cur
+            : [...cur.slice(0, Math.max(0, at)), c, ...cur.slice(Math.max(0, at))]);
+          // An overlapping removal that succeeded wrote the cache without this
+          // contact; put it back there too, even if the screen has closed.
+          writeCache(CACHE_KEY, restore(trustedRef.current));
           if (!mounted.current) return;
-          setTrusted(cur => (cur.some(t => t.userId === c.userId) ? cur
-            : [...cur.slice(0, Math.max(0, at)), c, ...cur.slice(Math.max(0, at))]));
+          setTrusted(restore);
           Alert.alert('Could not remove', userErrorText(e, 'Try again'));
         }
       } },
@@ -288,8 +292,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   addForm: { backgroundColor: c.glassSoft, borderRadius: 14, padding: 16, marginTop: 12, borderWidth: 1, borderColor: c.glassStroke },
   addLabel: { color: c.textDim, fontSize: 13, marginBottom: 10 },
   addRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  addInput: { flex: 1, backgroundColor: c.glassSoft, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, color: c.text, fontSize: 15, borderWidth: 1, borderColor: c.glassStroke },
-  addConfirm: { backgroundColor: c.primary, borderRadius: 10, paddingHorizontal: 20, paddingVertical: 11 },
+  addInput: { flex: 1, minHeight: 44, backgroundColor: c.glassSoft, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, color: c.text, fontSize: 15, borderWidth: 1, borderColor: c.glassStroke },
+  addConfirm: { minHeight: 44, justifyContent: 'center', backgroundColor: c.primary, borderRadius: 10, paddingHorizontal: 20, paddingVertical: 11 },
   addConfirmTxt: { color: c.onPrimary, fontWeight: '800' },
   cancelTxt: { color: c.textDim, textAlign: 'center', marginTop: 12 },
   idError: { color: c.danger, fontSize: 12.5, marginTop: 8 },

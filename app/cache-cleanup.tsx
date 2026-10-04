@@ -109,26 +109,32 @@ export default function CacheCleanupScreen() {
   const onSelected = () => runCleanup(selectedPlan, 'selected cache');
 
   // A setting that did not save goes back to what is stored, and says so.
-  // One save per setting at a time: a second tap while the first is saving is
-  // ignored, so an earlier tap's failure can no longer undo a later choice.
+  // One save per setting at a time: while the first is saving, the control is
+  // shown busy and disabled (as call-reliability's Switch is), so a second tap
+  // is visibly not taken and an earlier failure cannot undo a later choice.
+  // The refs gate synchronously; the state drives the busy/disabled cue.
   const autoBusy = useRef(false);
   const logoutBusy = useRef(false);
+  const [savingAuto, setSavingAuto] = useState(false);
+  const [savingLogout, setSavingLogout] = useState(false);
   const chooseAutoDays = async (d: number) => {
     if (autoBusy.current) return;
     autoBusy.current = true;
+    setSavingAuto(true);
     const prev = autoDays;
     setAutoDays(d);
     try { await setAutoCleanDays(d); }
     catch { setAutoDays(prev); if (mounted.current) Alert.alert('Could not save', 'Automatic cleanup was not changed.'); }
-    finally { autoBusy.current = false; }
+    finally { autoBusy.current = false; if (mounted.current) setSavingAuto(false); }
   };
   const toggleLogout = async (v: boolean) => {
     if (logoutBusy.current) return;
     logoutBusy.current = true;
+    setSavingLogout(true);
     setClearLogout(v);
     try { await setClearOnLogout(v); }
     catch { setClearLogout(!v); if (mounted.current) Alert.alert('Could not save', 'Clear cache on logout was not changed.'); }
-    finally { logoutBusy.current = false; }
+    finally { logoutBusy.current = false; if (mounted.current) setSavingLogout(false); }
   };
 
   return (
@@ -201,8 +207,8 @@ export default function CacheCleanupScreen() {
             <Text style={S.rowLabel}>Auto-clear safe cache</Text>
             <View style={S.chips} accessibilityRole="radiogroup" accessibilityLabel="Auto-clear safe cache">
               {AUTO_OPTIONS.map((d) => (
-                <TouchableOpacity key={d} onPress={() => chooseAutoDays(d)} accessibilityRole="radio" accessibilityState={{ checked: autoDays === d }} accessibilityLabel={d === 0 ? 'Auto-clear off' : `Auto-clear every ${d} days`} style={[S.chip, autoDays === d && { backgroundColor: colors.primary, borderColor: colors.primary }]}>
-                  <Text style={[S.chipText, autoDays === d && { color: colors.onPrimary }]}>{d === 0 ? 'Off' : `${d}d`}</Text>
+                <TouchableOpacity key={d} onPress={() => chooseAutoDays(d)} disabled={savingAuto} accessibilityRole="radio" accessibilityState={{ checked: autoDays === d, busy: savingAuto, disabled: savingAuto }} accessibilityLabel={d === 0 ? 'Auto-clear off' : `Auto-clear every ${d} days`} style={[S.chip, autoDays === d && S.chipOn, savingAuto && S.saving]}>
+                  <Text style={[S.chipText, autoDays === d && S.chipTextOn]}>{d === 0 ? 'Off' : `${d}d`}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -213,7 +219,7 @@ export default function CacheCleanupScreen() {
               <Text style={S.rowLabel}>Clear cache on logout</Text>
               <Text style={S.rowDesc}>Removes cache (not your data) when you sign out.</Text>
             </View>
-            <Switch value={clearLogout} onValueChange={toggleLogout} accessibilityLabel="Clear cache on logout" trackColor={{ true: colors.primary, false: colors.border }} thumbColor={colors.onPrimary} />
+            <Switch value={clearLogout} onValueChange={toggleLogout} disabled={savingLogout} accessibilityState={{ checked: clearLogout, busy: savingLogout, disabled: savingLogout }} accessibilityLabel="Clear cache on logout" trackColor={{ true: colors.primary, false: colors.border }} thumbColor={colors.onPrimary} />
           </View>
         </View>
 
@@ -264,6 +270,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   chip: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.glassStroke, borderRadius: 9, paddingHorizontal: 10, paddingVertical: 5 },
   retryBtn: { minHeight: 44, paddingHorizontal: 16, justifyContent: 'center' },
   chipText: { color: c.textDim, fontSize: 12.5, fontWeight: '700' },
+  chipOn: { backgroundColor: c.primary, borderColor: c.primary },
+  chipTextOn: { color: c.onPrimary },
+  saving: { opacity: 0.6 },
 
   note: { marginHorizontal: 16, marginTop: 20, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glassSoft },
   noteText: { color: c.textDim, fontSize: 12.5, lineHeight: 18 },

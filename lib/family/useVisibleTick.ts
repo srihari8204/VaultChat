@@ -19,8 +19,9 @@
 import { useEffect, useState } from 'react';
 import { AppState } from 'react-native';
 
-/** The tick count and the wall-clock time it was taken at. */
-function useVisibleClock(ms: number): { tick: number; now: number } {
+/** The tick count and the wall-clock time it was taken at (one timer for
+ *  screens that need both, e.g. the hub's markers and its child hooks). */
+export function useVisibleClock(ms: number): { tick: number; now: number } {
   const [clock, setClock] = useState(() => ({ tick: 0, now: Date.now() }));
 
   useEffect(() => {

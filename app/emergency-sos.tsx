@@ -23,7 +23,7 @@ import { useSosStyles } from '../components/sos/sosStyles';
 import { useReducedMotion } from '../lib/useReducedMotion';
 import { SOS_BUTTON } from '../constants/sosPalette';
 // Shared with app/notifications.tsx, so both SOS screens word a result the same way.
-import { sosReachedOf, sosSentAnnouncement, sosSentLine } from '../lib/sosReachCopy';
+import { sosCountdownAnnouncement, sosReachedOf, sosSentAnnouncement, sosSentLine } from '../lib/sosReachCopy';
 
 /**
  * Best-effort position for an SOS. NEVER throws, NEVER blocks the send.
@@ -224,6 +224,10 @@ export default function EmergencySOSScreen() {
     setTestMode(isTest);
     setCountdown(5);
     setSent(false);
+    // The number's live region is Android-only: VoiceOver heard nothing for
+    // 5 s and was never told about Cancel. The start is announced on both
+    // platforms; each later second on iOS only (TalkBack has the live region).
+    AccessibilityInfo.announceForAccessibility(sosCountdownAnnouncement(isTest, 5, true));
 
     let count = 5;
     countdownTimer.current = setInterval(() => {
@@ -235,6 +239,7 @@ export default function EmergencySOSScreen() {
       } else {
         setCountdown(count);
         Vibration.vibrate(100);
+        if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(sosCountdownAnnouncement(isTest, count, false));
       }
     }, 1000);
   };
@@ -273,7 +278,15 @@ export default function EmergencySOSScreen() {
       AccessibilityInfo.announceForAccessibility(sosSentAnnouncement(isTest, n, r, lat == null));
       loadHistory();
     } catch {
-      Alert.alert('Error', 'Failed to send SOS. Please try again.');
+      // A failed SOS offers the retry right here (same recipients) instead of
+      // sending the person back through the 5 s countdown.
+      if (mounted.current) setSending(false);
+      Alert.alert(isTest ? 'Test SOS not sent' : 'SOS not sent',
+        'Check your connection and try again. If you are in danger, call your local emergency number.', [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Retry', onPress: () => { triggerSOS(isTest, contactIds); } },
+        ]);
+      return;
     }
     if (mounted.current) setSending(false);
   };

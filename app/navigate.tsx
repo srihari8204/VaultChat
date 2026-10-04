@@ -23,6 +23,7 @@ import { type NavProfile } from '../lib/nav/hapticLanguage';
 import { type DisplayMode } from '../lib/nav/hapticPlayer';
 import { type LatLng } from '../lib/nav/geo';
 import { typedCoords, inLatLngRange } from '../lib/nav/urlCoords';
+import { navErrorText } from '../lib/nav/navErrorText';
 
 const PROFILES: { key: NavProfile; label: string }[] = [
   { key: 'standard', label: 'Standard' }, { key: 'strong', label: 'Strong' },
@@ -146,13 +147,15 @@ export default function NavigateScreen() {
     setSearching(true);
     try {
       const hits = await geocodeSearch(q).catch(() => [] as GeoHit[]);
+      if (!mounted.current) return;
       if (hits[0]) { pickSug(hits[0]); return; }
       const res = await Location.geocodeAsync(q);   // platform fallback (GMS devices)
+      if (!mounted.current) return;
       if (res[0]) setDest({ name: q, coords: { lat: res[0].latitude, lng: res[0].longitude } });
       else Alert.alert('Not found', 'No match — try a nearby landmark, or enter coordinates as "lat, lng".');
     } catch {
-      Alert.alert('Search failed', 'Check your connection, or enter coordinates as "lat, lng".');
-    } finally { setSearching(false); }
+      if (mounted.current) Alert.alert('Search failed', 'Check your connection, or enter coordinates as "lat, lng".');
+    } finally { if (mounted.current) setSearching(false); }
   };
 
   const start = async () => {
@@ -165,7 +168,7 @@ export default function NavigateScreen() {
       const chosen = routeSel > 0 ? routes[routeSel] : undefined;
       await startNavigation({ to: dest.coords, profile: s.profile, mode: s.mode, timing: s.timing, costing: s.costing, custom: s.custom, routeOpts: s.routeOpts, route: chosen });
     } catch (e: unknown) {
-      Alert.alert('Could not start', (e instanceof Error && e.message) || 'Check location permission and that the routing engine is up.');
+      Alert.alert('Could not start', navErrorText(e, 'Could not plan the route. Check your location is on and try again.'));
     } finally { if (mounted.current) setStarting(false); }
   };
 

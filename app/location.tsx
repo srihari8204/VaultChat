@@ -31,10 +31,13 @@ import { emit } from '../lib/socket';
 import { newLiveKey, encryptPosition } from '../lib/liveLocationCrypto';
 import { AuroraBackground } from '../components/ui';
 import LocationMap, { type MapPoint } from '../components/LocationMap';
-import { readCache, writeCache } from '../lib/localCache';
+import { readSealedCache, writeSealedCache } from '../lib/localCache';
 
 // Last fix we actually got, so a re-open paints the right part of the world
-// while the GPS warms up instead of a map of the whole subcontinent.
+// while the GPS warms up instead of a map of the whole subcontinent. It is an
+// exact position, so it goes only to the sealed cache: with the cache key not
+// loaded nothing is stored (the map then starts wide), and a plaintext entry
+// left by older builds is deleted on the first read (lib/localCache.ts).
 const LAST_FIX = 'location:lastFix';
 
 const DURATIONS = [
@@ -123,7 +126,7 @@ export default function LocationScreen() {
       const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       if (!mountedRef.current) return;
       setLoc(pos);
-      writeCache(LAST_FIX, { lat: pos.coords.latitude, lng: pos.coords.longitude });
+      writeSealedCache(LAST_FIX, { lat: pos.coords.latitude, lng: pos.coords.longitude });
       reverseGeocode(pos.coords.latitude, pos.coords.longitude);
     } catch {
       if (mountedRef.current) setGpsError(true);
@@ -133,7 +136,7 @@ export default function LocationScreen() {
   }, [reverseGeocode]);
 
   useEffect(() => {
-    readCache<MapPoint>(LAST_FIX).then((c) => { if (c && mountedRef.current) setLastFix(c); }).catch(() => {});
+    readSealedCache<MapPoint>(LAST_FIX).then((c) => { if (c && mountedRef.current) setLastFix(c); }).catch(() => {});
     locate(true);
   }, [locate]);
 
@@ -154,11 +157,11 @@ export default function LocationScreen() {
         lat: loc.coords.latitude, lng: loc.coords.longitude, address, live: false,
       });
       await sendMessage(chatId, payload, 'location');
-      router.back();
+      if (mountedRef.current) router.back();
     } catch (e: unknown) {
-      Alert.alert('Could not send', userErrorText(e, 'Try again'));
+      if (mountedRef.current) Alert.alert('Could not send', userErrorText(e, 'Try again'));
     } finally {
-      setSending(false);
+      if (mountedRef.current) setSending(false);
     }
   }, [loc, chatId, address, router]);
 

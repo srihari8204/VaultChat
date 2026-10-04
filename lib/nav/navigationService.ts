@@ -23,6 +23,7 @@ import * as NavCore from './native/NavCore';
 import { type NavProfile, type HapticEvent, type HapticPattern } from './hapticLanguage';
 import { startVoiceGuide, stopVoiceGuide, feedVoiceGuide } from './voiceGuide';
 import { showThenManeuver } from './navPresentation';
+import { navUserError, NAV_PERMISSION_TEXT } from './navErrorText';
 
 export interface NavBanner {
   active: boolean;
@@ -278,7 +279,7 @@ function onFix(loc: Location.LocationObject) {
 export async function startNavigation(o: StartNavOpts): Promise<void> {
   await stopNavigation();
   const perm = await Location.requestForegroundPermissionsAsync();
-  if (perm.status !== 'granted') throw new Error('Location permission is required for navigation.');
+  if (perm.status !== 'granted') throw navUserError(NAV_PERMISSION_TEXT);
 
   opts = o; dest = o.to;
   const from = o.from ?? (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High })).coords;

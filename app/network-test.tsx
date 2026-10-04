@@ -21,7 +21,7 @@ import NetInfo from '@react-native-community/netinfo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AuroraBackground } from '../components/ui';
 import { pingStats, throughputMbps, type TransferSample } from '../lib/speedTest';
-import { appTarget, cloudflareTarget, probeVerdict, rateLimitMessage, historyServers, filterHistory, type SpeedTarget } from '../lib/speedTarget';
+import { appTarget, cloudflareTarget, probeVerdict, rateLimitMessage, historyServers, filterHistory, serverFilterChip, type SpeedTarget } from '../lib/speedTarget';
 import { getAccessToken } from '../lib/api';
 import { SERVER_URL } from '../constants/server';
 
@@ -422,7 +422,7 @@ export default function NetworkTestScreen() {
           <Ionicons name="arrow-back" size={20} color={colors.accent} />
         </TouchableOpacity>
         <Text style={styles.headerTitle} accessibilityRole="header">Speed Test</Text>
-        <View style={{ width: 40 }} />
+        <View style={styles.headerSpacer} />
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -525,14 +525,16 @@ export default function NetworkTestScreen() {
                 accessibilityRole="radiogroup" accessibilityLabel="Show results measured by">
                 {[null, ...servers].map(s => {
                   const on = activeServer === s;
+                  const chip = serverFilterChip(s);
                   return (
                     <TouchableOpacity
                       key={s ?? 'all'} onPress={() => setServerFilter(s)}
                       style={[styles.filterChip, on && styles.filterChipOn]}
-                      accessibilityRole="radio" accessibilityState={{ checked: on }}
-                      accessibilityLabel={s === null ? 'All servers' : `Measured by ${s}`}
+                      accessibilityRole="radio" accessibilityState={{ checked: on, selected: on }}
+                      accessibilityLabel={chip.label}
                     >
-                      <Text style={[styles.filterChipText, on && styles.filterChipTextOn]} numberOfLines={1}>{s ?? 'All'}</Text>
+                      {on && <Ionicons name="checkmark" size={14} color={colors.onPrimary} />}
+                      <Text style={[styles.filterChipText, on && styles.filterChipTextOn]} numberOfLines={1}>{chip.text}</Text>
                     </TouchableOpacity>
                   );
                 })}
@@ -645,9 +647,11 @@ const makeStyles = (c: Palette, SW: number) => StyleSheet.create({
   historyMetricLabel: { color: c.accent, fontSize: 12 },
   historyMetricValue: { color: c.text, fontSize: 13, fontWeight: '700', marginTop: 2 },
   filterRow: { gap: 8, paddingBottom: 10 },
-  filterChip: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 14, borderRadius: 22, borderWidth: 1, borderColor: c.hairline, backgroundColor: c.glassSoft },
-  filterChipOn: { borderColor: c.primary },
+  filterChip: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 14, borderRadius: 22, borderWidth: 1, borderColor: c.hairline, backgroundColor: c.glassSoft },
+  // Filled, with a checkmark: a 1 px border and a text tone were the only cue.
+  filterChipOn: { backgroundColor: c.primary, borderColor: c.primary },
   filterChipText: { color: c.textDim, fontSize: 13, fontWeight: '600' },
-  filterChipTextOn: { color: c.text },
+  filterChipTextOn: { color: c.onPrimary, fontWeight: '700' },
   bottomSpacer: { height: 40 },
+  headerSpacer: { width: 40 },
 });

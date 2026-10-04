@@ -41,13 +41,12 @@ export default function CallReliabilityScreen() {
   // trips, slow native reads): no state updates once the screen is gone.
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  const ifMounted = <T,>(set: (v: T) => void) => (v: T) => { if (mounted.current) set(v); };
   // Stable, so refresh (and the focus effect) can list it.
   const setBattOk = useCallback((v: boolean | null) => { if (mounted.current) setBattOkState(v); }, []);
-  useEffect(() => { getLowDataMode().then(ifMounted(setLowData)).catch(() => {}); }, []);
+  useEffect(() => { getLowDataMode().then((v) => { if (mounted.current) setLowData(v); }).catch(() => {}); }, []);
 
   useEffect(() => {
-    oemInstructions().then(ifMounted(setOem)).catch(() => { if (mounted.current) setOemFailed(true); });
+    oemInstructions().then((v) => { if (mounted.current) setOem(v); }).catch(() => { if (mounted.current) setOemFailed(true); });
     AsyncStorage.getItem(DONE_KEY).then(v => { if (mounted.current) setAutoOk(v === '1'); }).catch(() => {});
   }, []);
   // A failed write is put back and said, or the tick would vanish next visit.

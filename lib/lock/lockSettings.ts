@@ -34,6 +34,7 @@ export interface LockSettings {
   mode: LockMode;            // monitoring sensitivity + navigate-back default
   customSensitivity: { warningBand: number; hysteresis: number };  // mode === 'custom'
   cadence: LockCadence;      // tracking frequency: adaptive / battery saver / high precision
+  batteryPromptOff: boolean; // "Don't ask again" on the arm-time battery-optimisation prompt
 }
 
 export const DEFAULT_LOCK_ALERTS: LockAlertSettings = {
@@ -45,7 +46,7 @@ export const DEFAULT_LOCK_ALERTS: LockAlertSettings = {
 const DEFAULT: LockSettings = {
   alerts: DEFAULT_LOCK_ALERTS, lastRadius: 30,
   units: 'metric', mode: 'walking', customSensitivity: { warningBand: 5, hysteresis: 3 },
-  cadence: 'auto',
+  cadence: 'auto', batteryPromptOff: false,
 };
 const KEY = 'vc_lock_settings_v1';
 

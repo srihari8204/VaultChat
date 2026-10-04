@@ -52,6 +52,7 @@ import { armLeaveNow, cancelLeaveNow } from '../lib/family/leaveNowAlarm';
 import { getCurrentUserAsync } from './(constants)/authService';
 import MapRosterSheet, { freshLabel } from '../components/family/MapRosterSheet';
 import { BarAction, TripBar, LeaveBar, FollowBar, TurnBar, RouteBar } from '../components/family/MapBars';
+import { userErrorText } from '../lib/userErrorText';
 
 export default function FamilyMapScreen() {
   const insets = useSafeAreaInsets();
@@ -264,7 +265,7 @@ export default function FamilyMapScreen() {
     try {
       const chat = await createDirectChat({ userId });
       router.push({ pathname: '/chat', params: { id: chat.id } });
-    } catch (e: any) { Alert.alert('Message', e?.message ?? 'Could not open a direct chat.'); }
+    } catch (e: unknown) { Alert.alert('Message', userErrorText(e, 'Could not open a direct chat.')); }
     finally { setChatBusy(false); }
   };
 
@@ -400,7 +401,7 @@ export default function FamilyMapScreen() {
           const t = await startTrip(circleId, me, { lat: d.lat, lng: d.lng }, d.name);
           setTrip(t);
           setMeetOpen(false);
-        } catch (e: any) { Alert.alert('Family trip', e?.message ?? 'Could not start the trip.'); }
+        } catch (e: unknown) { Alert.alert('Family trip', userErrorText(e, 'Could not start the trip.')); }
       } },
     ]);
   };
@@ -414,15 +415,15 @@ export default function FamilyMapScreen() {
         // here left the trip on screen and the tap looking like a no-op.
         { text: 'End trip', style: 'destructive', onPress: async () => {
           try { await endTrip(trip); setTrip(null); setTripPings([]); }
-          catch (e: any) { Alert.alert('Family trip', e?.message ?? 'Could not end the trip.'); }
+          catch (e: unknown) { Alert.alert('Family trip', userErrorText(e, 'Could not end the trip.')); }
         } },
       ]);
     } else if (joined) {
       try { await leaveTrip(); setTrip({ ...trip }); }   // re-render: the button flips to JOIN
-      catch (e: any) { Alert.alert('Family trip', e?.message ?? 'Could not leave the trip.'); }
+      catch (e: unknown) { Alert.alert('Family trip', userErrorText(e, 'Could not leave the trip.')); }
     } else {
       try { await joinTrip(trip, me); setTrip({ ...trip }); }
-      catch (e: any) { Alert.alert('Family trip', e?.message ?? 'Could not join the trip.'); }
+      catch (e: unknown) { Alert.alert('Family trip', userErrorText(e, 'Could not join the trip.')); }
     }
   };
 

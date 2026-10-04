@@ -19,6 +19,7 @@ import { SPACE_SHADOW } from '../constants/spaceTheme';
 import { createCircle, joinCircle } from '../lib/family/circle';
 import { groupTypeInfo } from '../lib/groups/catalog';
 import { familyOf } from '../lib/spaces/layout';
+import { userErrorText } from '../lib/userErrorText';
 
 export default function FamilySetupScreen() {
   const { colors } = useTheme();
@@ -46,7 +47,7 @@ export default function FamilySetupScreen() {
     if (!name.trim() || busy) return;
     setBusy('create');
     try { const c = await createCircle(name); done(c.id); }
-    catch (e: any) { Alert.alert('Create failed', e?.message ?? 'Could not create the circle.'); }
+    catch (e: unknown) { Alert.alert('Create failed', userErrorText(e, 'Could not create the circle.')); }
     finally { setBusy(null); }
   };
   const join = async () => {
@@ -62,7 +63,7 @@ export default function FamilySetupScreen() {
       if (r.alreadyMember) Alert.alert('Already a member', `You are already in "${r.name}".`);
       done(r.id);
     }
-    catch (e: any) { Alert.alert('Join failed', e?.message ?? 'Check the code and try again.'); }
+    catch (e: unknown) { Alert.alert('Join failed', userErrorText(e, 'Check the code and try again.')); }
     finally { setBusy(null); }
   };
 
@@ -83,7 +84,7 @@ export default function FamilySetupScreen() {
             {other
               ? `Join a ${other.label} space with the code its admin shared, create a family circle, or set up a new ${other.label} or any other kind of space. `
               : 'See each other on a live map, get arrive/leave alerts, and send SOS. '}
-            Live updates between your phones are end-to-end encrypted, but each position you share (after your privacy setting) is also stored on crazzychat&apos;s server so the {unit} can see last-known spots and history. The server only shows it to {unit} members. Road distances, routes and history distances send points to crazzychat&apos;s routing server, which does not store them.
+            Live updates between your phones are end-to-end encrypted, but each position you share (after your privacy setting) is also stored on crazzychat&apos;s server so the {unit} can see last-known spots and history. The server only shows it to {unit} members, and nothing deletes stored positions automatically yet, so they are kept with no time limit. Road distances, routes and history distances send points to crazzychat&apos;s routing server, which does not store them.
           </Text>
         </View>
 

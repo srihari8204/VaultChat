@@ -78,6 +78,14 @@ export function historyServers(rows: { server?: string }[]): string[] {
   return out;
 }
 
+/** A filter chip's visible text and its screen-reader name: rows saved before
+ *  the server was recorded read as older results, not "Measured by Server not recorded". */
+export function serverFilterChip(server: string | null): { text: string; label: string } {
+  if (server === null) return { text: 'All', label: 'All servers' };
+  if (server === UNRECORDED_SERVER) return { text: 'Older results', label: 'Older results, server not recorded' };
+  return { text: server, label: `Measured by ${server}` };
+}
+
 /** Rows measured by `server`, or every row when `server` is null or no longer present. */
 export function filterHistory<T extends { server?: string }>(rows: T[], server: string | null): T[] {
   if (server === null || !rows.some(r => historyServer(r) === server)) return rows;

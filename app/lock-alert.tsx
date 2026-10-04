@@ -9,6 +9,8 @@ import { View, Text, TouchableOpacity, StyleSheet, Animated, Alert, ActivityIndi
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { type Costing } from '../lib/nav/routing';
+import { navErrorText } from '../lib/nav/navErrorText';
+import { userErrorText } from '../lib/userErrorText';
 import { useLockSettings } from '../lib/lock/lockSettings';
 import { fmtDistance } from '../lib/lock/format';
 import {
@@ -38,7 +40,7 @@ export default function LockAlertScreen() {
   // lock" when it simply could not read the lock.
   useEffect(() => {
     restoreLock().catch((e: unknown) => {
-      Alert.alert('Location Lock', `Couldn’t read the active lock: ${(e instanceof Error && e.message) || 'unknown error'}. Open Location Lock to check it.`);
+      Alert.alert('Location Lock', userErrorText(e, 'Couldn’t read the active lock. Open Location Lock to check it.'));
     });
   }, []);
 
@@ -96,7 +98,7 @@ export default function LockAlertScreen() {
       await navigateBackToLock(costing);
       router.replace('/navigate');
     } catch (e: unknown) {
-      Alert.alert('Navigate back', (e instanceof Error && e.message) || 'Could not plan a route back to the locked spot.');
+      Alert.alert('Navigate back', navErrorText(e, 'Could not plan a route back to the locked spot.'));
     } finally { setPlanning(null); }
   };
 

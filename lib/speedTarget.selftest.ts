@@ -1,6 +1,6 @@
 // lib/speedTarget.selftest.ts — npx tsx lib/speedTarget.selftest.ts
 import assert from 'node:assert/strict';
-import { appTarget, cloudflareTarget, probeVerdict, rateLimitMessage, CLOUDFLARE_HOST, historyServers, filterHistory, UNRECORDED_SERVER } from './speedTarget';
+import { appTarget, cloudflareTarget, probeVerdict, rateLimitMessage, CLOUDFLARE_HOST, historyServers, filterHistory, serverFilterChip, UNRECORDED_SERVER } from './speedTarget';
 
 let n = 0;
 const ok = (cond: boolean, what: string) => { assert.ok(cond, what); n++; };
@@ -32,5 +32,10 @@ ok(filterHistory(rows, null).length === 4, '17. no filter keeps every row');
 ok(filterHistory(rows, 'speed.cloudflare.com').map(r => r.id).join() === 'a,d', '18. a filter keeps only that server, in order');
 ok(filterHistory(rows, UNRECORDED_SERVER).map(r => r.id).join() === 'c', '19. rows saved before the server was recorded can be picked');
 ok(filterHistory(rows, 'gone.example').length === 4, '20. a server no longer in the list falls back to all rows, never an empty list');
+
+ok(serverFilterChip(null).label === 'All servers' && serverFilterChip(null).text === 'All', '21. the All chip');
+ok(serverFilterChip(UNRECORDED_SERVER).label === 'Older results, server not recorded'
+  && !/Measured by/.test(serverFilterChip(UNRECORDED_SERVER).label), '22. unrecorded rows read naturally');
+ok(serverFilterChip('api.example.com').label === 'Measured by api.example.com', '23. a named server');
 
 console.log(`speedTarget.selftest: ${n} assertions passed`);

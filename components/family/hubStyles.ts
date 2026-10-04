@@ -54,6 +54,7 @@ export const st = StyleSheet.create({
   // The share toggle's own pane on the dashboard.
   shareCard: { borderWidth: 1, borderRadius: 18, paddingHorizontal: 16, paddingVertical: 2, marginBottom: 12, ...SPACE_SHADOW.rest },
   shareRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10 },
+  shareNote: { fontSize: 12, lineHeight: 17, marginTop: -4, marginBottom: 10 },
   // marginTop 4: every card above a section head now carries marginBottom 12,
   // so the total 16 lands on the grid without double-counting.
   secHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4, marginBottom: 8 },

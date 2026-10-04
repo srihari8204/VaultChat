@@ -171,8 +171,10 @@ export default function LockHistoryScreen() {
     catch { Alert.alert('Export failed', 'Lock history could not be exported. Try again.'); }
   };
 
+  // The file is a location record: say so before it reaches the share sheet.
   const doExport = () => {
-    Alert.alert('Export history', 'Choose a format', [
+    Alert.alert('Export history?',
+      'The file holds every saved session: the exact coordinates of each locked spot, its times and distances, place names and your notes. Anyone you share it with can read where you were. Choose a format to share it.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'CSV', onPress: () => share(exportHistoryCSV, 'location-lock-history.csv') },
       { text: 'JSON', onPress: () => share(exportHistoryJSON, 'location-lock-history.json') },
@@ -204,8 +206,9 @@ export default function LockHistoryScreen() {
     if (savingNote) return;
     setSavingNote(true);
     try { await setSessionNotes(id, noteDraft); }
-    catch { Alert.alert('Not saved', 'The note could not be saved. Try again.'); return; }
-    finally { setSavingNote(false); }
+    catch { if (mountedRef.current) Alert.alert('Not saved', 'The note could not be saved. Try again.'); return; }
+    finally { if (mountedRef.current) setSavingNote(false); }
+    if (!mountedRef.current) return;
     setNoteSaved(true);
     refresh();
   };
@@ -413,7 +416,7 @@ export default function LockHistoryScreen() {
                   <TouchableOpacity
                     accessibilityRole="button" accessibilityLabel="Save note"
                     accessibilityState={{ busy: savingNote, disabled: savingNote }} disabled={savingNote}
-                    hitSlop={12}
+                    hitSlop={12} style={st.saveBtn}
                     onPress={() => saveNote(s.id)}>
                     {savingNote
                       ? <ActivityIndicator size="small" color={colors.primary} />
@@ -468,6 +471,7 @@ const st = StyleSheet.create({
   linkRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   /** linkRow as a tap target: 44 tall. */
   linkBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 44 },
+  saveBtn: { minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' },
   session: { borderWidth: 1, borderRadius: 12, padding: 12, marginTop: 10 },
   timeline: { borderTopWidth: StyleSheet.hairlineWidth, marginTop: 10, paddingTop: 8 },
   eventRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 },
