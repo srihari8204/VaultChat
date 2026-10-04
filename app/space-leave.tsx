@@ -35,6 +35,7 @@ import {
 } from '../lib/spaces/api';
 import { AuroraBackground } from '../components/ui';
 import { KeyboardSafe } from '../components/ui/KeyboardSafe';
+import LoadError from '../components/spaces/LoadError';
 import { ymd, dayOffset, allowanceBody, ALLOWANCE_KINDS, type AllowanceKind } from '../lib/spaces/leave';
 import { parseDay } from '../lib/spaces/runPlan';
 // The app's one cross-platform date picker (shared with finance).
@@ -71,6 +72,9 @@ export default function SpaceLeaveScreen() {
   const [rows, setRows] = useState<LeaveRequest[] | null>(null);
   const [tab, setTab] = useState<'mine' | 'pending' | 'history'>('mine');
   const [balance, setBalance] = useState<LeaveBalance | null>(null);
+  // The balance read failed (not "never set"): said on screen, and the
+  // allowance editor warns that it cannot show the current values.
+  const [balanceFailed, setBalanceFailed] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState<number | null>(null);
@@ -97,6 +101,7 @@ export default function SpaceLeaveScreen() {
       ]);
       setRows(l);
       setBalance(b);
+      setBalanceFailed(b == null);
     } catch (e: any) {
       setErr(e?.message || 'Could not load leave.');
       setRows([]);
@@ -178,11 +183,11 @@ export default function SpaceLeaveScreen() {
     }
   };
 
-  const s = styles(colors);
+  const s = useMemo(() => styles(colors), [colors]);
   // Pending is orange in the design system — attention, not a verdict either way.
   const tone = (st: string) =>
     st === 'approved' ? colors.success : st === 'pending' ? colors.warning : colors.danger;
-  const icon = (st: string) =>
+  const icon = (st: string): keyof typeof Ionicons.glyphMap =>
     st === 'approved' ? 'checkmark-circle' : st === 'pending' ? 'time-outline' : 'close-circle';
 
   const mine = (rows ?? []).filter((r) => r.userId === meId);
@@ -199,7 +204,7 @@ export default function SpaceLeaveScreen() {
   const row = (r: LeaveRequest) => (
     <View key={r.id} style={s.card}>
       <View style={s.rowTop}>
-        <Ionicons name={icon(r.status) as any} size={20} color={tone(r.status)} />
+        <Ionicons name={icon(r.status)} size={20} color={tone(r.status)} />
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={s.cardTitle} numberOfLines={1}>
             {r.name || 'A member'} · {r.kind}
@@ -241,14 +246,16 @@ export default function SpaceLeaveScreen() {
           >
             <Text style={[s.btnText, { color: colors.danger }]}>Decline</Text>
           </TouchableOpacity>
+          {/* Outlined, success-coloured ink on the ground: white on the dark
+              scheme's #22C55E fill was about 2.3:1. */}
           <TouchableOpacity
             onPress={() => decide(r, 'approved')}
             disabled={busy === r.id}
-            style={[s.btn, { backgroundColor: colors.success, flex: 1 }]}
+            style={[s.btn, s.btnGhost, { borderWidth: 1, borderColor: colors.success, flex: 1 }]}
             accessibilityRole="button" accessibilityLabel={`Approve leave for ${r.name || 'this person'}`}
             accessibilityState={{ disabled: busy === r.id, busy: busy === r.id }}
           >
-            <Text style={s.btnText}>{busy === r.id ? '…' : 'Approve'}</Text>
+            <Text style={[s.btnText, { color: colors.success }]}>{busy === r.id ? '…' : 'Approve'}</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -263,7 +270,7 @@ export default function SpaceLeaveScreen() {
       {/* Tabs (Business design: Leave screen). For a plain employee the server
           returns only their own requests, so Pending and History are simply
           their pending and settled — the tabs need no role branch. */}
-      <View style={s.tabs}>
+      <View style={s.tabs} accessibilityRole="tablist">
         {TABS.map((t) => (
           <TouchableOpacity
             key={t.key}
@@ -272,7 +279,8 @@ export default function SpaceLeaveScreen() {
             accessibilityState={{ selected: tab === t.key }}
             style={[s.tabBtn, tab === t.key && { backgroundColor: colors.brandOnLight }]}
           >
-            <Text style={[s.tabText, tab === t.key && { color: '#fff' }]}>
+            {/* White ink on the solid brandOnLight fill (deep blue in both schemes, 6.3:1). */}
+            <Text style={[s.tabText, tab === t.key && { color: colors.onBrand }]}>
               {t.label}{t.count > 0 ? ` (${t.count})` : ''}
             </Text>
           </TouchableOpacity>
@@ -307,19 +315,27 @@ export default function SpaceLeaveScreen() {
             ))}
           </View>
         )}
+        {/* A failed balance read is said, and the allowance editor stays
+            reachable — it is a space setting, not part of the balance. */}
+        {!balance && balanceFailed && rows !== null && !err && (
+          <View style={s.card}>
+            <View style={s.rowTop}>
+              <Text style={[s.muted, { flex: 1 }]}>Could not load your leave balance. Pull down to try again.</Text>
+              {canSetAllowance && (
+                <TouchableOpacity onPress={openAllowance} style={s.hit} accessibilityRole="button" accessibilityLabel="Set the leave allowance for this space">
+                  <Text style={{ color: colors.primary, fontWeight: '700' }}>Set allowance</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        )}
 
         {rows === null && (
           <View style={s.centre}><ActivityIndicator color={colors.primary} /><Text style={s.muted}>Loading leave…</Text></View>
         )}
 
         {err && (
-          <View style={[s.card, { borderColor: colors.danger, borderWidth: 1 }]}>
-            <Text style={s.cardTitle}>Could not load leave</Text>
-            <Text style={s.muted}>{err}</Text>
-            <TouchableOpacity onPress={load} style={[s.btn, { backgroundColor: colors.brandOnLight }]} accessibilityRole="button" accessibilityLabel="Try again">
-              <Text style={s.btnText}>Try again</Text>
-            </TouchableOpacity>
-          </View>
+          <LoadError colors={colors} title="Could not load leave" message={err} onRetry={() => { void onRefresh(); }} />
         )}
 
         {rows !== null && rows.length === 0 && !err && (
@@ -341,7 +357,8 @@ export default function SpaceLeaveScreen() {
         style={[s.fab, { backgroundColor: colors.brandOnLight, bottom: 28 + insets.bottom }]}
         onPress={() => { setFrom(dayOffset(1)); setTo(dayOffset(1)); setCompose(true); }}
       >
-        <Ionicons name="add" size={26} color="#fff" />
+        {/* White ink on the solid brandOnLight fill (deep blue in both schemes, 6.3:1). */}
+        <Ionicons name="add" size={26} color={colors.onBrand} />
       </TouchableOpacity>
 
       <Modal visible={compose} animationType="slide" transparent onRequestClose={() => setCompose(false)}>
@@ -357,7 +374,7 @@ export default function SpaceLeaveScreen() {
                   accessibilityRole="radio" accessibilityState={{ checked: kind === k }}
                   style={[s.kind, kind === k && { backgroundColor: colors.brandOnLight }]}
                 >
-                  <Text style={[s.kindText, kind === k && { color: '#fff' }]}>{k}</Text>
+                  <Text style={[s.kindText, kind === k && { color: colors.onBrand }]}>{k}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -397,7 +414,7 @@ export default function SpaceLeaveScreen() {
               accessibilityLabel="Reason, optional"
             />
             <View style={{ flexDirection: 'row', gap: 8 }}>
-              <TouchableOpacity onPress={() => setCompose(false)} style={[s.btn, s.btnGhost, { flex: 1 }]} accessibilityRole="button">
+              <TouchableOpacity onPress={() => setCompose(false)} style={[s.btn, s.btnGhost, { flex: 1 }]} accessibilityRole="button" accessibilityLabel="Cancel">
                 <Text style={[s.btnText, { color: colors.text }]}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -427,6 +444,12 @@ export default function SpaceLeaveScreen() {
               Days per type for everyone in {spaceName}. Leave a type empty for no allowance (shown as
               “not set”, never as zero). Saving replaces the whole allowance.
             </Text>
+            {!balance && (
+              <Text style={[s.muted, { color: colors.warning }]} accessibilityRole="alert">
+                The current allowance could not be read, so these fields start empty. Saving
+                replaces whatever is set now with what you enter here.
+              </Text>
+            )}
             {ALLOWANCE_KINDS.map((k) => (
               <View key={k} style={s.rowTop}>
                 <Text style={[s.label, { flex: 1, marginBottom: 0 }]}>{k}</Text>
@@ -439,7 +462,7 @@ export default function SpaceLeaveScreen() {
               </View>
             ))}
             <View style={{ flexDirection: 'row', gap: 8 }}>
-              <TouchableOpacity onPress={() => setAllowanceOpen(false)} style={[s.btn, s.btnGhost, { flex: 1 }]} accessibilityRole="button">
+              <TouchableOpacity onPress={() => setAllowanceOpen(false)} style={[s.btn, s.btnGhost, { flex: 1 }]} accessibilityRole="button" accessibilityLabel="Cancel">
                 <Text style={[s.btnText, { color: colors.text }]}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -492,5 +515,5 @@ const styles = (c: Palette) => StyleSheet.create({
   hit: { minHeight: 44, justifyContent: 'center' },
   dateBtn: { minHeight: 44, justifyContent: 'center' },
   btnGhost: { backgroundColor: c.bg },
-  btnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  btnText: { color: c.onBrand, fontWeight: '700', fontSize: 14 },
 });

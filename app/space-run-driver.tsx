@@ -53,7 +53,7 @@ import LoadError from '../components/spaces/LoadError';
  *  60s beat survives one lost request without raising a false GPS-offline. */
 const PING_MS = 60_000;
 
-const INCIDENTS: { key: string; label: string; icon: any }[] = [
+const INCIDENTS: { key: string; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { key: 'breakdown', label: 'Breakdown', icon: 'construct-outline' },
   { key: 'accident', label: 'Accident', icon: 'warning-outline' },
   { key: 'route_blocked', label: 'Road blocked', icon: 'remove-circle-outline' },
@@ -89,7 +89,7 @@ export default function SpaceRunDriverScreen() {
   const myId = useRef('');
 
   useEffect(() => {
-    getCurrentUserAsync().then((u: any) => { myId.current = String(u?.id ?? ''); }).catch(() => {});
+    getCurrentUserAsync().then((u: { id?: string | number } | null) => { myId.current = String(u?.id ?? ''); }).catch(() => {});
   }, []);
 
   // The "route" a deviation is measured against is the run's own stop sequence.
@@ -411,7 +411,7 @@ export default function SpaceRunDriverScreen() {
     doStatus(next);
   }, [run, started, prog.pending, doStatus]);
 
-  const s = styles(colors);
+  const s = useMemo(() => styles(colors), [colors]);
 
   if (loading) {
     return (
@@ -453,7 +453,9 @@ export default function SpaceRunDriverScreen() {
           accessibilityRole="button"
           accessibilityLabel={started ? 'Finish run' : 'Start run'}
         >
-          <Text style={s.runBtnText}>{started ? 'Finish' : 'Start'}</Text>
+          {/* Finish: on-danger ink. Start: white on the solid brandOnLight fill
+              (deep blue in both schemes, 6.3:1). */}
+          <Text style={[s.runBtnText, started && { color: colors.onDanger }]}>{started ? 'Finish' : 'Start'}</Text>
         </TouchableOpacity>
       </View>
 
@@ -508,12 +510,13 @@ export default function SpaceRunDriverScreen() {
                 onPress={() => onArrive(current)}
                 disabled={arriving}
                 accessibilityRole="button"
-                accessibilityState={{ disabled: arriving }}
+                accessibilityState={{ disabled: arriving, busy: arriving }}
               >
+                {/* White ink on the solid brandOnLight fill until arrived. */}
                 <Ionicons
                   name={current.arrivedAt ? 'checkmark-circle' : 'location'}
                   size={18}
-                  color={current.arrivedAt ? colors.success : '#fff'}
+                  color={current.arrivedAt ? colors.success : colors.onBrand}
                 />
                 <Text style={[s.arriveText, current.arrivedAt && { color: colors.success }]}>
                   {arriving ? 'Telling everyone…'
@@ -552,6 +555,7 @@ export default function SpaceRunDriverScreen() {
                       disabled={busy === r.riderId}
                       accessibilityRole="button"
                       accessibilityLabel={`${r.displayName} is not here`}
+                      accessibilityState={{ disabled: busy === r.riderId }}
                     >
                       <Text style={s.absentText}>Not here</Text>
                     </TouchableOpacity>
@@ -561,9 +565,10 @@ export default function SpaceRunDriverScreen() {
                       disabled={busy === r.riderId}
                       accessibilityRole="button"
                       accessibilityLabel={`${r.displayName} ${isDropRun(run) ? 'dropped off' : 'on board'}`}
+                      accessibilityState={{ disabled: busy === r.riderId, busy: busy === r.riderId }}
                     >
                       {busy === r.riderId
-                        ? <ActivityIndicator size="small" color="#fff" />
+                        ? <ActivityIndicator size="small" color={colors.onBrand} />
                         : <Text style={s.boardText}>{isDropRun(run) ? 'Dropped' : 'On board'}</Text>}
                     </TouchableOpacity>
                   </View>
@@ -612,14 +617,14 @@ export default function SpaceRunDriverScreen() {
               placeholderTextColor={colors.textDim}
             />
             <View style={s.modalRow}>
-              <TouchableOpacity style={s.modalBtn} onPress={() => setCodeFor(null)} accessibilityRole="button">
+              <TouchableOpacity style={s.modalBtn} onPress={() => setCodeFor(null)} accessibilityRole="button" accessibilityLabel="Cancel">
                 <Text style={s.muted}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[s.modalBtn, s.boardBtn, !code.trim() && { opacity: 0.4 }]}
                 onPress={() => { const c = codeFor; setCodeFor(null); if (c) apply(c.rider, c.state, code.trim()); }}
                 disabled={!code.trim()}
-                accessibilityRole="button"
+                accessibilityRole="button" accessibilityLabel="Confirm handover code"
                 accessibilityState={{ disabled: !code.trim() }}
               >
                 <Text style={s.boardText}>Confirm</Text>
@@ -634,10 +639,10 @@ export default function SpaceRunDriverScreen() {
       <Modal visible={incidentOpen} transparent animationType="slide" onRequestClose={() => setIncidentOpen(false)}>
         <View style={s.sheetWrap}>
           <View style={[s.sheet, { paddingBottom: 18 + insets.bottom }]}>
-            <Text style={s.modalTitle}>Report a problem</Text>
+            <Text style={s.modalTitle} accessibilityRole="header">Report a problem</Text>
             <TouchableOpacity style={[s.sheetRow, s.panicRow]} onPress={onPanic} accessibilityRole="button">
-              <Ionicons name="alert-circle" size={22} color="#fff" />
-              <Text style={[s.sheetText, { color: '#fff', fontWeight: '700' }]}>Emergency — alert everyone now</Text>
+              <Ionicons name="alert-circle" size={22} color={colors.onDanger} />
+              <Text style={[s.sheetText, { color: colors.onDanger, fontWeight: '700' }]}>Emergency — alert everyone now</Text>
             </TouchableOpacity>
             {INCIDENTS.map((i) => (
               <TouchableOpacity key={i.key} style={s.sheetRow} onPress={() => onIncident(i.key)} accessibilityRole="button">
@@ -677,7 +682,7 @@ function stateLabel(s: RiderState): string {
   }
 }
 
-function settledIcon(s: RiderState): any {
+function settledIcon(s: RiderState): keyof typeof Ionicons.glyphMap {
   return s === 'absent' || s === 'no_show' ? 'close-circle' : 'checkmark-circle';
 }
 
@@ -693,10 +698,10 @@ const styles = (c: Palette) => StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12 },
   vehicle: { fontSize: 22, fontWeight: '700', color: c.text },
   muted: { color: c.textDim, fontSize: 14 },
-  runBtn: { paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12 },
+  runBtn: { paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12, minHeight: 44, justifyContent: 'center' },
   runBtnGo: { backgroundColor: c.brandOnLight },
   runBtnStop: { backgroundColor: c.danger },
-  runBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  runBtnText: { color: c.onBrand, fontWeight: '700', fontSize: 16 },
   progressTrack: { height: 4, backgroundColor: c.border, marginHorizontal: 16, borderRadius: 2 },
   progressFill: { height: 4, backgroundColor: c.brandOnLight, borderRadius: 2 },
   body: { padding: 16, paddingBottom: 90, gap: 10 },
@@ -714,17 +719,17 @@ const styles = (c: Palette) => StyleSheet.create({
   riderState: { color: c.textDim, fontSize: 13, marginTop: 2 },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   iconBtn: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  actionBtn: { paddingHorizontal: 14, paddingVertical: 12, borderRadius: 10, minWidth: 84, alignItems: 'center' },
+  actionBtn: { paddingHorizontal: 14, paddingVertical: 12, borderRadius: 10, minWidth: 84, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   absentBtn: { backgroundColor: c.border },
   arriveBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     backgroundColor: c.brandOnLight, borderRadius: 12, paddingVertical: 14, marginBottom: 12,
   },
   arriveBtnDone: { backgroundColor: c.success + '18' },
-  arriveText: { color: '#fff', fontWeight: '800', fontSize: 15 },
+  arriveText: { color: c.onBrand, fontWeight: '800', fontSize: 15 },
   absentText: { color: c.text, fontWeight: '600' },
   boardBtn: { backgroundColor: c.brandOnLight },
-  boardText: { color: '#fff', fontWeight: '700' },
+  boardText: { color: c.onBrand, fontWeight: '700' },
   done: { alignItems: 'center', gap: 8, paddingVertical: 40 },
   doneText: { color: c.text, fontSize: 18, fontWeight: '600' },
   incidentBar: {
@@ -736,6 +741,7 @@ const styles = (c: Palette) => StyleSheet.create({
     borderWidth: 1, borderColor: c.danger,
   },
   incidentText: { color: c.danger, fontWeight: '600' },
+  // Fixed dark scrims behind the dialog and sheet, the same in both schemes.
   modalWrap: { flex: 1, backgroundColor: '#0008', alignItems: 'center', justifyContent: 'center', padding: 24 },
   modal: { width: '100%', backgroundColor: c.bg, borderRadius: 16, padding: 20, gap: 10 },
   modalTitle: { color: c.text, fontSize: 18, fontWeight: '700' },

@@ -22,14 +22,13 @@
 //    locked.
 
 import { AppText as Text } from '../components/ui/Text';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity,
   Alert, TextInput, Modal, RefreshControl,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import {
@@ -42,6 +41,7 @@ import LoadError from '../components/spaces/LoadError';
 import { AuroraBackground } from '../components/ui';
 import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 import ChatDoorButton from '../components/spaces/ChatDoorButton';
+import DeviceDetailSheet, { ago } from '../components/spaces/DeviceDetailSheet';
 
 const KINDS: { key: string; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { key: 'phone', label: 'Phone', icon: 'phone-portrait-outline' },
@@ -52,23 +52,9 @@ const KINDS: { key: string; label: string; icon: keyof typeof Ionicons.glyphMap 
   { key: 'other', label: 'Other', icon: 'cube-outline' },
 ];
 
-// Design screen 18. `wipe` is deliberately last and styled apart.
-// `supported` = the phone-side agent (lib/spaces/deviceCommands.ts) can carry
-// it out. The rest need Device Admin, which the app does not hold, so they are
-// shown but not offered: a Lock button that can only ever report "Failed" is a
-// promise the phone cannot keep.
-const ACTIONS: { key: string; label: string; icon: keyof typeof Ionicons.glyphMap; danger?: boolean; supported?: boolean }[] = [
-  { key: 'ring', label: 'Ring device', icon: 'volume-high-outline', supported: true },
-  { key: 'lock', label: 'Lock remotely', icon: 'lock-closed-outline' },
-  { key: 'message', label: 'Show a message', icon: 'chatbox-ellipses-outline', supported: true },
-  { key: 'photo', label: 'Capture photo', icon: 'camera-outline' },
-  { key: 'wipe', label: 'Erase everything', icon: 'trash-outline', danger: true },
-];
-
 export default function SpaceDevicesScreen() {
   const params = useLocalSearchParams<{ spaceId?: string; name?: string; groupType?: string; perms?: string }>();
   const colors = useSpaceColors(params.groupType);
-  const insets = useSafeAreaInsets();
   const spaceId = String(params.spaceId || '');
 
   const [devices, setDevices] = useState<SpaceDevice[]>([]);
@@ -89,10 +75,6 @@ export default function SpaceDevicesScreen() {
   const [events, setEvents] = useState<DeviceEvent[]>([]);
   const [commands, setCommands] = useState<DeviceCommand[]>([]);
   const [detailError, setDetailError] = useState<string | null>(null);
-  const [msg, setMsg] = useState('');
-  const [asking, setAsking] = useState(false);
-  const [renaming, setRenaming] = useState(false);
-  const [newLabel, setNewLabel] = useState('');
   // Which device the detail sheet last asked about. Opening A then B quickly
   // must not let A's late answers overwrite B's history.
   const openReq = useRef(0);
@@ -165,28 +147,32 @@ export default function SpaceDevicesScreen() {
           onPress: async () => {
             try {
               await updateDevice(spaceId, d.id, { archived: true });
-              await unbindThisPhone({ spaceId, deviceId: d.id });
-              closeDevice();
-              await load();
-            } catch (e: any) { Alert.alert('Could not remove', e?.message ?? 'Try again.'); }
+            } catch (e: any) { Alert.alert('Could not remove', e?.message ?? 'Try again.'); return; }
+            // The device IS removed now. Forgetting it on this phone is a
+            // separate, local step, and its failure must not read as "not removed".
+            closeDevice();
+            try { await unbindThisPhone({ spaceId, deviceId: d.id }); }
+            catch {
+              Alert.alert('Removed', `${d.label} is removed from this space. This phone could not clear its own saved link to it, so it may keep trying to report for it.`);
+            }
+            await load();
           },
         },
       ],
     );
   }, [spaceId, load, closeDevice]);
 
-  const onRename = useCallback(async () => {
-    const l = newLabel.trim();
-    if (!open || !l || l === open.label) { setRenaming(false); return; }
+  const onRename = useCallback(async (l: string): Promise<boolean> => {
+    if (!open || l === open.label) return true;
     setBusy(true);
     try {
       await updateDevice(spaceId, open.id, { label: l });
       setOpen({ ...open, label: l });
-      setRenaming(false);
       await load();
-    } catch (e: any) { Alert.alert('Could not rename', e?.message ?? 'Try again.'); }
+      return true;
+    } catch (e: any) { Alert.alert('Could not rename', e?.message ?? 'Try again.'); return false; }
     finally { setBusy(false); }
-  }, [newLabel, open, spaceId, load]);
+  }, [open, spaceId, load]);
 
   const runAction = useCallback(async (d: SpaceDevice, action: string, payload?: string): Promise<boolean> => {
     const req = openReq.current;
@@ -207,9 +193,8 @@ export default function SpaceDevicesScreen() {
     } finally { setBusy(false); }
   }, [spaceId]);
 
-  const confirmAction = useCallback((d: SpaceDevice, a: typeof ACTIONS[number]) => {
-    if (a.key === 'message') { setMsg(''); setAsking(true); return; }
-    if (a.key === 'wipe') {
+  const confirmAction = useCallback((d: SpaceDevice, key: string) => {
+    if (key === 'wipe') {
       Alert.alert(
         'Erase everything on this device?',
         'This cannot be undone, and it cannot be stopped once the device receives it. ' +
@@ -221,10 +206,11 @@ export default function SpaceDevicesScreen() {
       );
       return;
     }
-    runAction(d, a.key);
+    void runAction(d, key);
   }, [runAction]);
 
-  const s = styles(colors);
+  const s = useMemo(() => styles(colors), [colors]);
+  const canManage = !!open && (open.ownerId === myId || String(params.perms || '').split(',').includes('view_space_ops'));
 
   if (loading) {
     return (
@@ -323,142 +309,19 @@ export default function SpaceDevicesScreen() {
         </Text>
       </ScrollView>
 
-      {/* ── detail: screens 15, 17, 18 ── */}
-      <Modal visible={!!open} animationType="slide" onRequestClose={closeDevice}>
-        <View style={[s.screen, { backgroundColor: colors.bg }]}>
-          <View style={[s.sheetHead, { paddingTop: insets.top + 12 }]}>
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close" onPress={closeDevice} style={s.hit}>
-              <Ionicons name="close" size={24} color={colors.text} />
-            </TouchableOpacity>
-            <Text style={s.sheetTitle} numberOfLines={1}>{open?.label}</Text>
-          </View>
-
-          <ScrollView contentContainerStyle={[s.body, { paddingBottom: 40 + insets.bottom }]}>
-            <View style={s.card}>
-              <Text style={s.muted}>
-                {open?.lastSeenAt ? `Last reported ${ago(open.lastSeenAt)}` : 'Has never reported'}
-                {open?.battery != null ? ` · battery ${open.battery}%` : ''}
-              </Text>
-              {open?.stale && (
-                <Text style={{ color: colors.danger, fontSize: 12.5 }}>
-                  This device has gone quiet. That is all the server can tell — it may be off,
-                  out of signal, or simply not running the app.
-                </Text>
-              )}
-            </View>
-
-            {/* Theft protection (screen 18) */}
-            <Text style={s.section}>PROTECTION</Text>
-            {open && !open.appBacked ? (
-              <View style={s.card}>
-                <Text style={s.muted}>
-                  Remote actions need crazzychat running on the device itself. This one is tracked
-                  as an item, so its alerts and history are kept, but it cannot be locked, rung or
-                  erased from here.
-                </Text>
-              </View>
-            ) : (
-              <View style={s.card}>
-                {/* Only the handset that registered as this device collects its
-                    commands; the server cannot tell phones apart. */}
-                {open && open.ownerId === myId && (
-                  <TouchableOpacity
-                    style={s.actionRow} onPress={() => toggleThisPhone(open)}
-                    accessibilityRole="switch" accessibilityState={{ checked: boundHere }}
-                    accessibilityLabel="This is the phone I am using"
-                  >
-                    <Ionicons name={boundHere ? 'checkbox' : 'square-outline'} size={19} color={boundHere ? colors.primary : colors.textDim} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.actionText}>This is the phone I am using</Text>
-                      <Text style={s.muted}>
-                        {boundHere
-                          ? 'This phone reports in and carries out requests while crazzychat is open.'
-                          : 'Turn on, on the phone itself, so it can receive requests.'}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                )}
-                {ACTIONS.map((a) => (
-                  <TouchableOpacity
-                    key={a.key}
-                    style={[s.actionRow, !a.supported && { opacity: 0.5 }]}
-                    onPress={() => open && confirmAction(open, a)}
-                    disabled={busy || !a.supported}
-                    accessibilityRole="button"
-                    accessibilityState={{ disabled: busy || !a.supported }}
-                    accessibilityHint={a.supported ? undefined : 'Not available on crazzychat phones yet'}
-                  >
-                    <Ionicons name={a.icon} size={19} color={a.danger ? colors.danger : colors.text} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={[s.actionText, a.danger && { color: colors.danger }]}>{a.label}</Text>
-                      {!a.supported && <Text style={s.muted}>Needs device admin — not available yet</Text>}
-                    </View>
-                    {a.supported && <Ionicons name="chevron-forward" size={15} color={colors.textDim} />}
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-
-            {commands.length > 0 && (
-              <View style={s.card}>
-                <Text style={s.cardTitle}>Requests</Text>
-                {commands.map((c) => (
-                  <View key={c.id} style={s.row}>
-                    <View style={[s.dot, { backgroundColor: resultColour(c.result, colors) }]} />
-                    <Text style={[s.actionText, { flex: 1 }]}>{c.action}</Text>
-                    <Text style={s.muted}>{resultLabel(c.result)}</Text>
-                  </View>
-                ))}
-                <Text style={s.footnote}>
-                  “Waiting” means the device has not confirmed yet. Only the device can report that
-                  it acted, so nothing here is marked done on its behalf.
-                </Text>
-              </View>
-            )}
-
-            {open && (open.ownerId === myId || String(params.perms || '').split(',').includes('view_space_ops')) && (
-              <TouchableOpacity
-                style={[s.card, s.row]} onPress={() => { setNewLabel(open.label); setRenaming(true); }}
-                accessibilityRole="button" accessibilityLabel={`Rename ${open.label}`}
-              >
-                <Ionicons name="create-outline" size={19} color={colors.text} />
-                <Text style={s.actionText}>Rename</Text>
-              </TouchableOpacity>
-            )}
-
-            {open && (open.ownerId === myId || String(params.perms || '').split(',').includes('view_space_ops')) && (
-              <TouchableOpacity
-                style={[s.card, s.row]} onPress={() => archiveDevice(open)}
-                accessibilityRole="button" accessibilityLabel={`Remove ${open.label} from this space`}
-              >
-                <Ionicons name="archive-outline" size={19} color={colors.danger} />
-                <Text style={[s.actionText, { color: colors.danger }]}>Remove from this space</Text>
-              </TouchableOpacity>
-            )}
-
-            {detailError && open && (
-              <LoadError colors={colors} message={detailError} onRetry={() => { void openDevice(open); }} />
-            )}
-
-            {/* History + alerts (screens 13 and 17) */}
-            <Text style={s.section}>HISTORY</Text>
-            <View style={s.card}>
-              {events.length === 0 && !detailError && <Text style={s.muted}>Nothing recorded yet.</Text>}
-              {events.map((e) => (
-                <View key={e.id} style={s.row}>
-                  <View style={[s.dot, { backgroundColor: eventColour(e.kind, colors) }]} />
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={s.actionText} numberOfLines={2}>
-                      {e.text || e.kind.replace(/_/g, ' ')}
-                    </Text>
-                    <Text style={s.muted}>{ago(e.at)}</Text>
-                  </View>
-                </View>
-              ))}
-            </View>
-          </ScrollView>
-        </View>
-      </Modal>
+      {/* ── detail: screens 15, 17, 18 (its dialogs are nested inside it) ── */}
+      <DeviceDetailSheet
+        colors={colors} device={open} events={events} commands={commands}
+        detailError={detailError} boundHere={boundHere} busy={busy}
+        isOwner={!!open && open.ownerId === myId} canManage={canManage}
+        onClose={closeDevice}
+        onRetry={() => { if (open) void openDevice(open); }}
+        onToggleThisPhone={() => { if (open) void toggleThisPhone(open); }}
+        onAction={(key) => { if (open) confirmAction(open, key); }}
+        onSendMessage={(text) => (open ? runAction(open, 'message', text) : Promise.resolve(false))}
+        onRename={onRename}
+        onArchive={() => { if (open) archiveDevice(open); }}
+      />
 
       {/* add */}
       <Modal visible={adding} transparent animationType="fade" onRequestClose={() => setAdding(false)}>
@@ -476,7 +339,7 @@ export default function SpaceDevicesScreen() {
                   accessibilityLabel={k.label}
                   style={[s.kind, kind === k.key && { backgroundColor: colors.brandOnLight }]}>
                   {/* White ink on the solid brandOnLight fill (deep blue in both schemes). */}
-                  <Text style={[s.kindText, kind === k.key && { color: '#fff' }]}>{k.label}</Text>
+                  <Text style={[s.kindText, kind === k.key && { color: colors.onBrand }]}>{k.label}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -495,67 +358,14 @@ export default function SpaceDevicesScreen() {
               </Text>
             )}
             <View style={s.modalRow}>
-              <TouchableOpacity style={s.modalBtn} onPress={() => setAdding(false)} accessibilityRole="button">
+              <TouchableOpacity style={s.modalBtn} onPress={() => setAdding(false)} accessibilityRole="button" disabled={busy} accessibilityState={{ disabled: busy }}>
                 <Text style={s.muted}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[s.modalBtn, { backgroundColor: colors.brandOnLight }, (!label.trim() || busy) && s.off]}
                 onPress={onAdd} disabled={!label.trim() || busy}
                 accessibilityRole="button" accessibilityLabel="Add device"
                 accessibilityState={{ disabled: !label.trim() || busy, busy }}>
-                {busy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.primaryText}>Add</Text>}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-        </KeyboardSafe>
-      </Modal>
-
-      {/* show-a-message */}
-      <Modal visible={asking} transparent animationType="fade" onRequestClose={() => setAsking(false)}>
-        <KeyboardSafe keyboardOnly>
-        <View style={s.modalWrap}>
-          <View style={s.modal}>
-            <Text style={s.modalTitle}>Show a message</Text>
-            <Text style={s.muted}>Whoever has the phone sees this when crazzychat is open on it. A phone number helps.</Text>
-            <TextInput style={s.input} value={msg} onChangeText={setMsg} autoFocus multiline
-              accessibilityLabel="Message to show on the phone"
-              placeholder="Lost phone — please call …" placeholderTextColor={colors.textDim} maxLength={300} />
-            <View style={s.modalRow}>
-              <TouchableOpacity style={s.modalBtn} onPress={() => setAsking(false)} accessibilityRole="button" disabled={busy}>
-                <Text style={s.muted}>Cancel</Text>
-              </TouchableOpacity>
-              {/* Stays open while sending, so a failure keeps the typed text. */}
-              <TouchableOpacity style={[s.modalBtn, { backgroundColor: colors.brandOnLight }, (!msg.trim() || busy) && s.off]}
-                onPress={async () => { if (open && await runAction(open, 'message', msg.trim())) setAsking(false); }}
-                disabled={!msg.trim() || busy}
-                accessibilityRole="button" accessibilityLabel="Send message"
-                accessibilityState={{ disabled: !msg.trim() || busy, busy }}>
-                {busy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.primaryText}>Send</Text>}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-        </KeyboardSafe>
-      </Modal>
-
-      {/* rename */}
-      <Modal visible={renaming} transparent animationType="fade" onRequestClose={() => setRenaming(false)}>
-        <KeyboardSafe keyboardOnly>
-        <View style={s.modalWrap}>
-          <View style={s.modal}>
-            <Text style={s.modalTitle}>Rename device</Text>
-            <TextInput style={s.input} value={newLabel} onChangeText={setNewLabel} autoFocus
-              accessibilityLabel="New device name" maxLength={80}
-              placeholder="Name, e.g. Honda City" placeholderTextColor={colors.textDim} />
-            <View style={s.modalRow}>
-              <TouchableOpacity style={s.modalBtn} onPress={() => setRenaming(false)} accessibilityRole="button" disabled={busy}>
-                <Text style={s.muted}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[s.modalBtn, { backgroundColor: colors.brandOnLight }, (!newLabel.trim() || busy) && s.off]}
-                onPress={onRename} disabled={!newLabel.trim() || busy}
-                accessibilityRole="button" accessibilityLabel="Save name"
-                accessibilityState={{ disabled: !newLabel.trim() || busy, busy }}>
-                {busy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.primaryText}>Save</Text>}
+                {busy ? <ActivityIndicator size="small" color={colors.onBrand} /> : <Text style={s.primaryText}>Add</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -564,43 +374,6 @@ export default function SpaceDevicesScreen() {
       </Modal>
     </View>
   );
-}
-
-function ago(iso: string): string {
-  const ms = Date.parse(iso);
-  if (!Number.isFinite(ms)) return '';
-  const mins = Math.round((Date.now() - ms) / 60_000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins} min ago`;
-  const h = Math.round(mins / 60);
-  if (h < 24) return `${h} h ago`;
-  return new Date(ms).toLocaleDateString([], { day: 'numeric', month: 'short' });
-}
-
-function resultLabel(r: DeviceCommand['result']): string {
-  switch (r) {
-    case 'executed': return 'Done';
-    case 'delivered': return 'Received';
-    case 'failed': return 'Failed';
-    case 'cancelled': return 'Cancelled';
-    default: return 'Waiting';
-  }
-}
-function resultColour(r: DeviceCommand['result'], c: Palette): string {
-  switch (r) {
-    case 'executed': return c.success;
-    case 'failed': return c.danger;
-    case 'cancelled': return c.textFaint;
-    default: return c.warning;
-  }
-}
-function eventColour(kind: string, c: Palette): string {
-  switch (kind) {
-    case 'overspeed': case 'shock': return c.danger;
-    case 'left_zone': case 'disconnected': case 'powered_off': return c.warning;
-    case 'entered_zone': return c.success;
-    default: return c.textDim;
-  }
 }
 
 const styles = (c: Palette) => StyleSheet.create({
@@ -613,16 +386,8 @@ const styles = (c: Palette) => StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 },
   icon: { width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
   pill: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
-  dot: { width: 9, height: 9, borderRadius: 5 },
-  section: { color: c.textDim, fontSize: 11.5, letterSpacing: 1, marginTop: 8 },
   actionRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 },
   actionText: { color: c.text, fontSize: 14.5, flexShrink: 1 },
-  sheetHead: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 16, paddingBottom: 14,
-    borderBottomWidth: 1, borderBottomColor: c.glassStroke,
-  },
-  sheetTitle: { color: c.text, fontSize: 17, fontWeight: '700', flex: 1 },
   footnote: { color: c.textFaint, fontSize: 11.5, lineHeight: 16 },
   // A fixed dark scrim behind the dialog, the same in both schemes.
   modalWrap: { flex: 1, backgroundColor: '#0008', alignItems: 'center', justifyContent: 'center', padding: 22 },
@@ -640,5 +405,5 @@ const styles = (c: Palette) => StyleSheet.create({
   off: { opacity: 0.5 },
   hit: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   headerActions: { flexDirection: 'row', alignItems: 'center' },
-  primaryText: { color: '#fff', fontWeight: '700' },
+  primaryText: { color: c.onBrand, fontWeight: '700' },
 });

@@ -47,6 +47,9 @@ export default function SpaceCheckinScreen() {
 
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [leave, setLeave] = useState<LeaveRequest[]>([]);
+  // Leave is only a badge here, so its failure is reported on the leave row
+  // and never hides the check-in hero.
+  const [leaveError, setLeaveError] = useState(false);
   const [me, setMe] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -58,11 +61,16 @@ export default function SpaceCheckinScreen() {
       const [u, a, l] = await Promise.all([
         getCurrentUserAsync().catch(() => null),
         getAttendance(spaceId),
-        getLeave(spaceId),
+        getLeave(spaceId).catch(() => null),
       ]);
-      setMe(String((u as any)?.id ?? ''));
+      const id = u?.id != null ? String(u.id) : '';
+      // Without knowing who is signed in, the hero would say "Not checked in"
+      // and the leave badge would count the viewer's own requests as others'.
+      if (!id) throw new Error('Could not tell who is signed in. Try again.');
+      setMe(id);
       setRecords(a.records || []);
-      setLeave(l || []);
+      setLeave(l ?? []);
+      setLeaveError(l == null);
       setLoadError(null);
     } catch (e: any) {
       // "Not checked in" and "No leave requested" after a failed read would be
@@ -106,13 +114,13 @@ export default function SpaceCheckinScreen() {
     params: { spaceId, name: params.name ?? '', groupType: params.groupType ?? '', perms: params.perms ?? '' },
   });
 
-  const s = styles(colors);
+  const s = useMemo(() => styles(colors), [colors]);
 
   if (loading) {
     return (
       <View style={[s.screen, s.centre]}>
       <AuroraBackground />
-        <Stack.Screen options={spaceHeader(colors, 'Attendance')} />
+        <Stack.Screen options={spaceHeader(colors, 'Check in')} />
         <ActivityIndicator color={colors.primary} />
       </View>
     );
@@ -125,7 +133,7 @@ export default function SpaceCheckinScreen() {
       style={s.screen} contentContainerStyle={s.body}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} tintColor={colors.primary} />}
     >
-      <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · Attendance` : 'Attendance', { id: spaceId, name: params.name })} />
+      <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · Check in` : 'Check in', { id: spaceId, name: params.name })} />
 
       {loadError && (
         <LoadError colors={colors} title="Could not load today’s record" message={loadError} onRetry={() => { setLoading(true); void load(); }} />
@@ -149,12 +157,13 @@ export default function SpaceCheckinScreen() {
         </Text>
 
         {!inAt ? (
-          <TouchableOpacity style={[s.bigBtn, { backgroundColor: colors.brandOnLight }]} onPress={doCheckIn} disabled={busy} accessibilityRole="button" accessibilityLabel="Check in">
-            {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.bigBtnText}>Check In</Text>}
+          <TouchableOpacity style={[s.bigBtn, { backgroundColor: colors.brandOnLight }]} onPress={doCheckIn} disabled={busy} accessibilityRole="button" accessibilityLabel="Check in" accessibilityState={{ disabled: busy, busy }}>
+            {/* White ink on the solid brandOnLight fill (deep blue in both schemes, 6.3:1). */}
+            {busy ? <ActivityIndicator color={colors.onBrand} /> : <Text style={s.bigBtnText}>Check In</Text>}
           </TouchableOpacity>
         ) : !outAt ? (
-          <TouchableOpacity style={[s.bigBtn, { backgroundColor: colors.danger }]} onPress={doCheckOut} disabled={busy} accessibilityRole="button" accessibilityLabel="Check out now">
-            {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.bigBtnText}>Check Out Now</Text>}
+          <TouchableOpacity style={[s.bigBtn, { backgroundColor: colors.danger }]} onPress={doCheckOut} disabled={busy} accessibilityRole="button" accessibilityLabel="Check out now" accessibilityState={{ disabled: busy, busy }}>
+            {busy ? <ActivityIndicator color={colors.onDanger} /> : <Text style={[s.bigBtnText, { color: colors.onDanger }]}>Check Out Now</Text>}
           </TouchableOpacity>
         ) : (
           // Checking in again would move the arrival time, so the button is
@@ -168,13 +177,14 @@ export default function SpaceCheckinScreen() {
       <TouchableOpacity
         style={[s.card, s.linkRow]} onPress={openLeave}
         accessibilityRole="button"
-        accessibilityLabel={`Leave. ${loadError ? '' : `${myPending} of yours pending${canDecide ? `, ${toDecide} waiting for your decision` : ''}. `}Request or review leave`}
+        accessibilityLabel={`Leave. ${loadError ? '' : leaveError ? 'Could not load your requests. ' : `${myPending} of yours pending${canDecide ? `, ${toDecide} waiting for your decision` : ''}. `}Request or review leave`}
       >
         <Ionicons name="calendar-outline" size={20} color={colors.primary} />
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={s.cardTitle}>Leave</Text>
           <Text style={s.muted}>
             {loadError ? 'Request leave, or review requests'
+              : leaveError ? 'Could not load your requests · open to try again'
               : [
                 myPending ? `${myPending} of yours pending` : 'Nothing of yours pending',
                 canDecide && toDecide ? `${toDecide} waiting for your decision` : null,
@@ -231,7 +241,7 @@ const styles = (c: Palette) => StyleSheet.create({
   muted: { color: c.textDim, fontSize: 12.5, flexShrink: 1 },
   bigBtn: { marginTop: 8, paddingHorizontal: 28, paddingVertical: 13, borderRadius: 14, minHeight: 48, justifyContent: 'center' },
   linkRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 44 },
-  bigBtnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
+  bigBtnText: { color: c.onBrand, fontWeight: '800', fontSize: 15 },
   leaveRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9 },
   leaveDot: { width: 9, height: 9, borderRadius: 5 },
   leaveTitle: { color: c.text, fontSize: 14.5, fontWeight: '600' },

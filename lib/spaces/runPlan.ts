@@ -12,7 +12,7 @@
 //
 // Pure — no react-native imports.
 
-import type { RunStop, RunRider } from './runs';
+import type { Run, RunStop, RunRider } from './runs';
 export { parseClock } from './attendance';
 
 export interface StopPayload { id?: string; label: string; lat?: number; lng?: number; plannedAt?: string }
@@ -64,6 +64,39 @@ export function dayOf(iso: string | null): string {
 export function stopDay(scheduledAt: string | null, typedDay: string): number | null {
   const t = scheduledAt ? Date.parse(scheduledAt) : NaN;
   return Number.isFinite(t) ? t : parseDay(typedDay);
+}
+
+/**
+ * Where the stop's date+time picker starts: the stop's own planned time, else
+ * a sibling stop's planned instant (same run, so usually the same day), else
+ * the run's scheduled or start time, else tomorrow 07:00 local. The picker
+ * shows the day, so this is only a starting point — never a silent "today"
+ * (see stopDay for why today is the wrong default).
+ */
+export function plannedPickStart(
+  own: string | null, sibling: string | null, scheduledAt: string | null, startedAt: string | null, nowMs: number,
+): Date {
+  for (const iso of [own, sibling, scheduledAt, startedAt]) {
+    const t = iso ? Date.parse(iso) : NaN;
+    if (Number.isFinite(t)) return new Date(t);
+  }
+  const d = new Date(nowMs);
+  d.setDate(d.getDate() + 1);
+  d.setHours(7, 0, 0, 0);
+  return d;
+}
+
+/**
+ * One entry of `GET /chats/{id}/runs?include=riders[,stops]` split into the
+ * run and its manifest — or null when the server did not include them (an
+ * older server ignores `include`), so the caller falls back to getRun.
+ */
+export function splitListedRun(
+  r: Run & { riders?: unknown; stops?: unknown }, needStops: boolean,
+): { run: Run; riders: RunRider[]; stops: RunStop[] } | null {
+  if (!Array.isArray(r.riders) || (needStops && !Array.isArray(r.stops))) return null;
+  const { riders, stops, ...run } = r;
+  return { run, riders: riders as RunRider[], stops: Array.isArray(stops) ? stops as RunStop[] : [] };
 }
 
 /** The local "HH:MM" of an instant, for pre-filling an edit form. */

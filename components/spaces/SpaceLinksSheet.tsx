@@ -166,7 +166,7 @@ export default function SpaceLinksSheet({
                   >
                     {/* White ink on the solid brand fill: brandOnLight is a deep
                         blue in both schemes, so this keeps contrast. */}
-                    <Text style={[s.chipText, relation === r.key && { color: '#fff' }]}>{r.label}</Text>
+                    <Text style={[s.chipText, relation === r.key && { color: colors.onBrand }]}>{r.label}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
@@ -243,5 +243,5 @@ const styles = (c: SpacePalette) => StyleSheet.create({
   chipText: { color: c.textDim, fontSize: 12.5 },
   input: { borderWidth: 1, borderColor: c.glassStroke, borderRadius: 10, padding: 12, color: c.text, fontSize: 15 },
   primary: { backgroundColor: c.brandOnLight, borderRadius: 10, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  primaryText: { color: '#fff', fontWeight: '700' },
+  primaryText: { color: c.onBrand, fontWeight: '700' },
 });

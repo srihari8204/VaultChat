@@ -152,7 +152,7 @@ export default function SpaceAttendanceScreen() {
     [rows],
   );
 
-  const s = styles(colors);
+  const s = useMemo(() => styles(colors), [colors]);
 
   if (loading) {
     return (
@@ -174,6 +174,10 @@ export default function SpaceAttendanceScreen() {
       <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · Attendance` : 'Attendance', { id: spaceId, name: params.name })} />
 
       {loadError && <LoadError colors={colors} message={loadError} onRetry={() => { setRefreshing(true); void load(); }} />}
+      {/* A failed refresh keeps the last rows below the error — and says so. */}
+      {loadError && rows.length > 0 && (
+        <Text style={s.footnote}>The list below is from the last successful load and may be out of date.</Text>
+      )}
 
       {!loadError && !zoneName && (
         <View style={s.card}>
@@ -232,30 +236,33 @@ export default function SpaceAttendanceScreen() {
           </View>
 
           {rows.map((r) => (
-            <TouchableOpacity
-              key={r.userId}
-              style={s.card}
-              onPress={() => setExpanded(expanded === r.userId ? null : r.userId)}
-              accessibilityRole="button"
-              accessibilityState={{ expanded: expanded === r.userId }}
-              accessibilityLabel={`${r.name}, ${STATE_LABELS[r.today.state]} today`}
-              accessibilityHint="Shows the last seven days"
-            >
-              <View style={s.row}>
-                <View style={[s.badge, { backgroundColor: stateColour(r.today.state, colors) + '22' }]}>
-                  <Ionicons name={stateIcon(r.today.state)} size={16} color={stateColour(r.today.state, colors)} />
+            <View key={r.userId} style={s.card}>
+              {/* The week sits OUTSIDE the touchable: inside it, the row's own
+                  label would hide each day from a screen reader. */}
+              <TouchableOpacity
+                style={s.rowHit}
+                onPress={() => setExpanded(expanded === r.userId ? null : r.userId)}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: expanded === r.userId }}
+                accessibilityLabel={`${r.name}, ${STATE_LABELS[r.today.state]} today`}
+                accessibilityHint="Shows the last seven days"
+              >
+                <View style={s.row}>
+                  <View style={[s.badge, { backgroundColor: stateColour(r.today.state, colors) + '22' }]}>
+                    <Ionicons name={stateIcon(r.today.state)} size={16} color={stateColour(r.today.state, colors)} />
+                  </View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={s.name} numberOfLines={1}>{r.name}</Text>
+                    <Text style={s.muted}>
+                      {STATE_LABELS[r.today.state]}
+                      {r.today.firstIn ? ` · in ${clock(r.today.firstIn)}` : ''}
+                      {r.today.lastOut ? ` · out ${clock(r.today.lastOut)}` : ''}
+                      {r.today.lateBy > 0 ? ` · ${r.today.lateBy} min late` : ''}
+                    </Text>
+                  </View>
+                  <Ionicons name={expanded === r.userId ? 'chevron-up' : 'chevron-down'} size={16} color={colors.textDim} />
                 </View>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={s.name} numberOfLines={1}>{r.name}</Text>
-                  <Text style={s.muted}>
-                    {STATE_LABELS[r.today.state]}
-                    {r.today.firstIn ? ` · in ${clock(r.today.firstIn)}` : ''}
-                    {r.today.lastOut ? ` · out ${clock(r.today.lastOut)}` : ''}
-                    {r.today.lateBy > 0 ? ` · ${r.today.lateBy} min late` : ''}
-                  </Text>
-                </View>
-                <Ionicons name={expanded === r.userId ? 'chevron-up' : 'chevron-down'} size={16} color={colors.textDim} />
-              </View>
+              </TouchableOpacity>
 
               {expanded === r.userId && (
                 <View style={s.week}>
@@ -276,7 +283,7 @@ export default function SpaceAttendanceScreen() {
                   </Text>
                 </View>
               )}
-            </TouchableOpacity>
+            </View>
           ))}
 
           <View style={s.card}>
@@ -313,7 +320,7 @@ function dayLabel(daysAgo: number): string {
   return d.toLocaleDateString([], { weekday: 'short' });
 }
 
-function stateIcon(s: AttendanceState): any {
+function stateIcon(s: AttendanceState): keyof typeof Ionicons.glyphMap {
   switch (s) {
     case 'present': return 'checkmark-circle';
     case 'late': return 'time';
@@ -342,6 +349,7 @@ const styles = (c: Palette) => StyleSheet.create({
   cardTitle: { color: c.text, fontSize: 15.5, fontWeight: '700' },
   muted: { color: c.textDim, fontSize: 13, flexShrink: 1 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  rowHit: { minHeight: 44, justifyContent: 'center' },
   badge: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   name: { color: c.text, fontSize: 15.5, fontWeight: '600' },
   tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
@@ -351,7 +359,7 @@ const styles = (c: Palette) => StyleSheet.create({
   },
   tileValue: { color: c.text, fontSize: 22, fontWeight: '700' },
   tileLabel: { color: c.textDim, fontSize: 11.5 },
-  week: { marginTop: 10, gap: 8 },
+  week: { marginTop: 2, gap: 8 },
   weekCell: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   weekDot: { width: 10, height: 10, borderRadius: 5 },
   weekLabel: { color: c.textDim, fontSize: 12.5 },

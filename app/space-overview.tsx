@@ -172,8 +172,7 @@ export default function SpaceOverviewScreen() {
               accessibilityRole="button" style={s.sos} onPress={() => go('/space-incidents')}
               accessibilityLabel={`${sum.open.sos === 1 ? 'An emergency alert is open' : `${sum.open.sos} emergency alerts are open`}. Open incidents`}
             >
-              {/* White ink on the solid danger fill (no on-danger token exists). */}
-              <Ionicons name="warning" size={20} color="#fff" />
+              <Ionicons name="warning" size={20} color={colors.onDanger} />
               <Text style={s.sosText}>
                 {sum.open.sos === 1 ? 'An emergency alert is open' : `${sum.open.sos} emergency alerts are open`}
               </Text>
@@ -185,7 +184,10 @@ export default function SpaceOverviewScreen() {
             <>
               <View style={s.tiles}>
                 {schoolTiles.map((t) => (
-                  <View key={t.key} style={[s.tile, t.alert && { borderColor: colors.danger }]}>
+                  <View
+                    key={t.key} style={[s.tile, t.alert && { borderColor: colors.danger }]}
+                    accessible accessibilityLabel={`${t.label}, ${t.value == null ? 'not known' : t.value}${t.alert ? ', needs attention' : ''}`}
+                  >
                     <Text style={[
                       s.tileValue,
                       t.alert && { color: colors.danger },
@@ -257,10 +259,13 @@ export default function SpaceOverviewScreen() {
                       <Legend s={s} color={BIZ_GRAY} label="No check-in" value={noCheckIn} />
                     </View>
                   </View>
-                  <TouchableOpacity accessibilityRole="button" style={s.viewRow} onPress={() => go('/space-people')}>
-                    <Text style={s.link}>View All Employees</Text>
-                    <Ionicons name="arrow-forward" size={14} color={colors.primary} />
-                  </TouchableOpacity>
+                  {/* Same gate as the People quick action below. */}
+                  {perms.has('view_space_ops') && (
+                    <TouchableOpacity accessibilityRole="button" style={s.viewRow} onPress={() => go('/space-people')}>
+                      <Text style={s.link}>View All Employees</Text>
+                      <Ionicons name="arrow-forward" size={14} color={colors.primary} />
+                    </TouchableOpacity>
+                  )}
                 </View>
 
                 {/* ATTENDANCE TODAY */}
@@ -462,7 +467,11 @@ function Metric({ s, icon, tint, value, label }: {
   s: Styles; icon: keyof typeof Ionicons.glyphMap; tint: string; value: string; label: string;
 }) {
   return (
-    <View style={[s.metric, { backgroundColor: tint + '14', borderColor: tint + '33' }]}>
+    // One element for a screen reader: "Total People, 42", not two fragments.
+    <View
+      style={[s.metric, { backgroundColor: tint + '14', borderColor: tint + '33' }]}
+      accessible accessibilityLabel={`${label}, ${value === '—' ? 'not known' : value}`}
+    >
       <View style={[s.metricIcon, { backgroundColor: tint + '26' }]}>
         <Ionicons name={icon} size={18} color={tint} />
       </View>
@@ -474,7 +483,7 @@ function Metric({ s, icon, tint, value, label }: {
 
 function Legend({ s, color, label, value }: { s: Styles; color: string; label: string; value: number }) {
   return (
-    <View style={s.legendRow}>
+    <View style={s.legendRow} accessible accessibilityLabel={`${label}, ${value}`}>
       <View style={[s.legendDot, { backgroundColor: color }]} />
       <Text style={s.legendLabel} numberOfLines={1}>{label}</Text>
       <Text style={s.legendValue}>{value}</Text>
@@ -484,7 +493,7 @@ function Legend({ s, color, label, value }: { s: Styles; color: string; label: s
 
 function Chip({ s, tint, value, label }: { s: Styles; tint: string; value: number; label: string }) {
   return (
-    <View style={[s.chip, { backgroundColor: tint + '14' }]}>
+    <View style={[s.chip, { backgroundColor: tint + '14' }]} accessible accessibilityLabel={`${label}, ${value}`}>
       <Text style={[s.chipValue, { color: tint }]}>{value}</Text>
       <Text style={s.chipLabel}>{label}</Text>
     </View>
@@ -510,7 +519,8 @@ const styles = (c: Palette) => StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 10,
     backgroundColor: c.danger, borderRadius: 12, padding: 14,
   },
-  sosText: { color: '#fff', fontWeight: '700', flex: 1 },
+  // On-danger ink on the solid danger fill.
+  sosText: { color: c.onDanger, fontWeight: '700', flex: 1 },
   tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   tile: {
     backgroundColor: c.glassSoft, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 13,

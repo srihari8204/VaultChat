@@ -12,6 +12,7 @@
 
 import { api } from '../api';
 import type { Run, RunStop, RunRider, RunEvent, RiderState } from './runs';
+import { splitListedRun } from './runPlan';
 
 export interface RosterEntry {
   id: string;
@@ -97,6 +98,33 @@ export const getRun = (spaceId: string, runId: string) =>
   api<{ run: Run; stops: RunStop[]; riders: RunRider[]; delayThresholdMinutes: number }>(
     `/chats/${spaceId}/runs/${runId}`,
   );
+
+/**
+ * Runs with each one's scoped riders (and stops, when asked) — ONE call where
+ * the server supports `?include=` (R4BE C11: written, not deployed). An older
+ * server ignores the parameter and lists plain summaries, so this falls back
+ * to one getRun per run, as the screens did before. `failed` marks a run whose
+ * manifest could not be read on that path, so a screen can say so rather than
+ * draw nobody on it. Throws only when the run list itself fails.
+ */
+export async function getRunsWithManifest(
+  spaceId: string, opts: { activeOnly?: boolean; stops?: boolean } = {},
+): Promise<{ run: Run; riders: RunRider[]; stops: RunStop[]; failed: boolean }[]> {
+  const include = opts.stops ? 'riders,stops' : 'riders';
+  const listed = await api<(Run & { riders?: unknown; stops?: unknown })[]>(
+    `/chats/${spaceId}/runs?${opts.activeOnly ? 'active=1&' : ''}include=${include}`);
+  return Promise.all((listed || []).map(async (r) => {
+    const one = splitListedRun(r, !!opts.stops);
+    if (one) return { ...one, failed: false };
+    try {
+      const d = await getRun(spaceId, r.id);
+      return { run: d.run, riders: d.riders || [], stops: d.stops || [], failed: false };
+    } catch {
+      const { riders: _r, stops: _s, ...run } = r;
+      return { run, riders: [], stops: [], failed: true };
+    }
+  }));
+}
 
 export const createRun = (
   spaceId: string,
@@ -362,8 +390,11 @@ export const deviceHeartbeat = (spaceId: string, deviceId: string, battery?: num
     method: 'POST', json: battery == null ? {} : { battery },
   });
 
-/** The space's shift (edit_settings or view_space_ops; 403 otherwise). Empty
- *  start/end means none is set. Read through lib/spaces/shift.ts loadShift. */
+/** The space's shift. Empty start/end means none is set. Today's server has no
+ *  GET (404); the written one answers edit_settings/view_space_ops, and R4BE
+ *  C12 (written, not deployed) opens it to every current member, with
+ *  `canEdit`. Read through lib/spaces/shift.ts loadShift, which falls back to
+ *  this device's copy on any refusal. */
 export const getShift = (spaceId: string) =>
   api<{ shiftStart: string; shiftEnd: string; shiftGraceMinutes: number; runDelayThresholdMinutes: number }>(
     `/chats/${spaceId}/shift`);

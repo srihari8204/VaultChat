@@ -16,10 +16,10 @@
 import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity,
+  View, StyleSheet, ScrollView, FlatList, ActivityIndicator, TouchableOpacity,
   Alert, TextInput, Modal, RefreshControl, Share,
 } from 'react-native';
-import * as Clipboard from 'expo-clipboard';
+import { copyAndAutoClear } from '../lib/clipboardSafe';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
@@ -56,6 +56,8 @@ export default function SpaceVisitorsScreen() {
   const [name, setName] = useState('');
   const [hours, setHours] = useState(8);
   const [busy, setBusy] = useState(false);
+  // Which redeem button is working, so only that one shows the spinner.
+  const [redeemExit, setRedeemExit] = useState<boolean | null>(null);
   const [redeeming, setRedeeming] = useState(false);
   const [code, setCode] = useState('');
   // The one row whose code is shown in full, if any.
@@ -110,7 +112,15 @@ export default function SpaceVisitorsScreen() {
         `Pass for ${visitorName}`,
         `Code: ${res.code}\n\nGive this to them. It works once, and expires in ${hours} hours.`,
         [
-          { text: 'Copy code', onPress: () => { Clipboard.setStringAsync(res.code).catch(() => {}); } },
+          // Wiped from the clipboard after 30s if still there (lib/clipboardSafe).
+          {
+            text: 'Copy code',
+            onPress: () => {
+              copyAndAutoClear(res.code)
+                .then(() => Alert.alert('Code copied', 'It is cleared from the clipboard in 30 seconds while crazzychat stays open.'))
+                .catch(() => Alert.alert('Could not copy', `The code is ${res.code}.`));
+            },
+          },
           { text: 'Share', onPress: () => { Share.share({ message }).catch(() => {}); } },
           { text: 'Done', style: 'cancel' },
         ],
@@ -125,7 +135,7 @@ export default function SpaceVisitorsScreen() {
   const onRedeem = useCallback(async (exit: boolean) => {
     const c = code.trim().toUpperCase();
     if (!c) return;
-    setBusy(true);
+    setBusy(true); setRedeemExit(exit);
     try {
       const res = await redeemVisitorPass(spaceId, c, exit);
       setRedeeming(false); setCode('');
@@ -137,7 +147,7 @@ export default function SpaceVisitorsScreen() {
       // for guessing codes. Repeat it rather than inventing a more specific one.
       Alert.alert('Not valid', e?.message ?? 'That pass is not valid.');
     } finally {
-      setBusy(false);
+      setBusy(false); setRedeemExit(null);
     }
   }, [code, spaceId, load]);
 
@@ -161,7 +171,7 @@ export default function SpaceVisitorsScreen() {
     ]);
   }, [spaceId, load]);
 
-  const s = styles(colors);
+  const s = useMemo(() => styles(colors), [colors]);
 
   if (loading) {
     return (
@@ -196,34 +206,37 @@ export default function SpaceVisitorsScreen() {
         }}
       />
 
-      <ScrollView
+      <FlatList
         contentContainerStyle={s.body}
+        ListHeaderComponentStyle={s.header}
+        data={ordered}
+        keyExtractor={(p) => p.id}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} tintColor={colors.primary} />}
-      >
-        <TouchableOpacity style={s.scan} onPress={() => setRedeeming(true)} accessibilityRole="button">
-          {/* Codes are typed (they are read aloud at a gate); there is no scanner. */}
-          <Ionicons name="keypad-outline" size={20} color={colors.primary} />
-          <Text style={s.scanText}>Admit or sign out a visitor by code</Text>
-        </TouchableOpacity>
+        ListHeaderComponent={<>
+          <TouchableOpacity style={s.scan} onPress={() => setRedeeming(true)} accessibilityRole="button">
+            {/* Codes are typed (they are read aloud at a gate); there is no scanner. */}
+            <Ionicons name="keypad-outline" size={20} color={colors.primary} />
+            <Text style={s.scanText}>Admit or sign out a visitor by code</Text>
+          </TouchableOpacity>
 
-        {loadError && (
-          <LoadError colors={colors} title="Could not load passes" message={loadError} onRetry={() => { setLoading(true); void load(); }} />
-        )}
-        {!loadError && ordered.length === 0 && (
-          <View style={s.card}>
-            <Text style={s.cardTitle}>No passes yet</Text>
-            <Text style={s.muted}>
-              Issue one and give the visitor the code. A pass admits them to the building —
-              it gives no access to this space’s people, messages or locations.
-            </Text>
-          </View>
-        )}
-
-        {ordered.map((p) => {
+          {loadError && (
+            <LoadError colors={colors} title="Could not load passes" message={loadError} onRetry={() => { setLoading(true); void load(); }} />
+          )}
+          {!loadError && ordered.length === 0 && (
+            <View style={s.card}>
+              <Text style={s.cardTitle}>No passes yet</Text>
+              <Text style={s.muted}>
+                Issue one and give the visitor the code. A pass admits them to the building —
+                it gives no access to this space’s people, messages or locations.
+              </Text>
+            </View>
+          )}
+        </>}
+        renderItem={({ item: p }) => {
           const inside = !!p.redeemedAt && !p.exitedAt;
           const expired = !p.redeemedAt && Date.parse(p.validTo) < Date.now();
           return (
-            <View key={p.id} style={[s.card, inside && s.inside, expired && s.spent]}>
+            <View style={[s.card, inside && s.inside, expired && s.spent]}>
               <View style={s.row}>
                 <View style={[s.icon, { backgroundColor: (inside ? colors.success : colors.primary) + '22' }]}>
                   <Ionicons
@@ -265,13 +278,14 @@ export default function SpaceVisitorsScreen() {
               </View>
             </View>
           );
-        })}
-
-        <Text style={s.footnote}>
-          A pass works once and cannot be reused. Arrivals notify the host, and every
-          issue, admission and sign-out is recorded in the space’s audit log.
-        </Text>
-      </ScrollView>
+        }}
+        ListFooterComponent={
+          <Text style={s.footnote}>
+            A pass works once and cannot be reused. Arrivals notify the host, and every
+            issue, admission and sign-out is recorded in the space’s audit log.
+          </Text>
+        }
+      />
 
       {/* issue */}
       <Modal visible={issuing} transparent animationType="fade" onRequestClose={() => setIssuing(false)}>
@@ -292,7 +306,7 @@ export default function SpaceVisitorsScreen() {
                   accessibilityLabel={`Valid for ${h} hours`}
                   style={[s.hour, hours === h && { backgroundColor: colors.brandOnLight }]}
                 >
-                  <Text style={[s.hourText, hours === h && { color: '#fff' }]}>{h}h</Text>
+                  <Text style={[s.hourText, hours === h && { color: colors.onBrand }]}>{h}h</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -307,22 +321,24 @@ export default function SpaceVisitorsScreen() {
                       accessibilityLabel={`Host: ${m.name}`}
                       style={[s.hour, hostId === m.id && { backgroundColor: colors.brandOnLight }]}
                     >
-                      <Text numberOfLines={1} style={[s.hourText, hostId === m.id && { color: '#fff' }]}>{m.name}</Text>
+                      <Text numberOfLines={1} style={[s.hourText, hostId === m.id && { color: colors.onBrand }]}>{m.name}</Text>
                     </TouchableOpacity>
                   ))}
                 </ScrollView>
               </>
             )}
             <View style={s.modalRow}>
-              <TouchableOpacity style={s.modalBtn} onPress={() => setIssuing(false)} accessibilityRole="button">
+              <TouchableOpacity style={s.modalBtn} onPress={() => setIssuing(false)} accessibilityRole="button" accessibilityLabel="Cancel">
                 <Text style={s.muted}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[s.modalBtn, s.solid, (!name.trim() || busy) && s.off]}
                 onPress={onIssue} disabled={!name.trim() || busy}
                 accessibilityRole="button" accessibilityLabel="Issue pass"
+                accessibilityState={{ disabled: !name.trim() || busy, busy }}
               >
-                {busy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.solidText}>Issue</Text>}
+                {/* White ink on the solid brandOnLight fill (deep blue in both schemes, 6.3:1). */}
+                {busy ? <ActivityIndicator size="small" color={colors.onBrand} /> : <Text style={s.solidText}>Issue</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -342,22 +358,26 @@ export default function SpaceVisitorsScreen() {
               autoCapitalize="characters" maxLength={8} accessibilityLabel="Visitor code"
             />
             <View style={s.modalRow}>
-              <TouchableOpacity style={s.modalBtn} onPress={() => setRedeeming(false)} accessibilityRole="button">
+              <TouchableOpacity style={s.modalBtn} onPress={() => setRedeeming(false)} accessibilityRole="button" accessibilityLabel="Cancel">
                 <Text style={s.muted}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[s.modalBtn, s.ghost, (!code.trim() || busy) && s.off]}
                 onPress={() => onRedeem(true)} disabled={!code.trim() || busy}
                 accessibilityRole="button" accessibilityLabel="Sign visitor out"
+                accessibilityState={{ disabled: !code.trim() || busy, busy: redeemExit === true }}
               >
-                <Text style={s.ghostText}>Sign out</Text>
+                {redeemExit === true
+                  ? <ActivityIndicator size="small" color={colors.text} />
+                  : <Text style={s.ghostText}>Sign out</Text>}
               </TouchableOpacity>
               <TouchableOpacity
                 style={[s.modalBtn, s.solid, (!code.trim() || busy) && s.off]}
                 onPress={() => onRedeem(false)} disabled={!code.trim() || busy}
                 accessibilityRole="button" accessibilityLabel="Admit visitor"
+                accessibilityState={{ disabled: !code.trim() || busy, busy: redeemExit === false }}
               >
-                {busy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.solidText}>Admit</Text>}
+                {redeemExit === false ? <ActivityIndicator size="small" color={colors.onBrand} /> : <Text style={s.solidText}>Admit</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -375,6 +395,7 @@ const styles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   centre: { alignItems: 'center', justifyContent: 'center' },
   body: { padding: 16, gap: 10, paddingBottom: 40 },
+  header: { gap: 10 },
   scan: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     borderWidth: 1, borderColor: c.primary, borderRadius: 12, padding: 14,
@@ -411,7 +432,7 @@ const styles = (c: Palette) => StyleSheet.create({
   ghost: { borderWidth: 1, borderColor: c.glassStroke },
   ghostText: { color: c.text, fontWeight: '600' },
   solid: { backgroundColor: c.brandOnLight },
-  solidText: { color: '#fff', fontWeight: '700' },
+  solidText: { color: c.onBrand, fontWeight: '700' },
   off: { opacity: 0.4 },
   footnote: { color: c.textFaint, fontSize: 11.5, lineHeight: 16 },
 });

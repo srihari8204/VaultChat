@@ -95,7 +95,7 @@ export default function ShiftSheet({ visible, onClose, colors, spaceId }: {
                 onPress={save} disabled={busy}
                 accessibilityRole="button" accessibilityLabel="Save shift" accessibilityState={{ disabled: busy }}
               >
-                {busy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={{ color: '#fff', fontWeight: '700' }}>Save</Text>}
+                {busy ? <ActivityIndicator size="small" color={colors.onBrand} /> : <Text style={{ color: colors.onBrand, fontWeight: '700' }}>Save</Text>}
               </TouchableOpacity>
             </View>
           </View>

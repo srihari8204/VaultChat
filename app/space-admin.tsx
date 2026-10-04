@@ -31,7 +31,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import {
-  getRuns, getRun, getRoster, getIncidents, getLinks,
+  getRunsWithManifest, getRoster, getIncidents, getLinks,
   type Incident, type RosterEntry, type SpaceLink,
 } from '../lib/spaces/api';
 import LoadError from '../components/spaces/LoadError';
@@ -111,21 +111,22 @@ export default function SpaceAdminScreen() {
       // Each part still fails on its own, but a failure is SAID rather than
       // drawn as "Nothing running yet" or a missing SOS banner.
       const failed: string[] = [];
+      // Runs come with their riders in one call where the server supports it,
+      // else one read per run (getRunsWithManifest).
       const [rs, ros, incidents] = await Promise.all([
-        getRuns(spaceId, true).catch(() => { failed.push('runs'); return [] as Run[]; }),
+        getRunsWithManifest(spaceId, { activeOnly: true }).catch(() => { failed.push('runs'); return []; }),
         getRoster(spaceId).catch(() => { failed.push('roster'); return null; }),
         getIncidents(spaceId).catch(() => { failed.push('incidents'); return [] as Incident[]; }),
       ]);
+      // A run whose riders could not be read would undercount the tiles: say so.
+      const noManifest = rs.filter((x) => x.failed).length;
+      if (noManifest) failed.push(`riders for ${noManifest} ${noManifest === 1 ? 'run' : 'runs'} (the figures below may be low)`);
       setLoadError(failed.length ? `Could not load ${failed.join(', ')}.` : null);
-      setRuns(rs);
+      setRuns(rs.map((x) => x.run));
       setRosterCount(ros ? ros.roster.length : null);
       setRoster(ros?.roster ?? []);
       setOpenIncidents(incidents.filter((i) => i.status !== 'resolved'));
-      const entries = await Promise.all(rs.map(async (r) => {
-        try { return [r.id, (await getRun(spaceId, r.id)).riders] as const; }
-        catch { return [r.id, []] as const; }
-      }));
-      setManifests(Object.fromEntries(entries));
+      setManifests(Object.fromEntries(rs.map((x) => [x.run.id, x.riders])));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -155,7 +156,7 @@ export default function SpaceAdminScreen() {
     [params.groupType, runs, manifests],
   );
 
-  const s = styles(colors);
+  const s = useMemo(() => styles(colors), [colors]);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -192,8 +193,7 @@ export default function SpaceAdminScreen() {
           accessibilityRole="button"
           accessibilityLabel="An emergency alert is open. Open incidents"
         >
-          {/* White ink on the solid danger fill (no on-danger token exists). */}
-          <Ionicons name="warning" size={20} color="#fff" />
+          <Ionicons name="warning" size={20} color={colors.onDanger} />
           <Text style={s.sosText}>
             An emergency alert is open. Tap to see it.
           </Text>
@@ -211,7 +211,10 @@ export default function SpaceAdminScreen() {
           {tiles.length > 0 && (
             <View style={s.tiles}>
               {tiles.map((t) => (
-                <View key={t.key} style={[s.tile, t.alert && s.tileAlert]}>
+                <View
+                  key={t.key} style={[s.tile, t.alert && s.tileAlert]}
+                  accessible accessibilityLabel={`${t.label}, ${t.value}${t.alert ? ', needs attention' : ''}`}
+                >
                   <Text style={[s.tileValue, t.alert && { color: colors.danger }]}>{t.value}</Text>
                   <Text style={s.tileLabel} numberOfLines={2}>{t.label}</Text>
                 </View>
@@ -306,7 +309,8 @@ const styles = (c: Palette) => StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 10,
     backgroundColor: c.danger, borderRadius: 12, padding: 14,
   },
-  sosText: { color: '#fff', fontWeight: '700', flex: 1 },
+  // On-danger ink on the solid danger fill.
+  sosText: { color: c.onDanger, fontWeight: '700', flex: 1 },
   tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   tile: {
     backgroundColor: c.glassSoft, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 12,

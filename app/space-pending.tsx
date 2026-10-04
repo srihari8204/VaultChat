@@ -68,7 +68,7 @@ export default function SpacePendingScreen() {
     return [...m.values()];
   }, [rows]);
 
-  const s = styles(colors);
+  const s = useMemo(() => styles(colors), [colors]);
 
   if (loading) {
     return (
@@ -121,8 +121,19 @@ export default function SpacePendingScreen() {
             <Text style={s.link}>{g.data.length} waiting</Text>
           </TouchableOpacity>
         )}
-        renderItem={({ item: p }) => (
-          <View style={s.row}>
+        renderItem={({ item: p, index, section }) => {
+          const overdue = !!p.plannedAt && Date.parse(p.plannedAt) < Date.now();
+          return (
+          // One element per rider: "Asha, Green Lane, due 07:45, overdue",
+          // not a name and two pills read as separate fragments.
+          <View
+            style={[s.row, index === section.data.length - 1 && s.rowLast]}
+            accessible
+            accessibilityLabel={[
+              p.name, p.stop || 'no stop set', p.plannedAt ? `due ${clock(p.plannedAt)}` : null,
+              overdue ? 'overdue' : null, p.runStatus === 'scheduled' ? 'run not started' : null,
+            ].filter(Boolean).join(', ')}
+          >
             <View style={[s.avatar, { backgroundColor: colors.primary + '22' }]}>
               <Text style={{ color: colors.primary, fontWeight: '800' }}>
                 {initialOf(p.name)}
@@ -138,7 +149,7 @@ export default function SpacePendingScreen() {
             {/* "Late" only when there IS a scheduled time to be late against.
                 Without one the app has no opinion, and says nothing rather
                 than implying the pickup is overdue. */}
-            {p.plannedAt && Date.parse(p.plannedAt) < Date.now() && (
+            {overdue && (
               <View style={[s.pill, { backgroundColor: colors.danger + '22' }]}>
                 <Text style={{ color: colors.danger, fontSize: 11, fontWeight: '700' }}>overdue</Text>
               </View>
@@ -149,7 +160,8 @@ export default function SpacePendingScreen() {
               </View>
             )}
           </View>
-        )}
+          );
+        }}
         ListFooterComponent={
           <Text style={s.footnote}>
             Ordered by scheduled stop time, oldest first, as the server returned it. Pull to refresh.
@@ -175,6 +187,7 @@ const styles = (c: Palette) => StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, paddingHorizontal: 14,
     backgroundColor: c.glassSoft,
   },
+  rowLast: { borderBottomLeftRadius: 14, borderBottomRightRadius: 14 },
   sectionHead: {
     minHeight: 44, gap: 8, paddingHorizontal: 14, marginTop: 10,
     backgroundColor: c.glassSoft, borderTopLeftRadius: 14, borderTopRightRadius: 14,

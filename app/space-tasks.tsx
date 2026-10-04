@@ -19,7 +19,7 @@
 import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator,
+  View, StyleSheet, ScrollView, FlatList, TouchableOpacity, ActivityIndicator,
   RefreshControl, Modal, TextInput, Alert,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
@@ -29,6 +29,7 @@ import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import { getWorkTasks, createWorkTask, setWorkTaskDone, type WorkTask } from '../lib/spaces/api';
 import { AuroraBackground } from '../components/ui';
 import { KeyboardSafe } from '../components/ui/KeyboardSafe';
+import LoadError from '../components/spaces/LoadError';
 import { circleMembers } from '../lib/family/circle';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // The app's one cross-platform date picker (shared with finance).
@@ -134,7 +135,8 @@ export default function SpaceTasksScreen() {
   const toggle = async (t: WorkTask) => {
     const next = !t.doneAt;
     setBusy(t.id);
-    // Optimistic: ticking a task should feel instant. Reconciled by reload.
+    // Optimistic: ticking a task should feel instant. Kept on success (the
+    // next focus or pull re-reads the list); put back on failure.
     setTasks((ts) => (ts ?? []).map((x) =>
       x.id === t.id ? { ...x, doneAt: next ? new Date().toISOString() : null } : x));
     try {
@@ -171,7 +173,10 @@ export default function SpaceTasksScreen() {
   const todo = open.filter((t) => !dueWords(t.dueAt).overdue);
   const done = (tasks ?? []).filter((t) => t.doneAt);
   const shown = tab === 'todo' ? todo : tab === 'overdue' ? overdue : done;
-  const s = styles(colors);
+  const s = useMemo(() => styles(colors), [colors]);
+  // A picked day that has already ended: allowed (back-filling happens), but
+  // said, because the task is overdue the moment it exists.
+  const customPast = !!dueCustom && Date.parse(dueAtOn(dueCustom)) < Date.now();
 
   const TABS = [
     { key: 'todo', label: 'To Do', count: todo.length },
@@ -183,7 +188,7 @@ export default function SpaceTasksScreen() {
     const due = dueWords(t.dueAt);
     return (
       <TouchableOpacity
-        key={t.id} style={s.row} onPress={() => toggle(t)} disabled={busy === t.id}
+        style={s.row} onPress={() => toggle(t)} disabled={busy === t.id}
         accessibilityRole="checkbox"
         accessibilityState={{ checked: !!t.doneAt, disabled: busy === t.id }}
         accessibilityLabel={`${t.title}, ${t.assigneeName || 'Unassigned'}${due.text ? `, ${due.text}` : ''}`}
@@ -224,7 +229,7 @@ export default function SpaceTasksScreen() {
 
       {/* Tabs (Business design: Tasks screen). No "In Progress": the model has
           no such state, and inventing one here would be a lie about the data. */}
-      <View style={s.tabs}>
+      <View style={s.tabs} accessibilityRole="tablist">
         {TABS.map((t) => (
           <TouchableOpacity
             key={t.key}
@@ -233,48 +238,46 @@ export default function SpaceTasksScreen() {
             accessibilityState={{ selected: tab === t.key }}
             style={[s.tab, tab === t.key && { backgroundColor: colors.brandOnLight }]}
           >
-            <Text style={[s.tabText, tab === t.key && { color: '#fff' }]}>
+            {/* White ink on the solid brandOnLight fill (deep blue in both schemes, 6.3:1). */}
+            <Text style={[s.tabText, tab === t.key && { color: colors.onBrand }]}>
               {t.label}{t.count > 0 ? ` (${t.count})` : ''}
             </Text>
           </TouchableOpacity>
         ))}
       </View>
 
-      <ScrollView
+      <FlatList
         contentContainerStyle={s.body}
+        ListHeaderComponentStyle={s.header}
+        data={shown}
+        keyExtractor={(t) => String(t.id)}
+        renderItem={({ item }) => row(item)}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
-      >
-        {tasks === null && (
-          <View style={s.centre}><ActivityIndicator color={colors.primary} /><Text style={s.muted}>Loading tasks…</Text></View>
-        )}
+        ListHeaderComponent={<>
+          {tasks === null && (
+            <View style={s.centre}><ActivityIndicator color={colors.primary} /><Text style={s.muted}>Loading tasks…</Text></View>
+          )}
 
-        {err && (
-          <View style={[s.card, { borderColor: colors.danger, borderWidth: 1 }]}>
-            <Text style={s.cardTitle}>Could not load tasks</Text>
-            <Text style={s.muted}>{err}</Text>
-            <TouchableOpacity onPress={load} style={[s.btn, { backgroundColor: colors.brandOnLight }]} accessibilityRole="button" accessibilityLabel="Try again">
-              <Text style={s.btnText}>Try again</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+          {err && (
+            <LoadError colors={colors} title="Could not load tasks" message={err} onRetry={() => { void onRefresh(); }} />
+          )}
 
-        {tasks !== null && tasks.length === 0 && !err && (
-          <View style={s.card}>
-            <Ionicons name="checkbox-outline" size={26} color={colors.textDim} />
-            <Text style={s.cardTitle}>Nothing assigned</Text>
-            <Text style={s.muted}>
-              {canAssign
-                ? `Create a task and it appears here for whoever it is assigned to.`
-                : `When someone assigns you work in ${spaceName}, it shows up here.`}
-            </Text>
-          </View>
-        )}
-
-        {shown.map(row)}
-        {tasks !== null && tasks.length > 0 && shown.length === 0 && (
-          <Text style={s.muted}>Nothing in {TABS.find((t) => t.key === tab)?.label}.</Text>
-        )}
-      </ScrollView>
+          {tasks !== null && tasks.length === 0 && !err && (
+            <View style={s.card}>
+              <Ionicons name="checkbox-outline" size={26} color={colors.textDim} />
+              <Text style={s.cardTitle}>Nothing assigned</Text>
+              <Text style={s.muted}>
+                {canAssign
+                  ? `Create a task and it appears here for whoever it is assigned to.`
+                  : `When someone assigns you work in ${spaceName}, it shows up here.`}
+              </Text>
+            </View>
+          )}
+        </>}
+        ListFooterComponent={tasks !== null && tasks.length > 0 && shown.length === 0
+          ? <Text style={s.muted}>Nothing in {TABS.find((t) => t.key === tab)?.label}.</Text>
+          : null}
+      />
 
       {canAssign && (
         <TouchableOpacity
@@ -287,7 +290,8 @@ export default function SpaceTasksScreen() {
             loadMembers();
           }}
         >
-          <Ionicons name="add" size={26} color="#fff" />
+          {/* White ink on the solid brandOnLight fill (deep blue in both schemes, 6.3:1). */}
+          <Ionicons name="add" size={26} color={colors.onBrand} />
         </TouchableOpacity>
       )}
 
@@ -315,7 +319,7 @@ export default function SpaceTasksScreen() {
                   accessibilityLabel={`${p.label} priority`}
                   style={[s.prio, priority === p.key && { backgroundColor: colors.brandOnLight }]}
                 >
-                  <Text style={[s.prioText, priority === p.key && { color: '#fff' }]}>{p.label}</Text>
+                  <Text style={[s.prioText, priority === p.key && { color: colors.onBrand }]}>{p.label}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -328,7 +332,7 @@ export default function SpaceTasksScreen() {
                   accessibilityLabel={`Due: ${d.label}`}
                   style={[s.prio, !dueCustom && dueDays === d.days && { backgroundColor: colors.brandOnLight }]}
                 >
-                  <Text style={[s.prioText, !dueCustom && dueDays === d.days && { color: '#fff' }]}>{d.label}</Text>
+                  <Text style={[s.prioText, !dueCustom && dueDays === d.days && { color: colors.onBrand }]}>{d.label}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -339,12 +343,17 @@ export default function SpaceTasksScreen() {
               accessibilityLabel={dueCustom ? `Due: ${dueCustom.toLocaleDateString()}. Change` : 'Due on another day'}
               style={[s.prio, { flex: 0 }, !!dueCustom && { backgroundColor: colors.brandOnLight }]}
             >
-              <Text style={[s.prioText, !!dueCustom && { color: '#fff' }]}>
+              <Text style={[s.prioText, !!dueCustom && { color: colors.onBrand }]}>
                 {dueCustom
                   ? `Due ${dueCustom.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}`
                   : 'Another day…'}
               </Text>
             </TouchableOpacity>
+            {customPast && (
+              <Text style={[s.muted, { color: colors.warning }]} accessibilityRole="alert">
+                That day has already ended, so the task will be overdue as soon as it is created.
+              </Text>
+            )}
             {membersError && (
               <View style={s.hintRow}>
                 <Text style={[s.muted, { flex: 1 }]}>
@@ -365,19 +374,20 @@ export default function SpaceTasksScreen() {
                     accessibilityLabel={`Assign to ${m.name}`}
                     style={[s.prio, { flex: 0, paddingHorizontal: 12 }, assignee === m.id && { backgroundColor: colors.brandOnLight }]}
                   >
-                    <Text numberOfLines={1} style={[s.prioText, assignee === m.id && { color: '#fff' }]}>{m.name}</Text>
+                    <Text numberOfLines={1} style={[s.prioText, assignee === m.id && { color: colors.onBrand }]}>{m.name}</Text>
                   </TouchableOpacity>
                 ))}
               </ScrollView>
             )}
             <View style={{ flexDirection: 'row', gap: 8 }}>
-              <TouchableOpacity onPress={() => setCompose(false)} style={[s.btn, s.btnGhost, { flex: 1 }]} accessibilityRole="button">
+              <TouchableOpacity onPress={() => setCompose(false)} style={[s.btn, s.btnGhost, { flex: 1 }]} accessibilityRole="button" accessibilityLabel="Cancel">
                 <Text style={[s.btnText, { color: colors.text }]}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={submit}
                 disabled={!title.trim() || saving}
                 accessibilityRole="button" accessibilityLabel="Create task"
+                accessibilityState={{ disabled: !title.trim() || saving, busy: saving }}
                 style={[s.btn, { backgroundColor: colors.brandOnLight, flex: 1, opacity: !title.trim() || saving ? 0.5 : 1 }]}
               >
                 <Text style={s.btnText}>{saving ? 'Creating…' : 'Create'}</Text>
@@ -396,6 +406,7 @@ export default function SpaceTasksScreen() {
 const styles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   body: { padding: 16, gap: 8, paddingBottom: 90 },
+  header: { gap: 8 },
   tabs: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingTop: 12 },
   tab: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.glassSoft, borderRadius: 999, minHeight: 44 },
   tabText: { color: c.textDim, fontWeight: '700', fontSize: 12.5 },
@@ -431,5 +442,5 @@ const styles = (c: Palette) => StyleSheet.create({
   prioText: { color: c.textDim, fontWeight: '700', fontSize: 13 },
   btn: { alignItems: 'center', justifyContent: 'center', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 14, minHeight: 44 },
   btnGhost: { backgroundColor: c.bg },
-  btnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  btnText: { color: c.onBrand, fontWeight: '700', fontSize: 14 },
 });

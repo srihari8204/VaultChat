@@ -36,7 +36,8 @@ import { Stack, useLocalSearchParams, useRouter, useFocusEffect } from 'expo-rou
 import { Ionicons } from '@expo/vector-icons';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { SpacePalette as Palette } from '../lib/spaces/theme';
-import { getRuns, getRun } from '../lib/spaces/api';
+import { getRunsWithManifest } from '../lib/spaces/api';
+import LoadError from '../components/spaces/LoadError';
 import { createDirectChat } from '../lib/chatService';
 import type { Run, RunStop, RunRider } from '../lib/spaces/runs';
 import { nextStop } from '../lib/spaces/runs';
@@ -49,7 +50,12 @@ interface Loaded {
   stops: RunStop[];
   /** Only the riders this caller is entitled to — the server decides, not us. */
   riders: RunRider[];
+  /** The manifest could not be read: say so, never "nobody is on this bus". */
+  failed: boolean;
 }
+
+/** While a run is out, rider states are re-read this often (as space-run does). */
+const LIVE_REFRESH_MS = 30_000;
 
 /** Plain words for a rider's state. A parent should not have to learn our enum. */
 function riderWords(state: string, kind: string): { text: string; tone: 'ok' | 'warn' | 'wait' } {
@@ -138,37 +144,41 @@ export default function SpaceTransportScreen() {
     if (!spaceId) { setErr('No space was given.'); setLoaded([]); return; }
     try {
       setErr(null);
-      const runs = await getRuns(spaceId);
       // The manifest carries the rider states, and the server has already cut it
-      // down to the children this caller is linked to. A failure on one run must
-      // not blank the whole screen.
-      const out = await Promise.all(runs.map(async (run) => {
-        try {
-          const d = await getRun(spaceId, run.id);
-          return { run: d.run, stops: d.stops, riders: d.riders };
-        } catch {
-          return { run, stops: [], riders: [] };
-        }
-      }));
-      setLoaded(out);
+      // down to the children this caller is linked to. One call where the server
+      // supports it, else one read per run; a failure on one run must not blank
+      // the whole screen, and is marked on that run.
+      setLoaded(await getRunsWithManifest(spaceId, { stops: true }));
       // Best-effort: without it the button simply says "Driver".
       circleMembers(spaceId)
         .then((ms) => setNames(Object.fromEntries(ms.map((m) => [m.id, m.name]))))
         .catch(() => {});
     } catch (e: any) {
       setErr(e?.message || 'Could not load transport.');
-      setLoaded([]);
+      // Keep what was last shown (the timer re-reads while a run is out); the
+      // note under the error says it may be old.
+      setLoaded((prev) => prev ?? []);
     }
   }, [spaceId]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  // Rider states change while a run is out ("picked up", "dropped off"): re-read
+  // them on a timer, but only while something is on the road and the screen is
+  // focused.
+  const anyStarted = (loaded ?? []).some((l) => l.run.status === 'started');
+  useFocusEffect(useCallback(() => {
+    if (!anyStarted) return;
+    const t = setInterval(() => { void load(); }, LIVE_REFRESH_MS);
+    return () => clearInterval(t);
+  }, [anyStarted, load]));
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try { await load(); } finally { setRefreshing(false); }
   }, [load]);
 
-  const s = styles(colors);
+  const s = useMemo(() => styles(colors), [colors]);
   const toneColor = (t: 'ok' | 'warn' | 'wait') =>
     t === 'ok' ? colors.success : t === 'warn' ? colors.danger : colors.textDim;
 
@@ -190,13 +200,10 @@ export default function SpaceTransportScreen() {
       )}
 
       {err && (
-        <View style={[s.card, { borderColor: colors.danger, borderWidth: 1 }]}>
-          <Text style={s.cardTitle}>Could not load transport</Text>
-          <Text style={s.muted}>{err}</Text>
-          <TouchableOpacity onPress={load} style={[s.btn, { backgroundColor: colors.brandOnLight }]} accessibilityRole="button" accessibilityLabel="Try again">
-            <Text style={s.btnText}>Try again</Text>
-          </TouchableOpacity>
-        </View>
+        <LoadError colors={colors} title="Could not load transport" message={err} onRetry={() => { void onRefresh(); }} />
+      )}
+      {err && !!loaded?.length && (
+        <Text style={s.muted}>The runs below are from the last successful refresh and may be out of date.</Text>
       )}
 
       {/* EMPTY IS NOT AN ERROR, and the two must not look alike. A parent whose
@@ -218,13 +225,14 @@ export default function SpaceTransportScreen() {
               style={[s.btn, { backgroundColor: colors.brandOnLight }]}
               accessibilityRole="button"
             >
+              {/* White ink on the solid brandOnLight fill (deep blue in both schemes, 6.3:1). */}
               <Text style={s.btnText}>Set up transport</Text>
             </TouchableOpacity>
           )}
         </View>
       )}
 
-      {(loaded ?? []).map(({ run, stops, riders }) => {
+      {(loaded ?? []).map(({ run, stops, riders, failed }) => {
         const rs = runWords(run);
         const next = nextStop(stops, riders);
         return (
@@ -272,7 +280,12 @@ export default function SpaceTransportScreen() {
               );
             })}
 
-            {riders.length === 0 && (
+            {failed && (
+              <Text style={[s.muted, { color: colors.danger }]}>
+                Could not load who is on this {kindWord}. Pull down to try again.
+              </Text>
+            )}
+            {!failed && riders.length === 0 && (
               <Text style={s.muted}>
                 Nobody you are responsible for is on this {kindWord} today.
               </Text>
@@ -296,7 +309,7 @@ export default function SpaceTransportScreen() {
                 accessibilityRole="button"
                 accessibilityLabel={`Track ${kindWord}: ${run.vehicleLabel || run.name}`}
               >
-                <Ionicons name="navigate-outline" size={16} color="#fff" />
+                <Ionicons name="navigate-outline" size={16} color={colors.onBrand} />
                 <Text style={s.btnText}>Track {kindWord}</Text>
               </TouchableOpacity>
               {/* Calling goes through crazzychat's existing call stack, and only
@@ -354,6 +367,6 @@ const styles = (c: Palette) => StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
     borderRadius: 10, paddingVertical: 11, paddingHorizontal: 14, minWidth: 140, minHeight: 44,
   },
-  btnText: { color: '#fff', fontWeight: '700', fontSize: 13.5 },
+  btnText: { color: c.onBrand, fontWeight: '700', fontSize: 13.5 },
   footnote: { color: c.textFaint, fontSize: 11.5, lineHeight: 16, marginTop: 4 },
 });

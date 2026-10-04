@@ -4,9 +4,9 @@
 import assert from 'node:assert/strict';
 import {
   parseCoords, parseClock, plannedAtOn, clockOf, stopPayload, remapRiders, idsPreserved,
-  parseDay, dayOf, stopDay,
+  parseDay, dayOf, stopDay, plannedPickStart, splitListedRun,
 } from './runPlan';
-import { driverView, nextStop, type RunStop, type RunRider, type RiderState } from './runs';
+import { driverView, nextStop, type Run, type RunStop, type RunRider, type RiderState } from './runs';
 
 const stop = (id: string, seq: number, extra: Partial<RunStop> = {}): RunStop =>
   ({ id, seq, label: `Stop ${seq}`, lat: null, lng: null, plannedAt: null, arrivedAt: null, ...extra });
@@ -131,5 +131,31 @@ assert.deepEqual(v?.riders.map((r) => r.riderId), ['a', 'b']);
 assert.equal(driverView([], [rider('a', null, 'dropped')]), null);
 assert.equal(driverView(stops, [rider('a', 's1', 'absent')]), null);
 assert.equal(driverView([], []), null);
+
+// ── the stop picker's starting point ──
+{
+  const now = new Date(2026, 9, 4, 18, 30).getTime();
+  const own = '2026-10-05T02:15:00.000Z';
+  assert.equal(plannedPickStart(own, null, null, null, now).toISOString(), own, 'own planned time first');
+  assert.equal(plannedPickStart(null, own, '2026-10-09T00:00:00.000Z', null, now).toISOString(), own, 'then a sibling');
+  assert.equal(plannedPickStart(null, null, '2026-10-09T01:00:00.000Z', null, now).toISOString(), '2026-10-09T01:00:00.000Z');
+  assert.equal(plannedPickStart(null, 'nonsense', null, '2026-10-03T03:00:00.000Z', now).toISOString(), '2026-10-03T03:00:00.000Z', 'malformed is skipped');
+  const fallback = plannedPickStart(null, null, null, null, now);
+  assert.equal(fallback.getDate(), 5, 'never today: tomorrow');
+  assert.equal(fallback.getHours(), 7);
+  assert.equal(fallback.getMinutes(), 0);
+}
+
+// ── runs listed with their manifest (R4BE C11) ──
+{
+  const base = { id: 'r1', name: 'Route 1' } as Run;
+  assert.equal(splitListedRun(base, false), null, 'older server: no riders key → fall back');
+  assert.equal(splitListedRun({ ...base, riders: [] }, true), null, 'stops asked for but absent → fall back');
+  const one = splitListedRun({ ...base, riders: [rider('a', 's1')], stops: [stop('s1', 1)] }, true);
+  assert.deepEqual(one?.riders.map((x) => x.riderId), ['a']);
+  assert.deepEqual(one?.stops.map((x) => x.id), ['s1']);
+  assert.equal('riders' in (one?.run ?? {}), false, 'the run object is the summary alone');
+  assert.deepEqual(splitListedRun({ ...base, riders: [] }, false)?.stops, [], 'empty manifest is a real answer');
+}
 
 console.log('spaces/runPlan self-check OK');

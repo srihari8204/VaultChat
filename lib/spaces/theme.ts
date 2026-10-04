@@ -26,7 +26,14 @@ import ChatDoorButton, { type ChatDoorTarget } from '../../components/spaces/Cha
  * follow the active scheme, so light Aurora grounds never carry navy's white
  * text. The identity split is pinned by check-space-identity.
  */
-export type SpacePalette = Palette & { warning: string };
+export type SpacePalette = Palette & {
+  warning: string;
+  /** Ink ON a solid `brandOnLight` fill (selected chips, primary buttons, FABs).
+   *  brandOnLight is the same deep blue (#1552E0) in both schemes, so this is
+   *  white in both: 6.33:1. Not `onPrimary` — that pairs with `primary`, which
+   *  is a lighter blue in dark mode. */
+  onBrand: string;
+};
 
 export function useSpaceColors(groupType?: string | null): SpacePalette {
   const { colors, scheme } = useTheme();
@@ -44,6 +51,7 @@ export function useSpaceColors(groupType?: string | null): SpacePalette {
       surface: G.paneFaint,
       surfaceSolid: G.sheet,
       warning: G.warnText,
+      onBrand: '#FFFFFF',
     };
   }, [biz, colors, scheme]);
 }

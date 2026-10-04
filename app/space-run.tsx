@@ -202,7 +202,7 @@ export default function SpaceRunScreen() {
     return st && st.lat != null && st.lng != null ? { lat: st.lat, lng: st.lng, name: st.label } : null;
   }, [stops, riders]);
 
-  const s = styles(colors);
+  const s = useMemo(() => styles(colors), [colors]);
 
   if (loading) {
     return (
@@ -252,6 +252,7 @@ export default function SpaceRunScreen() {
           reachedStopId={reachedStopId}
           vehicle={vehicle}
           colors={colors}
+          s={s}
           delayThresholdMin={delayThresholdMin}
         />
       ))}
@@ -264,8 +265,8 @@ export default function SpaceRunScreen() {
       {/* vehicle */}
       <View style={s.card}>
         <Text style={s.cardTitle}>{run.vehicleLabel || 'Vehicle'}</Text>
-        <Row icon="ellipse" label="Status" value={statusLabel(run)} colors={colors} />
-        {!!driverName && <Row icon="person-outline" label="Driver" value={driverName} colors={colors} />}
+        <Row icon="ellipse" label="Status" value={statusLabel(run)} colors={colors} s={s} />
+        {!!driverName && <Row icon="person-outline" label="Driver" value={driverName} colors={colors} s={s} />}
         {run.stale && active && (
           <View style={s.warn}>
             <Ionicons name="cloud-offline-outline" size={16} color={colors.warning} />
@@ -326,7 +327,11 @@ export default function SpaceRunScreen() {
       <View style={s.card}>
         <Text style={s.cardTitle}>Route</Text>
         {[...stops].sort((a, b) => a.seq - b.seq).map((st) => (
-          <View key={st.id} style={s.stopRow}>
+          <View
+            key={st.id} style={s.stopRow} accessible
+            // The arrived state is an icon change for sighted users; say it.
+            accessibilityLabel={`${st.label}, ${st.arrivedAt ? `arrived ${clock(st.arrivedAt)}` : 'not reached yet'}${st.plannedAt ? `, planned ${clock(st.plannedAt)}` : ''}`}
+          >
             <Ionicons
               name={st.arrivedAt ? 'checkmark-circle' : 'ellipse-outline'}
               size={18}
@@ -374,15 +379,16 @@ export default function SpaceRunScreen() {
   );
 }
 
-function RiderCard({ rider, run, stops, reachedStopId, vehicle, colors, delayThresholdMin }: {
+type Styles = ReturnType<typeof styles>;
+
+function RiderCard({ rider, run, stops, reachedStopId, vehicle, colors, s, delayThresholdMin }: {
   rider: RunRider; run: Run; stops: RunStop[]; reachedStopId: string | null;
-  vehicle: RunPing | null; colors: Palette;
+  vehicle: RunPing | null; colors: Palette; s: Styles;
   /** The space's server-side threshold, once loaded — undefined only for the
    *  instant before the first getRun answers, when isDelayed's own default
    *  (10) is the honest fallback. */
   delayThresholdMin?: number;
 }) {
-  const s = styles(colors);
   const now = Date.now();
   const between = stopsBetween(stops, reachedStopId, rider.stopId);
   const myStop = stops.find((x) => x.id === rider.stopId);
@@ -428,7 +434,9 @@ function RiderCard({ rider, run, stops, reachedStopId, vehicle, colors, delayThr
 
       {waiting && (
         <>
-          <Text style={s.window}>
+          {/* Polite live region: the window is recomputed every 30s, and a
+              screen-reader user should hear it move without re-reading. */}
+          <Text style={s.window} accessibilityLiveRegion="polite">
             {between === 0 ? 'Arriving now' : `Between ${clockMs(win.earliest)} and ${clockMs(win.latest)}`}
           </Text>
           <Text style={s.muted}>
@@ -451,10 +459,11 @@ function RiderCard({ rider, run, stops, reachedStopId, vehicle, colors, delayThr
   );
 }
 
-function Row({ icon, label, value, colors }: { icon: any; label: string; value: string; colors: Palette }) {
-  const s = styles(colors);
+function Row({ icon, label, value, colors, s }: {
+  icon: keyof typeof Ionicons.glyphMap; label: string; value: string; colors: Palette; s: Styles;
+}) {
   return (
-    <View style={s.row}>
+    <View style={s.row} accessible accessibilityLabel={`${label}: ${value}`}>
       <Ionicons name={icon} size={14} color={colors.textDim} />
       <Text style={s.muted}>{label}</Text>
       <Text style={s.rowValue}>{value}</Text>

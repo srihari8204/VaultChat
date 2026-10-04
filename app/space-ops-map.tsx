@@ -19,14 +19,14 @@
 import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, TextInput,
+  View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, TextInput, RefreshControl,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import FamilyMap, { type FamilyMarker } from '../components/family/FamilyMap';
-import { getRuns, getRun } from '../lib/spaces/api';
+import { getRunsWithManifest } from '../lib/spaces/api';
 import { subscribeRun, type RunPing } from '../lib/spaces/runSession';
 import { progress, type Run, type RunRider } from '../lib/spaces/runs';
 import { tilesForType, type RunSet } from '../lib/spaces/dashboard';
@@ -38,6 +38,8 @@ import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 
 /** A fix older than this is drawn faded — the map must not imply freshness. */
 const STALE_MS = 90_000;
+/** How often the run list is re-read while the screen is focused. */
+const RELOAD_MS = 60_000;
 
 export default function SpaceOpsMapScreen() {
   const router = useRouter();
@@ -48,23 +50,23 @@ export default function SpaceOpsMapScreen() {
   const [runs, setRuns] = useState<Run[]>([]);
   const [positions, setPositions] = useState<Record<string, RunPing>>({});
   const [manifests, setManifests] = useState<Record<string, RunRider[]>>({});
+  // Runs whose manifest could not be read: their "done" counts are unknown.
+  const [noManifest, setNoManifest] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [focus, setFocus] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const list = await getRuns(spaceId, true);
-      setRuns(list || []);
-      // Manifests are fetched per run so the office sees "22 of 40 aboard"
-      // rather than just a dot. Failures are per-run and non-fatal: one
-      // unreadable manifest must not blank the whole map.
-      const entries = await Promise.all((list || []).map(async (r) => {
-        try { return [r.id, (await getRun(spaceId, r.id)).riders] as const; }
-        catch { return [r.id, [] as RunRider[]] as const; }
-      }));
-      setManifests(Object.fromEntries(entries));
+      // Manifests come with the runs (one call where the server supports it,
+      // else per run) so the office sees "22 of 40 aboard" rather than just a
+      // dot. Failures are per-run and non-fatal — and marked, not drawn as 0/0.
+      const list = await getRunsWithManifest(spaceId, { activeOnly: true });
+      setRuns(list.map((x) => x.run));
+      setManifests(Object.fromEntries(list.map((x) => [x.run.id, x.riders])));
+      setNoManifest(list.filter((x) => x.failed).map((x) => x.run.id));
       setLoadError(null);
     } catch (e: any) {
       // Not "No runs are scheduled": an empty map after a failed read is a
@@ -72,10 +74,17 @@ export default function SpaceOpsMapScreen() {
       setLoadError(e?.message ?? 'Could not load runs.');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [spaceId]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  // Read on focus, and again every minute while focused, so a run started
+  // while this screen is open appears without leaving it.
+  useFocusEffect(useCallback(() => {
+    void load();
+    const t = setInterval(() => { void load(); }, RELOAD_MS);
+    return () => clearInterval(t);
+  }, [load]));
 
   // Re-render on a timer so "2 minutes ago" and the stale fade stay true
   // without any new data arriving. Cheap, and the alternative is a screen that
@@ -87,31 +96,37 @@ export default function SpaceOpsMapScreen() {
 
   // One subscription per active run, opened in PARALLEL (awaiting them one by
   // one left the last bus dark until every earlier join had answered).
-  // Re-established when the run list changes.
+  // Re-established only when the SET of started runs changes — the periodic
+  // re-read hands back a new array every minute, and must not resubscribe.
+  const startedKey = useMemo(
+    () => runs.filter((x) => x.status === 'started').map((x) => x.id).sort().join(','),
+    [runs],
+  );
   useEffect(() => {
     let live = true;
     const stops: (() => void)[] = [];
+    const ids = startedKey ? startedKey.split(',') : [];
     (async () => {
-      const me = await getCurrentUserAsync().catch(() => null);
-      const myId = String((me as any)?.id ?? '');
+      const me: { id?: string | number } | null = await getCurrentUserAsync().catch(() => null);
+      const myId = me?.id != null ? String(me.id) : '';
       if (!live) return;
-      await Promise.all(runs.filter((x) => x.status === 'started').map(async (r) => {
+      await Promise.all(ids.map(async (runId) => {
         try {
-          const off = await subscribeRun(spaceId, r.id, myId, (e) => {
+          const off = await subscribeRun(spaceId, runId, myId, (e) => {
             if (!e.ping) {
               // The vehicle said it is done broadcasting. Drop the marker
               // rather than leaving a dot where the bus used to be.
-              setPositions((p) => { const n = { ...p }; delete n[r.id]; return n; });
+              setPositions((p) => { const n = { ...p }; delete n[runId]; return n; });
               return;
             }
-            setPositions((p) => ({ ...p, [r.id]: e.ping! }));
+            setPositions((p) => ({ ...p, [runId]: e.ping! }));
           });
           if (live) stops.push(off); else off();
         } catch { /* one run failing to subscribe must not take the others down */ }
       }));
     })();
     return () => { live = false; stops.forEach((f) => f()); };
-  }, [runs, spaceId]);
+  }, [startedKey, spaceId]);
 
   const markers: FamilyMarker[] = useMemo(() => {
     const now = Date.now();
@@ -227,7 +242,7 @@ export default function SpaceOpsMapScreen() {
     void deliver(still, text);
   }, [instruction, unreached, activeRuns, deliver]);
 
-  const s = styles(colors);
+  const s = useMemo(() => styles(colors), [colors]);
 
   if (loading) {
     return (
@@ -257,15 +272,26 @@ export default function SpaceOpsMapScreen() {
         </View>
       )}
 
-      <ScrollView style={s.list} contentContainerStyle={s.listBody} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        style={s.list} contentContainerStyle={s.listBody} keyboardShouldPersistTaps="handled"
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} tintColor={colors.primary} />}
+      >
         {/* Derived tiles (S3.2). Alert colour is reserved for what is actually
             wrong: riders still to collect on a running route is the normal state
             of a bus halfway round, and a dashboard that is red every morning is
             a dashboard nobody reads. */}
+        {noManifest.length > 0 && (
+          <Text style={s.muted}>
+            Riders could not be loaded for {noManifest.length} {noManifest.length === 1 ? 'run' : 'runs'}, so the figures below may be low.
+          </Text>
+        )}
         {runs.length > 0 && (
           <View style={s.tiles}>
             {tiles.map((t) => (
-              <View key={t.key} style={[s.tile, t.alert && s.tileAlert]}>
+              <View
+                key={t.key} style={[s.tile, t.alert && s.tileAlert]}
+                accessible accessibilityLabel={`${t.label}, ${t.value}${t.alert ? ', needs attention' : ''}`}
+              >
                 <Text style={[s.tileValue, t.alert && s.tileValueAlert]}>{t.value}</Text>
                 <Text style={s.tileLabel} numberOfLines={2}>{t.label}</Text>
               </View>
@@ -286,13 +312,13 @@ export default function SpaceOpsMapScreen() {
             accessibilityState={{ checked: emergency }}
             accessibilityLabel="Emergency: address every run on the road at once"
           >
-            {/* White ink only on the solid danger fill (no on-danger token exists). */}
+            {/* On-danger ink only on the solid danger fill. */}
             <Ionicons
               name={emergency ? 'warning' : 'warning-outline'}
               size={18}
-              color={emergency ? '#fff' : colors.danger}
+              color={emergency ? colors.onDanger : colors.danger}
             />
-            <Text style={[s.emergencyText, emergency && { color: '#fff' }]}>
+            <Text style={[s.emergencyText, emergency && { color: colors.onDanger }]}>
               {emergency
                 ? `Emergency — messages go to all ${activeRuns.length} runs on the road`
                 : 'Emergency: address every run at once'}
@@ -321,10 +347,12 @@ export default function SpaceOpsMapScreen() {
                 style={[s.send, (!instruction.trim() || sending) && s.sendOff]}
                 onPress={sendInstruction}
                 disabled={!instruction.trim() || sending}
+                accessibilityState={{ disabled: !instruction.trim() || sending, busy: sending }}
               >
+                {/* White ink on the solid brandOnLight fill (deep blue in both schemes, 6.3:1). */}
                 {sending
-                  ? <ActivityIndicator size="small" color="#fff" />
-                  : <Ionicons name="send" size={16} color="#fff" />}
+                  ? <ActivityIndicator size="small" color={colors.onBrand} />
+                  : <Ionicons name="send" size={16} color={colors.onBrand} />}
               </TouchableOpacity>
             </View>
             {!!unreached?.length && !sending && (
@@ -359,44 +387,46 @@ export default function SpaceOpsMapScreen() {
           const noFix = r.status === 'started' && !p;
           const openRun = () => router.push({ pathname: '/space-run', params: { spaceId, runId: r.id, groupType: params.groupType ?? '', name: params.name ?? '' } });
           return (
-            <TouchableOpacity
-              key={r.id}
-              style={[s.row, focus === r.id && s.rowFocus]}
-              onPress={() => setFocus(r.id)}
-              onLongPress={openRun}
-              accessibilityRole="button"
-              accessibilityState={{ selected: focus === r.id }}
-              accessibilityLabel={`${r.vehicleLabel || r.name}${r.stale && r.status === 'started' ? ', not reporting' : ''}`}
-              accessibilityHint="Selects this run for a message"
-              accessibilityActions={[{ name: 'open', label: 'Open run' }]}
-              onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'open') openRun(); }}
-            >
-              <View style={[s.dot, { backgroundColor: dotColour(r, noFix, colors) }]} />
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={s.rowTitle} numberOfLines={1}>{r.vehicleLabel || r.name}</Text>
-                <Text style={s.muted} numberOfLines={1}>
-                  {r.status === 'started'
-                    ? `${prog.total - prog.pending}/${prog.total} done${prog.absent ? ` · ${prog.absent} not travelling` : ''}`
-                    : 'Not started'}
-                </Text>
-              </View>
-              <View style={{ alignItems: 'flex-end' }}>
-                {/* The server's own staleness verdict, which is the one signal
-                    that does not depend on this device having listened. */}
-                {r.stale && r.status === 'started' && (
-                  <Text style={s.alert}>not reporting</Text>
-                )}
-                {noFix && !r.stale && <Text style={s.muted}>awaiting fix</Text>}
-                {p && <Text style={s.muted}>{ago(p.at)}</Text>}
-              </View>
-              {/* A visible, tappable way in — long-press alone is undiscoverable. */}
+            <View key={r.id} style={[s.row, focus === r.id && s.rowFocus]}>
+              <TouchableOpacity
+                style={s.rowMain}
+                onPress={() => setFocus(r.id)}
+                onLongPress={openRun}
+                accessibilityRole="button"
+                accessibilityState={{ selected: focus === r.id }}
+                accessibilityLabel={`${r.vehicleLabel || r.name}${r.stale && r.status === 'started' ? ', not reporting' : ''}`}
+                accessibilityHint="Selects this run for a message"
+                accessibilityActions={[{ name: 'open', label: 'Open run' }]}
+                onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'open') openRun(); }}
+              >
+                <View style={[s.dot, { backgroundColor: dotColour(r, noFix, colors) }]} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={s.rowTitle} numberOfLines={1}>{r.vehicleLabel || r.name}</Text>
+                  <Text style={s.muted} numberOfLines={1}>
+                    {r.status !== 'started' ? 'Not started'
+                      : noManifest.includes(r.id) ? 'Riders could not be loaded'
+                      : `${prog.total - prog.pending}/${prog.total} done${prog.absent ? ` · ${prog.absent} not travelling` : ''}`}
+                  </Text>
+                </View>
+                <View style={{ alignItems: 'flex-end' }}>
+                  {/* The server's own staleness verdict, which is the one signal
+                      that does not depend on this device having listened. */}
+                  {r.stale && r.status === 'started' && (
+                    <Text style={s.alert}>not reporting</Text>
+                  )}
+                  {noFix && !r.stale && <Text style={s.muted}>awaiting fix</Text>}
+                  {p && <Text style={s.muted}>{ago(p.at)}</Text>}
+                </View>
+              </TouchableOpacity>
+              {/* A visible, tappable way in — long-press alone is undiscoverable.
+                  Beside the row, not nested in it, so each is its own target. */}
               <TouchableOpacity
                 onPress={openRun} style={s.openBtn}
                 accessibilityRole="button" accessibilityLabel={`Open ${r.vehicleLabel || r.name}`}
               >
                 <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
               </TouchableOpacity>
-            </TouchableOpacity>
+            </View>
           );
         })}
         <Text style={s.footnote}>
@@ -423,7 +453,7 @@ function ago(ms: number): string {
 }
 
 const styles = (c: Palette) => StyleSheet.create({
-  openBtn: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center', marginRight: -8 },
+  openBtn: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   screen: { flex: 1, backgroundColor: 'transparent' },
   centre: { alignItems: 'center', justifyContent: 'center' },
   map: { height: '46%', width: '100%' },
@@ -435,10 +465,11 @@ const styles = (c: Palette) => StyleSheet.create({
   list: { flex: 1 },
   listBody: { padding: 14, gap: 8, paddingBottom: 30 },
   row: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: c.glassSoft, borderRadius: 12, padding: 14,
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: c.glassSoft, borderRadius: 12, paddingRight: 6,
     borderWidth: 1, borderColor: 'transparent',
   },
+  rowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 },
   rowFocus: { borderColor: c.primary },
   dot: { width: 10, height: 10, borderRadius: 5 },
   rowTitle: { color: c.text, fontSize: 15.5, fontWeight: '600' },

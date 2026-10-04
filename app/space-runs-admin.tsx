@@ -20,8 +20,8 @@
 import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator,
-  Alert, TextInput, Modal, RefreshControl,
+  View, ScrollView, TouchableOpacity, ActivityIndicator,
+  Alert, Modal, RefreshControl,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -39,29 +39,18 @@ import { AuroraBackground } from '../components/ui';
 import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 import LoadError from '../components/spaces/LoadError';
 import {
-  parseCoords, parseClock, plannedAtOn, clockOf, stopPayload, remapRiders, idsPreserved, dayOf, stopDay,
+  clockOf, stopPayload, remapRiders, idsPreserved, plannedPickStart,
 } from '../lib/spaces/runPlan';
-import { geocodeSearch } from '../lib/nav/geocode';
-import { permissionDenied } from '../lib/permissionDenied';
 import ChatDoorButton from '../components/spaces/ChatDoorButton';
-// The app's one cross-platform date+time picker (native dialog on Android,
-// inline sheet on iOS). Shared with finance; nothing in it is finance-specific
-// beyond its sheet colours.
-import { useDatePicker } from '../components/ui/useDatePicker';
+import { runsAdminStyles } from '../components/spaces/runsAdminStyles';
+import NewRunModal, { type NewRunBody } from '../components/spaces/NewRunModal';
+import StopFormModal, { type StopFormInitial, type StopFormResult } from '../components/spaces/StopFormModal';
 
 /** One stop as the editor holds it: its OLD server id (null when new) plus the
  *  fields the server stores. See lib/spaces/runPlan.ts for why the old id matters. */
 type StopDraft = { prevId: string | null; label: string; lat: number | null; lng: number | null; plannedAt: string | null };
 const draftOf = (st: RunStop): StopDraft =>
   ({ prevId: st.id, label: st.label, lat: st.lat, lng: st.lng, plannedAt: st.plannedAt });
-
-const KINDS: { key: string; label: string }[] = [
-  { key: 'school_pickup', label: 'Morning pickup' },
-  { key: 'school_drop', label: 'Afternoon drop' },
-  { key: 'cab_pickup', label: 'Cab pickup' },
-  { key: 'cab_drop', label: 'Cab drop' },
-  { key: 'generic', label: 'Other' },
-];
 
 export default function SpaceRunsAdminScreen() {
   const params = useLocalSearchParams<{ spaceId?: string; name?: string; groupType?: string }>();
@@ -75,23 +64,15 @@ export default function SpaceRunsAdminScreen() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newKind, setNewKind] = useState('school_pickup');
-  const [newVehicle, setNewVehicle] = useState('');
-  // When the run happens. Setting it here means stop times are anchored to the
-  // run's own day, so the per-stop "Day of the run" field is rarely needed.
-  const [newWhen, setNewWhen] = useState<Date | null>(null);
-  const [newRequireCode, setNewRequireCode] = useState(false);
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   // A run that could not be opened, shown inline with a retry instead of an Alert.
   const [openError, setOpenError] = useState<{ run: Run; message: string } | null>(null);
-  const picker = useDatePicker();
 
   // The run being edited, with its stops and manifest.
   const [editing, setEditing] = useState<{ run: Run; stops: RunStop[]; riders: RunRider[] } | null>(null);
-  // The stop form: index into the ordered stops, or null for a new stop.
-  const [stopForm, setStopForm] = useState<{ index: number | null; label: string; where: string; time: string; day: string } | null>(null);
+  // The stop form's starting values (index null = a new stop); null = closed.
+  const [stopForm, setStopForm] = useState<StopFormInitial | null>(null);
   // The rider whose stop is being picked.
   const [stopFor, setStopFor] = useState<RunRider | null>(null);
 
@@ -125,26 +106,25 @@ export default function SpaceRunsAdminScreen() {
     }
   }, [spaceId]);
 
-  const onCreate = useCallback(async () => {
-    const name = newName.trim();
-    if (!name) return;
+  const onCreate = useCallback(async (body: NewRunBody): Promise<boolean> => {
     setBusy(true);
+    let id: string;
     try {
-      const { id } = await createRun(spaceId, {
-        name, kind: newKind, vehicleLabel: newVehicle.trim() || undefined,
-        ...(newWhen ? { scheduledAt: newWhen.toISOString() } : {}),
-        ...(newRequireCode ? { requireCode: true } : {}),
-      });
-      setCreating(false); setNewName(''); setNewVehicle(''); setNewWhen(null); setNewRequireCode(false);
-      await load();
-      const full = await getRun(spaceId, id);
-      setEditing(full);
+      ({ id } = await createRun(spaceId, body));
     } catch (e: any) {
       Alert.alert('Could not create the run', e?.message ?? 'Try again.');
+      return false;
     } finally {
       setBusy(false);
     }
-  }, [newName, newKind, newVehicle, newWhen, newRequireCode, spaceId, load]);
+    // Created: close the dialog, then open the new run (a failed open shows
+    // its own inline retry rather than reading as "not created").
+    setCreating(false);
+    await load();
+    // openRun reads only the id, and the name/vehicle for its error card.
+    await openRun({ id, name: body.name, vehicleLabel: body.vehicleLabel ?? null } as Run);
+    return true;
+  }, [spaceId, load, openRun]);
 
   const orderedStops = useMemo(
     () => [...(editing?.stops ?? [])].sort((a, b) => a.seq - b.seq),
@@ -204,55 +184,14 @@ export default function SpaceRunsAdminScreen() {
     );
   }, [editing?.run.status]);
 
-  const fillHere = useCallback(async () => {
-    try {
-      const Location = await import('expo-location');
-      const perm = await Location.requestForegroundPermissionsAsync();
-      if (perm.status !== 'granted') {
-        permissionDenied('Location needed', 'Allow location to place this stop where you are standing, or type an address or "lat, lng".', perm.canAskAgain);
-        return;
-      }
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      setStopForm((f) => f && { ...f, where: `${loc.coords.latitude.toFixed(6)}, ${loc.coords.longitude.toFixed(6)}` });
-    } catch (e: any) {
-      Alert.alert('Could not read your location', e?.message ?? 'Try again.');
-    }
-  }, []);
-
-  const submitStop = useCallback(async () => {
-    if (!editing || !stopForm || !stopForm.label.trim()) return;
-    const where = stopForm.where.trim();
-    const time = stopForm.time.trim();
-    const minutes = time ? parseClock(time) : null;
-    if (time && minutes == null) {
-      Alert.alert('Planned time', 'Use a 24-hour time such as 07:45, or leave it blank.');
-      return;
-    }
-    const base = minutes == null ? null : stopDay(editing.run.scheduledAt, stopForm.day);
-    if (minutes != null && base == null) {
-      Alert.alert('Which day?', 'This run has no scheduled date. Enter the day of the run, such as 2026-10-05, so the planned time is not measured against the wrong day.');
-      return;
-    }
-    let place: { lat: number; lng: number } | null = null;
-    if (where) {
-      place = parseCoords(where);
-      if (!place) {
-        setBusy(true);
-        const hits = await geocodeSearch(where).catch(() => []);
-        setBusy(false);
-        if (!hits[0]) {
-          Alert.alert('Place not found', `Could not find "${where}". Try an address, "lat, lng", or use your current location.`);
-          return;
-        }
-        place = { lat: hits[0].lat, lng: hits[0].lng };
-      }
-    }
+  const submitStop = useCallback((v: StopFormResult) => {
+    if (!editing || !stopForm) return;
     const draft: StopDraft = {
       prevId: stopForm.index == null ? null : orderedStops[stopForm.index].id,
-      label: stopForm.label.trim(),
-      lat: place?.lat ?? null,
-      lng: place?.lng ?? null,
-      plannedAt: minutes == null || base == null ? null : plannedAtOn(base, minutes),
+      label: v.label,
+      lat: v.place?.lat ?? null,
+      lng: v.place?.lng ?? null,
+      plannedAt: v.plannedAt,
     };
     const drafts = orderedStops.map(draftOf);
     if (stopForm.index == null) drafts.push(draft); else drafts[stopForm.index] = draft;
@@ -261,16 +200,20 @@ export default function SpaceRunsAdminScreen() {
 
   const editStop = useCallback((index: number | null) => {
     const st = index == null ? null : orderedStops[index];
+    const t = st?.plannedAt ? Date.parse(st.plannedAt) : NaN;
     setStopForm({
       index,
       label: st?.label ?? '',
       where: st && st.lat != null && st.lng != null ? `${st.lat.toFixed(6)}, ${st.lng.toFixed(6)}` : '',
-      time: clockOf(st?.plannedAt ?? null),
-      // Only asked for when the run has no scheduled day: this stop's day, a
-      // sibling's, or the day the run started — the admin can see and change it.
-      day: dayOf(st?.plannedAt ?? orderedStops.find((x) => x.plannedAt)?.plannedAt ?? editing?.run.startedAt ?? null),
+      planned: Number.isFinite(t) ? new Date(t) : null,
     });
-  }, [orderedStops, editing?.run.startedAt]);
+  }, [orderedStops]);
+  // Where the stop picker starts when the stop has no time: a sibling's, the
+  // run's scheduled or start time, else tomorrow morning (lib/spaces/runPlan).
+  const pickStart = useMemo(() => plannedPickStart(
+    null, orderedStops.find((x) => x.plannedAt)?.plannedAt ?? null,
+    editing?.run.scheduledAt ?? null, editing?.run.startedAt ?? null, Date.now(),
+  ), [orderedStops, editing?.run.scheduledAt, editing?.run.startedAt]);
 
   const removeStop = useCallback((st: RunStop) => {
     const riding = editing?.riders.filter((r) => r.stopId === st.id).length ?? 0;
@@ -368,7 +311,7 @@ export default function SpaceRunsAdminScreen() {
     );
   }, [spaceId, load]);
 
-  const s = styles(colors);
+  const s = useMemo(() => runsAdminStyles(colors), [colors]);
   const driverName = useMemo(
     () => (id: string | null) => id ? (members.find((m) => m.id === id)?.name ?? 'Assigned') : 'No driver',
     [members],
@@ -457,82 +400,10 @@ export default function SpaceRunsAdminScreen() {
       </ScrollView>
 
       {/* ── create ── */}
-      <Modal visible={creating} transparent animationType="fade" onRequestClose={() => setCreating(false)}>
-        <KeyboardSafe keyboardOnly>
-        <View style={s.modalWrap}>
-          <View style={s.modal}>
-            <Text style={s.modalTitle}>New run</Text>
-            <TextInput
-              style={s.input} value={newName} onChangeText={setNewName}
-              placeholder="Name, e.g. Route 1 morning" placeholderTextColor={colors.textDim} autoFocus
-              accessibilityLabel="Run name"
-            />
-            <TextInput
-              style={s.input} value={newVehicle} onChangeText={setNewVehicle}
-              placeholder="Vehicle, e.g. Bus 01" placeholderTextColor={colors.textDim}
-              accessibilityLabel="Vehicle"
-            />
-            <View style={s.kinds}>
-              {KINDS.map((k) => (
-                <TouchableOpacity
-                  key={k.key}
-                  onPress={() => setNewKind(k.key)}
-                  accessibilityRole="radio"
-                  accessibilityState={{ checked: newKind === k.key }}
-                  style={[s.kind, newKind === k.key && { backgroundColor: colors.brandOnLight }]}
-                >
-                  {/* White ink on the solid brandOnLight fill (deep blue in both schemes). */}
-                  <Text style={[s.kindText, newKind === k.key && { color: '#fff' }]}>{k.label}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            {/* When: picked, not typed. Optional — an unscheduled run asks for
-                a day only when a stop is given a planned time. */}
-            <View style={s.pickRow}>
-              <TouchableOpacity
-                style={[s.addStop, { flex: 1 }]}
-                onPress={() => picker.open(newWhen ?? nextMorning(), setNewWhen, 'datetime')}
-                accessibilityRole="button"
-                accessibilityLabel={newWhen ? `Scheduled for ${whenLabel(newWhen)}. Change` : 'Set the date and time of the run'}
-              >
-                <Ionicons name="calendar-outline" size={18} color={colors.primary} />
-                <Text style={{ color: colors.primary, fontWeight: '600', flexShrink: 1 }}>
-                  {newWhen ? whenLabel(newWhen) : 'Set date and time (optional)'}
-                </Text>
-              </TouchableOpacity>
-              {newWhen && (
-                <TouchableOpacity onPress={() => setNewWhen(null)} style={s.iconHit} accessibilityRole="button" accessibilityLabel="Clear the date and time">
-                  <Ionicons name="close-circle-outline" size={19} color={colors.textDim} />
-                </TouchableOpacity>
-              )}
-            </View>
-            <TouchableOpacity
-              style={s.pickRow} onPress={() => setNewRequireCode((v) => !v)}
-              accessibilityRole="checkbox" accessibilityState={{ checked: newRequireCode }}
-              accessibilityLabel="Ask for a handover code when a rider boards and is dropped off"
-            >
-              <Ionicons name={newRequireCode ? 'checkbox' : 'square-outline'} size={19} color={newRequireCode ? colors.primary : colors.textDim} />
-              <Text style={[s.pickText, newRequireCode && { color: colors.text }]}>Ask for a handover code at boarding and drop-off</Text>
-            </TouchableOpacity>
-            <View style={s.modalRow}>
-              <TouchableOpacity style={s.modalBtn} onPress={() => setCreating(false)} accessibilityRole="button">
-                <Text style={s.muted}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[s.modalBtn, s.primaryBtn, (!newName.trim() || busy) && s.off]}
-                onPress={onCreate} disabled={!newName.trim() || busy}
-                accessibilityRole="button" accessibilityLabel="Create run"
-                accessibilityState={{ disabled: !newName.trim() || busy }}
-              >
-                {busy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.primaryText}>Create</Text>}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-        </KeyboardSafe>
-        {/* Inside this Modal so it stacks above it on iOS. */}
-        {picker.element}
-      </Modal>
+      <NewRunModal
+        visible={creating} colors={colors} s={s} busy={busy}
+        onClose={() => setCreating(false)} onCreate={onCreate}
+      />
 
       {/* ── edit ── */}
       <Modal visible={!!editing} animationType="slide" onRequestClose={() => setEditing(null)}>
@@ -545,7 +416,7 @@ export default function SpaceRunsAdminScreen() {
             </Text>
             {busy && <ActivityIndicator size="small" color={colors.primary} />}
             {editing && editing.run.status !== 'completed' && editing.run.status !== 'cancelled' && (
-              <TouchableOpacity onPress={() => cancelRun(editing.run)} accessibilityRole="button" style={s.hit}>
+              <TouchableOpacity onPress={() => cancelRun(editing.run)} accessibilityRole="button" accessibilityLabel="Cancel this run" style={s.hit}>
                 <Text style={{ color: colors.danger, fontWeight: '600' }}>Cancel run</Text>
               </TouchableOpacity>
             )}
@@ -670,62 +541,11 @@ export default function SpaceRunsAdminScreen() {
         </KeyboardSafe>
 
         {/* ── stop form (inside the edit modal so it stacks above it) ── */}
-        <Modal visible={!!stopForm} transparent animationType="fade" onRequestClose={() => setStopForm(null)}>
-          <KeyboardSafe keyboardOnly>
-          <View style={s.modalWrap}>
-            <View style={s.modal}>
-              <Text style={s.modalTitle}>{stopForm?.index == null ? 'New stop' : 'Edit stop'}</Text>
-              <TextInput
-                style={s.input} value={stopForm?.label ?? ''} autoFocus
-                onChangeText={(t) => setStopForm((f) => f && { ...f, label: t })}
-                placeholder="Name, e.g. Green Lane" placeholderTextColor={colors.textDim}
-                accessibilityLabel="Stop name" maxLength={120}
-              />
-              <TextInput
-                style={s.input} value={stopForm?.where ?? ''}
-                onChangeText={(t) => setStopForm((f) => f && { ...f, where: t })}
-                placeholder='Address or "lat, lng" (optional)' placeholderTextColor={colors.textDim}
-                accessibilityLabel="Stop location: an address or latitude, longitude"
-              />
-              <TouchableOpacity style={s.addStop} onPress={fillHere} accessibilityRole="button" accessibilityLabel="Use my current location">
-                <Ionicons name="locate-outline" size={18} color={colors.primary} />
-                <Text style={{ color: colors.primary, fontWeight: '600' }}>Use my current location</Text>
-              </TouchableOpacity>
-              <TextInput
-                style={s.input} value={stopForm?.time ?? ''}
-                onChangeText={(t) => setStopForm((f) => f && { ...f, time: t })}
-                placeholder="Planned time, e.g. 07:45 (optional)" placeholderTextColor={colors.textDim}
-                accessibilityLabel="Planned time, 24-hour" keyboardType="numbers-and-punctuation" maxLength={5}
-              />
-              {!!stopForm?.time.trim() && stopDay(editing?.run.scheduledAt ?? null, '') == null && (
-                <TextInput
-                  style={s.input} value={stopForm?.day ?? ''}
-                  onChangeText={(t) => setStopForm((f) => f && { ...f, day: t })}
-                  placeholder="Day of the run, e.g. 2026-10-05" placeholderTextColor={colors.textDim}
-                  accessibilityLabel="Day of the run, year-month-day" keyboardType="numbers-and-punctuation" maxLength={10}
-                />
-              )}
-              <Text style={s.muted}>
-                The location gives guardians an arrival estimate and lets the driver’s phone
-                notice a route deviation. The planned time is what “running late” is measured against.
-              </Text>
-              <View style={s.modalRow}>
-                <TouchableOpacity style={s.modalBtn} onPress={() => setStopForm(null)} accessibilityRole="button">
-                  <Text style={s.muted}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[s.modalBtn, s.primaryBtn, (!stopForm?.label.trim() || busy) && s.off]}
-                  onPress={submitStop} disabled={!stopForm?.label.trim() || busy}
-                  accessibilityRole="button" accessibilityLabel="Save stop"
-                  accessibilityState={{ disabled: !stopForm?.label.trim() || busy }}
-                >
-                  {busy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.primaryText}>Save</Text>}
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-          </KeyboardSafe>
-        </Modal>
+        <StopFormModal
+          initial={stopForm} colors={colors} s={s} busy={busy}
+          pickStart={pickStart} scheduledAt={editing?.run.scheduledAt ?? null}
+          onClose={() => setStopForm(null)} onSubmit={submitStop}
+        />
 
         {/* ── rider stop picker ── */}
         <Modal visible={!!stopFor} transparent animationType="fade" onRequestClose={() => setStopFor(null)}>
@@ -747,7 +567,7 @@ export default function SpaceRunsAdminScreen() {
                 );
               })}
               <View style={s.modalRow}>
-                <TouchableOpacity style={s.modalBtn} onPress={() => setStopFor(null)} accessibilityRole="button">
+                <TouchableOpacity style={s.modalBtn} onPress={() => setStopFor(null)} accessibilityRole="button" accessibilityLabel="Cancel">
                   <Text style={s.muted}>Cancel</Text>
                 </TouchableOpacity>
               </View>
@@ -759,15 +579,6 @@ export default function SpaceRunsAdminScreen() {
   );
 }
 
-/** Tomorrow at 07:00 local — the picker's starting point for a new run. */
-function nextMorning(): Date {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  d.setHours(7, 0, 0, 0);
-  return d;
-}
-const whenLabel = (d: Date) =>
-  d.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
 function statusLabel(r: Run): string {
   switch (r.status) {
@@ -782,54 +593,3 @@ function statusColour(r: Run, c: Palette): string {
   if (r.status === 'scheduled') return c.textDim;
   return c.textFaint;
 }
-
-const styles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: 'transparent' },
-  centre: { alignItems: 'center', justifyContent: 'center' },
-  body: { padding: 16, gap: 10, paddingBottom: 40 },
-  card: { backgroundColor: c.glassSoft, borderRadius: 14, padding: 14, gap: 8 },
-  cardTitle: { color: c.text, fontSize: 15.5, fontWeight: '700' },
-  muted: { color: c.textDim, fontSize: 12.5, flexShrink: 1 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  dot: { width: 10, height: 10, borderRadius: 5 },
-  section: { color: c.textDim, fontSize: 11.5, letterSpacing: 1, marginTop: 8 },
-  pickRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9, minHeight: 44 },
-  pickText: { color: c.textDim, flex: 1, fontSize: 14.5 },
-  seq: { color: c.textDim, width: 20, fontVariant: ['tabular-nums'] },
-  addStop: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44 },
-  iconHit: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  hit: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  headerActions: { flexDirection: 'row', alignItems: 'center' },
-  riderToggle: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, minHeight: 44 },
-  stopChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 160, minHeight: 44,
-    borderWidth: 1, borderColor: c.glassStroke, borderRadius: 16, paddingHorizontal: 10,
-  },
-  stopChipText: { color: c.textDim, fontSize: 12.5, flexShrink: 1 },
-  input: {
-    borderWidth: 1, borderColor: c.glassStroke, borderRadius: 10, padding: 12,
-    color: c.text, fontSize: 15,
-  },
-  kinds: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  kind: {
-    borderWidth: 1, borderColor: c.glassStroke, borderRadius: 22, paddingHorizontal: 14,
-    minHeight: 44, justifyContent: 'center',
-  },
-  kindText: { color: c.textDim, fontSize: 12.5 },
-  // A fixed dark scrim behind the dialog, the same in both schemes.
-  modalWrap: { flex: 1, backgroundColor: '#0008', alignItems: 'center', justifyContent: 'center', padding: 22 },
-  modal: { width: '100%', backgroundColor: c.bg, borderRadius: 16, padding: 20, gap: 10 },
-  modalTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
-  modalRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 4 },
-  modalBtn: { paddingHorizontal: 18, minHeight: 44, minWidth: 64, alignItems: 'center', justifyContent: 'center', borderRadius: 10 },
-  primaryBtn: { backgroundColor: c.brandOnLight },
-  primaryText: { color: '#fff', fontWeight: '700' },
-  off: { opacity: 0.4 },
-  sheetHeader: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 16, paddingBottom: 14,
-    borderBottomWidth: 1, borderBottomColor: c.glassStroke,
-  },
-  sheetTitle: { color: c.text, fontSize: 17, fontWeight: '700', flex: 1 },
-  footnote: { color: c.textFaint, fontSize: 11.5, lineHeight: 16, marginTop: 6 },
-});

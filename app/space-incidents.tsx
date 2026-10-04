@@ -19,7 +19,7 @@
 import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Alert,
+  View, StyleSheet, FlatList, ActivityIndicator, TouchableOpacity, Alert,
   RefreshControl,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect, useRouter } from 'expo-router';
@@ -52,6 +52,8 @@ export default function SpaceIncidentsScreen() {
 
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [runs, setRuns] = useState<Run[]>([]);
+  // The runs read only names vehicles; its failure is said, not drawn as "a vehicle".
+  const [runsFailed, setRunsFailed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -61,10 +63,11 @@ export default function SpaceIncidentsScreen() {
     try {
       const [inc, rs] = await Promise.all([
         getIncidents(spaceId),
-        getRuns(spaceId).catch(() => [] as Run[]),
+        getRuns(spaceId).catch(() => null),
       ]);
       setIncidents(inc);
-      setRuns(rs);
+      setRuns(rs ?? []);
+      setRunsFailed(rs == null);
       setLoadError(null);
     } catch (e: any) {
       setLoadError(e?.message ?? 'Could not load incidents.');
@@ -87,8 +90,10 @@ export default function SpaceIncidentsScreen() {
   }, [incidents]);
 
   const vehicleFor = useCallback(
-    (runId: string | null) => runId ? (runs.find((r) => r.id === runId)?.vehicleLabel ?? 'a vehicle') : null,
-    [runs],
+    (runId: string | null) => runId
+      ? (runs.find((r) => r.id === runId)?.vehicleLabel ?? (runsFailed ? 'vehicle unknown' : 'a vehicle'))
+      : null,
+    [runs, runsFailed],
   );
 
   const setStatusNow = useCallback(async (i: Incident, status: 'ack' | 'resolved') => {
@@ -112,7 +117,7 @@ export default function SpaceIncidentsScreen() {
     );
   }, [setStatusNow]);
 
-  const s = styles(colors);
+  const s = useMemo(() => styles(colors), [colors]);
 
   if (loading) {
     return (
@@ -127,32 +132,38 @@ export default function SpaceIncidentsScreen() {
   return (
     <View style={s.screen}>
       <AuroraBackground />
-    <ScrollView
-      style={s.screen} contentContainerStyle={s.body}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} tintColor={colors.primary} />}
-    >
       <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · Incidents` : 'Incidents', { id: spaceId, name: params.name })} />
+    <FlatList
+      style={s.screen} contentContainerStyle={s.body}
+      ListHeaderComponentStyle={s.header}
+      data={ordered}
+      keyExtractor={(i) => i.id}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} tintColor={colors.primary} />}
+      ListHeaderComponent={<>
+        {loadError && (
+          <LoadError colors={colors} title="Could not load incidents" message={loadError} onRetry={() => { setLoading(true); void load(); }} />
+        )}
+        {!loadError && ordered.length === 0 && (
+          <View style={s.card}>
+            <Text style={s.cardTitle}>Nothing reported</Text>
+            <Text style={s.muted}>
+              Drivers report breakdowns, accidents and road problems from their run screen.
+              Anything they raise appears here.
+            </Text>
+          </View>
+        )}
 
-      {loadError && (
-        <LoadError colors={colors} title="Could not load incidents" message={loadError} onRetry={() => { setLoading(true); void load(); }} />
-      )}
-      {!loadError && ordered.length === 0 && (
-        <View style={s.card}>
-          <Text style={s.cardTitle}>Nothing reported</Text>
-          <Text style={s.muted}>
-            Drivers report breakdowns, accidents and road problems from their run screen.
-            Anything they raise appears here.
-          </Text>
-        </View>
-      )}
-
-      {ordered.map((i) => {
+        {runsFailed && ordered.some((i) => i.runId) && (
+          <Text style={s.footnote}>Vehicle names could not be loaded. Pull down to try again.</Text>
+        )}
+      </>}
+      renderItem={({ item: i }) => {
         const meta = CATEGORY[i.category] ?? CATEGORY.other;
         const sos = i.category === 'sos';
         const done = i.status === 'resolved';
         const vehicle = vehicleFor(i.runId);
         return (
-          <View key={i.id} style={[s.card, sos && !done && s.sosCard, done && s.doneCard]}>
+          <View style={[s.card, sos && !done && s.sosCard, done && s.doneCard]}>
             <View style={s.row}>
               <View style={[s.icon, { backgroundColor: (sos ? colors.danger : colors.primary) + '22' }]}>
                 <Ionicons name={meta.icon} size={19} color={sos ? colors.danger : colors.primary} />
@@ -202,6 +213,7 @@ export default function SpaceIncidentsScreen() {
                     disabled={busy === i.id}
                     accessibilityRole="button"
                     accessibilityLabel={`Acknowledge ${meta.label}`}
+                    accessibilityState={{ disabled: busy === i.id }}
                   >
                     <Text style={s.ghostText}>Acknowledge</Text>
                   </TouchableOpacity>
@@ -212,22 +224,25 @@ export default function SpaceIncidentsScreen() {
                   disabled={busy === i.id}
                   accessibilityRole="button"
                   accessibilityLabel={`Resolve ${meta.label}`}
+                  accessibilityState={{ disabled: busy === i.id, busy: busy === i.id }}
                 >
+                  {/* White ink on the solid brandOnLight fill (deep blue in both schemes, 6.3:1). */}
                   {busy === i.id
-                    ? <ActivityIndicator size="small" color="#fff" />
+                    ? <ActivityIndicator size="small" color={colors.onBrand} />
                     : <Text style={s.solidText}>Resolve</Text>}
                 </TouchableOpacity>
               </View>
             )}
           </View>
         );
-      })}
-
-      <Text style={s.footnote}>
-        Acknowledging and resolving are recorded in the space’s audit log. A driver cannot
-        resolve their own report — someone who could would also be able to make it vanish.
-      </Text>
-    </ScrollView>
+      }}
+      ListFooterComponent={
+        <Text style={s.footnote}>
+          Acknowledging and resolving are recorded in the space’s audit log. A driver cannot
+          resolve their own report — someone who could would also be able to make it vanish.
+        </Text>
+      }
+    />
     </View>
   );
 }
@@ -247,6 +262,7 @@ const styles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   centre: { alignItems: 'center', justifyContent: 'center' },
   body: { padding: 16, gap: 10, paddingBottom: 40 },
+  header: { gap: 10 },
   card: { backgroundColor: c.glassSoft, borderRadius: 14, padding: 14, gap: 8 },
   sosCard: { borderWidth: 1, borderColor: c.danger },
   doneCard: { opacity: 0.6 },
@@ -260,6 +276,6 @@ const styles = (c: Palette) => StyleSheet.create({
   ghost: { borderWidth: 1, borderColor: c.glassStroke },
   ghostText: { color: c.text, fontWeight: '600' },
   solid: { backgroundColor: c.brandOnLight },
-  solidText: { color: '#fff', fontWeight: '700' },
+  solidText: { color: c.onBrand, fontWeight: '700' },
   footnote: { color: c.textFaint, fontSize: 11.5, lineHeight: 16 },
 });

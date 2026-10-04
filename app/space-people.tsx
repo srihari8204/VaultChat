@@ -83,10 +83,13 @@ export default function SpacePeopleScreen() {
   // role action simply is not offered.
   const loadMeta = useCallback(async () => {
     try {
-      const [detail, me]: any[] = await Promise.all([
+      const [chat, me] = await Promise.all([
         getChat(spaceId),
-        getCurrentUserAsync().catch(() => null),
+        getCurrentUserAsync().catch(() => null) as Promise<{ id?: string | number } | null>,
       ]);
+      // The space detail carries the caller's role and the role catalog; the
+      // shared ChatDetail type does not declare them.
+      const detail = chat as typeof chat & { roleCatalog?: RoleDef[] | null; role?: string };
       setCatalog(detail?.roleCatalog ?? null);
       if (me?.id) setViewer({ id: String(me.id), role: String(detail?.role ?? 'member') });
     } catch (e: any) {
@@ -154,7 +157,7 @@ export default function SpacePeopleScreen() {
     unknown: people.filter((p) => p.status === 'unknown').length,
   }), [people]);
 
-  const s = styles(colors);
+  const s = useMemo(() => styles(colors), [colors]);
 
   if (loading) {
     return (
@@ -173,9 +176,9 @@ export default function SpacePeopleScreen() {
 
       <View style={s.head}>
         <View style={s.counts}>
-          <Count value={counts.in} label="In" tone={colors.success} c={colors} />
-          <Count value={counts.leave} label="On leave" tone={colors.warning} c={colors} />
-          <Count value={counts.unknown} label="No check-in" tone={colors.textFaint} c={colors} />
+          <Count value={counts.in} label="In" tone={colors.success} s={s} />
+          <Count value={counts.leave} label="On leave" tone={colors.warning} s={s} />
+          <Count value={counts.unknown} label="No check-in" tone={colors.textFaint} s={s} />
         </View>
         <TextInput
           style={s.search}
@@ -293,38 +296,41 @@ export default function SpacePeopleScreen() {
 
             <ScrollView style={{ maxHeight: 340 }}>
               {options.map((o) => (
-                <TouchableOpacity
-                  key={o.key}
-                  onPress={() => { setChosen(o); setRoleErr(null); }}
-                  accessibilityRole="radio"
-                  accessibilityState={{ checked: chosen?.key === o.key }}
-                  accessibilityLabel={o.label}
-                  style={[s.roleCard, chosen?.key === o.key && { borderColor: colors.primary }]}
-                >
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <Ionicons
-                      name={chosen?.key === o.key ? 'radio-button-on' : 'radio-button-off'}
-                      size={18}
-                      color={chosen?.key === o.key ? colors.primary : colors.textDim}
-                    />
-                    <Text style={s.name}>{o.label}</Text>
-                    {o.current && <Text style={s.currentTag}>CURRENT</Text>}
-                  </View>
-                  {/* One line in the list; the full matrix once selected, so
-                      choosing a role is never done blind. null, [] and a real
-                      list stay three distinct statements — PermissionMatrix
-                      owns that distinction. */}
-                  {o.grants === null ? (
-                    <Text style={s.muted}>Inherits the standard {rankLabel(o.rank)} permissions</Text>
-                  ) : o.grants.length === 0 ? (
-                    <Text style={s.muted}>No permissions of its own</Text>
-                  ) : (
-                    <Text style={s.muted}>
-                      {o.grants.length} permission{o.grants.length === 1 ? '' : 's'}
-                      {' · '}{o.grants.slice(0, 3).map(permissionLabel).join(', ')}
-                      {o.grants.length > 3 ? '…' : ''}
-                    </Text>
-                  )}
+                <View key={o.key} style={[s.roleCard, chosen?.key === o.key && { borderColor: colors.primary }]}>
+                  <TouchableOpacity
+                    onPress={() => { setChosen(o); setRoleErr(null); }}
+                    accessibilityRole="radio"
+                    accessibilityState={{ checked: chosen?.key === o.key }}
+                    accessibilityLabel={o.label}
+                    style={s.roleHit}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Ionicons
+                        name={chosen?.key === o.key ? 'radio-button-on' : 'radio-button-off'}
+                        size={18}
+                        color={chosen?.key === o.key ? colors.primary : colors.textDim}
+                      />
+                      <Text style={s.name}>{o.label}</Text>
+                      {o.current && <Text style={s.currentTag}>CURRENT</Text>}
+                    </View>
+                    {/* One line in the list; the full matrix once selected, so
+                        choosing a role is never done blind. null, [] and a real
+                        list stay three distinct statements — PermissionMatrix
+                        owns that distinction. */}
+                    {o.grants === null ? (
+                      <Text style={s.muted}>Inherits the standard {rankLabel(o.rank)} permissions</Text>
+                    ) : o.grants.length === 0 ? (
+                      <Text style={s.muted}>No permissions of its own</Text>
+                    ) : (
+                      <Text style={s.muted}>
+                        {o.grants.length} permission{o.grants.length === 1 ? '' : 's'}
+                        {' · '}{o.grants.slice(0, 3).map(permissionLabel).join(', ')}
+                        {o.grants.length > 3 ? '…' : ''}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                  {/* Below the radio, not inside it: the radio's own label would
+                      hide the matrix from a screen reader. */}
                   {chosen?.key === o.key && (
                     <PermissionMatrix
                       colors={colors}
@@ -332,7 +338,7 @@ export default function SpacePeopleScreen() {
                       error={catalogErr}
                     />
                   )}
-                </TouchableOpacity>
+                </View>
               ))}
             </ScrollView>
 
@@ -343,7 +349,7 @@ export default function SpacePeopleScreen() {
                   {editing.name || 'This member'} · {labelFor(editing)} → {chosen.label}
                 </Text>
                 <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <TouchableOpacity onPress={() => setConfirming(false)} style={[s.btn, s.btnGhost, { flex: 1 }]} accessibilityRole="button">
+                  <TouchableOpacity onPress={() => setConfirming(false)} style={[s.btn, s.btnGhost, { flex: 1 }]} accessibilityRole="button" accessibilityLabel="Cancel">
                     <Text style={[s.btnText, { color: colors.text }]}>Cancel</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
@@ -383,10 +389,9 @@ export default function SpacePeopleScreen() {
   );
 }
 
-function Count({ value, label, tone, c }: { value: number; label: string; tone: string; c: Palette }) {
-  const s = styles(c);
+function Count({ value, label, tone, s }: { value: number; label: string; tone: string; s: ReturnType<typeof styles> }) {
   return (
-    <View style={s.count}>
+    <View style={s.count} accessible accessibilityLabel={`${label}, ${value}`}>
       <Text style={[s.countValue, { color: tone }]}>{value}</Text>
       <Text style={s.countLabel}>{label}</Text>
     </View>
@@ -413,11 +418,11 @@ const styles = (c: Palette) => StyleSheet.create({
   countValue: { fontSize: 20, fontWeight: '800' },
   countLabel: { color: c.textDim, fontSize: 11 },
   // 2026-09-18: this is the TextInput itself, and at font scale 1.5 its line
-  // box outgrows a pinned 42, so what you type is cut off. minHeight is the
-  // same 42 at scale 1.0 and grows with the text.
+  // box outgrows a pinned height, so what you type is cut off. minHeight is
+  // the 44pt target at scale 1.0 and grows with the text.
   search: {
     borderWidth: 1, borderColor: c.glassStroke, borderRadius: 10,
-    paddingHorizontal: 12, minHeight: 42, paddingVertical: 6, color: c.text,
+    paddingHorizontal: 12, minHeight: 44, paddingVertical: 6, color: c.text,
   },
   body: { padding: 16, paddingBottom: 40 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, minHeight: 44 },
@@ -441,10 +446,11 @@ const styles = (c: Palette) => StyleSheet.create({
     borderWidth: 1, borderColor: c.glassStroke, borderRadius: 12,
     padding: 12, gap: 4, marginBottom: 8,
   },
+  roleHit: { gap: 4, minHeight: 44, justifyContent: 'center' },
   currentTag: { color: c.textFaint, fontSize: 11, fontWeight: '800' },
   confirm: { backgroundColor: c.bg, borderRadius: 12, padding: 12, gap: 8 },
   btn: { alignItems: 'center', justifyContent: 'center', borderRadius: 10, paddingVertical: 12, minHeight: 44 },
   btnGhost: { backgroundColor: c.bg },
-  btnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  btnText: { color: c.onBrand, fontWeight: '700', fontSize: 14 },
   footnote: { color: c.textFaint, fontSize: 11.5, lineHeight: 16, marginTop: 10 },
 });

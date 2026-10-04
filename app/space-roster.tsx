@@ -15,7 +15,7 @@
 import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Alert,
+  View, StyleSheet, FlatList, ActivityIndicator, TouchableOpacity, Alert,
   TextInput, Modal, RefreshControl,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
@@ -39,6 +39,8 @@ const KINDS: { key: string; label: string }[] = [
   { key: 'child', label: 'Child' },
   { key: 'person', label: 'Adult' },
 ];
+/** The row's kind word: our two labels, else the stored kind as given. */
+const kindLabel = (kind: string) => KINDS.find((k) => k.key === kind)?.label ?? kind;
 
 export default function SpaceRosterScreen() {
   const params = useLocalSearchParams<{ spaceId?: string; name?: string; canManage?: string; groupType?: string; perms?: string }>();
@@ -138,7 +140,7 @@ export default function SpaceRosterScreen() {
     );
   }, [spaceId, load]);
 
-  const s = styles(colors);
+  const s = useMemo(() => styles(colors), [colors]);
 
   if (loading) {
     return (
@@ -175,48 +177,51 @@ export default function SpaceRosterScreen() {
         }}
       />
 
-      <ScrollView
+      <FlatList
         contentContainerStyle={s.body}
+        ListHeaderComponentStyle={s.header}
+        data={roster}
+        keyExtractor={(r) => r.id}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} tintColor={colors.primary} />}
-      >
-        {loadError && (
-          <LoadError colors={colors} title="Could not load the roster" message={loadError} onRetry={() => { setLoading(true); void load(); }} />
-        )}
-        {canManage && !loadError && (
-          <TouchableOpacity
-            style={[s.card, s.row]} onPress={() => setLinksOpen(true)}
-            accessibilityRole="button" accessibilityLabel="Manage links: who is guardian of, supervises or teaches whom"
-          >
-            <Ionicons name="git-network-outline" size={18} color={colors.primary} />
-            <View style={{ flex: 1 }}>
-              <Text style={s.name}>Links</Text>
-              <Text style={s.muted}>Who is guardian of, supervises or teaches whom. This decides what each person can see.</Text>
+        ListHeaderComponent={<>
+          {loadError && (
+            <LoadError colors={colors} title="Could not load the roster" message={loadError} onRetry={() => { setLoading(true); void load(); }} />
+          )}
+          {canManage && !loadError && (
+            <TouchableOpacity
+              style={[s.card, s.row]} onPress={() => setLinksOpen(true)}
+              accessibilityRole="button" accessibilityLabel="Manage links: who is guardian of, supervises or teaches whom"
+            >
+              <Ionicons name="git-network-outline" size={18} color={colors.primary} />
+              <View style={{ flex: 1 }}>
+                <Text style={s.name}>Links</Text>
+                <Text style={s.muted}>Who is guardian of, supervises or teaches whom. This decides what each person can see.</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
+            </TouchableOpacity>
+          )}
+          {truncated && (
+            <View style={s.warn}>
+              <Ionicons name="git-branch-outline" size={16} color={colors.warning} />
+              <Text style={s.warnText}>
+                This space’s structure is deeper than the view can follow, so some people
+                below you are not shown. Ask an administrator for the full list.
+              </Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
-          </TouchableOpacity>
-        )}
-        {truncated && (
-          <View style={s.warn}>
-            <Ionicons name="git-branch-outline" size={16} color={colors.warning} />
-            <Text style={s.warnText}>
-              This space’s structure is deeper than the view can follow, so some people
-              below you are not shown. Ask an administrator for the full list.
-            </Text>
-          </View>
-        )}
+          )}
 
-        {!loadError && roster.length === 0 && (
+          {!loadError && roster.length === 0 && (
+            <View style={s.card}>
+              <Text style={s.muted}>
+                {scoped
+                  ? 'Nobody is linked to you in this space yet. An administrator adds those links.'
+                  : 'Nobody is on the roster yet.'}
+              </Text>
+            </View>
+          )}
+        </>}
+        renderItem={({ item: r }) => (
           <View style={s.card}>
-            <Text style={s.muted}>
-              {scoped
-                ? 'Nobody is linked to you in this space yet. An administrator adds those links.'
-                : 'Nobody is on the roster yet.'}
-            </Text>
-          </View>
-        )}
-
-        {roster.map((r) => (
-          <View key={r.id} style={s.card}>
             <View style={s.row}>
               <View style={[s.avatar, { backgroundColor: colors.primary + '22' }]}>
                 <Ionicons
@@ -230,7 +235,8 @@ export default function SpaceRosterScreen() {
                 <Text style={s.muted}>
                   {/* An entry with no account is the normal case for a child —
                       saying so stops it reading as a broken invite. */}
-                  {r.userId ? 'Has an account' : 'No account'}
+                  {kindLabel(r.kind)}
+                  {r.userId ? ' · has an account' : ' · no account'}
                   {linkedIds.has(r.id) ? ' · in your care' : ''}
                   {r.externalRef ? ` · ${r.externalRef}` : ''}
                 </Text>
@@ -242,14 +248,15 @@ export default function SpaceRosterScreen() {
               )}
             </View>
           </View>
-        ))}
-
-        <Text style={s.footnote}>
-          {scoped
-            ? 'You see the people you are responsible for. The rest of the space’s roster is not sent to this device.'
-            : 'You have the space-wide view, so this is everyone.'}
-        </Text>
-      </ScrollView>
+        )}
+        ListFooterComponent={
+          <Text style={s.footnote}>
+            {scoped
+              ? 'You see the people you are responsible for. The rest of the space’s roster is not sent to this device.'
+              : 'You have the space-wide view, so this is everyone.'}
+          </Text>
+        }
+      />
 
       <Modal visible={adding} transparent animationType="fade" onRequestClose={() => setAdding(false)}>
         <KeyboardSafe keyboardOnly>
@@ -291,7 +298,7 @@ export default function SpaceRosterScreen() {
               maxLength={64}
             />
             <View style={s.modalRow}>
-              <TouchableOpacity style={s.modalBtn} onPress={() => setAdding(false)} accessibilityRole="button">
+              <TouchableOpacity style={s.modalBtn} onPress={() => setAdding(false)} accessibilityRole="button" accessibilityLabel="Cancel">
                 <Text style={s.muted}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -301,8 +308,9 @@ export default function SpaceRosterScreen() {
                 accessibilityRole="button" accessibilityLabel="Add to the roster"
                 accessibilityState={{ disabled: !newName.trim() || busy, busy }}
               >
+                {/* White ink on the solid brandOnLight fill (deep blue in both schemes, 6.3:1). */}
                 {busy
-                  ? <ActivityIndicator size="small" color="#fff" />
+                  ? <ActivityIndicator size="small" color={colors.onBrand} />
                   : <Text style={s.primaryText}>Add</Text>}
               </TouchableOpacity>
             </View>
@@ -322,6 +330,7 @@ const styles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   centre: { alignItems: 'center', justifyContent: 'center' },
   body: { padding: 16, gap: 10, paddingBottom: 40 },
+  header: { gap: 10 },
   card: { backgroundColor: c.glassSoft, borderRadius: 14, padding: 14 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   avatar: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
@@ -353,6 +362,6 @@ const styles = (c: Palette) => StyleSheet.create({
   kindOn: { borderColor: c.primary, backgroundColor: c.primary + '18' },
   kindText: { color: c.text, fontSize: 14, fontWeight: '600' },
   primaryBtn: { backgroundColor: c.brandOnLight },
-  primaryText: { color: '#fff', fontWeight: '700' },
+  primaryText: { color: c.onBrand, fontWeight: '700' },
   btnOff: { opacity: 0.4 },
 });

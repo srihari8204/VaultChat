@@ -2,10 +2,11 @@
 // shift is read from.
 //
 // PATCH /chats/{id}/shift writes the shift; GET /chats/{id}/shift reads it back
-// (edit_settings or view_space_ops). loadShift() asks the server first and
-// keeps a copy on this device; the copy is used only when the server cannot
-// answer — a 403 for a member without those permissions, a 404 from an older
-// server without the read, or no connection.
+// (written, not deployed: edit_settings or view_space_ops, and every current
+// member once R4BE C12 ships). loadShift() asks the server first and keeps a
+// copy on this device; the copy is used only when the server cannot answer —
+// a 404 from today's server, a 403 for a plain member before C12, or no
+// connection.
 
 import { parseClock } from './attendance';
 
