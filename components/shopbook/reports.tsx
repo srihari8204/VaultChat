@@ -7,6 +7,7 @@ import { View, Text, TouchableOpacity, ScrollView, Alert, RefreshControl, Share,
 import { Ionicons } from '@expo/vector-icons';
 import QRCode from 'react-native-qrcode-svg';
 import { categoryIcon } from '../../constants/shopCategories';
+import { QR_COLORS } from '../../constants/qrPalette';
 import { formatMoney, shopOpenState, dateLocale } from '../../utils/shopbook';
 import * as SB from '../../services/shopBookService';
 import { StatTile, TileGrid, ActionGrid, QuickAction, LoadingState, ErrorState } from '../finance/ui';
@@ -35,8 +36,10 @@ export function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPla
           <View style={s.modalCard}>
             <Text numberOfLines={1} style={s.modalTitle} accessibilityRole="header">{shop.name}</Text>
             <Text style={[s.hint, { textAlign: 'center' }]}>Customers scan this to open your shop</Text>
-            <View style={{ alignItems: 'center', marginVertical: 18, backgroundColor: '#FFFFFF', padding: 14, borderRadius: 14 }}>   {/* theme-exempt: a QR needs a real white quiet zone */}
-              <QRCode value={deepLink} size={190} color={C.navyFill} backgroundColor="#ffffff" />
+            {/* A QR is read by a camera: dark modules on a white quiet zone in both
+                themes, from the app's one QR palette (constants/qrPalette.ts). */}
+            <View style={{ alignItems: 'center', marginVertical: 18, backgroundColor: QR_COLORS.backgroundColor, padding: 14, borderRadius: 14 }}>
+              <QRCode value={deepLink} size={190} {...QR_COLORS} />
             </View>
             <TouchableOpacity style={s.primaryBtn} accessibilityRole="button"
               onPress={() => Share.share({ message: `Order from ${shop.name} on Shop Book 🛍️\n${deepLink}` }).catch(() => {})}>

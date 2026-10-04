@@ -87,12 +87,15 @@ diff <(sed 's/[[:space:]]*$//' "$ADMIN_ROOT"/shopbook.html) <(sed 's/[[:space:]]
 cp admin/shopbook.html "$ADMIN_ROOT"/shopbook.html     # after reviewing the diff
 
 # 2. Self-hosted fonts for index.html (it no longer loads Google Fonts; its CSP
-#    is now font-src 'self'). Five files from the app's own assets. Without
-#    them the page still works and falls back to sans-serif.
+#    is now font-src 'self'). Five files from the app's own assets, plus
+#    JetBrains Mono from admin/fonts/ (copied from expo-dev-menu's bundled
+#    font; SIL OFL 1.1, the licence is in the font's own name table). These
+#    are every face the page uses. Without them the page still works and
+#    falls back to the system fonts.
 mkdir -p "$ADMIN_ROOT"/fonts
 cp assets/fonts/Sora_700Bold.ttf assets/fonts/Sora_800ExtraBold.ttf \
    assets/fonts/NunitoSans_400Regular.ttf assets/fonts/NunitoSans_600SemiBold.ttf \
-   assets/fonts/NunitoSans_700Bold.ttf "$ADMIN_ROOT"/fonts/
+   assets/fonts/NunitoSans_700Bold.ttf admin/fonts/JetBrainsMono_400Regular.ttf "$ADMIN_ROOT"/fonts/
 cp admin/index.html "$ADMIN_ROOT"/index.html
 ```
 
@@ -119,6 +122,7 @@ nginx -t && systemctl reload nginx
 curl -sI https://admin.corefinite.com/ | grep -iE 'frame|x-content|referrer'   # expect all four
 curl -sI https://admin.corefinite.com/shopbook.html | grep -i frame-ancestors
 curl -sI https://admin.corefinite.com/fonts/Sora_700Bold.ttf | head -1           # expect 200
+curl -sI https://admin.corefinite.com/fonts/JetBrainsMono_400Regular.ttf | head -1  # expect 200
 ```
 
 The site is behind the Cloudflare proxy; Cloudflare passes these origin

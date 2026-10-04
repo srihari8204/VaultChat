@@ -10,7 +10,7 @@
      class; script code may still set el.style.* through the CSSOM, which CSP allows). After editing the stylesheet,
      recompute with the same command, replacing script by style in both tags; an unmatched hash leaves the page
      unstyled. admin/adminPages.selftest.ts checks both. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-sjHKLii3zOpSQmI7s6iKCYJUffuxw5mD+5FZ4mIcpQE='; style-src 'sha256-lOECk7y8rKDkkGrCHJLanEMR8aSN6dQn7zhEqHsyBa4='; connect-src https: http://localhost:* http://127.0.0.1:*; img-src data:; base-uri 'none'; form-action 'none'" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-5QqaChKxKM1GB4m7fam51rpWbNmugclTBiXtJtVDF3U='; style-src 'sha256-gahcIHLLt/EAU6Bko0IieCN7Z4eW1Sbt5v4BIg9wwG4='; connect-src https: http://localhost:* http://127.0.0.1:*; img-src data:; base-uri 'none'; form-action 'none'" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="dark light" />
 <title>Shop Book · Admin</title>
@@ -19,7 +19,7 @@
     --bg:#070B14; --panel:#0D1322; --panel2:#111A2E; --line:rgba(11,122,59,.35);
     --line2:rgba(255,255,255,.07); --green:#22C55E; --green-dim:rgba(34,197,94,.12);
     --txt:#EAF0FB; --sub:rgba(234,240,251,.55); --err:#FF5C72; --warn:#E8B64C;
-    --green-fill:#22C55E; --on-green:#052e12; --danger-fill:#D42A41; --warn-dim:rgba(232,182,76,.14);
+    --green-fill:#22C55E; --on-green:#052e12; --danger-fill:#D42A41; --on-danger:#fff; --warn-dim:rgba(232,182,76,.14);
   }
   /* Light theme follows the OS setting; every text colour is >= 4.5:1 on its
      background. The button fills stay the same in both themes. (The danger
@@ -46,7 +46,7 @@
   .pages a{color:var(--green)}
   button{cursor:pointer;border:none;border-radius:9px;padding:9px 14px;font-weight:700;font-size:13px;background:var(--green-fill);color:var(--on-green)}
   button.ghost{background:var(--panel2);color:var(--txt);border:1px solid var(--line2)}
-  button.danger{background:var(--danger-fill);color:#fff}
+  button.danger{background:var(--danger-fill);color:var(--on-danger)}
   /* The filter a section is showing (aria-pressed is set by pressFilter). */
   button.ghost[aria-pressed="true"]{border-color:var(--green);color:var(--green);box-shadow:inset 0 0 0 1px var(--green)}
   .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:14px 0}
@@ -501,6 +501,25 @@ async function decideLocation(id, approve, note){
   refocus(`[data-act="decide-location"][data-id="${CSS.escape(id)}"]`, 'locations');
 }
 
+// Both inline forms (note, entitlement) save the same way: the submit button is
+// busy while the request runs, and a failure re-enables it and shows the
+// server's error in the form, keeping what was typed. Resolves true on success.
+async function saveForm(btn, errEl, save){
+  btn.disabled = true; btn.setAttribute('aria-busy', 'true');
+  try { await save(); return true; }
+  catch (e) {
+    errEl.textContent = 'Not saved: ' + e.message;
+    btn.disabled = false; btn.removeAttribute('aria-busy');
+    return false;
+  }
+}
+// A field the form refuses: the reason in the form's alert, the field marked
+// invalid and focused.
+function refuseField(errEl, input, why){
+  errEl.textContent = why;
+  if (input) { input.setAttribute('aria-invalid', 'true'); input.focus(); }
+}
+
 // ── single-note actions: an inline form, not prompt() ─────────────
 // Reject shop, a verification note, reject document and refuse move each need
 // one note that the owner is shown. The form opens at the bottom of the card:
@@ -556,26 +575,18 @@ async function submitNote(f){
   const input = f.elements.namedItem('note');
   const errEl = f.querySelector('[data-note-err]');
   const note = input.value.trim();
-  if (!note) {
-    errEl.textContent = 'Write the note first — the owner is shown it.';
-    input.setAttribute('aria-invalid', 'true'); input.focus();
-    return;
-  }
+  if (!note) { refuseField(errEl, input, 'Write the note first — the owner is shown it.'); return; }
   errEl.textContent = ''; input.removeAttribute('aria-invalid');
   const d = f.dataset;
-  btn.disabled = true; btn.setAttribute('aria-busy', 'true');
-  try {
+  const saved = await saveForm(btn, errEl, () => {
     switch (d.nact) {
-      case 'reject-shop': await rejectShop(d.nid, note); break;
-      case 'set-verify': await setVerify(d.nid, d.nstate, note); break;
-      case 'review-doc': await reviewDoc(d.nid, 'rejected', d.nshop, note); break;
-      case 'decide-location': await decideLocation(d.nid, false, note); break;
+      case 'reject-shop': return rejectShop(d.nid, note);
+      case 'set-verify': return setVerify(d.nid, d.nstate, note);
+      case 'review-doc': return reviewDoc(d.nid, 'rejected', d.nshop, note);
+      case 'decide-location': return decideLocation(d.nid, false, note);
     }
-    if (f.isConnected) f.remove();   // the list usually re-rendered it away already
-  } catch (e) {
-    errEl.textContent = 'Not saved: ' + e.message;
-    btn.disabled = false; btn.removeAttribute('aria-busy');
-  }
+  });
+  if (saved && f.isConnected) f.remove();   // the list usually re-rendered it away already
 }
 
 // ── subscriptions / entitlements ────────────────────────────────
@@ -690,12 +701,7 @@ async function submitEntitlement(f){
   const exp = f.elements.namedItem('expires');
   const errEl = f.querySelector('[data-ent-err]');
   const v = entitlementExpiry(plan, exp ? exp.value : '', ymd(new Date()), !!(exp && exp.validity.badInput));
-  if (v.error) {
-    resetEntitlementReview(f);
-    errEl.textContent = v.error;
-    if (exp) { exp.setAttribute('aria-invalid', 'true'); exp.focus(); }
-    return;
-  }
+  if (v.error) { resetEntitlementReview(f); refuseField(errEl, exp, v.error); return; }
   errEl.textContent = '';
   if (exp) exp.removeAttribute('aria-invalid');
   const reference = f.elements.namedItem('reference').value.trim();
@@ -707,18 +713,18 @@ async function submitEntitlement(f){
     btn.focus();
     return;
   }
-  if (Date.now() - Number(f.dataset.review) < CONFIRM_DELAY_MS) return;
-  btn.disabled = true; btn.setAttribute('aria-busy', 'true');
-  try {
-    await api(`/api/admin/shopbook/shops/${encodeURIComponent(id)}/entitlement`,
-      { method:'POST', body: JSON.stringify({ plan, state, expiresAt: v.expiresAt, reference }) });
-    toast('Entitlement saved');
-    await loadSubscriptions();
-    refocus(`[data-act="entitlement"][data-id="${CSS.escape(id)}"][data-state="${CSS.escape(state)}"]`, 'subscriptions');
-  } catch (e) {
-    errEl.textContent = 'Not saved: ' + e.message;
-    btn.disabled = false; btn.removeAttribute('aria-busy');
+  // Too soon after the summary appeared (a double-click on Review): not saved,
+  // and the form says why rather than ignoring the press without a cue.
+  if (Date.now() - Number(f.dataset.review) < CONFIRM_DELAY_MS) {
+    errEl.textContent = 'Read the summary above, then press Confirm again.';
+    return;
   }
+  const saved = await saveForm(btn, errEl, () => api(`/api/admin/shopbook/shops/${encodeURIComponent(id)}/entitlement`,
+    { method:'POST', body: JSON.stringify({ plan, state, expiresAt: v.expiresAt, reference }) }));
+  if (!saved) return;
+  toast('Entitlement saved');
+  await loadSubscriptions();
+  refocus(`[data-act="entitlement"][data-id="${CSS.escape(id)}"][data-state="${CSS.escape(state)}"]`, 'subscriptions');
 }
 
 document.addEventListener('submit', (ev) => {

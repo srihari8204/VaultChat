@@ -9,21 +9,24 @@
      style-src likewise pins the ONE style element (no style="" attributes anywhere; script code may still set
      el.style.* through the CSSOM, which CSP allows). After editing the stylesheet, recompute with the same command,
      replacing script by style in both tags; an unmatched hash leaves the page unstyled. admin/adminPages.selftest.ts checks both. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-GKBfoUr+EmprbU+01Ml8Kee/CwkM9KQfqMCutLtX5Vg='; style-src 'sha256-pVEvHfamtkZcOlhrc5sUFOX/XkIkdAHI9cjL7yTnukQ='; font-src 'self'; connect-src https: http://localhost:* http://127.0.0.1:*; img-src data:; base-uri 'none'; form-action 'none'" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-GKBfoUr+EmprbU+01Ml8Kee/CwkM9KQfqMCutLtX5Vg='; style-src 'sha256-NE5WAayE7jR6aDfoyfLQV/9HVxR47D+DI4A7WhHUK5Q='; font-src 'self'; connect-src https: http://localhost:* http://127.0.0.1:*; img-src data:; base-uri 'none'; form-action 'none'" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="dark light" />
 <title>crazzychat · Admin Console</title>
 <style>
   /* Self-hosted: no Google Fonts request carries the admin's IP. The files are
-     the app's own (assets/fonts/), deployed to fonts/ next to this page — see
-     admin/LOGS_DEPLOY.md. Only these five weights exist in the repo: Sora
-     500/600 render with the 700 face, and JetBrains Mono falls back to the
-     system monospace (--mono). Missing files fall back to sans-serif. */
+     deployed to fonts/ next to this page (admin/LOGS_DEPLOY.md): Sora and Nunito
+     Sans from the app's assets/fonts/, JetBrains Mono from an installed
+     dependency. These are every face the page uses: Sora only at 700/800
+     (headings, tabs, stats), Nunito Sans at 400/600/700, JetBrains Mono at 400
+     (its bold log labels are synthesised). A missing file falls back to the
+     next family in --head/--body/--mono. */
   @font-face{font-family:'Sora';font-weight:700;font-display:swap;src:url(fonts/Sora_700Bold.ttf) format('truetype')}
   @font-face{font-family:'Sora';font-weight:800;font-display:swap;src:url(fonts/Sora_800ExtraBold.ttf) format('truetype')}
   @font-face{font-family:'Nunito Sans';font-weight:400;font-display:swap;src:url(fonts/NunitoSans_400Regular.ttf) format('truetype')}
   @font-face{font-family:'Nunito Sans';font-weight:600;font-display:swap;src:url(fonts/NunitoSans_600SemiBold.ttf) format('truetype')}
   @font-face{font-family:'Nunito Sans';font-weight:700;font-display:swap;src:url(fonts/NunitoSans_700Bold.ttf) format('truetype')}
+  @font-face{font-family:'JetBrains Mono';font-weight:400;font-display:swap;src:url(fonts/JetBrainsMono_400Regular.ttf) format('truetype')}
   :root{
     --bg:#070B14; --panel:#0D1322; --panel2:#111A2E; --line:rgba(232,182,76,.14);
     --line2:rgba(255,255,255,.07); --gold:#E8B64C; --gold-dim:rgba(232,182,76,.12);

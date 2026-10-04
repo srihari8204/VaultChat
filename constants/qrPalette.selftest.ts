@@ -14,7 +14,7 @@ const r = contrastOn(QR_COLORS.color, QR_COLORS.backgroundColor);
 assert.ok(r >= 15, `QR module/ground contrast is ${r.toFixed(2)}:1; keep it near black on white`);
 assert.ok(contrastOn(QR_SCAN_OVERLAY.ink, QR_SCAN_OVERLAY.shadow) >= 15, 'the scanner hint and its shadow must be opposite ends');
 
-for (const f of ['app/qr-contact.tsx', 'app/verify-contact.tsx', 'app/invite-link.tsx']) {
+for (const f of ['app/qr-contact.tsx', 'app/verify-contact.tsx', 'app/invite-link.tsx', 'components/shopbook/reports.tsx']) {
   const src = readFileSync(join(__dirname, '..', f), 'utf8');
   for (const m of src.matchAll(/<QRCode\b[^>]*>/g)) {
     assert.ok(/\{\.\.\.QR_COLORS\}/.test(m[0]), `${f}: a <QRCode> does not take QR_COLORS`);

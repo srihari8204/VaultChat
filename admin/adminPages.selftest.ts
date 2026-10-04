@@ -8,9 +8,12 @@
 // 3. The pure helpers inside the pages behave: logs.html highlights against
 //    the raw text (a filter such as "lt" must not split &lt;), and
 //    shopbook.html's entitlement expiry check.
-// 4. A page whose style-src pins a hash instead of 'unsafe-inline' (index.html)
-//    pins its ONE <style> element, and carries no style="" attribute anywhere.
-// 5. shopbook.html asks for notes in inline forms: no prompt() is left.
+// 4. Every page's style-src pins a hash instead of 'unsafe-inline': its ONE
+//    <style> element, and no style="" attribute anywhere.
+// 5. shopbook.html asks for notes in inline forms: no prompt() is left; both
+//    forms save through one helper; an early Confirm says why it was ignored.
+// 6. logs.html and shopbook.html keep every stylesheet colour in :root tokens.
+// 7. index.html's @font-face files exist where LOGS_DEPLOY.md copies them from.
 //
 // Run: npx tsx admin/adminPages.selftest.ts
 import assert from 'node:assert/strict';
@@ -38,7 +41,8 @@ function inlineScript(page: string, html: string): string {
   assert.ok(!/<[a-z][^<>`]*\son[a-z]+\s*=/i.test(body), `${page}: on*= handler in a script template`);
   assert.ok(!/javascript:/i.test(live), `${page}: javascript: URL`);
   const styleSrc = /style-src ([^;"]*)/.exec(live);
-  if (styleSrc && !/unsafe-inline/.test(styleSrc[1])) {
+  assert.ok(styleSrc && !/unsafe-inline/.test(styleSrc[1]), `${page}: style-src must pin the stylesheet, not allow 'unsafe-inline'`);
+  {
     const styles = [...live.matchAll(/<style\b([^>]*)>([\s\S]*?)<\/style>/gi)];
     assert.equal(styles.length, 1, `${page}: expected exactly one <style> element`);
     const stylePins = [...styleSrc[1].matchAll(/'sha256-([^']+)'/g)].map((m) => m[1]);
@@ -101,7 +105,12 @@ for (const page of ['index.html', 'logs.html', 'shopbook.html']) scripts[page] =
   assert.ok(expiry('pro', '2027-02-30', today, false).error, 'an impossible date is refused');
   assert.ok(expiry('pro', '31/12/2026', today, false).error, 'only YYYY-MM-DD');
   assert.ok(!/\bprompt\(/.test(s.replace(/\/\/.*$/gm, '')), 'shopbook.html: notes use the inline form, not prompt()');
-  assert.ok(/CONFIRM_DELAY_MS\) return;/.test(s), 'shopbook.html: a Confirm right after Review is ignored');
+  assert.ok(/CONFIRM_DELAY_MS\) \{\s*errEl\.textContent = '[^']+';\s*return;\s*\}/.test(fnSource(s, 'submitEntitlement')),
+    'shopbook.html: a Confirm right after Review is ignored, with a cue in the form');
+  for (const fn of ['submitNote', 'submitEntitlement']) {
+    assert.ok(/await saveForm\(btn, errEl,/.test(fnSource(s, fn)), `shopbook.html: ${fn} saves through saveForm`);
+    assert.ok(!/btn\.disabled = true/.test(fnSource(s, fn)), `shopbook.html: ${fn} hand-rolls the busy state again`);
+  }
 }
 
 // ── logs.html: the status live region is written only when it changes ──
@@ -111,4 +120,23 @@ for (const page of ['index.html', 'logs.html', 'shopbook.html']) scripts[page] =
   assert.ok(!/(?<!window\[area\]\.)\b(localStorage|sessionStorage)\.(get|set|remove)Item/.test(s), 'logs.html: storage outside the guarded helpers');
 }
 
-console.log('adminPages selftest: 3 pages hash-pinned (index.html style too), no inline handlers or prompt(); log highlight, status and entitlement expiry OK');
+// ── stylesheet colours live in :root tokens (logs.html, shopbook.html) ──
+for (const page of ['logs.html', 'shopbook.html']) {
+  const css = /<style>([\s\S]*?)<\/style>/.exec(read(page))![1]
+    .replace(/\/\*[\s\S]*?\*\//g, '')           // comments may quote old values
+    .replace(/:root\s*\{[^}]*\}/g, '');            // the token blocks themselves
+  const stray = css.match(/#[0-9a-fA-F]{3,8}\b|rgba?\(/g);
+  assert.equal(stray, null, `${page}: colour literal outside :root (${stray}) — add a token`);
+}
+
+// ── index.html's fonts: every @font-face file is one the deploy can copy ──
+{
+  const deploy = read('LOGS_DEPLOY.md');
+  for (const [, file] of read('index.html').matchAll(/src:url\(fonts\/([^)]+)\)/g)) {
+    assert.ok(deploy.includes(file), `index.html: fonts/${file} is not in LOGS_DEPLOY.md's copy step`);
+    const from = [path.join(dir, '..', 'assets', 'fonts', file), path.join(dir, 'fonts', file)];
+    assert.ok(from.some((p) => fs.existsSync(p)), `index.html: fonts/${file} exists in neither assets/fonts nor admin/fonts`);
+  }
+}
+
+console.log('adminPages selftest: 3 pages script- and style-pinned, stylesheet colours tokenised, fonts present, no inline handlers or prompt(); log highlight, status and entitlement expiry OK');
