@@ -25,7 +25,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Sharing from 'expo-sharing';
 import {
-  addAttachment, deleteAttachment, isImage, openAttachment, type NoteAttachment,
+  addAttachment, deleteAttachment, isImage, listAttachmentIds, openAttachment, type NoteAttachment,
 } from '../lib/notesAttachments';
 import { useTheme } from '../lib/theme';
 import { Stack, useRouter } from 'expo-router';
@@ -97,6 +97,9 @@ export default function EncryptedNotesScreen() {
 
   // Editor state (components/notes/useNoteEditor).
   const ed = useNoteEditor();
+  // For the re-lock handler (registered once): it clears the fields too.
+  const edRef = useRef(ed);
+  edRef.current = ed;
   const [hideSensitive, setHideSensitive] = useState(true);
   const [attaching, setAttaching] = useState(false);
   const [viewerImg, setViewerImg] = useState<string | null>(null);
@@ -147,6 +150,12 @@ export default function EncryptedNotesScreen() {
       setLoadState('loading');
       setGate('pin');
       setShowEditor(false);
+      // The draft's plaintext must not stay in React state behind the gate:
+      // it was sealed above and is offered back after the next unlock.
+      edRef.current.load(emptyFields('personal'));
+      edRef.current.setPreview(false);
+      setEditNote(null);
+      edInitial.current = '';
       setShowTrash(false);
       setShowBackup(false);
       setShowPassGen(false);
@@ -165,16 +174,21 @@ export default function EncryptedNotesScreen() {
 
   // Takes the PIN as an argument: PinPad fires onComplete with the final digit
   // included, which the `pinTry` state does not hold yet on that same tick.
+  // Single flight: a double tap on ✓ must not send two server checks, which
+  // would count twice against the server's attempt limit.
+  const pinChecking = useRef(false);
   const submitPin = useCallback(async (pin?: string) => {
+    if (pinChecking.current) return;
     const v = pin ?? pinTry;
     if (!/^\d{4,8}$/.test(v)) { setPinErr('PIN must be 4–8 digits'); return; }
+    pinChecking.current = true;
     try {
       if (await verifyPin(v)) { setGate('open'); setPinTry(''); setPinErr(null); }
       else { setPinTry(''); setPinErr('Incorrect PIN'); }
     } catch (e) {
       // Server unreachable — stay locked rather than open on a network error.
       setPinTry(''); setPinErr(pinCheckError(e));
-    }
+    } finally { pinChecking.current = false; }
   }, [pinTry]);
 
   // WRITES ARE BLOCKED UNTIL THE STORE HAS BEEN READ (2026-10-04).
@@ -272,7 +286,14 @@ export default function EncryptedNotesScreen() {
     if (!raw) return;
     await AsyncStorage.removeItem(DRAFT_KEY).catch(() => {});
     const d = await openDraft(raw);
-    if (!d) return;
+    if (!d) {
+      // The draft cannot be opened (its key is gone), so the attachments only
+      // it pointed at can never be reached: delete every stored attachment no
+      // saved note (trash included) references. Nothing else is open now.
+      const used = new Set(list.flatMap(n => (n.attachments ?? []).map(a => a.id)));
+      for (const id of await listAttachmentIds()) if (!used.has(id)) await deleteAttachment(id);
+      return;
+    }
     const base = d.editId ? list.find(n => n.id === d.editId) ?? null : null;
     openWith(base, d, '');   // a restored draft is unsaved by definition
     Alert.alert('Unsaved note restored', 'You left the app while editing. Your changes were kept — save them or cancel to discard.');
@@ -315,9 +336,10 @@ export default function EncryptedNotesScreen() {
   // remember for the same vault.
   const submitLockPin = async (pin?: string) => {
     const note = pendingLock;
-    if (!note) return;
+    if (!note || pinChecking.current) return;
     const v = pin ?? lockTry;
     if (!/^\d{4,8}$/.test(v)) { setLockErr('PIN must be 4–8 digits'); return; }
+    pinChecking.current = true;
     try {
       if (await verifyPin(v)) {
         setPendingLock(null); setLockTry(''); setLockErr(null);
@@ -325,7 +347,7 @@ export default function EncryptedNotesScreen() {
       } else { setLockTry(''); setLockErr('Incorrect PIN'); }
     } catch (e) {
       setLockTry(''); setLockErr(pinCheckError(e));
-    }
+    } finally { pinChecking.current = false; }
   };
 
   const f = ed.fields;

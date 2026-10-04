@@ -122,7 +122,15 @@ export async function setSecure(enabled: boolean): Promise<boolean> {
   //
   // __DEV__ is false in every release build, so shipped builds are unchanged.
   if (__DEV__) return false;
+  const run = applySecure(enabled);
+  inFlight = run;
+  try { return await run; } finally { if (inFlight === run) inFlight = null; }
+}
 
+// The setSecure call still running, so a read can wait for its outcome.
+let inFlight: Promise<boolean> | null = null;
+
+async function applySecure(enabled: boolean): Promise<boolean> {
   let native = false;
   if (Native?.setSecure) {
     try { native = !!(await Native.setSecure(enabled)); } catch { native = false; }
@@ -160,6 +168,14 @@ export async function setSecure(enabled: boolean): Promise<boolean> {
 export function readSecureState(): boolean | 'unknown' {
   if (__DEV__ || Platform.OS !== 'android') return false;
   return lastApplied ?? 'unknown';
+}
+
+/** readSecureState, after any setSecure call still running has settled — so a
+ *  screen that loads while the root layout is applying the flag does not read
+ *  'unknown' just because the call had not finished. */
+export async function readSecureStateSettled(): Promise<boolean | 'unknown'> {
+  if (inFlight) await inFlight.catch(() => false);
+  return readSecureState();
 }
 
 /** For code that sets FLAG_SECURE without setSecure (VaultCalls.setWindowSecure),

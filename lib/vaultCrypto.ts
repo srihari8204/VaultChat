@@ -3,8 +3,9 @@
 // v1 (vaultEncrypt/vaultDecrypt): a key derived from a secret (PBKDF2-SHA256,
 // 100k iterations, constant salt) — still used by lib/cloudBackup, and still
 // read for Vault files added before v2. v2 (below): Vault files are sealed with
-// a random key wrapped under the Device PIN. v3 (end of file): new Vault files,
-// the same key, sealed in chunks so they stream from disk to disk. Pure-JS
+// a random key wrapped under the Device PIN. v3/v4 (end of file): new Vault
+// files, the same key, sealed in chunks so they stream from disk to disk, and
+// (v4) bound to their file id. Pure-JS
 // @noble primitives so it works under Hermes (unlike crypto.subtle);
 // Node-testable (vaultCrypto.selftest.ts).
 
@@ -180,51 +181,70 @@ export function vaultFileEncrypt(keys: VaultKeys | null, _pin: string, plaintext
   return { v: 2, iv: b64(iv), ct: b64(ct) };
 }
 
-/** Opens either format. Throws when no key this install holds can open it. */
-export function vaultFileDecrypt(keys: VaultKeys | null, pin: string, p: VaultFilePayload | VaultPayload): string {
+/** Opens either format. Throws when no key this install holds can open it.
+ *  `older` are archived keys an old PIN recovered (lib/vaultKeyStore): they
+ *  are tried after the current key, only for reading. */
+export function vaultFileDecrypt(keys: VaultKeys | null, pin: string, p: VaultFilePayload | VaultPayload, older: VaultKeys[] = []): string {
   const open = (key: Uint8Array) => new TextDecoder().decode(gcm(key, unb64(p.iv)).decrypt(unb64(p.ct)));
+  const ring = keys ? [keys, ...older] : older;
   if (p.v === 2) {
-    if (!keys) throw new Error('The vault key could not be opened with this PIN.');
-    return open(keys.dek);
+    if (!ring.length) throw new Error('The vault key could not be opened with this PIN.');
+    for (const k of ring) {
+      try { return open(k.dek); } catch { /* next */ }
+    }
+    throw new Error('This file was sealed with another vault key. If you used a different PIN before, try it with "Try an old PIN".');
   }
   // v1: sealed under whatever PIN was set when it was added. Lazy, so the
-  // second 100k-iteration derivation only runs when the first key misses.
-  const candidates: (() => Uint8Array)[] = [() => keyFromPin(pin)];
-  if (keys) candidates.unshift(() => keys.legacy);
+  // 100k-iteration derivation of the PIN just entered only runs when the
+  // carried legacy keys miss.
+  const candidates: (() => Uint8Array)[] = [...ring.map((k) => () => k.legacy), () => keyFromPin(pin)];
   for (const k of candidates) {
     try { return open(k()); } catch { /* next */ }
   }
   throw new Error('This file was added under an earlier PIN and cannot be opened with this one.');
 }
 
-// ─── v3: chunked, so a file is never held whole in memory (2026-10-04) ───────
+// ─── v3/v4: chunked, so a file is never held whole in memory (2026-10-04) ────
 //
 // v1/v2 seal one base64 string, so adding or opening a file held it in JS
 // memory several times over (base64, bytes, ciphertext, base64 again, JSON).
 // v3 seals the raw bytes in 1 MiB chunks under the same v2 DEK, so a caller can
 // stream from disk to disk holding one chunk at a time.
 //
-// Layout: 'VCV3' | nonce(8) | chunk_0 | … | chunk_{n-1}
-//   chunk_i = AES-256-GCM(dek, iv = nonce ‖ u32be(i | LAST), aad = header)(plain_i)
+// Layout: MAGIC | nonce(8) | chunk_0 | … | chunk_{n-1}
+//   chunk_i = AES-256-GCM(dek, iv = nonce ‖ u32be(i | LAST), aad)(plain_i)
+//   'VCV3' (round 4): aad = header
+//   'VCV4' (every file sealed from round 5 on): aad = header ‖ utf8(fileId),
+//     so a .enc file only opens under the manifest entry it was sealed for —
+//     swapping two files' bytes on disk makes both fail the tag check.
 // Every chunk but the last holds V3_CHUNK plaintext bytes; the last holds the
 // rest (possibly 0). The LAST bit in the IV marks the final chunk, so cutting
 // chunks off the end, reordering or splicing two files fails the tag check.
 // v1/v2 files are JSON (they start with '{'), so the magic tells them apart.
+// VCV3 files are only read, never written again.
 
 export const V3_MAGIC = new Uint8Array([0x56, 0x43, 0x56, 0x33]);   // 'VCV3'
+export const V4_MAGIC = new Uint8Array([0x56, 0x43, 0x56, 0x34]);   // 'VCV4'
 export const V3_HEADER_BYTES = 12;
 export const V3_CHUNK = 1 << 20;
 const V3_TAG = 16;
 const V3_LAST = 0x80000000;
 
-/** True when `b` (at least 4 bytes) starts a v3 file. */
+const startsWith = (b: Uint8Array, m: Uint8Array) => b.length >= m.length && m.every((x, i) => b[i] === x);
+
+/** True when `b` (at least 4 bytes) starts a chunked (v3 or v4) file. */
 export function isV3(b: Uint8Array): boolean {
-  return b.length >= 4 && V3_MAGIC.every((x, i) => b[i] === x);
+  return startsWith(b, V3_MAGIC) || startsWith(b, V4_MAGIC);
 }
 
 /** Chunks a `plainSize`-byte file is sealed in (an empty file is one empty chunk). */
 export function v3ChunkCount(plainSize: number): number {
   return Math.max(1, Math.ceil(plainSize / V3_CHUNK));
+}
+
+/** Size on disk of a chunked file holding `plainSize` bytes. */
+export function v3SealedSize(plainSize: number): number {
+  return V3_HEADER_BYTES + plainSize + V3_TAG * v3ChunkCount(plainSize);
 }
 
 /** Plaintext size of a `sealedSize`-byte v3 file; throws when no v3 file has that size. */
@@ -244,48 +264,90 @@ function v3Iv(header: Uint8Array, index: number, last: boolean): Uint8Array {
   return iv;
 }
 
+/** The AAD for a header: VCV3 binds only the header, VCV4 also the file id. */
+function v3Aad(header: Uint8Array, fileId: string): Uint8Array {
+  if (startsWith(header, V3_MAGIC)) return header;
+  if (!fileId) throw new Error('The vault file id is missing.');
+  const id = new TextEncoder().encode(fileId);
+  const aad = new Uint8Array(header.length + id.length);
+  aad.set(header, 0);
+  aad.set(id, header.length);
+  return aad;
+}
+
+/** Thrown when the caller cancelled a seal or open (no partial output is kept). */
+export class VaultCancelledError extends Error {
+  constructor() { super('Cancelled.'); this.name = 'VaultCancelledError'; }
+}
+
 type ReadFn = (n: number) => Uint8Array | Promise<Uint8Array>;
 type WriteFn = (b: Uint8Array) => void | Promise<void>;
+/** `onProgress(done, total)` after each chunk; `cancelled()` is checked before each one. */
+export interface V3StreamOptions { onProgress?: (done: number, total: number) => void; cancelled?: () => boolean }
 // Lets the UI breathe between chunks (the cipher is pure JS on the JS thread).
 const yieldToUi = () => new Promise<void>((r) => setTimeout(r, 0));
 
 /**
- * Seal `plainSize` bytes pulled from `read` into a v3 file pushed to `write`.
+ * Seal `plainSize` bytes pulled from `read` into a VCV4 file pushed to `write`,
+ * bound to `fileId` (the id the manifest will list it under).
  * `read(n)` must return exactly n bytes (fewer means the source changed under
  * us, and the seal fails rather than store a short file).
  */
-export async function v3SealStream(dek: Uint8Array, plainSize: number, read: ReadFn, write: WriteFn): Promise<void> {
+export async function v3SealStream(
+  dek: Uint8Array, plainSize: number, read: ReadFn, write: WriteFn, fileId: string, opts: V3StreamOptions = {},
+): Promise<void> {
   const header = new Uint8Array(V3_HEADER_BYTES);
-  header.set(V3_MAGIC, 0);
+  header.set(V4_MAGIC, 0);
   header.set(randomBytes(8), 4);
+  const aad = v3Aad(header, fileId);
   await write(header);
   const n = v3ChunkCount(plainSize);
   for (let i = 0; i < n; i++) {
+    if (opts.cancelled?.()) throw new VaultCancelledError();
     const last = i === n - 1;
     const want = last ? plainSize - i * V3_CHUNK : V3_CHUNK;
     const pt = await read(want);
     if (pt.length !== want) throw new Error('The file changed while it was being added. Try again.');
-    await write(gcm(dek, v3Iv(header, i, last), header).encrypt(pt));
+    await write(gcm(dek, v3Iv(header, i, last), aad).encrypt(pt));
+    opts.onProgress?.(i + 1, n);
     if (!last) await yieldToUi();
   }
 }
 
-/** Open a `sealedSize`-byte v3 file pulled from `read`, pushing plaintext to `write`.
- *  Throws (after writing only authenticated chunks) on any tampering or damage. */
-export async function v3OpenStream(dek: Uint8Array, sealedSize: number, read: ReadFn, write: WriteFn): Promise<void> {
+/**
+ * Open a `sealedSize`-byte v3/v4 file pulled from `read`, pushing plaintext to
+ * `write`. `deks` are tried in order on the first chunk (the current key, then
+ * archived ones), and the one that opens it is used for the rest. `fileId` must
+ * be the id a VCV4 file was sealed for. Throws (after writing only
+ * authenticated chunks) on any tampering or damage.
+ */
+export async function v3OpenStream(
+  deks: Uint8Array[], sealedSize: number, read: ReadFn, write: WriteFn, fileId: string, opts: V3StreamOptions = {},
+): Promise<void> {
   const plainSize = v3PlainSize(sealedSize);
   const header = await read(V3_HEADER_BYTES);
   if (header.length !== V3_HEADER_BYTES || !isV3(header)) throw new Error('Not a vault file');
+  const aad = v3Aad(header, fileId);
   const n = v3ChunkCount(plainSize);
+  let dek: Uint8Array | null = null;
   for (let i = 0; i < n; i++) {
+    if (opts.cancelled?.()) throw new VaultCancelledError();
     const last = i === n - 1;
     const len = (last ? plainSize - i * V3_CHUNK : V3_CHUNK) + V3_TAG;
     const ct = await read(len);
     if (ct.length !== len) throw new Error('This vault file is damaged (truncated).');
-    let pt: Uint8Array;
-    try { pt = gcm(dek, v3Iv(header, i, last), header).decrypt(ct); }
-    catch { throw new Error('This vault file could not be opened: it is damaged, or was sealed with another key.'); }
+    const iv = v3Iv(header, i, last);
+    let pt: Uint8Array | null = null;
+    for (const k of dek ? [dek] : deks) {
+      try { pt = gcm(k, iv, aad).decrypt(ct); dek = k; break; } catch { /* next key */ }
+    }
+    if (!pt) {
+      throw new Error(i === 0
+        ? 'This vault file could not be opened: it is damaged, was moved from another entry, or was sealed with another key.'
+        : 'This vault file is damaged and could not be opened.');
+    }
     await write(pt);
+    opts.onProgress?.(i + 1, n);
     if (!last) await yieldToUi();
   }
 }

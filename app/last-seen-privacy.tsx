@@ -56,21 +56,21 @@ export default function LastSeenPrivacyScreen() {
     setLoadError(null);
     getSettings()
       .then((v) => { if (!cancel) setSettings(v); })
-      .catch((e: any) => { if (!cancel) setLoadError(e?.message ?? 'Failed to load privacy settings.'); });
+      .catch((e: unknown) => { if (!cancel) setLoadError((e as Error | undefined)?.message ?? 'Failed to load privacy settings.'); });
     return () => { cancel = true; };
   }, [loadTick]);
 
   const toggle = async (key: PrivacyKey, value: boolean) => {
     if (!settings || busy) return;
-    setSettings({ ...settings, [key]: value });   // optimistic
+    setSettings((cur) => (cur ? { ...cur, [key]: value } : cur));   // optimistic, on the newest state
     setBusy(key);
     try {
       await updateSettings({ [key]: value });
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (!mounted.current) return;
       // Roll back only the key that failed.
       setSettings((cur) => (cur ? { ...cur, [key]: !value } : cur));
-      Alert.alert('Could not save', e?.message ?? 'Try again');
+      Alert.alert('Could not save', (e as Error | undefined)?.message ?? 'Try again');
     } finally {
       if (mounted.current) setBusy(null);
     }

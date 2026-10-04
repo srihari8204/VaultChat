@@ -34,7 +34,7 @@ import {
 import { useTheme } from '../lib/theme';
 import Svg, { Circle } from 'react-native-svg';
 import { getSettings, listTrustedContacts, listBlocks, type UserSettings } from '../lib/chatService';
-import { readSecureState } from '../lib/screenGuard';
+import { readSecureStateSettled } from '../lib/screenGuard';
 import { isMfaEnabled } from '../lib/mfa';
 import { hasPIN } from './(constants)/authService';
 import { E2EE_ENABLED } from '../constants/flags';
@@ -66,8 +66,10 @@ export default function PrivacyDashboardScreen() {
   const load = useCallback(async () => {
     const seq = ++loadSeq.current;
     setLoading(true);
-    const [bs, trusted, pin, mfa] = await Promise.allSettled([
+    const [bs, trusted, pin, mfa, secure] = await Promise.allSettled([
       getSettings(), listTrustedContacts(), hasPIN(), isMfaEnabled(),
+      // Waits for a setSecure call still in flight (the root layout's).
+      readSecureStateSettled(),
     ]);
     if (seq !== loadSeq.current) return;
     setLoading(false);
@@ -77,7 +79,7 @@ export default function PrivacyDashboardScreen() {
       // A read of what the guard last confirmed, not a platform guess and not a
       // setSecure(true) that would change the answer by asking: false in a dev
       // build, 'unknown' when no call was confirmed. iOS cannot block at all.
-      screenshotsBlocked: Platform.OS === 'android' ? readSecureState() : null,
+      screenshotsBlocked: Platform.OS === 'android' ? (secure.status === 'fulfilled' ? secure.value : 'unknown') : null,
       deviceMfa: factOf(mfa, (v) => !!v),
       pinSet: factOf(pin, (v) => !!v),
       trustedContacts: factOf(trusted, (v) => v.length > 0),

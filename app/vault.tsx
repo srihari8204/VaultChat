@@ -3,8 +3,10 @@
 // 4–8 digits — services/security/pinFormat).
 // Files are AES-256-GCM encrypted on this phone (lib/vaultCrypto: a random
 // file key wrapped under the PIN, so changing the PIN does not orphan files).
-// New files are v3, streamed in chunks from disk to disk
-// (components/vault/vaultFileIO); older v1/v2 files still open.
+// New files are v4, streamed in chunks from disk to disk and bound to their
+// file id (components/vault/vaultFileIO); older v1/v2/v3 files still open.
+// The key's data-loss rules (lost key, New key, Try an old PIN) are in
+// lib/vaultKeyStore; the notice and old-PIN sheet in components/vault/VaultKeyPanel.
 // Tabs: Documents / Photos / Voice / Videos
 // "Export file list" shares names/sizes/dates only — not the files, not encrypted.
 // There is no automatic or server backup of vault files.
@@ -16,9 +18,9 @@ import { AuroraBackground } from '../components/ui';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
-  View, TouchableOpacity, StyleSheet,
+  View, TouchableOpacity,
   FlatList, Alert, Vibration, ActivityIndicator,
-  Modal, AppState,
+  AppState,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
@@ -29,11 +31,14 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import { clearVaultKeyCache, type VaultKeys } from '../lib/vaultCrypto';
-import { replaceVaultKeys, unlockVaultKeys, type VaultKeyMiss } from '../lib/vaultKeyStore';
+import { clearVaultKeyCache, VaultCancelledError, type VaultKeys } from '../lib/vaultCrypto';
+import { replaceVaultKeys, tryOldVaultPin, unlockVaultKeys, type VaultKeyMiss, type VaultUnlock } from '../lib/vaultKeyStore';
 import { holdAppSwitcherBlur } from '../lib/screenGuard';
-import { openVaultFileTo, sealFileToVault } from '../components/vault/vaultFileIO';
-import type { Palette } from '../constants/theme';
+import { openVaultFileTo, scanVaultDir, sealFileToVault, sweepPartialSeals, type VaultDirScan } from '../components/vault/vaultFileIO';
+import { VaultKeyPanel } from '../components/vault/VaultKeyPanel';
+import { VaultExportSheet } from '../components/vault/VaultExportSheet';
+import { makePinStyles, makeStyles } from '../components/vault/vaultStyles';
+import { File as FsFile } from 'expo-file-system';
 import { useColors } from '../lib/theme';
 import { HEADER_TOP } from '../constants/layout';
 import { permissionDenied } from '../lib/permissionDenied';
@@ -76,6 +81,10 @@ const wipeOpenDir = () => FileSystem.deleteAsync(OPEN_DIR, { idempotent: true })
 /** A file name safe to use as a path segment. */
 const safeName = (name: string) => name.replace(/[/\\]/g, '_').replace(/^\.+/, '') || 'file';
 const MANIFEST_KEY = 'vault_manifest'; // SecureStore key for file list
+// The .enc file of an entry. Resolved against TODAY's vault folder by file
+// name: iOS can move the app's container on an update, so an absolute path
+// saved in the manifest may point at a folder that no longer exists.
+const encUriOf = (f: VaultFile) => VAULT_DIR + (f.encPath.split('/').pop() || `${f.id}.enc`);
 
 function formatSize(bytes: number): string {
   if (bytes < 1024)       return `${bytes} B`;
@@ -201,11 +210,17 @@ export default function VaultScreen() {
   const [unlocked,    setUnlocked]    = useState(false);
   const [vaultPin,    setVaultPin]    = useState('');
   // The file key. null when this PIN cannot open the key record (the PIN was
-  // reset somewhere that could not re-wrap it), or storage failed: older v1
-  // files still open via the PIN, and ADDING is off until the key is back —
-  // there is no weaker fallback format (lib/vaultCrypto, round 4).
+  // reset somewhere that could not re-wrap it), the record is damaged or lost,
+  // or storage failed: v1 files still open via the PIN, and ADDING is off until
+  // the key is back — there is no weaker fallback format (lib/vaultCrypto).
   const [vaultKeys,   setVaultKeys]   = useState<VaultKeys | null>(null);
   const [keyMiss,     setKeyMiss]     = useState<VaultKeyMiss | undefined>(undefined);
+  // Archived keys this PIN opens (read-only), and how many it does not.
+  const [olderKeys,   setOlderKeys]   = useState<VaultKeys[]>([]);
+  const [lockedArchives, setLockedArchives] = useState(0);
+  // What is on disk at unlock: unlisted files can be listed again, and the
+  // key-dependent count is what the "lost key" notice reports.
+  const [diskScan,    setDiskScan]    = useState<VaultDirScan | null>(null);
   const [activeTab,   setActiveTab]   = useState<VaultTab>('Documents');
   const [files,       setFiles]       = useState<VaultFile[]>([]);
   // Latest saved manifest, so an add or delete never builds on a stale render.
@@ -216,20 +231,48 @@ export default function VaultScreen() {
   const adding = useRef(false);
   const [loading,     setLoading]     = useState(false);
   const [loadingText, setLoadingText] = useState('Encrypting…');
+  // Chunk progress (0–1) of the running seal or open, and its cancel flag. A
+  // re-lock or leaving the screen cancels it: an open stops writing plaintext,
+  // a seal deletes its partial file and never reaches the manifest.
+  const [progress,    setProgress]    = useState<number | null>(null);
+  const op = useRef<{ cancelled: boolean } | null>(null);
+  const beginOp = () => {
+    const o = { cancelled: false };
+    op.current = o;
+    setProgress(0);
+    return {
+      cancelled: () => o.cancelled,
+      onProgress: (d: number, t: number) => { if (!o.cancelled) setProgress(d / t); },
+      o,
+    };
+  };
+  const cancelOp = () => { if (op.current) op.current.cancelled = true; };
   const [showBackup,  setShowBackup]  = useState(false);
   const [lastBackup,  setLastBackup]  = useState<string | null>(null);
 
   // Nothing decrypted outlives the screen, and the derived keys go with it.
   useEffect(() => {
     wipeOpenDir();
-    return () => { wipeOpenDir(); clearVaultKeyCache(); };
+    return () => { cancelOp(); wipeOpenDir(); clearVaultKeyCache(); };
   }, []);
 
   const unlock = async (pin: string) => {
-    let res: { keys: VaultKeys | null; miss?: VaultKeyMiss };
-    try { res = await unlockVaultKeys(pin); } catch { res = { keys: null, miss: 'storage' }; }
+    // A seal the OS killed left a .part file: nothing lists it, so delete it.
+    try { sweepPartialSeals(VAULT_DIR); } catch { /* next unlock tries again */ }
+    let scan: VaultDirScan | null = null;
+    try { scan = scanVaultDir(VAULT_DIR); } catch { /* unknown: never treated as empty */ }
+    let res: VaultUnlock;
+    try {
+      res = await unlockVaultKeys(pin, async () => {
+        if (!scan) throw new Error('The vault folder could not be read.');
+        return scan.keyed > 0;
+      });
+    } catch { res = { keys: null, miss: 'storage', older: [], lockedArchives: 0 }; }
+    setDiskScan(scan);
     setVaultKeys(res.keys);
     setKeyMiss(res.keys ? undefined : res.miss);
+    setOlderKeys(res.older);
+    setLockedArchives(res.lockedArchives);
     setVaultPin(pin);
     setUnlocked(true);
   };
@@ -255,11 +298,15 @@ export default function VaultScreen() {
     if (!unlocked) return;
     const sub = AppState.addEventListener('change', (st) => {
       if (st !== 'background' || systemUi.current > 0) return;
+      cancelOp();
       clearVaultKeyCache();
       wipeOpenDir();
       setVaultPin('');
       setVaultKeys(null);
       setKeyMiss(undefined);
+      setOlderKeys([]);
+      setLockedArchives(0);
+      setDiskScan(null);
       // filesRef is left alone: the next unlock re-reads the manifest, and an
       // empty ref here is what a save would build on.
       setFiles([]);
@@ -318,26 +365,69 @@ export default function VaultScreen() {
   };
 
   // The way out when the key record cannot be opened with this PIN (or is
-  // damaged): a fresh key, after the old record is archived — never deleted.
+  // damaged, or lost): a fresh key, after the old record is archived (never
+  // deleted, and listed so "Try an old PIN" can still open it).
   const startNewKey = () => {
     if (!vaultPin || keyBusy) return;
     Alert.alert(
       'Start a new vault key?',
-      'Files added with the old key stay in the list but still cannot be opened with this PIN. The old key is kept on this phone, not deleted. New files will use the new key.',
+      keyMiss === 'lost'
+        ? 'The old key is gone from this phone\'s secure storage, so the files that need it cannot be opened again. They stay in the vault folder. New files will use the new key.'
+        : keyMiss === 'damaged'
+          ? 'The damaged key is kept on this phone as it is, but it cannot open anything, so files added with it stay unopenable. New files will use the new key.'
+          : 'Files added with the current key stay unopenable with this PIN. The key is kept on this phone: if you later remember the PIN you used before, Try an old PIN opens those files again. New files will use the new key.',
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Start new key', style: 'destructive', onPress: async () => {
           setKeyBusy(true);
           try {
-            const keys = await replaceVaultKeys(vaultPin);
-            setVaultKeys(keys);
-            setKeyMiss(undefined);
+            await replaceVaultKeys(vaultPin);
+            await unlock(vaultPin);   // picks up the new key and the archive count
           } catch (e: any) {
             Alert.alert('No new key', `Nothing was changed. ${e?.message ?? 'Try again.'}`);
           } finally { setKeyBusy(false); }
         } },
       ],
     );
+  };
+
+  // "Try an old PIN": re-wraps every key the old PIN opens under this one,
+  // then unlocks again so their files open. Returns how many it opened.
+  const recoverWithOldPin = async (oldPin: string): Promise<number> => {
+    if (!vaultPin) return 0;
+    const n = await tryOldVaultPin(oldPin, vaultPin);
+    if (n > 0) {
+      await unlock(vaultPin);
+      Alert.alert('Old key opened', `${n === 1 ? 'An old vault key' : `${n} old vault keys`} now ${n === 1 ? 'opens' : 'open'} with your current PIN, so ${n === 1 ? 'its' : 'their'} files open again.`);
+    }
+    return n;
+  };
+
+  // .enc files in the folder that the list does not name: the list was lost
+  // with the key (both live in SecureStore), or the app stopped between
+  // sealing a file and listing it. They are offered back, never deleted.
+  const unlisted = useMemo(() => {
+    if (!diskScan || manifestState !== 'ok') return [];
+    const listed = new Set(files.map(f => encUriOf(f).split('/').pop()!.replace(/\.enc$/, '')));
+    return diskScan.ids.filter(id => !listed.has(id));
+  }, [diskScan, files, manifestState]);
+
+  const relistUnlisted = async () => {
+    const now = Date.now();
+    const entries: VaultFile[] = unlisted.map((id, i) => {
+      const f = new FsFile(VAULT_DIR + id + '.enc');
+      return {
+        // The size shown is the encrypted file's, a close stand-in for the original.
+        id, name: `Recovered file ${i + 1}`, size: f.size, type: 'Documents', encPath: VAULT_DIR + id + '.enc',
+        addedAt: f.modificationTime ?? now, mimeType: 'application/octet-stream',
+      };
+    });
+    try {
+      await saveManifest([...filesRef.current, ...entries]);
+      setActiveTab('Documents');
+    } catch (e) {
+      Alert.alert('Not listed', (e as Error)?.message ?? 'Try again.');
+    }
   };
 
   // ── File encryption + save ────────────────────────────────────
@@ -349,17 +439,22 @@ export default function VaultScreen() {
     type:     VaultTab,
   ): Promise<void> => {
     setLoading(true);
+    const run = beginOp();
     try {
       // 1–3. Seal it chunk by chunk under the vault key straight to disk
-      // (v3): the file is never held whole in memory, and without the key
-      // nothing is written (no weaker fallback).
+      // (v4, bound to fileId): the file is never held whole in memory, and
+      // without the key nothing is written (no weaker fallback).
       const fileId  = `vault_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const encPath = VAULT_DIR + fileId + '.enc';
-      const sealedBytes = await sealFileToVault(vaultKeys, uri, encPath);
+      const sealedBytes = await sealFileToVault(vaultKeys, uri, encPath, size, run);
+      if (run.o.cancelled) {
+        await FileSystem.deleteAsync(encPath, { idempotent: true }).catch(() => {});
+        return;
+      }
 
       // 4. Add to manifest
       const newFile: VaultFile = {
-        id: fileId, name, size: sealedBytes || size, type,
+        id: fileId, name, size: sealedBytes, type,
         encPath, addedAt: Date.now(), mimeType,
       };
       try {
@@ -371,8 +466,11 @@ export default function VaultScreen() {
 
       Alert.alert('Added to Vault', `${name} encrypted and stored.`);
     } catch (e: any) {
+      if (e instanceof VaultCancelledError || run.o.cancelled) return;   // nothing was kept
       Alert.alert('Not added', e?.message || 'The file could not be encrypted. Try again.');
     } finally {
+      if (op.current === run.o) op.current = null;
+      setProgress(null);
       setLoading(false);
     }
   };
@@ -443,13 +541,17 @@ export default function VaultScreen() {
   const handleOpen = async (file: VaultFile) => {
     setLoadingText('Decrypting…');
     setLoading(true);
+    const run = beginOp();
     let tempPath: string | null = null;
     try {
-      // 1–3. Decrypt to a temp copy (deleted below): v3 streams chunk by
-      // chunk, older v1/v2 files take the whole-file path.
+      // 1–3. Decrypt to a temp copy (deleted below): v3/v4 stream chunk by
+      // chunk, older v1/v2 files take the whole-file path. Archived keys an
+      // old PIN recovered are tried after the current one.
       await FileSystem.makeDirectoryAsync(OPEN_DIR, { intermediates: true }).catch(() => {});
       tempPath = OPEN_DIR + safeName(file.name);
-      await openVaultFileTo(vaultKeys, vaultPin, file.encPath, tempPath);
+      await openVaultFileTo(vaultKeys, olderKeys, vaultPin, encUriOf(file), tempPath, run);
+      // Re-locked (or left) while decrypting: never hand the copy to a share sheet.
+      if (run.o.cancelled) return;
 
       // 4. Share/open with system viewer
       const canShare = await Sharing.isAvailableAsync();
@@ -463,13 +565,17 @@ export default function VaultScreen() {
         Alert.alert('Cannot open', 'This device has no app to open the file with.');
       }
     } catch (e: any) {
-      Alert.alert('Could not open', e?.message || 'The file could not be decrypted.');
+      if (!(e instanceof VaultCancelledError) && !run.o.cancelled) {
+        Alert.alert('Could not open', e?.message || 'The file could not be decrypted.');
+      }
     } finally {
       // ponytail: deleted as soon as the share sheet returns. Android resolves
       // shareAsync once the chooser closes, which is after a viewer has read the
       // file in the cases checked; a target that reads lazily would lose it, and
       // then the copy must move to a longer-lived cleanup (mediaCacheGC).
       if (tempPath) await FileSystem.deleteAsync(tempPath, { idempotent: true }).catch(() => {});
+      if (op.current === run.o) op.current = null;
+      setProgress(null);
       setLoading(false);
       setLoadingText('Encrypting…');
     }
@@ -490,7 +596,9 @@ export default function VaultScreen() {
               // List first: if saving it fails, the file is still there and still
               // listed. The other order left an entry pointing at a deleted file.
               await saveManifest(filesRef.current.filter(f => f.id !== file.id));
-              await FileSystem.deleteAsync(file.encPath, { idempotent: true }).catch(() => {});
+              await FileSystem.deleteAsync(encUriOf(file), { idempotent: true }).catch(() => {});
+              const gone = encUriOf(file).split('/').pop()!.replace(/\.enc$/, '');
+              setDiskScan(d => d && { ...d, ids: d.ids.filter(id => id !== gone) });
             } catch (e: any) {
               Alert.alert('Not deleted', e?.message ?? 'The file could not be removed. Try again.');
             }
@@ -594,22 +702,30 @@ export default function VaultScreen() {
         </View>
       </View>
 
-      {!vaultKeys && (
-        <View style={styles.keyNoticeRow}>
-          <Text style={[styles.keyNotice, { flex: 1 }]} accessibilityLiveRegion="polite">
-            {keyMiss === 'storage'
-              ? 'This phone\'s secure storage could not be read, so the vault key did not load. Files may not open, and adding files is paused, until it does.'
-              : keyMiss === 'damaged'
-                ? 'The saved vault key is damaged, so files added with it cannot open. It has been left as it is. Adding files is paused until you start a new key.'
-                : 'This PIN cannot open the vault key from before your PIN was reset, so files added under the old PIN cannot open. Adding files is paused until you start a new key.'}
+      <VaultKeyPanel
+        hasKeys={!!vaultKeys}
+        miss={keyMiss}
+        lockedArchives={lockedArchives}
+        keyedOnDisk={diskScan?.keyed ?? 0}
+        busy={keyBusy}
+        onRetry={retryKeys}
+        onNewKey={startNewKey}
+        onTryOldPin={recoverWithOldPin}
+      />
+
+      {unlisted.length > 0 && !loading ? (
+        <View style={styles.unlistedRow}>
+          <Text style={[styles.unlistedText, { flex: 1 }]}>
+            {unlisted.length === 1 ? '1 encrypted file' : `${unlisted.length} encrypted files`} in the vault folder
+            {unlisted.length === 1 ? ' is' : ' are'} not in the list (the list may have been lost). Names and types were
+            in the list, so {unlisted.length === 1 ? 'it comes' : 'they come'} back as “Recovered file” under Documents.
           </Text>
-          <TouchableOpacity style={styles.keyRetryBtn} onPress={keyMiss === 'storage' ? retryKeys : startNewKey} disabled={keyBusy}
-            accessibilityRole="button" accessibilityState={{ disabled: keyBusy, busy: keyBusy }}
-            accessibilityLabel={keyMiss === 'storage' ? 'Try loading the vault key again' : 'Start a new vault key'}>
-            {keyBusy ? <ActivityIndicator color={c.primary} /> : <Text style={styles.keyRetryText}>{keyMiss === 'storage' ? 'Try again' : 'New key'}</Text>}
+          <TouchableOpacity style={styles.unlistedBtn} onPress={relistUnlisted} accessibilityRole="button"
+            accessibilityLabel={`List ${unlisted.length} recovered file${unlisted.length === 1 ? '' : 's'} again`}>
+            <Text style={styles.unlistedBtnText}>List again</Text>
           </TouchableOpacity>
         </View>
-      )}
+      ) : null}
 
       {/* Tabs */}
       <View style={styles.tabs}>
@@ -663,7 +779,15 @@ export default function VaultScreen() {
       ) : loading ? (
         <View style={styles.loadingWrap}>
           <ActivityIndicator color={c.primary} size="large" />
-          <Text style={styles.loadingText}>{loadingText}</Text>
+          <Text style={styles.loadingText} accessibilityLiveRegion="polite">
+            {progress !== null && progress > 0 ? `${loadingText} ${Math.round(progress * 100)}%` : loadingText}
+          </Text>
+          {progress !== null ? (
+            <TouchableOpacity style={styles.cancelOpBtn} onPress={cancelOp} accessibilityRole="button"
+              accessibilityLabel={loadingText.startsWith('Decrypt') ? 'Cancel opening' : 'Cancel adding'}>
+              <Text style={styles.cancelOpText}>Cancel</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       ) : (
         <FlatList
@@ -733,228 +857,15 @@ export default function VaultScreen() {
         <Ionicons name="add" size={28} color={c.onPrimary} />
       </TouchableOpacity>
 
-      {/* Backup modal */}
-      <Modal
+      <VaultExportSheet
         visible={showBackup}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowBackup(false)}
-      >
-        <View style={styles.modalOverlay}>
-          {/* Backdrop as a sibling of the panel so the sheet's buttons stay reachable by screen readers. */}
-          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowBackup(false)}
-            accessibilityRole="button" accessibilityLabel="Close" />
-          <View style={styles.backupPanel}>
-            <View style={styles.backupHandle} />
-            <Text style={styles.backupTitle}>Export file list</Text>
-            <Text style={styles.backupDesc}>
-              Shares a list of your {files.length} vault file names, sizes and
-              dates. The list is NOT encrypted and does not contain the files —
-              they stay encrypted on this phone only.
-            </Text>
-
-            <View style={styles.backupBtnRow}>
-              <TouchableOpacity
-                style={styles.backupCancelBtn}
-                onPress={() => setShowBackup(false)}
-                accessibilityRole="button"
-                accessibilityLabel="Cancel"
-              >
-                <Text style={styles.backupCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.backupConfirmBtn}
-                onPress={handleBackup}
-                disabled={loading || manifestState !== 'ok'}
-                accessibilityRole="button"
-                accessibilityLabel="Export file list"
-                accessibilityState={{ disabled: loading || manifestState !== 'ok', busy: loading }}
-              >
-                {loading
-                  ? <ActivityIndicator color={c.onPrimary} size="small" />
-                  : <Text style={styles.backupConfirmText}>Export</Text>
-                }
-              </TouchableOpacity>
-            </View>
-
-            {lastBackup && (
-              <Text style={styles.backupLastText}>
-                Last export: {lastBackup}
-              </Text>
-            )}
-
-            <Text style={styles.backupNote}>
-              Vault files are not backed up anywhere — not automatically, and not
-              with chat backup. Deleting the app deletes them.
-            </Text>
-          </View>
-        </View>
-      </Modal>
-
-      
+        onClose={() => setShowBackup(false)}
+        count={files.length}
+        busy={loading}
+        disabled={loading || manifestState !== 'ok'}
+        lastExport={lastBackup}
+        onExport={handleBackup}
+      />
     </View>
   );
 }
-
-// ─────────────────────────────────────────────────────────────────
-// Styles
-// ─────────────────────────────────────────────────────────────────
-
-const makePinStyles = (c: Palette) => StyleSheet.create({
-  container: {
-    flex: 1, backgroundColor: c.glassSoft,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  lockIcon:  { marginBottom: 12 },
-  title:     { fontSize: 26, fontWeight: 'bold', color: c.text, marginBottom: 4 },
-  sub:       { fontSize: 13, color: c.textDim, marginBottom: 24 },
-  error:     { color: c.danger, fontSize: 13, marginTop: 12, textAlign: 'center', paddingHorizontal: 24 },
-  note:      { marginTop: 28, color: c.textDim, fontSize: 11 },
-  setBtn:    { marginTop: 8, minHeight: 48, paddingHorizontal: 24, borderRadius: 12, backgroundColor: c.primary, justifyContent: 'center', alignItems: 'center' },
-  setBtnText:{ color: c.onPrimary, fontWeight: 'bold', fontSize: 15 },
-});
-
-const makeStyles = (c: Palette) => StyleSheet.create({
-  container:    { flex: 1, backgroundColor: c.bg },
-
-  // Header
-  header: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: c.bg,
-    paddingTop: HEADER_TOP, paddingBottom: 12, paddingHorizontal: 16,
-    borderBottomWidth: 0.5, borderBottomColor: c.glassStroke,
-    gap: 12,
-  },
-  backBtn:      { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginLeft: -8 },
-  headerCenter: { flex: 1 },
-  headerTitle:  { fontSize: 18, fontWeight: 'bold', color: c.text },
-  headerSub:    { fontSize: 12, color: c.primary, marginTop: 1 },
-  backupBtn: {
-    width: 44, height: 44, backgroundColor: c.glassSoft,
-    borderRadius: 9, borderWidth: 0.5, borderColor: c.glassStroke,
-    justifyContent: 'center', alignItems: 'center',
-  },
-
-  // Stats
-  statsBar: {
-    flexDirection: 'row', backgroundColor: c.bg,
-    paddingVertical: 12, paddingHorizontal: 20,
-    borderBottomWidth: 0.5, borderBottomColor: c.glassStroke,
-  },
-  statItem:    { flex: 1, alignItems: 'center' },
-  statNum:     { fontSize: 15, fontWeight: 'bold', color: c.text },
-  statLabel:   { fontSize: 12, color: c.textDim, marginTop: 2 },
-  statDivider: { width: 0.5, backgroundColor: c.surfaceSolid, marginVertical: 4 },
-
-  keyNotice: { color: c.danger, fontSize: 12, lineHeight: 17, paddingHorizontal: 16, paddingVertical: 8 },
-  keyNoticeRow: { flexDirection: 'row', alignItems: 'center', paddingRight: 12 },
-  keyRetryBtn: { minHeight: 44, paddingHorizontal: 14, borderRadius: 10, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glassSoft, justifyContent: 'center' },
-  keyRetryText: { color: c.primary, fontWeight: '700', fontSize: 13 },
-
-  // Tabs
-  tabs: {
-    flexDirection: 'row',
-    borderBottomWidth: 0.5, borderBottomColor: c.glassStroke,
-  },
-  tab: {
-    flex: 1, alignItems: 'center', paddingVertical: 10, gap: 3,
-  },
-  tabActive: {
-    borderBottomWidth: 2, borderBottomColor: c.primary,
-  },
-  tabText:       { fontSize: 12, color: c.textDim },
-  tabTextActive: { color: c.primary, fontWeight: 'bold' },
-  tabCount: {
-    borderRadius: 8, paddingHorizontal: 5, paddingVertical: 1, backgroundColor: c.glass,
-  },
-  tabCountText:  { fontSize: 12, fontWeight: 'bold', color: c.primary },
-
-  // Loading
-  loadingWrap: {
-    flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12,
-  },
-  loadingText: { fontSize: 13, color: c.textDim },
-
-  // List
-  listContent: { padding: 14, paddingBottom: 100, flexGrow: 1 },
-
-  // Empty
-  emptyWrap: {
-    flex: 1, alignItems: 'center', paddingTop: 64, gap: 10,
-  },
-  emptyTitle: { fontSize: 16, fontWeight: 'bold', color: c.textDim },
-  emptyHint:  { fontSize: 12, color: c.textDim, textAlign: 'center' },
-
-  // File row
-  fileRow: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: c.bg,
-    borderRadius: 12, padding: 12, marginBottom: 8,
-    borderWidth: 0.5, borderColor: c.glassStroke,
-  },
-  fileIcon: {
-    width: 44, height: 44, borderRadius: 10, backgroundColor: c.glassSoft,
-    justifyContent: 'center', alignItems: 'center', marginRight: 12,
-  },
-  fileInfo:      { flex: 1 },
-  fileName:      { fontSize: 14, fontWeight: 'bold', color: c.text, marginBottom: 3 },
-  fileMeta:      { fontSize: 12, color: c.textDim },
-  fileActions:   { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  encBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 3,
-    backgroundColor: c.glassSoft, borderRadius: 6,
-    borderWidth: 0.5, borderColor: c.primary,
-    paddingHorizontal: 6, paddingVertical: 2,
-  },
-  encBadgeText:  { fontSize: 12, color: c.primary, fontWeight: 'bold' },
-  deleteBtn:     { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-
-  // FAB
-  fab: {
-    position: 'absolute', right: 18, bottom: 74,
-    width: 54, height: 54, borderRadius: 27,
-    backgroundColor: c.primary,
-    justifyContent: 'center', alignItems: 'center',
-    elevation: 6,
-  },
-  fabDisabled: { opacity: 0.4 },
-  retryBtn: { minHeight: 44, paddingHorizontal: 24, borderRadius: 12, backgroundColor: c.primary, justifyContent: 'center', alignItems: 'center' },
-  retryText: { color: c.onPrimary, fontWeight: 'bold', fontSize: 15 },
-
-  // Backup modal
-  // Modal scrim: a translucent black dims whatever is behind in either theme.
-  modalOverlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.53)', justifyContent: 'flex-end',
-  },
-  backupPanel: {
-    backgroundColor: c.bg,
-    borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    padding: 20, paddingBottom: 36,
-  },
-  backupHandle: {
-    width: 40, height: 4, backgroundColor: c.surfaceSolid,
-    borderRadius: 2, alignSelf: 'center', marginBottom: 16,
-  },
-  backupTitle: {
-    fontSize: 17, fontWeight: 'bold', color: c.text,
-    textAlign: 'center', marginBottom: 8,
-  },
-  backupDesc: {
-    fontSize: 13, color: c.textDim, lineHeight: 20,
-    textAlign: 'center', marginBottom: 20,
-  },
-  backupBtnRow:  { flexDirection: 'row', gap: 10, marginBottom: 12 },
-  backupCancelBtn: {
-    flex: 1, backgroundColor: c.surfaceSolid,
-    borderRadius: 10, borderWidth: 0.5, borderColor: c.glassStroke,
-    paddingVertical: 13, alignItems: 'center',
-  },
-  backupCancelText:  { color: c.textDim, fontWeight: 'bold' },
-  backupConfirmBtn: {
-    flex: 1, backgroundColor: c.primary,
-    borderRadius: 10, paddingVertical: 13, alignItems: 'center',
-  },
-  backupConfirmText: { color: c.onPrimary, fontWeight: 'bold', fontSize: 15 },
-  backupLastText:    { fontSize: 12, color: c.textDim, textAlign: 'center' },
-  backupNote:        { fontSize: 12, color: c.text, textAlign: 'center', marginTop: 6 },
-});

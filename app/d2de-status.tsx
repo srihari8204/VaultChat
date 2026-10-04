@@ -1,14 +1,17 @@
 // app/d2de-status.tsx
 // Encryption status — which encryption layers THIS BUILD uses. It is a readout
 // of compile-time flags (services/d2deService.getD2DEStatus → E2EE_ENABLED), not
-// a live per-conversation check, and the copy says so.
+// a live per-conversation check, and the copy says so. With E2EE on, it links
+// to a chosen direct chat's safety number (app/verify-contact).
 
 import { AppText as Text, AuroraBackground } from '../components/ui';
-import React, { useMemo } from 'react';
-import { View, ScrollView, StyleSheet } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, View, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
+import { Sheet, type SheetAction } from '../components/ui/Sheet';
+import { listChats } from '../lib/chatService';
 import { getD2DEStatus } from '../services/d2deService';
 import { E2EE_ENABLED } from '../constants/flags';
 
@@ -32,8 +35,37 @@ function useS() {
 export default function D2DEStatusScreen() {
   const { colors } = useTheme();
   const s = useS();
+  const router = useRouter();
   const layers = getD2DEStatus();
   const active = layers.filter(l => l.active).length;
+
+  // Pick a direct chat, then compare its safety number (app/verify-contact
+  // needs a peer). Group chats have no single safety number.
+  const [peers, setPeers] = useState<SheetAction[] | null>(null);
+  const [loadingPeers, setLoadingPeers] = useState(false);
+  const pickContact = async () => {
+    if (loadingPeers) return;
+    setLoadingPeers(true);
+    try {
+      const chats = await listChats();
+      const seen = new Set<string>();
+      const actions: SheetAction[] = [];
+      for (const ch of chats) {
+        if (ch.type !== 'direct' || !ch.peerUserId || seen.has(ch.peerUserId)) continue;
+        seen.add(ch.peerUserId);
+        const peerId = ch.peerUserId;
+        const name = ch.peerName || 'this contact';
+        actions.push({ label: name, icon: 'person-outline', onPress: () => {
+          setPeers(null);
+          router.push({ pathname: '/verify-contact', params: { peerId, peerName: name } });
+        } });
+      }
+      if (actions.length) setPeers(actions);
+      else Alert.alert('No direct chats yet', 'A safety number belongs to a one-to-one chat. Start one, then check it here.');
+    } catch {
+      Alert.alert('Could not load your chats', 'Check your connection and try again.');
+    } finally { setLoadingPeers(false); }
+  };
 
   return (
     <>
@@ -87,10 +119,18 @@ export default function D2DEStatusScreen() {
               ? 'This lists what this version of the app is built to use. To check that a particular conversation is end-to-end encrypted with the right person, open the chat, tap their name, then tap the End-to-End Encrypted card, and compare the safety number with the one on their phone.'
               : 'This lists what this version of the app is built to use. End-to-end encryption is not switched on in this build, so there is no safety number to compare yet; messages are encrypted in transit.'}
           </Text>
+          {E2EE_ENABLED ? (
+            <TouchableOpacity style={s.checkBtn} onPress={pickContact} disabled={loadingPeers} accessibilityRole="button"
+              accessibilityLabel="Check a contact's safety number" accessibilityState={{ disabled: loadingPeers, busy: loadingPeers }}>
+              {loadingPeers ? <ActivityIndicator color={colors.primary} /> : <Text style={s.checkBtnTxt}>Check a contact’s safety number</Text>}
+            </TouchableOpacity>
+          ) : null}
         </View>
 
         <View style={{ height: 40 }} />
       </ScrollView>
+      {/* A sibling of the ScrollView: a Modal is never scroll content. */}
+      <Sheet visible={!!peers} title="Whose safety number?" actions={peers ?? []} onClose={() => setPeers(null)} />
       </View>
     </>
   );
@@ -114,4 +154,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   layerInfo:    { color: c.textDim, fontSize: 12, lineHeight: 18 },
   uniqueBox:    { backgroundColor: c.glass, margin: 16, borderRadius: 12, padding: 18, borderWidth: 1, borderColor: c.glassStroke },
   uniqueBody:   { color: c.textDim, fontSize: 13, lineHeight: 20 },
+  checkBtn:     { marginTop: 12, minHeight: 44, borderRadius: 10, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glassSoft, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14 },
+  checkBtnTxt:  { color: c.primary, fontWeight: '700', fontSize: 14 },
 });

@@ -98,17 +98,25 @@ export async function getSettings(): Promise<VBSettings> {
   return cached;
 }
 
-/** Applies `next` in memory at once; rejects if it could not be persisted, so
- *  the caller can say the choice will not survive a restart. */
-export async function saveSettings(next: VBSettings): Promise<void> {
+// Disk writes run one after another, in call order: each writes the whole
+// object, so overlapping writes finishing out of order could persist an older one.
+let writes: Promise<void> = Promise.resolve();
+
+/** Applies `next` in memory at once (synchronously, so the UI never waits on
+ *  an earlier write); rejects if it could not be persisted, so the caller can
+ *  say the choice will not survive a restart. */
+export function saveSettings(next: VBSettings): Promise<void> {
   cached = clamp(next);
   loaded = true;
   for (const cb of subs) { try { cb(); } catch {} }
-  await AsyncStorage.setItem(KEY, JSON.stringify(cached));
+  const json = JSON.stringify(cached);
+  const w = writes.then(() => AsyncStorage.setItem(KEY, json));
+  writes = w.catch(() => {});
+  return w;
 }
 
-export async function patchSettings(patch: Partial<VBSettings>): Promise<void> {
-  await saveSettings({ ...cached, ...patch });
+export function patchSettings(patch: Partial<VBSettings>): Promise<void> {
+  return saveSettings({ ...cached, ...patch });
 }
 
 export function useVBSettings(): VBSettings {

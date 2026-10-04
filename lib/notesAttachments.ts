@@ -63,6 +63,14 @@ export async function deleteAttachment(id: string): Promise<void> {
   try { await FileSystem.deleteAsync(DIR + id + '.enc', { idempotent: true }); } catch { /* ignore */ }
 }
 
+/** Ids of every stored attachment (names only, nothing is read or decrypted).
+ *  Throws when the folder exists but cannot be listed. */
+export async function listAttachmentIds(): Promise<string[]> {
+  const info = await FileSystem.getInfoAsync(DIR);
+  if (!info.exists) return [];
+  return (await FileSystem.readDirectoryAsync(DIR)).filter((n) => n.endsWith('.enc')).map((n) => n.slice(0, -4));
+}
+
 // ── Backup transfer (lib/notesVault) ────────────────────────────────────────
 // Attachments are already sealed on disk, so a backup moves the envelopes
 // verbatim. Decrypting to copy them would put every attachment in the clear in

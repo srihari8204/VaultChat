@@ -65,17 +65,29 @@ async function readBytes(uri: string): Promise<Uint8Array | null> {
  * uploads the media, which is the whole point for the content this feature
  * exists to handle.
  */
+/** Thrown by verifyMedia when `cancelled()` turned true between stages. */
+export class VaultCheckCancelled extends Error {
+  constructor() { super('Cancelled'); this.name = 'VaultCheckCancelled'; }
+}
+
 export async function verifyMedia(
   uri: string,
   kind: 'image' | 'video',
+  cancelled: () => boolean = () => false,
 ): Promise<VaultCheckReport> {
   const notChecked: string[] = [];
+  // ponytail: checked between stages only. A stage already running (the file
+  // read, the native frame sampling, the detector) finishes first; the later
+  // stages are skipped. Stopping mid-stage needs cancellable native calls.
+  const stop = () => { if (cancelled()) throw new VaultCheckCancelled(); };
 
   // ── C2PA ──
   let c2pa: C2paResult = {
     present: false, actions: [], binding: 'absent', signature: 'absent', issuer: 'unverified',
   };
+  stop();
   const bytes = await readBytes(uri);
+  stop();
   if (!bytes) {
     notChecked.push('Content Credentials (file could not be read)');
   } else if (kind === 'video') {
@@ -90,11 +102,13 @@ export async function verifyMedia(
   let rppg: RppgResult | undefined;
   if (kind === 'video') {
     if (!isRppgAvailable()) notChecked.push('Heartbeat analysis (not available in this build)');
-    else rppg = await analyseVideo(uri);
+    else { stop(); rppg = await analyseVideo(uri); }
   }
 
   // ── learned detector ──
+  stop();
   const detector = await runDetector(uri);
+  stop();
   if (!detector.available) notChecked.push('AI detection model (not bundled — see release notes)');
 
   // ── combine ──

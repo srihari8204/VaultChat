@@ -3,7 +3,7 @@
 // draft/discard rules stay in the screen; this renders the fields.
 
 import { Ionicons } from '@expo/vector-icons';
-import React from 'react';
+import React, { useEffect } from 'react';
 import { View, TouchableOpacity, TextInput, Modal, ScrollView, ActivityIndicator, Alert } from 'react-native';
 import Markdown from 'react-native-markdown-display';
 import { AppText as Text } from '../ui/Text';
@@ -33,7 +33,11 @@ export function NoteEditorModal({
   const { colors } = useTheme();
   const s = useNotesStyles();
   const f = ed.fields;
-  const picker = useDatePicker();
+  // inModal: on iOS the sheet is drawn inline over this Modal instead of as a
+  // second Modal, which can present behind the first (useDatePicker header).
+  const picker = useDatePicker(undefined, { inModal: true });
+  const closePicker = picker.close;
+  useEffect(() => { if (!visible) closePicker(); }, [visible, closePicker]);
 
   // Removing only detaches it from the draft; the encrypted file is deleted
   // when the note is SAVED without it. Deleting immediately meant Cancel left
@@ -186,10 +190,10 @@ export function NoteEditorModal({
             <Text style={s.edToggleTxt}>PIN Lock {f.locked ? '(ON)' : '(OFF)'}</Text>
           </TouchableOpacity>
 
-          {/* Reminder (feature #12) \u2014 armed as an OS alarm on save. The
+          {/* Reminder (feature #12) — armed as an OS alarm on save. The
               picker is the app's shared one (components/ui/useDatePicker):
-              Android's native dialogs, an inline sheet on iOS, where the
-              row used to say reminders were Android-only. */}
+              Android's native dialogs; on iOS an overlay drawn inside this
+              Modal (inModal), where the row used to say Android-only. */}
           <View style={s.edToggle}>
             <TouchableOpacity style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 }} onPress={pickReminder}
               accessibilityRole="button" accessibilityLabel={f.reminder ? `Reminder ${new Date(f.reminder).toLocaleString()}. Change` : 'Set a reminder'}>
@@ -219,9 +223,10 @@ export function NoteEditorModal({
         )}
       </ScrollView>
     </View>
-    {/* Inside the editor's Modal so the iOS sheet stacks above it (📱). */}
-    {picker.element}
     </KeyboardSafe>
+    {/* Last child of the editor's Modal: the iOS sheet is an absolute overlay
+        over the editor, not a nested Modal (📱 check on a device). */}
+    {picker.element}
     </Modal>
   );
 }

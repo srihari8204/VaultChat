@@ -24,11 +24,10 @@ export default function VaultBeamSettings() {
   // A failed write still applies for this session; say it will not survive a
   // restart, and offer to write it again.
   const [saveFailed, setSaveFailed] = React.useState(false);
-  // Writes go one after another: each writes the whole settings object, so two
-  // overlapping writes finishing out of order could persist the older one.
-  const queue = React.useRef<Promise<void>>(Promise.resolve());
+  // The change applies at once; lib/vaultBeamSettings writes to disk one
+  // write after another, in order, so the newest choice is the one kept.
   const save = (p: Partial<VBSettings>) => {
-    queue.current = queue.current.then(() => patchSettings(p)).then(() => setSaveFailed(false), () => setSaveFailed(true));
+    patchSettings(p).then(() => setSaveFailed(false), () => setSaveFailed(true));
   };
 
   const C = colors;

@@ -386,7 +386,9 @@ function ToggleRow({
       ) : (
         <Switch
           accessibilityLabel={title}
-          accessibilityHint={sub}
+          // While another switch saves, say why this one does not respond.
+          accessibilityHint={waiting ? `Unavailable while another setting saves. ${sub}` : sub}
+          accessibilityState={{ checked: value, disabled: waiting, busy: waiting }}
           value={value}
           onValueChange={onChange}
           disabled={waiting}

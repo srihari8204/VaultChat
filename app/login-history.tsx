@@ -97,8 +97,8 @@ export default function LoginHistoryScreen() {
             try {
               await revokeSession(row.id);
               if (mounted.current) setRows(prev => prev.filter(r => r.id !== row.id));
-            } catch (e: any) {
-              Alert.alert('Could not revoke', e?.message ?? 'Try again');
+            } catch (e: unknown) {
+              if (mounted.current) Alert.alert('Could not revoke', (e as Error | undefined)?.message ?? 'Try again');
             } finally {
               if (mounted.current) setRevoking(false);
             }
@@ -122,8 +122,8 @@ export default function LoginHistoryScreen() {
               if (!mounted.current) return;
               Alert.alert('Done', `${r.revoked} ${r.revoked === 1 ? 'device' : 'devices'} signed out.`);
               await fetchAll();
-            } catch (e: any) {
-              Alert.alert('Failed', e?.message ?? 'Try again');
+            } catch (e: unknown) {
+              if (mounted.current) Alert.alert('Failed', (e as Error | undefined)?.message ?? 'Try again');
             } finally {
               if (mounted.current) setRevoking(false);
             }

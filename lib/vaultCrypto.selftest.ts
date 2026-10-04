@@ -7,7 +7,11 @@
 //   • v2 files survive a PIN change because only the wrap is redone,
 //   • a wrong PIN opens nothing, and a damaged record opens nothing,
 //   • without keys, a new file is refused (never sealed in the weaker v1),
-//   • v3 (chunked) round-trips every size and rejects tampering/truncation.
+//   • v3/v4 (chunked) round-trip every size and reject tampering/truncation,
+//   • v4 binds the file id (two .enc files cannot be swapped), and v3 files
+//     written before that still open,
+//   • archived keys ("Try an old PIN") open v1, v2 and v4 files read-only,
+//   • a seal or open can report progress and be cancelled.
 
 import assert from 'node:assert/strict';
 
@@ -23,8 +27,10 @@ Module._load = function (request: string, ...rest: any[]) {
 const {
   vaultEncrypt, vaultDecrypt, newVaultKeys, sealVaultKeys, openVaultKeys,
   vaultFileEncrypt, vaultFileDecrypt, clearVaultKeyCache, VaultKeyMissingError,
-  v3SealStream, v3OpenStream, v3PlainSize, v3ChunkCount, isV3, V3_CHUNK, V3_HEADER_BYTES,
+  v3SealStream, v3OpenStream, v3PlainSize, v3ChunkCount, v3SealedSize, isV3, V3_CHUNK, V3_HEADER_BYTES,
+  V3_MAGIC, VaultCancelledError,
 } = require('./vaultCrypto') as typeof import('./vaultCrypto');
+const { gcm } = require('@noble/ciphers/aes.js') as typeof import('@noble/ciphers/aes.js');
 
 const OLD = '123456';
 const NEW = '9081';
@@ -81,15 +87,30 @@ function sink() {
     bytes: () => { const out = new Uint8Array(parts.reduce((a, p) => a + p.length, 0)); let o = 0; for (const p of parts) { out.set(p, o); o += p.length; } return out; },
   };
 }
-async function seal(dek: Uint8Array, plain: Uint8Array) {
+const ID = 'vault_1700000000000_abc123';
+async function seal(dek: Uint8Array, plain: Uint8Array, id = ID) {
   const out = sink();
-  await v3SealStream(dek, plain.length, source(plain), out.write);
+  await v3SealStream(dek, plain.length, source(plain), out.write, id);
   return out.bytes();
 }
-async function open(dek: Uint8Array, sealed: Uint8Array) {
+async function open(dek: Uint8Array | Uint8Array[], sealed: Uint8Array, id = ID) {
   const out = sink();
-  await v3OpenStream(dek, sealed.length, source(sealed), out.write);
+  await v3OpenStream(Array.isArray(dek) ? dek : [dek], sealed.length, source(sealed), out.write, id);
   return out.bytes();
+}
+// A round-4 'VCV3' file (aad = header only), built by hand the way round 4 wrote it.
+function sealV3Legacy(dek: Uint8Array, plain: Uint8Array) {
+  assert.ok(plain.length <= V3_CHUNK, 'one-chunk helper');
+  const header = new Uint8Array(V3_HEADER_BYTES);
+  header.set(V3_MAGIC, 0);
+  header.set([1, 2, 3, 4, 5, 6, 7, 8], 4);
+  const iv = new Uint8Array(12);
+  iv.set(header.subarray(4, 12), 0);
+  new DataView(iv.buffer).setUint32(8, 0x80000000);
+  const ct = gcm(dek, iv, header).encrypt(plain);
+  const out = new Uint8Array(header.length + ct.length);
+  out.set(header, 0); out.set(ct, header.length);
+  return out;
 }
 
 (async () => {
@@ -101,6 +122,8 @@ async function open(dek: Uint8Array, sealed: Uint8Array) {
     const sealed = await seal(dek, plain);
     assert.ok(isV3(sealed), `v3 magic (${n} bytes)`);
     assert.equal(sealed.length, V3_HEADER_BYTES + n + 16 * v3ChunkCount(n), `sealed size (${n} bytes)`);
+    assert.equal(v3SealedSize(n), sealed.length, `v3SealedSize (${n} bytes)`);
+    assert.equal(new TextDecoder().decode(sealed.subarray(0, 4)), 'VCV4', 'new files are v4 (id-bound)');
     assert.equal(v3PlainSize(sealed.length), n, `plain size from sealed size (${n} bytes)`);
     assert.deepEqual(await open(dek, sealed), plain, `round trip (${n} bytes)`);
   }
@@ -112,13 +135,54 @@ async function open(dek: Uint8Array, sealed: Uint8Array) {
   const flipped = sealed.slice(); flipped[V3_HEADER_BYTES + 5] ^= 1;
   await assert.rejects(open(dek, flipped), /could not be opened/);
   const noTail = sealed.slice(0, V3_HEADER_BYTES + 2 * (V3_CHUNK + 16));
-  await assert.rejects(open(dek, noTail), /could not be opened/, 'truncating at a chunk boundary is caught by the LAST flag');
+  await assert.rejects(open(dek, noTail), /damaged/, 'truncating at a chunk boundary is caught by the LAST flag');
   const spliced = new Uint8Array(sealed.length - (V3_CHUNK + 16));
   spliced.set(sealed.subarray(0, V3_HEADER_BYTES + V3_CHUNK + 16), 0);
   spliced.set(sealed.subarray(V3_HEADER_BYTES + 2 * (V3_CHUNK + 16)), V3_HEADER_BYTES + V3_CHUNK + 16);
-  await assert.rejects(open(dek, spliced), /could not be opened/);
+  await assert.rejects(open(dek, spliced), /damaged/);
   // A source that runs short is refused, never sealed as a shorter file.
-  await assert.rejects(v3SealStream(dek, 100, source(new Uint8Array(50)), () => {}), /changed/);
+  await assert.rejects(v3SealStream(dek, 100, source(new Uint8Array(50)), () => {}, ID), /changed/);
+
+  // v4 binds the file id: the bytes of one entry's file do not open under another
+  // entry's id (two .enc files swapped on disk both fail), and an id is required.
+  const a = await seal(dek, new Uint8Array([1, 2, 3]), 'vault_a');
+  await assert.rejects(open(dek, a, 'vault_b'), /could not be opened/, 'swapped files are refused');
+  assert.deepEqual(await open(dek, a, 'vault_a'), new Uint8Array([1, 2, 3]));
+  await assert.rejects(v3SealStream(dek, 1, source(new Uint8Array(1)), () => {}, ''), /id is missing/);
+  // Round-4 VCV3 files (no id in the AAD) still open, under any entry id.
+  const legacy = sealV3Legacy(dek, new Uint8Array([4, 5, 6]));
+  assert.ok(isV3(legacy));
+  assert.deepEqual(await open(dek, legacy, 'whatever'), new Uint8Array([4, 5, 6]), 'VCV3 still opens');
+  const legacyFlip = legacy.slice(); legacyFlip[V3_HEADER_BYTES] ^= 1;
+  await assert.rejects(open(dek, legacyFlip), /could not be opened/);
+
+  // Archived keys: after "New key", files sealed under the old key open once an
+  // old PIN has recovered that key — tried after the current key, all formats.
+  const newer = newVaultKeys(NEW);
+  const oldFile = await seal(dek, new Uint8Array([7, 7, 7]));
+  await assert.rejects(open(newer.dek, oldFile), /sealed with another key/);
+  assert.deepEqual(await open([newer.dek, dek], oldFile), new Uint8Array([7, 7, 7]), 'v4 opens with an archived key');
+  const twoChunk = await seal(dek, new Uint8Array(V3_CHUNK + 5).fill(3));
+  assert.equal((await open([newer.dek, dek], twoChunk)).length, V3_CHUNK + 5, 'the matching key is kept for later chunks');
+  assert.throws(() => vaultFileDecrypt(newer, NEW, v2), /another vault key/);
+  assert.equal(vaultFileDecrypt(newer, NEW, v2, [opened!]), 'new-bytes', 'v2 opens with an archived key');
+  assert.equal(vaultFileDecrypt(null, '0000', v1, [opened!]), 'legacy-bytes', 'v1 opens with an archived legacy key');
+
+  // Progress and cancel.
+  const seen: string[] = [];
+  const out2 = sink();
+  await v3SealStream(dek, 2 * V3_CHUNK + 1, source(new Uint8Array(2 * V3_CHUNK + 1)), out2.write, ID, { onProgress: (d, t) => seen.push(`${d}/${t}`) });
+  assert.deepEqual(seen, ['1/3', '2/3', '3/3']);
+  let calls = 0;
+  await assert.rejects(
+    v3SealStream(dek, 2 * V3_CHUNK, source(new Uint8Array(2 * V3_CHUNK)), () => {}, ID, { cancelled: () => ++calls > 1 }),
+    (e: any) => e instanceof VaultCancelledError,
+  );
+  const sealed2 = out2.bytes();
+  await assert.rejects(
+    v3OpenStream([dek], sealed2.length, source(sealed2), () => {}, ID, { cancelled: () => true }),
+    (e: any) => e instanceof VaultCancelledError,
+  );
   // v1/v2 files are JSON, never mistaken for v3.
   assert.equal(isV3(new TextEncoder().encode(JSON.stringify(v2))), false);
 

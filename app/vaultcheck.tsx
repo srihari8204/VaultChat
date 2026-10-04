@@ -13,7 +13,7 @@ import { AppText as Text } from '../components/ui/Text';
 import { AuroraBackground } from '../components/ui';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity, Share, Alert,
+  View, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity, Share, Alert, AccessibilityInfo,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams } from 'expo-router';
@@ -46,10 +46,17 @@ export default function VaultCheckScreen() {
   const [error, setError] = useState<string>('');
   const [attempt, setAttempt] = useState(0);
   const [elapsed, setElapsed] = useState(0);
-  // verifyMedia cannot be cancelled, so a timeout only stops WAITING. The
-  // running analysis is kept here and Try again waits on it again instead of
-  // starting a second one alongside it.
+  // A timeout only stops WAITING: the running analysis is kept here and Try
+  // again waits on it again instead of starting a second one alongside it.
+  // Leaving the screen cancels it (between stages — lib/vaultcheck).
   const inflight = useRef<{ key: string; p: Promise<VaultCheckReport> } | null>(null);
+  const left = useRef(false);
+  useEffect(() => () => { left.current = true; }, []);
+  // Screen readers get one progress update on a long check (the elapsed
+  // counter is deliberately not a live region).
+  useEffect(() => {
+    if (elapsed === 30) AccessibilityInfo.announceForAccessibility('Still checking. This can take a minute or two.');
+  }, [elapsed]);
 
   useEffect(() => {
     let cancelled = false;
@@ -75,7 +82,7 @@ export default function VaultCheckScreen() {
         const key = `${local}|${kind}`;
         let run = inflight.current?.key === key ? inflight.current.p : null;
         if (!run) {
-          const p = verifyMedia(local, kind);
+          const p = verifyMedia(local, kind, () => left.current);
           inflight.current = { key, p };
           p.catch(() => {}).finally(() => { if (inflight.current?.p === p) inflight.current = null; });
           run = p;

@@ -21,7 +21,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import {
   View, TouchableOpacity, StyleSheet,
   ScrollView, Alert, ActivityIndicator,
-  Modal, Share,
+  Modal, Share, type StyleProp, type TextStyle,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
@@ -67,6 +67,33 @@ const DEFAULT_SETTINGS: VaultSettings = {
 const CODE_KEY = 'vault_chat_code';
 const CODE_EXPIRY_KEY = 'vault_chat_code_expiry';
 
+/** Whole minutes left before `expiry`, at least 1 (for spoken and shared copy). */
+function minutesLeft(expiry: string, now: number): number {
+  return Math.max(1, Math.ceil((new Date(expiry).getTime() - now) / 60000));
+}
+
+/** The code's countdown line. It ticks each second on its own, so the rest
+ *  of the screen does not re-render, and calls `onExpired` at zero. */
+function CodeCountdown({ expiry, onExpired, style }: { expiry: string; onExpired: () => void; style: StyleProp<TextStyle> }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [expiry]);
+  const left = remaining(expiry, now);
+  useEffect(() => { if (!left) onExpired(); }, [left, onExpired]);
+  if (!left) return null;
+  const mins = minutesLeft(expiry, now);
+  // The visible text is the clock; the spoken label is the minute, so a
+  // screen reader is not read a new number every second.
+  return (
+    <Text style={style} accessibilityLabel={`Expires in about ${mins} minute${mins === 1 ? '' : 's'}`}>
+      Expires in {left}
+    </Text>
+  );
+}
+
 /** "4:59" for the time left before `expiry`, or null once it has passed. */
 function remaining(expiry: string, now: number): string | null {
   const ms = new Date(expiry).getTime() - now;
@@ -98,7 +125,6 @@ export default function VaultFeaturesScreen() {
   const [generatingCode,setGeneratingCode]= useState(false);
   const [revoking,      setRevoking]      = useState(false);
   const [codeCopied,    setCodeCopied]    = useState(false);
-  const [now,           setNow]           = useState(() => Date.now());
 
   // Lock timer picker modal
   const [showLock,      setShowLock]      = useState(false);
@@ -149,18 +175,8 @@ export default function VaultFeaturesScreen() {
   }, [clearLocalCode]);
   useEffect(() => { loadSettings(); }, [loadSettings]);
 
-  // ── Countdown: tick each second while a code is shown, clear it at zero ──
-  useEffect(() => {
-    if (!codeExpiry) return;
-    setNow(Date.now());
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [codeExpiry]);
-  const left = codeExpiry ? remaining(codeExpiry, now) : null;
-  const leftMins = codeExpiry ? Math.max(1, Math.ceil((new Date(codeExpiry).getTime() - now) / 60000)) : 0;
-  useEffect(() => {
-    if (codeExpiry && !left) clearLocalCode();
-  }, [codeExpiry, left, clearLocalCode]);
+  // The per-second countdown lives in <CodeCountdown>, so only that line
+  // re-renders each second; it clears the code when it reaches zero.
 
   const saveSetting = async <K extends keyof VaultSettings>(key: K, value: VaultSettings[K]) => {
     const prev = settings;
@@ -213,7 +229,7 @@ export default function VaultFeaturesScreen() {
 
   const handleShareCode = async () => {
     if (!chatCode) return;
-    const mins = leftMins;
+    const mins = codeExpiry ? minutesLeft(codeExpiry, Date.now()) : 0;
     try {
       await Share.share({
         message: `Join me on crazzychat — use this secure invite code:\n\n${chatCode}\n\nExpires in ${mins} minute${mins === 1 ? '' : 's'}. Enter it under Add Contact → Enter Their Code.`,
@@ -294,14 +310,10 @@ export default function VaultFeaturesScreen() {
                it with a 410. */
             desc="Single-use invite code — expires in 5 minutes" />
 
-          {chatCode && left ? (
+          {chatCode && codeExpiry ? (
             <View style={styles.codeCard}>
               <Text style={styles.codeValue} selectable accessibilityLabel={`Invite code ${chatCode.split('').join(' ')}`}>{chatCode}</Text>
-              {/* The visible text is the clock; the spoken label is the minute,
-                  so a screen reader is not read a new number every second. */}
-              <Text style={styles.codeExpiry} accessibilityLabel={`Expires in about ${leftMins} minute${leftMins === 1 ? '' : 's'}`}>
-                Expires in {left}
-              </Text>
+              <CodeCountdown expiry={codeExpiry} onExpired={clearLocalCode} style={styles.codeExpiry} />
               <View style={styles.codeActions}>
                 <CodeButton icon={codeCopied ? 'checkmark' : 'copy-outline'} label={codeCopied ? 'Copied' : 'Copy'}
                   a11yLabel={codeCopied ? 'Copied' : 'Copy invite code'} onPress={handleCopyCode}

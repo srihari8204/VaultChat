@@ -192,6 +192,15 @@ export default function StatusPrivacyScreen() {
                   </View>
                 </TouchableOpacity>
               ))}
+              {/* The server's "contacts" is everyone sharing an active chat, groups
+                  included (backend stories.go audienceIDs); this list only has
+                  direct-chat peers, so say what that means for the rest. */}
+              {mode !== 'contacts' && (
+                <Text style={[S.modeSub, { marginHorizontal: 16, marginTop: 4 }]}>
+                  Only people you have a direct chat with are listed. People you share only a group with
+                  {mode === 'except' ? ' cannot be excluded here and still see your status.' : ' cannot be picked here, so they do not see it.'}
+                </Text>
+              )}
               {mode !== 'contacts' && (
                 <Text style={S.sectionLabel}>
                   {mode === 'except' ? 'EXCLUDED' : 'SHARED WITH'} · {selected.size}
@@ -243,7 +252,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
-  hBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  hBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   hTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
   savingTag: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: 6 },
   modeRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 14, paddingVertical: 14, borderRadius: 16, backgroundColor: c.glass, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
