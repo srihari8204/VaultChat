@@ -14,6 +14,12 @@ import { useVisionComfort } from '../../lib/visionComfort';
 import { type Palette, ELEVATION, brandAlpha } from '../../constants/theme';
 import { type Message } from '../../lib/chatService';
 import { chatCardMax } from '../../constants/layoutMath';
+import { tint } from '../../lib/tintColor';
+
+// Amber for "heads up" banners (screenshot, security-code change, Vanish Mode).
+// Palette has no warning role yet, so the TINT stays fixed; the text on it uses
+// the theme's own ink so it reads in both themes.
+const WARN = '#F59E0B';
 
 // Optimistic bubbles carry a few extra fields beyond a server Message.
 export type DisplayMessage = Message & {
@@ -53,6 +59,7 @@ export type DisplayMessage = Message & {
  */
 export type ChatMetrics = { topInset: number; bottomInset: number; narrow: boolean; cardMax: number };
 
+let shared: { key: unknown[]; sheet: ReturnType<typeof makeStyles> } | null = null;
 export function useS() {
   const { colors } = useTheme();
   const { metrics, profile } = useVisionComfort();
@@ -71,10 +78,18 @@ export function useS() {
     // outside the bubble (2026-09-17; gutter and video corrected 2026-09-18).
     cardMax: chatCardMax(width),
   };
-  return useMemo(
-    () => makeStyles(colors, m, metrics, profile.highContrast),
-    [colors, m.topInset, m.bottomInset, m.narrow, m.cardMax, metrics, profile.highContrast],
-  );
+  return useMemo(() => {
+    // ONE sheet for every caller with the same inputs. Each bubble (and each
+    // poll/file/audio card inside it) calls this hook, and a per-instance memo
+    // rebuilt the whole stylesheet for every row that mounted.
+    const key = [colors, m.topInset, m.bottomInset, m.narrow, m.cardMax, metrics, profile.highContrast];
+    if (shared && shared.key.every((k, i) => k === key[i])) return shared.sheet;
+    const sheet = makeStyles(colors, m, metrics, profile.highContrast);
+    shared = { key, sheet };
+    return sheet;
+  // m is rebuilt every render; its four fields are the real inputs.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [colors, m.topInset, m.bottomInset, m.narrow, m.cardMax, metrics, profile.highContrast]);
 }
 
 // Pick black or white text for legibility on an arbitrary bubble color.
@@ -156,7 +171,7 @@ export const makeStyles = (
   headerAvatar:      { width: m.narrow ? 32 : 36, height: m.narrow ? 32 : 36, borderRadius: m.narrow ? 16 : 18, backgroundColor: c.groundDisc, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   headerAvatarImg:   { width: '100%', height: '100%' },
   headerAvatarTxt:   { color: '#fff', fontWeight: '700', fontSize: 15 },
-  headerPresenceDot: { position: 'absolute', right: -1, bottom: -1, width: 10, height: 10, borderRadius: 5, backgroundColor: '#22C55E', borderWidth: 2, borderColor: c.bg },
+  headerPresenceDot: { position: 'absolute', right: -1, bottom: -1, width: 10, height: 10, borderRadius: 5, backgroundColor: c.online, borderWidth: 2, borderColor: c.bg },
 
   // Day 13 — in-chat search
   inChatSearchBar:    { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: c.surfaceSolid, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
@@ -172,35 +187,40 @@ export const makeStyles = (
   // shift when the presence line changes.
   title:         { color: c.text, fontSize: 17 * v.textScale, lineHeight: Math.ceil(20 * v.textScale * v.lineScale), fontWeight: v.bold ? '700' : '600' },
   sub:           { color: c.accentLight, fontSize: 12 * v.textScale, lineHeight: Math.ceil(16 * v.textScale * v.lineScale) },
-  e2eBadge:      { color: '#22C55E', fontSize: 11, fontWeight: '600' },
+  e2eBadge:      { color: c.success, fontSize: 11, fontWeight: '600' },
   // Self-destruct countdown for a chat opened by a 1h/3h code (migration 120).
   // Sits directly under the header subtitle; goes red under ten minutes.
   expiryRow:     { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
   expiryTxt:     { color: c.textDim, fontSize: 11, fontWeight: '700' },
 
-  errorBar:      { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.4)', borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 10 },
+  errorBar:      { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: tint(c.danger, 0.12), borderColor: tint(c.danger, 0.4), borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 10 },
   errorTxt:      { color: c.danger, fontSize: 12 },
-  screenshotBanner:    { backgroundColor: 'rgba(252,211,77,0.14)', borderColor: 'rgba(252,211,77,0.5)', borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 10 },
+  screenshotBanner:    { backgroundColor: tint(WARN, 0.14), borderColor: tint(WARN, 0.5), borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 10 },
   // Memory Bubble — anniversary banner under the chat header. Distinct
   // from screenshot/error banners (purple) so the user reads it as a
   // "nostalgia" moment rather than an alert.
-  memoryBubble:        { backgroundColor: 'rgba(180,160,255,0.10)', borderColor: 'rgba(180,160,255,0.35)', borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 12, borderRadius: 10 },
-  memoryBubbleTitle:   { color: '#C4B5FD', fontSize: 12, fontWeight: '700' },
+  memoryBubble:        { backgroundColor: tint(c.purple, 0.10), borderColor: tint(c.purple, 0.35), borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 12, borderRadius: 10 },
+  memoryBubbleTitle:   { color: c.accentOn, fontSize: 12, fontWeight: '700' },
   memoryBubbleBody:    { color: c.text, fontSize: 13, marginTop: 4, fontStyle: 'italic' },
   memoryBubbleDismiss: { color: c.textDim, fontSize: 10, marginTop: 6 },
-  screenshotBannerTxt: { color: '#FCD34D', fontSize: 12, fontWeight: '600' },
+  screenshotBannerTxt: { color: c.text, fontSize: 12, fontWeight: '600' },
 
   // Security-code change. Amber, not red: a changed key usually means the peer
   // reinstalled, and colouring an ordinary event as an attack teaches people to
   // ignore the one time it is not.
   keyChangeBanner: {
-    backgroundColor: 'rgba(245,158,11,0.12)', borderColor: 'rgba(245,158,11,0.35)',
+    backgroundColor: tint(WARN, 0.12), borderColor: tint(WARN, 0.35),
     borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 12, borderRadius: 10,
   },
-  keyChangeTxt:     { color: '#FCD34D', fontSize: 12, lineHeight: 18 },
+  keyChangeTxt:     { color: c.text, fontSize: 12, lineHeight: 18 },
   keyChangeRow:     { flexDirection: 'row', gap: 20, marginTop: 8 },
-  keyChangeVerify:  { color: '#FCD34D', fontSize: 12, fontWeight: '800' },
+  keyChangeVerify:  { color: c.accentOn, fontSize: 12, fontWeight: '800' },
   keyChangeDismiss: { color: c.textDim, fontSize: 12, fontWeight: '600' },
+
+  // A peer is sharing live location — tinted from the theme's primary.
+  liveLocBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 12, marginTop: 8, padding: 10, borderRadius: 12, backgroundColor: tint(c.primary, 0.12), borderWidth: 1, borderColor: tint(c.primary, 0.4) },
+  liveLocTitle:  { color: c.primary, fontSize: 13, fontWeight: '700' },
+  liveLocSub:    { color: c.textDim, fontSize: 11, marginTop: 1 },
 
   mentionBar:    { backgroundColor: c.surfaceSolid, borderTopWidth: 1, borderTopColor: c.border, maxHeight: 220 },
   mentionRow:    { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 8 },
@@ -245,25 +265,26 @@ export const makeStyles = (
   readerChipTxt: { color: c.text, fontSize: 12, fontWeight: '600' },
   bubbleTxtMine: { color: c.bubbleOutText },
   bubbleMeta:    { color: highContrast ? c.bubbleOutText : c.bubbleMetaOut, fontSize: 10 * v.textScale, alignSelf: 'flex-end', marginTop: 2 * v.spacingScale },
-  ttlBadge:      { color: '#FCD34D', fontSize: 10, fontWeight: '700' },
+  // No colour: inherits the bubble's meta ink, which is chosen for the bubble it sits on.
+  ttlBadge:      { fontSize: 10, fontWeight: '700' },
   tick:          { color: c.bubbleMetaOut, fontSize: 11, fontWeight: '700' },
   tickRead:      { color: c.tickRead,      fontSize: 11, fontWeight: '700' },
 
   typingBar:     { paddingHorizontal: 16, paddingBottom: 4 },
   typingTxt:     { color: c.textDim, fontSize: 12, fontStyle: 'italic' },
 
-  editBar:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8, backgroundColor: 'rgba(108,99,255,0.12)', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border },
+  editBar:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8, backgroundColor: brandAlpha(0.12), borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border },
   // Vanish-Mode banner above the composer when chat.vanishMode is ON.
-  vanishBar:     { paddingHorizontal: 16, paddingVertical: 8, backgroundColor: 'rgba(252,211,77,0.10)', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(252,211,77,0.40)' },
-  vanishBarTxt:  { color: '#FCD34D', fontSize: 12, fontWeight: '600' },
+  vanishBar:     { paddingHorizontal: 16, paddingVertical: 8, backgroundColor: tint(WARN, 0.10), borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: tint(WARN, 0.40) },
+  vanishBarTxt:  { color: c.text, fontSize: 12, fontWeight: '600' },
   // 💨 badge inside the bubble meta line for messages stamped vanish_after_read.
-  vanishBadge:   { color: '#FCD34D', fontSize: 10, fontWeight: '700' },
+  vanishBadge:   { fontSize: 10, fontWeight: '700' },
   // Invisible Ink obscured text: bullets render slightly tighter and a
   // touch dimmer than normal text so the bubble visibly reads as "covered".
   invisibleInk:  { letterSpacing: 1, opacity: 0.75 },
   // Composer banner when Invisible Ink is armed (matches vanishBar shape).
-  inkBar:        { paddingHorizontal: 16, paddingVertical: 8, backgroundColor: 'rgba(180,160,255,0.12)', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(180,160,255,0.45)' },
-  inkBarTxt:     { color: '#C4B5FD', fontSize: 12, fontWeight: '600' },
+  inkBar:        { paddingHorizontal: 16, paddingVertical: 8, backgroundColor: tint(c.purple, 0.12), borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: tint(c.purple, 0.45) },
+  inkBarTxt:     { color: c.text, fontSize: 12, fontWeight: '600' },
   editTxt:       { flex: 1, color: c.primary, fontSize: 12, fontWeight: '600' },
   editCancelTxt: { color: c.textDim, fontSize: 12 },
 
@@ -407,7 +428,7 @@ export const makeStyles = (
   videoPlayIcon: { color: '#fff', fontSize: 22, marginLeft: 4 },
 
   // View-once shield (before tap) + tombstone (after view)
-  viewOnceShield:        { width: 220, padding: 20, borderRadius: 12, alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: 'rgba(108,99,255,0.15)', borderWidth: 1, borderColor: c.primary, borderStyle: 'dashed' },
+  viewOnceShield:        { width: 220, padding: 20, borderRadius: 12, alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: brandAlpha(0.15), borderWidth: 1, borderColor: c.primary, borderStyle: 'dashed' },
   viewOnceShieldIcon:    { fontSize: 28 },
   viewOnceShieldTxt:     { color: c.text, fontSize: 14, fontWeight: '700' },
   viewOnceShieldHint:    { color: c.textDim, fontSize: 11, textAlign: 'center' },
@@ -457,12 +478,12 @@ export const makeStyles = (
   reactionRowMine:     { justifyContent: 'flex-end' },
   reactionRowTheirs:   { justifyContent: 'flex-start' },
   reactionChip:        { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, backgroundColor: c.surfaceSolid, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
-  reactionChipMine:    { backgroundColor: 'rgba(108,99,255,0.25)', borderColor: c.primary },
+  reactionChipMine:    { backgroundColor: brandAlpha(0.25), borderColor: c.primary },
   reactionChipEmoji:   { fontSize: 14 },
   reactionChipCount:   { color: c.textDim, fontSize: 11, fontWeight: '600' },
   reactionChipCountMine: { color: c.primary },
 
-  // Day 8 — quick-react picker
+  // Centred-sheet backdrop (forward picker)
   modalBackdrop:       { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center', padding: 20 },
 
   // Day 8 — forward chat picker

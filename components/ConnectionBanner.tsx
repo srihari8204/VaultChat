@@ -8,7 +8,7 @@
 import React, { useMemo } from 'react';
 import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import { useConnectionState } from '../lib/socket';
-import type { Palette } from '../constants/theme';
+import { AuroraLight, type Palette } from '../constants/theme';
 import { useColors, useTheme } from '../lib/theme';
 
 export default function ConnectionBanner() {
@@ -32,7 +32,9 @@ export default function ConnectionBanner() {
 const makeStyles = (c: Palette) => StyleSheet.create({
   bar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 6, paddingHorizontal: 12 },
   connecting: { backgroundColor: c.surfaceSolid },
-  offline: { backgroundColor: c.danger },
+  // The light theme's danger in both schemes: white 13px text on the dark
+  // theme's brighter danger was ~3.8:1, under AA; on this one it is ~6.5:1.
+  offline: { backgroundColor: AuroraLight.danger },
   spinner: { marginRight: 8 },
   txt: { color: '#fff', fontSize: 13, fontWeight: '600' },
 });

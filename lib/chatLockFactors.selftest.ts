@@ -105,7 +105,8 @@ async function main() {
   // ── 'both' means BOTH, in the chat screen ──────────────────────────
   console.log("\napp/chat.tsx enforces 'both' as AND:");
   {
-    const c = code('app/chat.tsx');
+    // app/chat.tsx was split into components/chat/*; read the screen and its parts as one source.
+    const c = ['app/chat.tsx', 'components/chat/ChatHeader.tsx', 'components/chat/InChatSearchBar.tsx', 'components/chat/ChatBanners.tsx', 'components/chat/MessageRow.tsx', 'components/chat/ComposerBars.tsx', 'components/chat/Composer.tsx', 'components/chat/ChatModals.tsx', 'components/chat/MediaCaptionPreview.tsx', 'components/chat/ChatLockGate.tsx', 'components/chat/useChatMenu.ts', 'components/chat/useMessageActions.ts', 'components/chat/useMessagePaging.ts', 'components/chat/useVoiceRecording.ts', 'components/chat/useTiltReveal.ts', 'components/chat/useMediaStaging.ts'].map((f) => code(f)).join('\n');
 
     // The whole focus effect, run. One extraction covers the auto-unlock, the
     // per-visit reset of the banked factor and the fail-closed catch — three

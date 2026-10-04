@@ -127,8 +127,10 @@ export default function GifPicker({ visible, onClose, onSelect, initialTab = 'gi
   if (!visible) return null;
 
   return (
-    <Pressable style={s.overlay} onPress={onClose}>
-      <Pressable style={s.sheet} onPress={() => {}}>
+    <Pressable style={s.overlay} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close stickers, emoji and GIFs">
+      {/* accessible={false}: a Pressable is one focus stop by default, which
+          would fold the whole sheet into a single unusable element. */}
+      <Pressable style={s.sheet} onPress={() => {}} accessible={false} accessibilityViewIsModal>
         <View style={s.handle} />
 
         <View style={s.searchRow}>
@@ -207,20 +209,22 @@ export default function GifPicker({ visible, onClose, onSelect, initialTab = 'gi
             here it sits directly under the content it is attributing, at full
             size, which is the clearest placement in the app. */}
         {preview && (
-          <Pressable style={s.previewBackdrop} onPress={() => setPreview(null)}>
-            <Pressable style={s.previewCard} onPress={() => {}}>
+          <Pressable style={s.previewBackdrop} onPress={() => setPreview(null)} accessibilityRole="button" accessibilityLabel="Close preview">
+            <Pressable style={s.previewCard} onPress={() => {}} accessible={false} accessibilityViewIsModal>
               <Image source={{ uri: preview.preview }} style={s.previewImg} resizeMode="contain" />
 
               <KlipyMark scheme={scheme} width={132} />
 
               <View style={s.previewActions}>
-                <TouchableOpacity style={s.previewCancel} onPress={() => setPreview(null)} activeOpacity={0.8}>
+                <TouchableOpacity style={s.previewCancel} onPress={() => setPreview(null)} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Cancel">
                   <Text style={s.previewCancelTxt}>Cancel</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={s.previewSend}
                   onPress={() => { const p = preview; setPreview(null); onSelect(p.url, p.preview); onClose(); }}
                   activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel="Send"
                 >
                   <Ionicons name="send" size={16} color="#fff" />
                   <Text style={s.previewSendTxt}>Send</Text>

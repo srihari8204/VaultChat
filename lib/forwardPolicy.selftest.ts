@@ -67,7 +67,8 @@ check('forwardMessage writes the next score', /forwardScore: nextForwardScore\(/
 const BUBBLE = read('components/chat/MessageBubble.tsx');
 check('the bubble renders the policy label, not a hard-coded string',
   /forwardLabel\(msg\.meta\)/.test(BUBBLE));
-const CHAT = read('app/chat.tsx');
+// app/chat.tsx was split into components/chat/*; read the screen and its parts as one source.
+const CHAT = ['app/chat.tsx', 'components/chat/ChatHeader.tsx', 'components/chat/InChatSearchBar.tsx', 'components/chat/ChatBanners.tsx', 'components/chat/MessageRow.tsx', 'components/chat/ComposerBars.tsx', 'components/chat/Composer.tsx', 'components/chat/ChatModals.tsx', 'components/chat/MediaCaptionPreview.tsx', 'components/chat/ChatLockGate.tsx', 'components/chat/useChatMenu.ts', 'components/chat/useMessageActions.ts', 'components/chat/useMessagePaging.ts', 'components/chat/useVoiceRecording.ts', 'components/chat/useTiltReveal.ts', 'components/chat/useMediaStaging.ts'].map((f) => read(f)).join('\n');
 check('the forward sheet shows the notice', /forwardNotice\(/.test(CHAT));
 
 console.log(failures === 0 ? '\nAll forward-policy checks passed.\n' : `\n${failures} check(s) FAILED.\n`);

@@ -19,7 +19,8 @@ assert.equal(countVisibleMatches(rows, 'zzz'), 0);
 // The screen must count over the rendered list, not raw state that still holds
 // reaction / trip / live-location plumbing rows.
 import { readFileSync } from 'node:fs';
-const SCREEN = readFileSync('app/chat.tsx', 'utf8');
+// app/chat.tsx was split into components/chat/*; read the screen and its parts as one source.
+const SCREEN = ['app/chat.tsx', 'components/chat/ChatHeader.tsx', 'components/chat/InChatSearchBar.tsx', 'components/chat/ChatBanners.tsx', 'components/chat/MessageRow.tsx', 'components/chat/ComposerBars.tsx', 'components/chat/Composer.tsx', 'components/chat/ChatModals.tsx', 'components/chat/MediaCaptionPreview.tsx', 'components/chat/ChatLockGate.tsx', 'components/chat/useChatMenu.ts', 'components/chat/useMessageActions.ts', 'components/chat/useMessagePaging.ts', 'components/chat/useVoiceRecording.ts', 'components/chat/useTiltReveal.ts', 'components/chat/useMediaStaging.ts'].map((f) => readFileSync(f, 'utf8')).join('\n');
 assert.ok(SCREEN.includes('countVisibleMatches(renderMessages, searchQ)'),
   'chat.tsx search count must run over renderMessages');
 

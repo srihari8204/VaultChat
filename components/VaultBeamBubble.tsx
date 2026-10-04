@@ -186,6 +186,10 @@ function PillBtn({ label, icon, onPress, colors, disabled }: {
       onPress={onPress}
       disabled={disabled}
       activeOpacity={0.8}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: !!disabled }}
+      hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
       style={[styles.pill, { borderColor: BRAND_ACCENT, opacity: disabled ? 0.4 : 1 }]}
     >
       <Ionicons name={icon} size={14} color={BRAND_ACCENT} />

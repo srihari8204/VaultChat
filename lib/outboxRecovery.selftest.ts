@@ -263,7 +263,8 @@ async function main() {
   // app/chat.tsx cannot be imported under Node. These only prove the guards are
   // PRESENT, not that they fire — weaker than everything above.
   console.log('chat screen (source assertions only — app/chat.tsx cannot run under Node)');
-  const CHAT = readFileSync(join(HERE, '..', 'app', 'chat.tsx'), 'utf8');
+  // app/chat.tsx was split into components/chat/*; read the screen and its parts as one source.
+  const CHAT = ['app/chat.tsx', 'components/chat/ChatHeader.tsx', 'components/chat/InChatSearchBar.tsx', 'components/chat/ChatBanners.tsx', 'components/chat/MessageRow.tsx', 'components/chat/ComposerBars.tsx', 'components/chat/Composer.tsx', 'components/chat/ChatModals.tsx', 'components/chat/MediaCaptionPreview.tsx', 'components/chat/ChatLockGate.tsx', 'components/chat/useChatMenu.ts', 'components/chat/useMessageActions.ts', 'components/chat/useMessagePaging.ts', 'components/chat/useVoiceRecording.ts', 'components/chat/useTiltReveal.ts', 'components/chat/useMediaStaging.ts'].map((f) => readFileSync(join(HERE, '..', f), 'utf8')).join('\n');
   const initialLoad = CHAT.slice(CHAT.indexOf('// ── Initial load'), CHAT.indexOf('// ── Queue events'));
   check('initial load is cancellable and chat-checked',
     /let cancelled = false;/.test(initialLoad) &&

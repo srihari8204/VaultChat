@@ -15,10 +15,12 @@ import type { Viewer } from '../../hooks/useChatViewers';
 export type ResolvedViewer = { name: string; uri?: string | null; headers?: Record<string, string> };
 type Resolve = (userId: string) => ResolvedViewer;
 
-const ACTIVITY: Record<string, { icon: keyof typeof Ionicons.glyphMap; label: string; color: string }> = {
-  reading:   { icon: 'eye',                    label: 'Reading',   color: '#2ECC71' },
-  typing:    { icon: 'ellipsis-horizontal',    label: 'Typing…',   color: '#4EA1FF' },
-  uploading: { icon: 'arrow-up-circle',        label: 'Uploading', color: '#F5A623' },
+// Colours are palette roles, so the activity text stays readable in both themes.
+// Uploading keeps a fixed amber: the palette has no warning role yet.
+const ACTIVITY: Record<string, { icon: keyof typeof Ionicons.glyphMap; label: string; color: (c: Palette) => string }> = {
+  reading:   { icon: 'eye',                    label: 'Reading',   color: c => c.success },
+  typing:    { icon: 'ellipsis-horizontal',    label: 'Typing…',   color: c => c.accentOn },
+  uploading: { icon: 'arrow-up-circle',        label: 'Uploading', color: () => '#B45309' },
 };
 const act = (a?: string) => ACTIVITY[a || 'reading'] || ACTIVITY.reading;
 
@@ -34,14 +36,14 @@ export function ViewerStack({ viewers, resolve }: { viewers: Viewer[]; resolve: 
 
   return (
     <>
-      <TouchableOpacity style={S.wrap} onPress={() => setOpen(true)} activeOpacity={0.8} accessibilityLabel={`${viewers.length} viewing now`}>
+      <TouchableOpacity style={S.wrap} onPress={() => setOpen(true)} activeOpacity={0.8} hitSlop={8} accessibilityRole="button" accessibilityLabel={`${viewers.length} viewing now`} accessibilityHint="Shows who is viewing">
         <View style={S.stack}>
           {shown.map((v, i) => {
             const r = resolve(v.userId);
             return (
               <View key={v.userId} style={[S.avatarSlot, { marginLeft: i === 0 ? 0 : -10, zIndex: 10 - i }]}>
                 <Avatar uri={r.uri} headers={r.headers} name={r.name} size={22} />
-                <View style={[S.dot, { backgroundColor: act(v.activity).color }]} />
+                <View style={[S.dot, { backgroundColor: act(v.activity).color(colors) }]} />
               </View>
             );
           })}
@@ -51,7 +53,7 @@ export function ViewerStack({ viewers, resolve }: { viewers: Viewer[]; resolve: 
 
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
         <Pressable style={S.backdrop} onPress={() => setOpen(false)} accessibilityRole="button" accessibilityLabel="Close viewing now">
-          <Pressable style={S.sheet} onPress={() => {}} accessible={false}>
+          <Pressable style={S.sheet} onPress={() => {}} accessible={false} accessibilityViewIsModal>
             <View style={S.handle} />
             <View style={S.titleRow}>
               <Text style={[S.sheetTitle, { flex: 1 }]}>Viewing now · {viewers.length}</Text>
@@ -63,13 +65,14 @@ export function ViewerStack({ viewers, resolve }: { viewers: Viewer[]; resolve: 
               {viewers.map(v => {
                 const r = resolve(v.userId);
                 const a = act(v.activity);
+                const tone = a.color(colors);
                 return (
                   <View key={v.userId} style={S.row}>
                     <Avatar uri={r.uri} headers={r.headers} name={r.name} size={40} />
                     <Text style={S.name} numberOfLines={1}>{r.name}</Text>
                     <View style={S.activity}>
-                      <Ionicons name={a.icon} size={15} color={a.color} />
-                      <Text style={[S.activityTxt, { color: a.color }]}>{a.label}</Text>
+                      <Ionicons name={a.icon} size={15} color={tone} />
+                      <Text style={[S.activityTxt, { color: tone }]}>{a.label}</Text>
                     </View>
                   </View>
                 );

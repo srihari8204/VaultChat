@@ -69,7 +69,8 @@ import { useConnectionState } from '../../lib/socket';
 
 
 import { useS, idealText, HL, type DisplayMessage } from './chatStyles';
-import { BRAND_ACCENT } from '../../constants/theme';
+import { BRAND_ACCENT, brandAlpha } from '../../constants/theme';
+import { bubbleA11yLabel } from './bubbleA11yLabel';
 import { couldBeLongRead, readStats } from '../../lib/reader';
 // Vector, so the mark stays crisp and cannot be mis-scaled by a style box whose
 // ratio disagrees with a raster's — the failure that made this look absent.
@@ -80,7 +81,7 @@ import { groupTypeInfo } from '../../lib/groups/catalog';
 function colorMentions(body: string): any {
   if (!body || body.indexOf('@') === -1) return body;
   const parts: any[] = [];
-  const re = /@\w[\w]*/g;
+  const re = /@[\p{L}\p{N}_]+/gu;
   let last = 0; let m: RegExpExecArray | null;
   while ((m = re.exec(body)) !== null) {
     if (m.index > last) parts.push(body.slice(last, m.index));
@@ -374,7 +375,6 @@ function PollBubble({
  * this card navigates and never joins.
  */
 export function GroupRefBubble({ gref, isMine }: { gref: GroupRef; isMine: boolean }) {
-  const S = useS();
   const { colors } = useTheme();
   const gRouter = useRouter();
   const info = gref.groupType ? groupTypeInfo(gref.groupType) : null;
@@ -1359,9 +1359,33 @@ function MessageBubble({
     );
   }
 
+  // One spoken summary for the whole bubble (sender, body, time, ticks). It
+  // follows the bubble's own hiding rules — see bubbleA11yLabel.
+  let a11yCaption = '';
+  if ((isImage || isVideo) && plain) {
+    if (msg.meta?.encrypted) { try { a11yCaption = JSON.parse(plain)?.t || ''; } catch { a11yCaption = ''; } }
+    else a11yCaption = plain;
+  }
+  const a11yLabel = bubbleA11yLabel({
+    isMine,
+    senderName: member?.name || member?.email,
+    type: isGif ? 'image' : String(msg.type),
+    text: looksEncrypted(msg.content) ? '' : plain,
+    inkHidden: !!msg.meta?.invisibleInk && !isMine && !tiltRevealed,
+    viewOnce: isViewOnceMedia && !isMine,
+    revoked: isRevokedMedia,
+    caption: a11yCaption,
+    filename: msg.meta?.filename ? String(msg.meta.filename) : undefined,
+    time: new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    edited: !!msg.editedAt,
+    failed: msg._state === 'failed',
+    tick: tickState,
+  });
+
   return (
     <View style={[S.bubbleRow, isMine ? S.bubbleRowMine : S.bubbleRowTheirs, grouped && S.bubbleRowGrouped]}>
       <TouchableOpacity
+        accessibilityLabel={a11yLabel}
         style={[
           S.bubble,
           isMine ? S.bubbleMine : S.bubbleTheirs,
@@ -1408,6 +1432,8 @@ function MessageBubble({
           <TouchableOpacity
             style={S.replyPreview}
             activeOpacity={0.6}
+            accessibilityRole="button"
+            accessibilityLabel="Quoted message, double tap to jump to it"
             onPress={() => { const t = replyTarget?.id ?? msg.replyToId; if (t && t > 0) onJumpTo?.(t); }}
           >
             <View style={S.replyPreviewLine} />
@@ -1564,8 +1590,8 @@ function MessageBubble({
               onPress={() => { if (ok) navigateTo(L.lat, L.lng, L.address || 'Shared location'); }}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 190 }}>
-                <View style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: 'rgba(157,111,208,0.18)', alignItems: 'center', justifyContent: 'center' }}>
-                  <Ionicons name={L?.live ? 'navigate' : 'location'} size={22} color="#9D6FD0" />
+                <View style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: brandAlpha(0.18), alignItems: 'center', justifyContent: 'center' }}>
+                  <Ionicons name={L?.live ? 'navigate' : 'location'} size={22} color={isMine ? colors.bubbleOutText : colors.accentOn} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, { fontWeight: '700' }]}>
@@ -1576,7 +1602,7 @@ function MessageBubble({
                       {L.address}
                     </Text>
                   )}
-                  {ok && <Text style={{ color: '#9D6FD0', fontSize: 12, fontWeight: '700', marginTop: 2 }}>Open in Maps ›</Text>}
+                  {ok && <Text style={{ color: isMine ? colors.bubbleOutText : colors.accentOn, fontSize: 12, fontWeight: '700', marginTop: 2 }}>Open in Maps ›</Text>}
                 </View>
               </View>
             </TouchableOpacity>
@@ -1745,6 +1771,10 @@ function MessageBubble({
               style={[S.reactionChip, r.mine && S.reactionChipMine]}
               onPress={() => onToggleReaction?.(r.emoji)}
               activeOpacity={0.7}
+              hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel={`${r.emoji} ${r.count}${r.mine ? ', your reaction, double tap to remove' : ', double tap to react'}`}
+              accessibilityState={{ selected: !!r.mine }}
             >
               <Text style={S.reactionChipEmoji}>{r.emoji}</Text>
               <Text style={[S.reactionChipCount, r.mine && S.reactionChipCountMine]}>{r.count}</Text>

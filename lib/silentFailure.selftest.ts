@@ -44,7 +44,8 @@ const check = (what: string, ok: boolean, detail?: string) => {
 
 console.log('\nsilent-failure ratchet\n');
 
-const CHAT     = code(read('app/chat.tsx'));
+// app/chat.tsx was split into components/chat/*; read the screen and its parts as one source.
+const CHAT     = code(['app/chat.tsx', 'components/chat/ChatHeader.tsx', 'components/chat/InChatSearchBar.tsx', 'components/chat/ChatBanners.tsx', 'components/chat/MessageRow.tsx', 'components/chat/ComposerBars.tsx', 'components/chat/Composer.tsx', 'components/chat/ChatModals.tsx', 'components/chat/MediaCaptionPreview.tsx', 'components/chat/ChatLockGate.tsx', 'components/chat/useChatMenu.ts', 'components/chat/useMessageActions.ts', 'components/chat/useMessagePaging.ts', 'components/chat/useVoiceRecording.ts', 'components/chat/useTiltReveal.ts', 'components/chat/useMediaStaging.ts'].map((f) => read(f)).join('\n'));
 const CHATS    = code(read('app/(tabs)/chats.tsx'));
 const INSIGHTS = code(read('app/group-insights.tsx'));
 const REMINDER = code(read('app/message-reminder.tsx'));

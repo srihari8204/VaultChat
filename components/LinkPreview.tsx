@@ -61,7 +61,13 @@ export default function LinkPreview({ url, data }: Props) {
   if (!title) return null;
 
   return (
-    <TouchableOpacity style={s.card} onPress={() => Linking.openURL(href)}>
+    <TouchableOpacity
+      style={s.card}
+      onPress={() => Linking.openURL(href)}
+      accessibilityRole="link"
+      accessibilityLabel={`${title}, ${href}`}
+      accessibilityHint="Opens in your browser"
+    >
       {image ? <Image source={{ uri: image }} style={s.img} resizeMode="cover" /> : null}
       <View style={s.body}>
         <Text style={s.title} numberOfLines={2}>{title}</Text>
