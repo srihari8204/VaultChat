@@ -1,56 +1,84 @@
 import { AppText as Text } from '../components/ui/Text';
 import { AuroraBackground } from '../components/ui';
 // app/image-editor.tsx — Image Editor before sending
-// Crop, Rotate, Draw, Text overlay, Filters, Brightness/Contrast
-// Uses expo-image-manipulator for transforms, react-native-view-shot to capture
+// Crop (free or fixed ratio, user-positioned box), Rotate, Draw, Text overlay,
+// colour Filters, Brightness/Contrast.
+// expo-image-manipulator does crop/rotate; filters and adjustments are one
+// SVG colour matrix (react-native-svg FilterImage); react-native-view-shot
+// captures the canvas with the drawing, text and colour edits on Done.
 
-import { BRAND_ACCENT, type Palette } from '../constants/theme';
+import { BRAND_ACCENT, brandAlpha, type Palette } from '../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useState, useRef , useMemo} from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
   View, TouchableOpacity, StyleSheet, Image, ScrollView,
   PanResponder, type PanResponderInstance, TextInput, Alert, ActivityIndicator,
-  Platform, useWindowDimensions } from 'react-native';
+  useWindowDimensions } from 'react-native';
+import Svg, { Path } from 'react-native-svg';
+import { FilterImage } from 'react-native-svg/filter-image';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../lib/theme';
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
 import { returnParams } from '../lib/camera/cameraMode';
+import { strokeD } from '../lib/strokePath';
+import {
+  FILTERS, editMatrix, type FilterName, type Matrix,
+  containFrame, initialCrop, moveCrop, resizeCrop, toImageCrop, type Rect, type Corner,
+} from '../lib/imageEditMath';
 import * as ImageManipulator from 'expo-image-manipulator';
 import ViewShot from 'react-native-view-shot';
 
 
+// Ink colours are image content, not theme roles.
 const DRAW_COLORS = ['#FFFFFF', '#FF3C3C', '#4A9FFF', BRAND_ACCENT, '#FBBF24'];
 const COLOR_NAMES: Record<string, string> = {
   '#FFFFFF': 'white', '#FF3C3C': 'red', '#4A9FFF': 'blue', [BRAND_ACCENT]: 'brand blue', '#FBBF24': 'yellow',
 };
-const FILTER_LIST = ['Original', 'B&W', 'Warm', 'Cool', 'Vivid'];
 const CROP_RATIOS = [
   { label: 'Free', value: null },
   { label: '1:1', value: 1 },
   { label: '4:3', value: 4 / 3 },
   { label: '16:9', value: 16 / 9 },
 ];
+const CORNERS: Corner[] = ['tl', 'tr', 'bl', 'br'];
 
 type DrawLine = { points: { x: number; y: number }[]; color: string; width: number };
 type TextOverlay = { id: string; text: string; x: number; y: number; color: string; fontSize: number };
 
 type ToolMode = 'none' | 'crop' | 'rotate' | 'draw' | 'text' | 'filter' | 'adjust';
 
-function useS() {
-  // Reactive size. The module-level Dimensions.get above is captured ONCE at
-  // import and never updates, so it froze the layout at the size the app
-  // launched with. Shadowing it here makes every use in this component follow
-  // rotation; StyleSheet.create keeps the initial value, which is fine for
-  // static rules.
-  const {width: SW, height: SH} = useWindowDimensions();
+/** The photo with the colour matrix applied, or the plain Image when there is
+ *  no colour edit (no SVG filter pass at all). */
+function EditedImage({ uri, matrix, style }: { uri: string; matrix: Matrix | null; style: any }) {
+  if (!matrix) return <Image source={{ uri }} style={style} resizeMode="contain" />;
+  return (
+    <FilterImage source={{ uri }} style={style} resizeMode="contain"
+      filters={[{ name: 'feColorMatrix', type: 'matrix', values: matrix }]} />
+  );
+}
 
+function Strokes({ lines }: { lines: DrawLine[] }) {
+  return (
+    <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
+      {lines.map((l, i) => (
+        <Path key={i} d={strokeD(l.points)} stroke={l.color} strokeWidth={l.width}
+          strokeLinecap="round" strokeLinejoin="round" fill="none" />
+      ))}
+    </Svg>
+  );
+}
+
+function useS() {
+  const { width: SW, height: SH } = useWindowDimensions();
+  const { top } = useSafeAreaInsets();
   const { colors } = useTheme();
-  return useMemo(() => makeStyles(colors, SW, SH), [colors, SW, SH]);
+  return useMemo(() => makeStyles(colors, SW, SH, top), [colors, SW, SH, top]);
 }
 
 export default function ImageEditorScreen() {
-  // Live metrics owned by THIS component — the hook further up belongs to the
-  // useS() style helper, a different scope. Follows rotation and folds.
+  // Live metrics owned by THIS component — follows rotation and folds.
   const { width: SW, height: SH } = useWindowDimensions();
+  const canvasW = SW, canvasH = SH * 0.55;   // must match styles.canvas
 
   const { colors } = useTheme();
   const styles = useS();
@@ -62,7 +90,7 @@ export default function ImageEditorScreen() {
 
   // Image state
   const [imageUri, setImageUri] = useState(uri || '');
-  const [rotation, setRotation] = useState(0);
+  const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(null);
   const [processing, setProcessing] = useState(false);
 
   // Tool mode
@@ -70,6 +98,7 @@ export default function ImageEditorScreen() {
 
   // Crop
   const [cropRatio, setCropRatio] = useState<number | null>(null);
+  const [cropRect, setCropRect] = useState<Rect | null>(null);
 
   // Draw
   const [lines, setLines] = useState<DrawLine[]>([]);
@@ -83,12 +112,28 @@ export default function ImageEditorScreen() {
   const [textColor, setTextColor] = useState('#FFFFFF');
   const [textFontSize, setTextFontSize] = useState(24);
 
-  // Filters
-  const [activeFilter, setActiveFilter] = useState('Original');
-
-  // Adjustments
+  // Filters + adjustments → one colour matrix
+  const [activeFilter, setActiveFilter] = useState<FilterName>('Original');
   const [brightness, setBrightness] = useState(0);
   const [contrast, setContrast] = useState(0);
+  const matrix = useMemo(() => editMatrix(activeFilter, brightness, contrast), [activeFilter, brightness, contrast]);
+
+  // Natural size of the current image, for mapping the crop box to pixels.
+  useEffect(() => {
+    let dead = false;
+    setImgSize(null);
+    if (!imageUri) return;
+    Image.getSize(imageUri, (w, h) => { if (!dead) setImgSize({ w, h }); }, () => {});
+    return () => { dead = true; };
+  }, [imageUri]);
+  const frame = useMemo(
+    () => (imgSize ? containFrame(canvasW, canvasH, imgSize.w, imgSize.h) : null),
+    [imgSize, canvasW, canvasH],
+  );
+  // A fresh box whenever crop opens, the ratio changes, or the image changes.
+  useEffect(() => {
+    setCropRect(activeMode === 'crop' && frame ? initialCrop(frame, cropRatio) : null);
+  }, [activeMode, frame, cropRatio]);
 
   // The PanResponders below are created once, so they read live values from
   // refs. Reading state there captured the first render: every stroke came
@@ -99,6 +144,8 @@ export default function ImageEditorScreen() {
   brushSizeRef.current = brushSize;
   const overlaysRef = useRef(textOverlays);
   overlaysRef.current = textOverlays;
+  const cropRef = useRef({ rect: cropRect, frame, ratio: cropRatio });
+  cropRef.current = { rect: cropRect, frame, ratio: cropRatio };
 
   // ── Drawing PanResponder ──
   const drawPan = useRef(
@@ -122,6 +169,33 @@ export default function ImageEditorScreen() {
     })
   ).current;
 
+  // ── Crop box gestures: drag the box to move it, a corner to resize ──
+  const cropStart = useRef<Rect | null>(null);
+  const cropPans = useRef(new Map<string, PanResponderInstance>());
+  const cropPanFor = (handle: 'move' | Corner) => {
+    let pan = cropPans.current.get(handle);
+    if (!pan) {
+      pan = PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: () => { cropStart.current = cropRef.current.rect; },
+        onPanResponderMove: (_, g) => {
+          const start = cropStart.current;
+          const { frame: fr, ratio } = cropRef.current;
+          if (!start || !fr) return;
+          setCropRect(handle === 'move'
+            ? moveCrop(start, g.dx, g.dy, fr)
+            : resizeCrop(start, handle, g.dx, g.dy, ratio, fr));
+        },
+        onPanResponderRelease: () => { cropStart.current = null; },
+        onPanResponderTerminate: () => { cropStart.current = null; },
+      });
+      cropPans.current.set(handle, pan);
+    }
+    return pan;
+  };
+
   // ── Rotate ──
   const handleRotate = async () => {
     if (processing) return;   // a second tap would rotate the stale uri again
@@ -133,64 +207,32 @@ export default function ImageEditorScreen() {
         { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG }
       );
       setImageUri(result.uri);
-      setRotation((rotation + 90) % 360);
     } catch {
-      Alert.alert('Error', 'Failed to rotate image');
+      Alert.alert('Could not rotate', 'The image could not be rotated. Please try again.');
     }
     setProcessing(false);
   };
 
   // ── Crop ──
   const handleCrop = async () => {
-    if (!cropRatio) {
-      Alert.alert('Select Ratio', 'Choose a crop ratio first');
+    if (processing) return;   // a second tap would crop the stale uri again
+    if (!cropRect || !frame || !imgSize) {
+      Alert.alert('Crop not ready', 'The image is still loading. Try again in a moment.');
       return;
     }
     setProcessing(true);
     try {
-      // Get image dimensions
-      const imgSize = await new Promise<{ width: number; height: number }>((res) => {
-        Image.getSize(imageUri, (w, h) => res({ width: w, height: h }), () => res({ width: SW, height: SW }));
-      });
-      const { width: iw, height: ih } = imgSize;
-      let cropW = iw, cropH = ih;
-      if (cropRatio >= 1) {
-        cropH = Math.min(ih, iw / cropRatio);
-        cropW = cropH * cropRatio;
-      } else {
-        cropW = Math.min(iw, ih * cropRatio);
-        cropH = cropW / cropRatio;
-      }
-      const originX = Math.max(0, (iw - cropW) / 2);
-      const originY = Math.max(0, (ih - cropH) / 2);
       const result = await ImageManipulator.manipulateAsync(
         imageUri,
-        [{ crop: { originX, originY, width: cropW, height: cropH } }],
+        [{ crop: toImageCrop(cropRect, frame, imgSize.w, imgSize.h) }],
         { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG }
       );
       setImageUri(result.uri);
+      setActiveMode('none');
     } catch {
-      Alert.alert('Error', 'Failed to crop image');
+      Alert.alert('Could not crop', 'The image could not be cropped. Please try again.');
     }
     setProcessing(false);
-  };
-
-  // ── Apply Filter ──
-  const applyFilter = async (filter: string) => {
-    setActiveFilter(filter);
-    if (filter === 'Original') return;
-    // Filters are applied at capture time via overlay tint
-  };
-
-  // ── Get filter overlay style ──
-  const getFilterOverlay = () => {
-    switch (activeFilter) {
-      case 'B&W': return { backgroundColor: 'rgba(128,128,128,0.5)' };
-      case 'Warm': return { backgroundColor: 'rgba(255,140,50,0.15)' };
-      case 'Cool': return { backgroundColor: 'rgba(50,100,255,0.15)' };
-      case 'Vivid': return { backgroundColor: 'rgba(255,50,200,0.08)' };
-      default: return {};
-    }
   };
 
   // ── Add text overlay ──
@@ -242,6 +284,8 @@ export default function ImageEditorScreen() {
     return pan;
   };
 
+  const dirty = imageUri !== (uri || '') || lines.length > 0 || textOverlays.length > 0 || !!matrix;
+
   // ── Done — capture final image ──
   const handleDone = async () => {
     if (processing) return;
@@ -249,12 +293,10 @@ export default function ImageEditorScreen() {
     try {
       let finalUri = imageUri;
 
-      // Every visual edit lives in the ViewShot (drawing, text, filter tint and
-      // the brightness/contrast washes), so capturing it is what puts them in
-      // the sent image. Brightness/contrast used to be skipped here and then
-      // "applied" as a plain resize, so they never reached the output.
-      if (lines.length > 0 || textOverlays.length > 0 || activeFilter !== 'Original'
-          || brightness !== 0 || contrast !== 0) {
+      // Drawing, text and the colour matrix live in the ViewShot, so
+      // capturing it is what puts them in the sent image. Crop and rotate are
+      // already baked into imageUri by ImageManipulator.
+      if (lines.length > 0 || textOverlays.length > 0 || matrix) {
         if (!viewShotRef.current) throw new Error('canvas not ready');
         finalUri = await viewShotRef.current.capture();
       }
@@ -268,15 +310,16 @@ export default function ImageEditorScreen() {
         params: returnParams({ chatId, peerUid, peerName }, { uri: finalUri, type: 'image' }),
       });
     } catch {
-      Alert.alert('Error', 'Failed to save edited image');
+      Alert.alert('Could not save', 'The edited image could not be saved. Please try again.');
+      setProcessing(false);
     }
-    setProcessing(false);
   };
 
-  // ── Cancel ──
+  // ── Cancel ── (asks only when there is something to lose)
   const handleCancel = () => {
+    if (!dirty) { router.back(); return; }
     Alert.alert('Discard Changes?', 'All edits will be lost.', [
-      { text: 'Keep Editing' },
+      { text: 'Keep Editing', style: 'cancel' },
       { text: 'Discard', style: 'destructive', onPress: () => router.back() },
     ]);
   };
@@ -286,45 +329,13 @@ export default function ImageEditorScreen() {
     setLines(prev => prev.slice(0, -1));
   };
 
-  // ── Render SVG-like lines ──
-  const renderDrawLines = (linesToRender: DrawLine[]) => {
-    return linesToRender.map((line, li) => (
-      <View key={li} style={StyleSheet.absoluteFill} pointerEvents="none">
-        {line.points.map((pt, pi) => {
-          if (pi === 0) return null;
-          const prev = line.points[pi - 1];
-          const dx = pt.x - prev.x;
-          const dy = pt.y - prev.y;
-          const len = Math.sqrt(dx * dx + dy * dy);
-          const angle = Math.atan2(dy, dx) * (180 / Math.PI);
-          return (
-            <View
-              key={pi}
-              style={{
-                position: 'absolute',
-                left: prev.x,
-                top: prev.y,
-                width: len,
-                height: line.width,
-                backgroundColor: line.color,
-                borderRadius: line.width / 2,
-                transform: [{ rotate: angle + 'deg' }],
-                transformOrigin: 'left center',
-              }}
-            />
-          );
-        })}
-      </View>
-    ));
-  };
-
-  const toolButtons: { mode: ToolMode; icon: string; label: string }[] = [
-    { mode: 'crop', icon: '⬜', label: 'Crop' },
-    { mode: 'rotate', icon: '↻', label: 'Rotate' },
-    { mode: 'draw', icon: '✏️', label: 'Draw' },
-    { mode: 'text', icon: 'T', label: 'Text' },
-    { mode: 'filter', icon: '◑', label: 'Filter' },
-    { mode: 'adjust', icon: '☀', label: 'Adjust' },
+  const toolButtons: { mode: ToolMode; icon: keyof typeof Ionicons.glyphMap; label: string }[] = [
+    { mode: 'crop', icon: 'crop', label: 'Crop' },
+    { mode: 'rotate', icon: 'refresh', label: 'Rotate' },
+    { mode: 'draw', icon: 'brush', label: 'Draw' },
+    { mode: 'text', icon: 'text', label: 'Text' },
+    { mode: 'filter', icon: 'color-filter', label: 'Filter' },
+    { mode: 'adjust', icon: 'sunny', label: 'Adjust' },
   ];
 
   return (
@@ -337,7 +348,7 @@ export default function ImageEditorScreen() {
         <TouchableOpacity onPress={handleCancel} style={styles.topBtn} accessibilityRole="button" accessibilityLabel="Cancel editing">
           <Text style={styles.topBtnText}>Cancel</Text>
         </TouchableOpacity>
-        <Text style={styles.topTitle}>Edit Image</Text>
+        <Text style={styles.topTitle} accessibilityRole="header">Edit Image</Text>
         <TouchableOpacity onPress={handleDone} disabled={processing} style={[styles.topBtn, styles.doneBtn]}
           accessibilityRole="button" accessibilityLabel="Done, send edited image" accessibilityState={{ disabled: processing, busy: processing }}>
           {processing ? <ActivityIndicator size="small" color="#FFF" /> : <Text style={styles.doneBtnText}>Done</Text>}
@@ -346,53 +357,58 @@ export default function ImageEditorScreen() {
 
       {/* Image canvas */}
       <View style={styles.canvasWrapper}>
-        <ViewShot ref={viewShotRef} style={styles.canvas} options={{ format: 'jpg', quality: 0.9 }}>
-          <Image source={{ uri: imageUri }} style={styles.image} resizeMode="contain" />
+        <View style={styles.canvas}>
+          <ViewShot ref={viewShotRef} style={StyleSheet.absoluteFill} options={{ format: 'jpg', quality: 0.9 }}>
+            <EditedImage uri={imageUri} matrix={matrix} style={styles.image} />
 
-          {/* Filter overlay */}
-          {activeFilter !== 'Original' && <View style={[StyleSheet.absoluteFill, getFilterOverlay()]} pointerEvents="none" />}
+            {/* Draw lines */}
+            <Strokes lines={lines} />
+            {currentLine && <Strokes lines={[currentLine]} />}
 
-          {/* Brightness overlay */}
-          {brightness !== 0 && (
-            <View style={[StyleSheet.absoluteFill, {
-              backgroundColor: brightness > 0 ? `rgba(255,255,255,${brightness / 200})` : `rgba(0,0,0,${Math.abs(brightness) / 200})`,
-            }]} pointerEvents="none" />
-          )}
+            {/* Text overlays */}
+            {textOverlays.map(t => (
+              <View
+                key={t.id}
+                style={{ position: 'absolute', left: t.x, top: t.y }}
+                {...textPanFor(t.id).panHandlers}
+              >
+                <Text style={{ color: t.color, fontSize: t.fontSize, fontWeight: '700', textShadowColor: '#000', textShadowRadius: 3 }}>
+                  {t.text}
+                </Text>
+              </View>
+            ))}
 
-          {/* Contrast overlay. ponytail: brightness/contrast/filters are
-              translucent washes captured with the canvas, not a colour matrix
-              (no filter library is installed). What you see is what is sent,
-              but it is an approximation; replace with a real colour-matrix
-              filter if one (e.g. Skia) is adopted. Lower contrast = a grey wash. */}
-          {contrast !== 0 && (
-            <View style={[StyleSheet.absoluteFill, {
-              backgroundColor: contrast > 0 ? `rgba(0,0,0,${contrast / 400})` : `rgba(128,128,128,${Math.abs(contrast) / 125})`,
-              opacity: contrast > 0 ? 0.5 : 1,
-            }]} pointerEvents="none" />
-          )}
+            {/* Drawing touch area */}
+            {activeMode === 'draw' && (
+              <View style={StyleSheet.absoluteFill} {...drawPan.panHandlers} />
+            )}
+          </ViewShot>
 
-          {/* Draw lines */}
-          {renderDrawLines(lines)}
-          {currentLine && renderDrawLines([currentLine])}
-
-          {/* Text overlays */}
-          {textOverlays.map(t => (
-            <View
-              key={t.id}
-              style={{ position: 'absolute', left: t.x, top: t.y }}
-              {...textPanFor(t.id).panHandlers}
-            >
-              <Text style={{ color: t.color, fontSize: t.fontSize, fontWeight: '700', textShadowColor: '#000', textShadowRadius: 3 }}>
-                {t.text}
-              </Text>
+          {/* Crop box — outside the ViewShot, so it is never captured. */}
+          {activeMode === 'crop' && cropRect && (
+            <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+              <View pointerEvents="none" style={[styles.cropShade, { left: 0, right: 0, top: 0, height: cropRect.y }]} />
+              <View pointerEvents="none" style={[styles.cropShade, { left: 0, right: 0, top: cropRect.y + cropRect.h, bottom: 0 }]} />
+              <View pointerEvents="none" style={[styles.cropShade, { left: 0, width: cropRect.x, top: cropRect.y, height: cropRect.h }]} />
+              <View pointerEvents="none" style={[styles.cropShade, { left: cropRect.x + cropRect.w, right: 0, top: cropRect.y, height: cropRect.h }]} />
+              <View
+                style={[styles.cropBox, { left: cropRect.x, top: cropRect.y, width: cropRect.w, height: cropRect.h }]}
+                accessibilityLabel="Crop area"
+                accessibilityHint="Drag to move. Drag a corner to resize."
+                {...cropPanFor('move').panHandlers}
+              >
+                {CORNERS.map(c => (
+                  // Inside the box: Android does not deliver touches to a
+                  // child drawn outside its parent's bounds.
+                  <View key={c} {...cropPanFor(c).panHandlers}
+                    style={[styles.cropHandle,
+                      c[0] === 't' ? { top: -2 } : { bottom: -2 },
+                      c[1] === 'l' ? { left: -2 } : { right: -2 }]} />
+                ))}
+              </View>
             </View>
-          ))}
-
-          {/* Drawing touch area */}
-          {activeMode === 'draw' && (
-            <View style={StyleSheet.absoluteFill} {...drawPan.panHandlers} />
           )}
-        </ViewShot>
+        </View>
       </View>
 
       {/* Tool bar */}
@@ -413,7 +429,7 @@ export default function ImageEditorScreen() {
                 }
               }}
             >
-              <Text importantForAccessibility="no" accessibilityElementsHidden style={[styles.toolIcon, activeMode === tb.mode && styles.toolIconActive]}>{tb.icon}</Text>
+              <Ionicons name={tb.icon} size={20} color={activeMode === tb.mode ? colors.accentOn : colors.textDim} />
               <Text style={[styles.toolLabel, activeMode === tb.mode && styles.toolLabelActive]}>{tb.label}</Text>
             </TouchableOpacity>
           ))}
@@ -435,7 +451,10 @@ export default function ImageEditorScreen() {
                 <Text style={[styles.chipText, cropRatio === r.value && styles.chipTextActive]}>{r.label}</Text>
               </TouchableOpacity>
             ))}
-            <TouchableOpacity style={[styles.chipBtn, { backgroundColor: colors.accent }]} onPress={handleCrop} accessibilityRole="button" accessibilityLabel="Apply crop">
+            <TouchableOpacity style={[styles.chipBtn, { backgroundColor: colors.accent }]} onPress={handleCrop}
+              disabled={processing || !cropRect}
+              accessibilityRole="button" accessibilityLabel="Apply crop"
+              accessibilityState={{ disabled: processing || !cropRect, busy: processing }}>
               <Text style={[styles.chipText, { color: '#FFF' }]}>Apply Crop</Text>
             </TouchableOpacity>
           </ScrollView>
@@ -468,7 +487,8 @@ export default function ImageEditorScreen() {
                 </TouchableOpacity>
               ))}
             </View>
-            <TouchableOpacity onPress={undoLastLine} style={styles.undoBtn} accessibilityRole="button" accessibilityLabel="Undo last stroke">
+            <TouchableOpacity onPress={undoLastLine} disabled={lines.length === 0} style={styles.undoBtn}
+              accessibilityRole="button" accessibilityLabel="Undo last stroke" accessibilityState={{ disabled: lines.length === 0 }}>
               <Text style={styles.undoBtnText}>Undo</Text>
             </TouchableOpacity>
           </View>
@@ -482,6 +502,7 @@ export default function ImageEditorScreen() {
               style={styles.textInput}
               placeholder="Enter text..."
               placeholderTextColor={colors.textDim}
+              accessibilityLabel="Text to add to the image"
               value={editingText}
               onChangeText={setEditingText}
               onSubmitEditing={addTextOverlay}
@@ -531,16 +552,20 @@ export default function ImageEditorScreen() {
       {activeMode === 'filter' && (
         <View style={styles.subPanel}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.subRow}>
-            {FILTER_LIST.map(f => (
+            {FILTERS.map(f => (
               <TouchableOpacity
                 key={f}
-                style={[styles.filterBtn, activeFilter === f && styles.filterBtnActive]}
+                style={styles.filterBtn}
                 accessibilityRole="radio" accessibilityLabel={`Filter ${f}`}
                 accessibilityState={{ selected: activeFilter === f }}
-                onPress={() => applyFilter(f)}
+                onPress={() => setActiveFilter(f)}
               >
-                <View style={[styles.filterPreview, f === 'B&W' && { backgroundColor: '#6B7280' }, f === 'Warm' && { backgroundColor: '#FF8C32' }, f === 'Cool' && { backgroundColor: '#3264FF' }, f === 'Vivid' && { backgroundColor: '#FF32C8' }]} />
-                <Text style={[styles.filterLabel, activeFilter === f && { color: colors.accent }]}>{f}</Text>
+                {/* A live thumbnail of the photo with that filter (brightness
+                    and contrast included), so the preview is what gets sent. */}
+                <View style={[styles.filterPreview, activeFilter === f && styles.filterPreviewActive]}>
+                  <EditedImage uri={imageUri} matrix={editMatrix(f, brightness, contrast)} style={styles.filterThumb} />
+                </View>
+                <Text style={[styles.filterLabel, activeFilter === f && { color: colors.accentOn }]}>{f}</Text>
               </TouchableOpacity>
             ))}
           </ScrollView>
@@ -560,7 +585,7 @@ export default function ImageEditorScreen() {
                   accessibilityState={{ selected: brightness === v }}
                   onPress={() => setBrightness(v)}
                 >
-                  <Text style={[styles.adjustStepText, brightness === v && { color: colors.accent }]}>{v > 0 ? '+' + v : v}</Text>
+                  <Text style={[styles.adjustStepText, brightness === v && { color: colors.accentOn }]}>{v > 0 ? '+' + v : v}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -576,7 +601,7 @@ export default function ImageEditorScreen() {
                   accessibilityState={{ selected: contrast === v }}
                   onPress={() => setContrast(v)}
                 >
-                  <Text style={[styles.adjustStepText, contrast === v && { color: colors.accent }]}>{v > 0 ? '+' + v : v}</Text>
+                  <Text style={[styles.adjustStepText, contrast === v && { color: colors.accentOn }]}>{v > 0 ? '+' + v : v}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -585,8 +610,9 @@ export default function ImageEditorScreen() {
       )}
 
       {processing && (
-        <View style={styles.processingOverlay}>
-          <ActivityIndicator size="large" color={colors.accent} />
+        <View style={styles.processingOverlay} accessibilityViewIsModal>
+          <View style={[StyleSheet.absoluteFill, styles.processingScrim]} />
+          <ActivityIndicator size="large" color={colors.accentOn} />
           <Text style={styles.processingText}>Processing...</Text>
         </View>
       )}
@@ -597,54 +623,59 @@ export default function ImageEditorScreen() {
 // Width/height are threaded in from useWindowDimensions() rather than read
 // from a module-level Dimensions.get(): orientation is 'default', so a frozen
 // value survived rotation, folds and split-screen resizes.
-const makeStyles = (c: Palette, SW: number, SH: number) => StyleSheet.create({
+const makeStyles = (c: Palette, SW: number, SH: number, insetTop: number) => StyleSheet.create({
   container: { flex: 1, backgroundColor: c.bg },
-  topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: Platform.OS === 'ios' ? 56 : 40, paddingHorizontal: 16, paddingBottom: 12, backgroundColor: c.surfaceSolid },
+  topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: insetTop + 8, paddingHorizontal: 16, paddingBottom: 12, backgroundColor: c.surfaceSolid },
   topBtn: { minHeight: 44, justifyContent: 'center', paddingVertical: 6, paddingHorizontal: 14 },
   topBtnText: { color: c.textDim, fontSize: 16, fontWeight: '600' },
   topTitle: { color: c.text, fontSize: 17, fontWeight: '700' },
   doneBtn: { backgroundColor: c.accent, borderRadius: 8 },
   doneBtnText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
   canvasWrapper: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  canvas: { width: SW, height: SH * 0.55, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
+  canvas: { width: SW, height: SH * 0.55, overflow: 'hidden' },
   image: { width: '100%', height: '100%' },
-  toolbar: { backgroundColor: c.card, borderTopWidth: 1, borderTopColor: 'rgba(74,159,255,0.1)', paddingVertical: 10 },
+  toolbar: { backgroundColor: c.card, borderTopWidth: 1, borderTopColor: c.hairline, paddingVertical: 10 },
   toolRow: { flexDirection: 'row', paddingHorizontal: 12, gap: 6 },
   toolBtn: { alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10 },
-  toolBtnActive: { backgroundColor: 'rgba(0,229,255,0.15)' },
-  toolIcon: { fontSize: 20, color: c.textDim },
-  toolIconActive: { color: c.accent },
+  toolBtnActive: { backgroundColor: brandAlpha(0.15) },
   toolLabel: { fontSize: 12, color: c.textDim, marginTop: 3 },
-  toolLabelActive: { color: c.accent },
-  subPanel: { backgroundColor: c.card, paddingHorizontal: 14, paddingVertical: 10, borderTopWidth: 1, borderTopColor: 'rgba(74,159,255,0.08)' },
+  toolLabelActive: { color: c.accentOn },
+  subPanel: { backgroundColor: c.card, paddingHorizontal: 14, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.hairline },
   subRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  chipBtn: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(74,159,255,0.2)' },
-  chipActive: { borderColor: c.accent, backgroundColor: 'rgba(0,229,255,0.1)' },
+  chipBtn: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 8, borderWidth: 1, borderColor: c.border },
+  chipActive: { borderColor: c.accent, backgroundColor: brandAlpha(0.12) },
   chipText: { color: c.textDim, fontSize: 13, fontWeight: '600' },
-  chipTextActive: { color: c.accent },
-  colorDot: { width: 28, height: 28, borderRadius: 14, borderWidth: 2, borderColor: 'transparent' },
+  chipTextActive: { color: c.accentOn },
+  colorDot: { width: 28, height: 28, borderRadius: 14, borderWidth: 2, borderColor: c.glassStroke },
   colorDotActive: { borderColor: c.accent, borderWidth: 3 },
   sliderRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 10 },
   sliderLabel: { color: c.textDim, fontSize: 12, marginRight: 4 },
-  sizeBtn: { width: 30, height: 30, borderRadius: 15, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
-  sizeBtnActive: { borderColor: c.accent, backgroundColor: 'rgba(0,229,255,0.15)' },
+  sizeBtn: { width: 30, height: 30, borderRadius: 15, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: c.border },
+  sizeBtnActive: { borderColor: c.accent, backgroundColor: brandAlpha(0.15) },
   undoBtn: { marginLeft: 'auto', paddingHorizontal: 12, paddingVertical: 6, backgroundColor: 'rgba(255,60,110,0.15)', borderRadius: 6 },
   undoBtnText: { color: c.danger, fontSize: 12, fontWeight: '600' },
   textInputRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  textInput: { flex: 1, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, color: c.text, fontSize: 14, borderWidth: 1, borderColor: 'rgba(74,159,255,0.15)' },
+  textInput: { flex: 1, backgroundColor: c.glassSoft, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, color: c.text, fontSize: 14, borderWidth: 1, borderColor: c.border },
   addTextBtn: { marginLeft: 8, backgroundColor: c.accent, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
   addTextBtnText: { color: '#FFF', fontSize: 13, fontWeight: '700' },
-  textTag: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.06)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, marginRight: 6 },
+  textTag: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glassSoft, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, marginRight: 6 },
   filterBtn: { alignItems: 'center', marginRight: 14 },
-  filterBtnActive: {},
-  filterPreview: { width: 48, height: 48, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.1)', marginBottom: 4, borderWidth: 2, borderColor: 'transparent' },
+  filterPreview: { width: 52, height: 52, borderRadius: 8, backgroundColor: c.glassSoft, marginBottom: 4, borderWidth: 2, borderColor: 'transparent', overflow: 'hidden' },
+  filterPreviewActive: { borderColor: c.accent },
+  filterThumb: { width: 48, height: 48 },
   filterLabel: { fontSize: 12, color: c.textDim },
   adjustRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   adjustLabel: { color: c.textDim, fontSize: 13, width: 80 },
   adjustSlider: { flex: 1, flexDirection: 'row', justifyContent: 'space-around' },
-  adjustStep: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
-  adjustStepActive: { borderColor: c.accent, backgroundColor: 'rgba(0,229,255,0.1)' },
+  adjustStep: { minHeight: 32, justifyContent: 'center', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, borderWidth: 1, borderColor: c.border },
+  adjustStepActive: { borderColor: c.accent, backgroundColor: brandAlpha(0.12) },
   adjustStepText: { color: c.textDim, fontSize: 12 },
-  processingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(2,11,24,0.85)', justifyContent: 'center', alignItems: 'center' },
-  processingText: { color: c.accent, fontSize: 15, marginTop: 12, fontWeight: '600' },
+  processingOverlay: { ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center' },
+  processingScrim: { backgroundColor: c.bg, opacity: 0.85 },
+  processingText: { color: c.text, fontSize: 15, marginTop: 12, fontWeight: '600' },
+  // The crop shade/box sit over the photo itself, so they stay dark/light in
+  // both themes (like any photo editor), not theme tokens.
+  cropShade: { position: 'absolute', backgroundColor: 'rgba(0,0,0,0.55)' },
+  cropBox: { position: 'absolute', borderWidth: 2, borderColor: '#FFFFFF' },
+  cropHandle: { position: 'absolute', width: 28, height: 28, borderColor: '#FFFFFF', borderWidth: 4, borderRadius: 4, backgroundColor: 'rgba(0,0,0,0.25)' },
 });

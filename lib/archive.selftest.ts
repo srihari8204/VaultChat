@@ -8,6 +8,7 @@
 import {
   listDir, parentDir, safeEntryPath, toEntries, tooLargeToOpen, totalUncompressed,
   MAX_UNCOMPRESSED_BYTES, MAX_ENTRIES, refuseDeclared, unsupportedArchiveFormat,
+  entriesFromInfos, MAX_ENTRY_BYTES, MAX_ARCHIVE_BYTES,
 } from './archive';
 import { unzip, zipSync, type Unzipped, type UnzipFileInfo } from 'fflate';
 
@@ -124,6 +125,18 @@ async function fflateContract() {
     unzip(zip, { filter: f => { seen.push(f); return false; } }, (e, o) => (e ? rej(e) : res(o))));
   eq('filter reports the declared size without inflating', seen.map(f => f.originalSize), [100_000]);
   eq('a filtered-out entry is never inflated', Object.keys(none), []);
+
+  // Listing comes from the infos; tapping inflates exactly one entry.
+  const two = zipSync({ 'a/x.txt': new Uint8Array([1, 2, 3]), 'b.txt': new Uint8Array([4]) });
+  const infos: UnzipFileInfo[] = [];
+  await new Promise<void>((res, rej) =>
+    unzip(two, { filter: f => { infos.push(f); return false; } }, e => (e ? rej(e) : res())));
+  eq('entriesFromInfos lists from the central directory',
+    entriesFromInfos(infos).map(e => [e.path, e.size]).sort(), [['a/x.txt', 3], ['b.txt', 1]]);
+  const one = await new Promise<Unzipped>((res, rej) =>
+    unzip(two, { filter: f => f.name === 'b.txt' }, (e, o) => (e ? rej(e) : res(o))));
+  eq('a per-entry filter inflates only that entry', Object.keys(one), ['b.txt']);
+  check('caps are ordered', MAX_ENTRY_BYTES <= MAX_UNCOMPRESSED_BYTES && MAX_ARCHIVE_BYTES > 0);
 
   // Lie in the central directory: claim 10 bytes for a 100 kB entry.
   const lying = zip.slice();

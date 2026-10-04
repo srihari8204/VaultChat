@@ -12,7 +12,7 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  ActivityIndicator, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View,
+  ActivityIndicator, Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -98,10 +98,17 @@ export default function ShelfScreen() {
 
   const togglePin = useCallback(async (id: string) => {
     const next = new Set(pins);
-    next.has(id) ? next.delete(id) : next.add(id);
+    if (next.has(id)) next.delete(id); else next.add(id);
     setPins(next);
     setFiles(fs => fs.map(f => (f.attachmentId === id ? { ...f, pinned: next.has(id) } : f)));
-    await setMeta(PINS_KEY, JSON.stringify([...next])).catch(() => {});
+    try {
+      await setMeta(PINS_KEY, JSON.stringify([...next]));
+    } catch {
+      // The pin only looked saved: put the row back and say so.
+      setPins(pins);
+      setFiles(fs => fs.map(f => (f.attachmentId === id ? { ...f, pinned: pins.has(id) } : f)));
+      Alert.alert('Couldn’t save the pin', 'The change could not be written to this device. Please try again.');
+    }
   }, [pins]);
 
   const counts = useMemo(() => countsByKind(files), [files]);
@@ -123,7 +130,7 @@ export default function ShelfScreen() {
         <TouchableOpacity onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" hitSlop={12}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={S.title}>Shelf</Text>
+        <Text style={S.title} accessibilityRole="header">Shelf</Text>
         <Text style={S.subtitle}>{counts.all} file{counts.all === 1 ? '' : 's'}</Text>
       </View>
 
@@ -136,6 +143,7 @@ export default function ShelfScreen() {
           placeholder="Filter this shelf"
           placeholderTextColor={colors.textFaint}
           autoCorrect={false}
+          accessibilityLabel="Filter files by name"
         />
         {search.length > 0 && (
           <TouchableOpacity onPress={() => setSearch('')} accessibilityRole="button" accessibilityLabel="Clear the filter" hitSlop={10}>
@@ -173,6 +181,17 @@ export default function ShelfScreen() {
           </TouchableOpacity>
         ))}
       </View>
+
+      {/* A refresh that failed while older rows are still shown: say the list
+          may be stale instead of presenting it as current. */}
+      {!loading && loadFailed && files.length > 0 && (
+        <View style={S.staleBar} accessibilityLiveRegion="polite">
+          <Text style={S.staleTxt}>{"Couldn't refresh — showing the last list read."}</Text>
+          <TouchableOpacity onPress={() => load()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Retry loading the shelf">
+            <Text style={S.retryLink}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {loading ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
@@ -274,4 +293,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   emptyBody: { color: c.textDim, fontSize: 13, textAlign: 'center', lineHeight: 19 },
   retry: { marginTop: 6, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20, backgroundColor: brandAlpha(0.16) },
   retryTxt: { color: c.primary, fontSize: 14, fontWeight: '700' },
+  staleBar: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: c.glassSoft },
+  staleTxt: { flex: 1, color: c.textDim, fontSize: 12 },
+  retryLink: { color: c.accentOn, fontSize: 13, fontWeight: '700' },
 });

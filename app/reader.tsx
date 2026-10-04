@@ -13,8 +13,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import {
-  Modal, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text,
-  TouchableOpacity, View, useWindowDimensions,
+  ActivityIndicator, Modal, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text,
+  TouchableOpacity, View,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -37,7 +37,6 @@ const FONT_FAMILY: Record<ReaderSettings['font'], string | undefined> = {
 function ReaderScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
   const params = useLocalSearchParams<{
     chatId?: string; id?: string; text?: string; title?: string; author?: string; at?: string;
   }>();
@@ -46,14 +45,19 @@ function ReaderScreen() {
   const fromCache = !!params.chatId && msgId > 0;
   // null = still reading the cache (renders blank, not "Nothing to read").
   const [cached, setCached] = useState<string | null>(fromCache ? null : '');
+  // A failed cache READ is an error with Retry, not "no longer available".
+  const [readFailed, setReadFailed] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   useEffect(() => {
     if (!fromCache) return;
     let live = true;
+    setReadFailed(false);
+    setCached(null);
     getCachedMessagesByIds(params.chatId!, [msgId])
       .then(([m]) => { if (live) setCached(m?.content && !looksEncrypted(m.content) ? m.content : ''); })
-      .catch(() => { if (live) setCached(''); });
+      .catch(() => { if (live) { setReadFailed(true); setCached(''); } });
     return () => { live = false; };
-  }, [fromCache, params.chatId, msgId]);
+  }, [fromCache, params.chatId, msgId, reloadKey]);
   const body = fromCache ? (cached ?? '') : (params.text || '') + '';
   const title = (params.title || '') + '';
   const author = (params.author || '') + '';
@@ -130,7 +134,19 @@ function ReaderScreen() {
         </TouchableOpacity>
       </View>
 
-      {cached === null ? null : !body.trim() ? (
+      {cached === null ? (
+        <ActivityIndicator style={{ marginTop: 48 }} color={theme.dim} accessibilityLabel="Loading message" />
+      ) : readFailed ? (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 }}>
+          <Ionicons name="alert-circle-outline" size={44} color={theme.dim} />
+          <Text accessibilityRole="header" style={{ color: theme.text, fontSize: 17, fontWeight: '700', textAlign: 'center' }}>Couldn’t open this message</Text>
+          <Text style={{ color: theme.dim, fontSize: 14, textAlign: 'center' }}>It could not be read from this device’s storage.</Text>
+          <TouchableOpacity onPress={() => setReloadKey(k => k + 1)} accessibilityRole="button" accessibilityLabel="Retry"
+            style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 20 }}>
+            <Text style={{ color: theme.text, fontSize: 15, fontWeight: '700' }}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      ) : !body.trim() ? (
         // Reached without a message (bare deep link): say so rather than
         // render "Long message · 0 words".
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 }}>
@@ -254,9 +270,9 @@ function Stepper({ label, value, onDec, onInc, theme }: {
       <Text style={{ color: theme.dim, fontSize: 12, fontWeight: '700', letterSpacing: 1, flex: 1 }}>
         {label.toUpperCase()}
       </Text>
-      <TouchableOpacity onPress={onDec} accessibilityLabel={`Decrease ${label.toLowerCase()}`} hitSlop={10}><Ionicons name="remove-circle-outline" size={26} color={theme.text} /></TouchableOpacity>
+      <TouchableOpacity onPress={onDec} accessibilityRole="button" accessibilityLabel={`Decrease ${label.toLowerCase()}`} hitSlop={10}><Ionicons name="remove-circle-outline" size={26} color={theme.text} /></TouchableOpacity>
       <Text style={{ color: theme.text, fontSize: 15, fontWeight: '600', minWidth: 56, textAlign: 'center' }}>{value}</Text>
-      <TouchableOpacity onPress={onInc} accessibilityLabel={`Increase ${label.toLowerCase()}`} hitSlop={10}><Ionicons name="add-circle-outline" size={26} color={theme.text} /></TouchableOpacity>
+      <TouchableOpacity onPress={onInc} accessibilityRole="button" accessibilityLabel={`Increase ${label.toLowerCase()}`} hitSlop={10}><Ionicons name="add-circle-outline" size={26} color={theme.text} /></TouchableOpacity>
     </View>
   );
 }

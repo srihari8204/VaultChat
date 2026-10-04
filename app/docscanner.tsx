@@ -5,7 +5,9 @@ import { AuroraBackground } from '../components/ui';
 // Pick/capture one or more photos → resize each (expo-image-manipulator) →
 // assemble a real multi-page PDF (expo-print) → share it (expo-sharing) or send
 // it into a chat as a file attachment. Recent docs are the real PDFs produced on
-// this device. No fake OCR, no fabricated "AES-256" claim, no simulated progress.
+// this device, encrypted at rest (lib/scanVault: AES-256-GCM, install key in
+// SecureStore); plaintext exists only as a short-lived cache copy for Share/Send.
+// No fake OCR, no simulated progress.
 
 import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,16 +21,22 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState, useMemo } from 'react';
-import { ActivityIndicator, Alert, Animated, FlatList, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, FlatList, Image, Modal, Pressable, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../lib/theme';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { enqueueMedia } from '../lib/mediaOutbox';
 import { listChats, chatTitle, type ChatSummary } from '../lib/chatService';
 import DocumentScanner from 'react-native-document-scanner-plugin';
 import { docFilename, DEFAULT_STYLE } from '../lib/docs/docStyle';
-import { permissionDenied } from '../lib/permissionDenied';
+import { sealJson, openJson, encryptFileTo, decryptToTemp } from '../lib/scanVault';
+import type { MediaKey } from '../lib/mediaCrypto';
 
-const RECENT_KEY = 'vc_docscanner_recent';
+/** Pre-encryption list: plaintext JSON. Read once, migrated, then removed. */
+const LEGACY_RECENT_KEY = 'vc_docscanner_recent';
+/** The recent list, sealed under the scan key (titles are private too). */
+const RECENT_KEY = 'vc_docscanner_recent_v2';
+const SCAN_DIR = `${FileSystem.documentDirectory}VaultScans/`;
 
 const DOC_TYPES = [
   { id: 'invoice', label: 'Invoice', icon: '🧾' },
@@ -47,13 +55,33 @@ interface ScannedDoc {
   pages: number;
   pdfUri: string;
   sizeKb: number;
-  /** The file's real name on disk. Absent on scans saved before it was kept. */
+  /** The document's real name (used for Share/Send). Absent on scans saved before it was kept. */
   filename?: string;
+  /** Present when pdfUri is the ENCRYPTED file (VaultScans/<id>.vcs). */
+  mk?: MediaKey;
+}
+
+/** Encrypt a legacy plaintext scan in place: write <id>.vcs, then delete the
+ *  plaintext. On any failure the plaintext doc is returned unchanged, so a
+ *  migration problem can never lose a scan. */
+async function migrateDoc(doc: ScannedDoc): Promise<ScannedDoc> {
+  if (doc.mk) return doc;
+  try {
+    if (!(await FileSystem.getInfoAsync(doc.pdfUri)).exists) return doc;
+    await FileSystem.makeDirectoryAsync(SCAN_DIR, { intermediates: true });
+    const enc = `${SCAN_DIR}${doc.id}.vcs`;
+    const mk = await encryptFileTo(doc.pdfUri, enc);
+    await FileSystem.deleteAsync(doc.pdfUri, { idempotent: true });
+    return { ...doc, pdfUri: enc, mk, filename: doc.filename || doc.pdfUri.split('/').pop() };
+  } catch {
+    return doc;
+  }
 }
 
 function DocScannerContent() {
   const S = useS();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const { chatId } = useLocalSearchParams<{ chatId?: string }>();
 
@@ -64,6 +92,8 @@ function DocScannerContent() {
   const [processingProgress, setProcessingProgress] = useState(0);
   const [processingPhase, setProcessingPhase] = useState('');
   const [recentDocs, setRecentDocs] = useState<ScannedDoc[]>([]);
+  // A list that could not be read/opened is an error, not "no documents".
+  const [recentError, setRecentError] = useState(false);
   const [currentDoc, setCurrentDoc] = useState<ScannedDoc | null>(null);
   const [busy, setBusy] = useState(false);
   // Chat picker. The scanner is reachable only from Mini apps, which has no
@@ -80,17 +110,44 @@ function DocScannerContent() {
   const runRef = useRef(0);
   useEffect(() => () => { runRef.current++; }, []);
 
-  useEffect(() => {
-    Animated.timing(fadeIn, { toValue: 1, duration: 400, useNativeDriver: true }).start();
-    (async () => {
-      try { const raw = await AsyncStorage.getItem(RECENT_KEY); if (raw) setRecentDocs(JSON.parse(raw)); } catch {}
-    })();
-  }, [fadeIn]);
-
   const persistRecent = async (docs: ScannedDoc[]) => {
     setRecentDocs(docs);
-    try { await AsyncStorage.setItem(RECENT_KEY, JSON.stringify(docs.slice(0, 20))); } catch {}
+    try { await AsyncStorage.setItem(RECENT_KEY, await sealJson(docs.slice(0, 20))); } catch {}
   };
+
+  const loadRecent = async () => {
+    setRecentError(false);
+    try {
+      const sealed = await AsyncStorage.getItem(RECENT_KEY);
+      if (sealed) {
+        const docs = await openJson<ScannedDoc[]>(sealed);
+        if (!docs) throw new Error('recent list could not be opened');
+        setRecentDocs(docs);
+        return;
+      }
+      // One-time migration from the plaintext list + plaintext PDFs.
+      const legacy = await AsyncStorage.getItem(LEGACY_RECENT_KEY);
+      if (!legacy) return;
+      const docs: ScannedDoc[] = [];
+      for (const d of JSON.parse(legacy) as ScannedDoc[]) docs.push(await migrateDoc(d));
+      await AsyncStorage.setItem(RECENT_KEY, await sealJson(docs.slice(0, 20)));
+      await AsyncStorage.removeItem(LEGACY_RECENT_KEY);
+      setRecentDocs(docs);
+    } catch {
+      setRecentError(true);
+    }
+  };
+
+  useEffect(() => {
+    Animated.timing(fadeIn, { toValue: 1, duration: 400, useNativeDriver: true }).start();
+    loadRecent();
+  }, [fadeIn]);
+
+  /** A plaintext copy to hand to Share/Send: decrypted into a vt_ cache dir
+   *  (swept at boot/logout) for encrypted scans, the file itself for a legacy
+   *  scan whose migration failed. */
+  const plainCopy = (doc: ScannedDoc) =>
+    doc.mk ? decryptToTemp(doc.pdfUri, doc.mk, doc.filename || `${doc.title}.pdf`) : Promise.resolve(doc.pdfUri);
 
   // ML Kit / VisionKit document scanner — live edge detection, auto-capture,
   // perspective-correct crop, filters (auto/grayscale/color) and multi-page.
@@ -103,26 +160,25 @@ function DocScannerContent() {
         setStep('type');
       }
     } catch (e: any) {
-      Alert.alert('Scanner unavailable', e?.message ?? 'The document scanner needs Google Play Services.');
+      // A user cancel is not an error; anything else gets fixed copy, never
+      // the raw ML Kit / VisionKit message.
+      if (/cancel/i.test(String(e?.message ?? ''))) return;
+      console.warn('[docscanner] scan failed:', e?.message ?? e);
+      Alert.alert('Scanner unavailable', 'The document scanner could not start on this device. You can pick photos from the gallery instead.');
     }
   };
 
-  const pickPhoto = async (source: 'camera' | 'gallery') => {
+  // Camera capture is the Scan Document button above (edge detection, crop,
+  // multi-page); this is the gallery path only.
+  const pickFromGallery = async () => {
     try {
-      let result;
-      if (source === 'camera' && Platform.OS !== 'web') {
-        const perm = await ImagePicker.requestCameraPermissionsAsync();
-        if (!perm.granted) { permissionDenied('Permission needed', 'Allow camera access to scan.', perm.canAskAgain); return; }
-        result = await ImagePicker.launchCameraAsync({ quality: 1, allowsEditing: false });
-      } else {
-        result = await ImagePicker.launchImageLibraryAsync({ quality: 1, allowsMultipleSelection: true, mediaTypes: ['images'] });
-      }
+      const result = await ImagePicker.launchImageLibraryAsync({ quality: 1, allowsMultipleSelection: true, mediaTypes: ['images'] });
       if (!result.canceled && result.assets?.length) {
         setImageUris(result.assets.map(a => a.uri));
         setStep('type');
       }
     } catch {
-      Alert.alert('Error', 'Could not open camera or gallery.');
+      Alert.alert('Could not open gallery', 'Please try again.');
     }
   };
 
@@ -160,42 +216,29 @@ function DocScannerContent() {
       produced = uri;
       if (stale()) { FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {}); return; }
 
-      // Print writes into the CACHE directory, which Android is free to evict
-      // under storage pressure — and the uri is what "Recent documents" keeps
-      // for up to 20 scans. Left there, a recent row eventually points at a
-      // file that is gone, and the scan cannot be opened, shared or re-sent.
-      // Move it somewhere only the user's own delete removes. The send path
-      // already solved this by copying into the media outbox; this is the same
-      // fix for the list. Best-effort: if the move fails the cache copy still
-      // works today, which beats losing the scan outright.
-      // The title the user typed has to become the FILE's name, not just this
-      // list's label. expo-print names its output with a generated id, and that
-      // was the name the document carried everywhere it went — shared to another
-      // app, saved to Drive, sent on — so a scan carefully titled "Aadhaar card"
-      // arrived as 7f3a91c2-....pdf. docFilename is the same helper the camera's
-      // scan mode uses, so both scanners name a document identically.
+      // Print writes into the CACHE directory, which Android may evict, and
+      // in plaintext. The kept copy is ENCRYPTED into documentDirectory
+      // (VaultScans/<id>.vcs, a name that says nothing about the document) and
+      // the print output is deleted. Failing to encrypt fails the save rather
+      // than silently keeping a plaintext copy; the pages are still selected,
+      // so Convert can simply be tried again.
+      // The title the user typed still becomes the document's name wherever it
+      // is shared or sent — docFilename is the same helper the camera's scan
+      // mode uses, so both scanners name a document identically.
       const filename = docFilename(title, DEFAULT_STYLE, new Date());
-      let pdfUri = uri;
-      try {
-        const dir = `${FileSystem.documentDirectory}VaultScans/`;
-        await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
-        let dest = `${dir}${filename}`;
-        // Two scans can honestly share a title; only the second needs a suffix.
-        if ((await FileSystem.getInfoAsync(dest)).exists) {
-          dest = `${dir}${filename.replace(/\.pdf$/i, '')}-${Date.now()}.pdf`;
-        }
-        await FileSystem.moveAsync({ from: uri, to: dest });
-        pdfUri = dest;
-        produced = dest;
-      } catch { /* keep the cache copy */ }
+      const plainInfo = await FileSystem.getInfoAsync(uri);
+      const sizeKb = plainInfo.exists && (plainInfo as any).size ? Math.max(1, Math.round((plainInfo as any).size / 1024)) : 0;
+      const id = Date.now().toString();
+      await FileSystem.makeDirectoryAsync(SCAN_DIR, { intermediates: true });
+      const pdfUri = `${SCAN_DIR}${id}.vcs`;
+      const mk = await encryptFileTo(uri, pdfUri);
+      produced = pdfUri;
+      FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
       if (stale()) { FileSystem.deleteAsync(pdfUri, { idempotent: true }).catch(() => {}); return; }
 
-      const info = await FileSystem.getInfoAsync(pdfUri);
-      const sizeKb = info.exists && (info as any).size ? Math.max(1, Math.round((info as any).size / 1024)) : 0;
-
       const doc: ScannedDoc = {
-        id: Date.now().toString(), type: selectedType, title,
-        createdAt: Date.now(), pages: imageUris.length, pdfUri, sizeKb, filename,
+        id, type: selectedType, title,
+        createdAt: Date.now(), pages: imageUris.length, pdfUri, sizeKb, filename, mk,
       };
       setCurrentDoc(doc);
       await persistRecent([doc, ...recentDocs]);
@@ -206,14 +249,21 @@ function DocScannerContent() {
         if (produced) FileSystem.deleteAsync(produced, { idempotent: true }).catch(() => {});
         return;
       }
-      Alert.alert('Error', e?.message ?? 'Could not build the PDF.');
+      if (produced) FileSystem.deleteAsync(produced, { idempotent: true }).catch(() => {});
+      console.warn('[docscanner] PDF build failed:', e?.message ?? e);
+      Alert.alert('Could not save the PDF', 'The document could not be built and saved securely. Your pages are still selected — try Convert again.');
       setStep('type');
     }
   };
 
   const sharePdf = async (doc: ScannedDoc) => {
     if (!(await Sharing.isAvailableAsync())) { Alert.alert('Unavailable', 'Sharing is not available on this device.'); return; }
-    try { await Sharing.shareAsync(doc.pdfUri, { mimeType: 'application/pdf', dialogTitle: doc.title }); }
+    let uri: string;
+    try { uri = await plainCopy(doc); }
+    catch { Alert.alert('Could not open document', 'This scan could not be decrypted on this device.'); return; }
+    // The receiving app may still be reading the copy after the sheet closes,
+    // so it is left for the vt_ boot/logout sweep rather than deleted here.
+    try { await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: doc.title }); }
     catch { /* user dismissed */ }
   };
 
@@ -238,10 +288,10 @@ function DocScannerContent() {
     setChatsLoading(true);
     try {
       setChats(await listChats());
-    } catch (e: any) {
+    } catch {
       // listChats is a network call; offline it throws. Say so and close,
       // rather than leaving an empty sheet that looks like "you have no chats".
-      Alert.alert('Could not load chats', e?.message ?? 'Check your connection and try again.');
+      Alert.alert('Could not load chats', 'Check your connection and try again.');
       setPickerDoc(null);
     } finally {
       setChatsLoading(false);
@@ -251,9 +301,14 @@ function DocScannerContent() {
   const sendToChat = async (doc: ScannedDoc, targetChatId: string) => {
     setPickerDoc(null);
     setBusy(true);
+    let temp: string | null = null;
     try {
+      const uri = await plainCopy(doc);
+      if (uri !== doc.pdfUri) temp = uri;
+      // enqueueMedia copies the file into the outbox before resolving, so the
+      // decrypted temp can go as soon as it returns.
       await enqueueMedia(targetChatId, 'file', {
-        uri: doc.pdfUri,
+        uri,
         filename: doc.filename || `${doc.title}.pdf`,
         mime: 'application/pdf',
       });
@@ -263,8 +318,12 @@ function DocScannerContent() {
       // on focus, so the bubble is already there with its upload progress.
       router.push({ pathname: '/chat' as any, params: { id: targetChatId } });
     } catch (e: any) {
-      Alert.alert('Could not send', e?.message ?? 'Try again');
-    } finally { setBusy(false); }
+      console.warn('[docscanner] send failed:', e?.message ?? e);
+      Alert.alert('Could not send', 'The document could not be prepared for sending. Please try again.');
+    } finally {
+      if (temp) FileSystem.deleteAsync(temp.slice(0, temp.lastIndexOf('/') + 1), { idempotent: true }).catch(() => {});
+      setBusy(false);
+    }
   };
 
   const deleteRecent = (doc: ScannedDoc) => {
@@ -300,7 +359,7 @@ function DocScannerContent() {
             <Ionicons name="arrow-back" size={24} color={colors.primary} />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
-            <Text style={S.title}>📄 Doc Scanner</Text>
+            <Text style={S.title} accessibilityRole="header">Doc Scanner</Text>
             <Text style={{ color: colors.textFaint, fontSize: 12, letterSpacing: 2 }}>PHOTO → PDF DOCUMENT</Text>
           </View>
         </View>
@@ -313,14 +372,14 @@ function DocScannerContent() {
               <View style={{ flexDirection: 'row', gap: 12 }}>
                 <TouchableOpacity onPress={scanDoc} style={{ flex: 1 }} accessibilityRole="button" accessibilityLabel="Scan document">
                   <LinearGradient colors={['#4338CA', '#312E81']} style={S.sourceBtn}>
-                    <Text style={{ fontSize: 40 }}>📄</Text>
+                    <Ionicons name="scan-outline" size={40} color="#fff" />
                     <Text style={{ color: '#fff', fontSize: 14, fontWeight: '900', marginTop: 8 }}>Scan Document</Text>
                     <Text style={{ color: '#FFFFFF', fontSize: 12, marginTop: 4, textAlign: 'center' }}>Auto edge-detect, crop & multi-page</Text>
                   </LinearGradient>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => pickPhoto('gallery')} style={{ flex: 1 }} accessibilityRole="button" accessibilityLabel="Pick photos from gallery">
+                <TouchableOpacity onPress={pickFromGallery} style={{ flex: 1 }} accessibilityRole="button" accessibilityLabel="Pick photos from gallery">
                   <LinearGradient colors={['#1D4ED8', '#1E40AF']} style={S.sourceBtn}>
-                    <Text style={{ fontSize: 40 }}>🖼️</Text>
+                    <Ionicons name="images-outline" size={40} color="#fff" />
                     <Text style={{ color: '#fff', fontSize: 14, fontWeight: '900', marginTop: 8 }}>From Gallery</Text>
                     <Text style={{ color: '#FFFFFF', fontSize: 12, marginTop: 4, textAlign: 'center' }}>Pick one or more photos</Text>
                   </LinearGradient>
@@ -339,15 +398,30 @@ function DocScannerContent() {
                 ))}
               </View>
 
+              {recentError && (
+                <View style={S.tipsCard}>
+                  <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }}>Couldn’t load your recent documents</Text>
+                  <TouchableOpacity onPress={loadRecent} style={{ marginTop: 10, alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center' }}
+                    accessibilityRole="button" accessibilityLabel="Retry loading recent documents">
+                    <Text style={{ color: colors.accentOn, fontSize: 13, fontWeight: '800' }}>Retry</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
               {recentDocs.length > 0 && (
                 <View style={{ gap: 10 }}>
                   <Text style={S.sectionLabel}>RECENT DOCUMENTS</Text>
                   {recentDocs.map((doc) => (
                     <TouchableOpacity key={doc.id} style={S.docRow} onPress={() => sharePdf(doc)} onLongPress={() => deleteRecent(doc)}
                       accessibilityRole="button" accessibilityLabel={`${doc.title}, ${doc.pages} page${doc.pages > 1 ? 's' : ''}. Share`}
-                      accessibilityActions={[{ name: 'delete', label: 'Delete' }]}
-                      onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'delete') deleteRecent(doc); }}>
-                      <Text style={{ fontSize: 26 }}>{DOC_TYPES.find(d => d.id === doc.type)?.icon || '📄'}</Text>
+                      accessibilityActions={[{ name: 'send', label: 'Send to chat' }, { name: 'share', label: 'Share' }, { name: 'delete', label: 'Delete' }]}
+                      onAccessibilityAction={(e) => {
+                        const a = e.nativeEvent.actionName;
+                        if (a === 'delete') deleteRecent(doc);
+                        else if (a === 'send') sendOrPick(doc);
+                        else if (a === 'share') sharePdf(doc);
+                      }}>
+                      <Text style={{ fontSize: 26 }} importantForAccessibility="no" accessibilityElementsHidden>{DOC_TYPES.find(d => d.id === doc.type)?.icon || '📄'}</Text>
                       <View style={{ flex: 1, minWidth: 120 }}>
                         <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }} numberOfLines={1}>{doc.title}</Text>
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
@@ -391,11 +465,12 @@ function DocScannerContent() {
               </View>
               <View>
                 <Text style={S.sectionLabel}>DOCUMENT TITLE (OPTIONAL)</Text>
-                <TextInput value={customTitle} onChangeText={setCustomTitle} placeholder="e.g. Invoice #2024-041" placeholderTextColor={colors.textFaint} style={S.input} />
+                <TextInput value={customTitle} onChangeText={setCustomTitle} placeholder="e.g. Invoice #2024-041" placeholderTextColor={colors.textFaint} style={S.input}
+                  accessibilityLabel="Document title, optional" />
               </View>
               <TouchableOpacity onPress={processToPdf} accessibilityRole="button" accessibilityLabel="Convert to PDF">
                 <LinearGradient colors={[colors.accentDeep, colors.accentDeep]} style={{ borderRadius: 18, paddingVertical: 18, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 10 }}>
-                  <Text style={{ fontSize: 20 }}>⚡</Text>
+                  <Ionicons name="document-text-outline" size={20} color="#fff" />
                   <Text style={{ color: '#fff', fontSize: 16, fontWeight: '900' }}>Convert to PDF</Text>
                 </LinearGradient>
               </TouchableOpacity>
@@ -404,8 +479,10 @@ function DocScannerContent() {
 
           {/* STEP 3: Processing (real progress, page by page) */}
           {step === 'processing' && (
-            <View style={{ gap: 20, alignItems: 'center', paddingTop: 30 }}>
-              <Text style={{ fontSize: 56 }}>📄</Text>
+            <View style={{ gap: 20, alignItems: 'center', paddingTop: 30 }}
+              accessible accessibilityRole="progressbar" accessibilityLabel={processingPhase}
+              accessibilityValue={{ min: 0, max: 100, now: Math.floor(processingProgress) }}>
+              <Ionicons name="document-text-outline" size={56} color={colors.primary} />
               <View style={{ width: '100%', gap: 10 }}>
                 <View style={{ height: 6, backgroundColor: colors.glassStroke, borderRadius: 3, overflow: 'hidden' }}>
                   <View style={{ width: (processingProgress + '%') as any, height: 6, backgroundColor: colors.primary, borderRadius: 3 }} />
@@ -422,7 +499,7 @@ function DocScannerContent() {
           {step === 'preview' && currentDoc && (
             <View style={{ gap: 16 }}>
               <View style={S.successBanner}>
-                <Text style={{ fontSize: 36 }}>✅</Text>
+                <Ionicons name="checkmark-circle" size={36} color={colors.success} />
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: colors.accent, fontSize: 15, fontWeight: '900' }}>PDF ready</Text>
                   <Text style={{ color: colors.textDim, fontSize: 12, marginTop: 2 }}>{currentDoc.pages} page{currentDoc.pages > 1 ? 's' : ''} · {fmtSize(currentDoc.sizeKb)}</Text>
@@ -436,16 +513,22 @@ function DocScannerContent() {
               )}
 
               <View style={{ flexDirection: 'row', gap: 10 }}>
-                <TouchableOpacity onPress={() => sharePdf(currentDoc)} style={{ flex: 1, backgroundColor: colors.accent + '18', borderRadius: 16, paddingVertical: 14, alignItems: 'center', borderWidth: 1, borderColor: colors.accent + '44' }}>
-                  <Text style={{ color: colors.accent, fontWeight: '800', fontSize: 13 }}>📤 Share PDF</Text>
+                <TouchableOpacity onPress={() => sharePdf(currentDoc)} style={{ flex: 1, flexDirection: 'row', gap: 6, justifyContent: 'center', backgroundColor: brandAlpha(0.1), borderRadius: 16, paddingVertical: 14, alignItems: 'center', borderWidth: 1, borderColor: brandAlpha(0.3) }}
+                  accessibilityRole="button" accessibilityLabel="Share PDF">
+                  <Ionicons name="share-outline" size={16} color={colors.accentOn} />
+                  <Text style={{ color: colors.accentOn, fontWeight: '800', fontSize: 13 }}>Share PDF</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => sendOrPick(currentDoc)} disabled={busy} style={{ flex: 1 }}>
-                  <LinearGradient colors={[colors.accentDeep, colors.accentDeep]} style={{ borderRadius: 16, paddingVertical: 14, alignItems: 'center' }}>
-                    <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>{chatId ? '📨 Send in Chat' : '📨 Send to chat'}</Text>
+                <TouchableOpacity onPress={() => sendOrPick(currentDoc)} disabled={busy} style={{ flex: 1 }}
+                  accessibilityRole="button" accessibilityLabel={chatId ? 'Send in chat' : 'Send to chat'}
+                  accessibilityState={{ disabled: busy, busy }}>
+                  <LinearGradient colors={[colors.accentDeep, colors.accentDeep]} style={{ borderRadius: 16, paddingVertical: 14, alignItems: 'center', flexDirection: 'row', gap: 6, justifyContent: 'center' }}>
+                    {busy ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="send" size={14} color="#fff" />}
+                    <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>{chatId ? 'Send in Chat' : 'Send to chat'}</Text>
                   </LinearGradient>
                 </TouchableOpacity>
               </View>
-              <TouchableOpacity onPress={resetScanner} style={{ alignItems: 'center', paddingVertical: 8 }}>
+              <TouchableOpacity onPress={resetScanner} style={{ alignItems: 'center', paddingVertical: 8, minHeight: 44, justifyContent: 'center' }}
+                accessibilityRole="button" accessibilityLabel="Scan another document">
                 <Text style={{ color: colors.textFaint, fontSize: 13 }}>Scan another document</Text>
               </TouchableOpacity>
             </View>
@@ -463,9 +546,15 @@ function DocScannerContent() {
         animationType="slide"
         onRequestClose={() => setPickerDoc(null)}
       >
-        <Pressable style={S.sheetBackdrop} onPress={() => setPickerDoc(null)}>
-          <Pressable style={S.sheet} onPress={e => e.stopPropagation()}>
-            <Text style={S.sheetTitle}>Send to…</Text>
+        <Pressable style={S.sheetBackdrop} onPress={() => setPickerDoc(null)} accessibilityRole="button" accessibilityLabel="Close chat picker">
+          <Pressable style={[S.sheet, { paddingBottom: insets.bottom + 18 }]} onPress={e => e.stopPropagation()} accessible={false}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Text style={[S.sheetTitle, { flex: 1 }]} accessibilityRole="header">Send to…</Text>
+              <TouchableOpacity onPress={() => setPickerDoc(null)} hitSlop={10} style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}
+                accessibilityRole="button" accessibilityLabel="Close">
+                <Ionicons name="close" size={22} color={colors.textDim} />
+              </TouchableOpacity>
+            </View>
             {pickerDoc && (
               <Text style={S.sheetSub} numberOfLines={1}>
                 📄 {pickerDoc.filename || `${pickerDoc.title}.pdf`}
@@ -484,6 +573,7 @@ function DocScannerContent() {
                     style={S.sheetRow}
                     onPress={() => pickerDoc && sendToChat(pickerDoc, item.id)}
                     activeOpacity={0.7}
+                    accessibilityRole="button" accessibilityLabel={`Send to ${chatTitle(item)}`}
                   >
                     <Text style={S.sheetRowTxt} numberOfLines={1}>{chatTitle(item)}</Text>
                     <Text style={S.sheetRowSub}>{item.type}</Text>
@@ -518,14 +608,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: c.glassSoft, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: c.glassStroke },
   sectionLabel: { color: c.textDim, fontSize: 12, fontWeight: '800', letterSpacing: 2, marginBottom: 8 },
   sourceBtn: { borderRadius: 20, paddingVertical: 28, alignItems: 'center', paddingHorizontal: 16 },
-  tipsCard: { backgroundColor: c.glassSoft, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: 'rgba(74,159,255,0.12)' },
+  tipsCard: { backgroundColor: c.glassSoft, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: c.glassStroke },
   docRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 14, padding: 14, gap: 12, borderWidth: 1, borderColor: c.glassStroke },
   typeCard: { width: '30%', flex: 1, minWidth: 100, backgroundColor: c.glassSoft, borderRadius: 16, padding: 14, alignItems: 'center', borderWidth: 1.5, borderColor: c.glassStroke },
   input: { backgroundColor: c.glassSoft, borderRadius: 14, padding: 15, color: c.text, fontSize: 14, borderWidth: 1, borderColor: c.glassStroke },
   sheetBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
   sheet: {
     maxHeight: '70%', backgroundColor: c.card, borderTopLeftRadius: 22, borderTopRightRadius: 22,
-    paddingTop: 18, paddingHorizontal: 18, paddingBottom: 28, gap: 4,
+    paddingTop: 18, paddingHorizontal: 18, gap: 4,
     borderTopWidth: 1, borderColor: c.border,
   },
   sheetTitle: { color: c.text, fontSize: 17, fontWeight: '900' },
@@ -538,5 +628,5 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   sheetRowTxt: { color: c.text, fontSize: 15, fontWeight: '700', flex: 1 },
   sheetRowSub: { color: c.textFaint, fontSize: 12, textTransform: 'uppercase' },
   successBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: brandAlpha(0.1), borderRadius: 16, padding: 16, gap: 14, borderWidth: 1, borderColor: brandAlpha(0.25) },
-  docPreviewLarge: { height: 320, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(74,159,255,0.2)', overflow: 'hidden', backgroundColor: 'rgba(2,11,24,0.9)' },
+  docPreviewLarge: { height: 320, borderRadius: 16, borderWidth: 1, borderColor: c.glassStroke, overflow: 'hidden', backgroundColor: c.surfaceSolid },
 });

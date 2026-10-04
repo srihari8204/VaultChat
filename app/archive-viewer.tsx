@@ -5,8 +5,9 @@
 // Reads the archive with fflate (pure JS — no native module, so this needed no
 // prebuild). Nothing is written to disk until you tap a file: extraction is
 // per-entry into the app cache, then handed to the existing viewers. The whole
-// archive is never unpacked, so opening a 200-entry zip to read one file does
-// not cost 200 files on disk.
+// archive is never unpacked: the listing comes from the central directory, and
+// a tap inflates only that entry (fflate filter), so opening a 200-entry zip to
+// read one file costs neither 200 files on disk nor 200 entries in memory.
 //
 // Entry paths inside an archive are untrusted (lib/archive.safeEntryPath); an
 // entry that tries to escape the destination is refused rather than repaired.
@@ -22,15 +23,17 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as FileSystem from 'expo-file-system/legacy';
 import { unzip, type Unzipped, type UnzipFileInfo } from 'fflate';
+import * as Sharing from 'expo-sharing';
 import { useTheme } from '../lib/theme';
 import { type Palette, brandAlpha } from '../constants/theme';
 import {
-  listDir, parentDir, refuseDeclared, safeEntryPath, toEntries, tooLargeToOpen,
-  totalUncompressed, unsupportedArchiveFormat, type ArchiveEntry,
+  listDir, parentDir, refuseDeclared, safeEntryPath, entriesFromInfos, tooLargeToOpen,
+  totalUncompressed, unsupportedArchiveFormat, MAX_ARCHIVE_BYTES, MAX_ENTRY_BYTES, type ArchiveEntry,
 } from '../lib/archive';
 import { VIEWER_TEMP_PREFIX } from '../lib/mediaCacheGC';
 import { formatSize } from '../lib/shelf';
 import { getAccessToken } from '../lib/api';
+import { isOwnServerUrl } from '../lib/serverOrigin';
 import { AuroraBackground } from '../components/ui';
 
 function ArchiveViewerScreen() {
@@ -43,7 +46,8 @@ function ArchiveViewerScreen() {
   const fileUri = (params.uri || '') + '';
   const archiveName = (params.filename || 'archive.zip') + '';
 
-  const [raw, setRaw] = useState<Unzipped | null>(null);
+  // The COMPRESSED archive bytes. Entries are inflated one at a time, on tap.
+  const [raw, setRaw] = useState<Uint8Array | null>(null);
   const [entries, setEntries] = useState<ArchiveEntry[]>([]);
   const [dir, setDir] = useState('');
   const [loading, setLoading] = useState(true);
@@ -74,7 +78,8 @@ function ArchiveViewerScreen() {
           // Authenticated endpoint — without the token this downloads a 401
           // body and fflate then reports "invalid zip", which points at the
           // archive rather than at the missing credential.
-          const token = await getAccessToken();
+          // Only for our own server: the uri comes from route params.
+          const token = isOwnServerUrl(fileUri) ? await getAccessToken() : null;
           const safeName = (archiveName || 'archive.zip').replace(/[/\\:*?"<>|]/g, '_');
           await FileSystem.makeDirectoryAsync(workDir, { intermediates: true }).catch(() => {});
           const dl = await FileSystem.downloadAsync(
@@ -84,6 +89,13 @@ function ArchiveViewerScreen() {
           );
           if (dl.status >= 400) throw new Error(`Could not download the archive (${dl.status})`);
           local = dl.uri;
+        }
+        // The whole archive is read into JS to parse it; refuse a huge one
+        // before that read rather than crash in it.
+        const info: any = await FileSystem.getInfoAsync(local);
+        if (info?.exists && Number(info.size ?? 0) > MAX_ARCHIVE_BYTES) {
+          if (alive) setError(`This archive is ${formatSize(Number(info.size))}, which is too large to open on the device.`);
+          return;
         }
         const b64 = await FileSystem.readAsStringAsync(local, { encoding: FileSystem.EncodingType.Base64 });
         const bytes = Uint8Array.from(Buffer.from(b64, 'base64'));
@@ -105,18 +117,12 @@ function ArchiveViewerScreen() {
           return;
         }
 
-        const files = await new Promise<Unzipped>((resolve, reject) => {
-          unzip(bytes, (err, out) => (err ? reject(err) : resolve(out)));
-        });
-        if (!alive) return;
-
-        const rows = toEntries(
-          Object.fromEntries(Object.entries(files).map(([p, d]) => [p, { size: d.length }])),
-        );
+        // List from the central directory — nothing is inflated until a tap.
+        const rows = entriesFromInfos(declared);
         if (tooLargeToOpen(rows)) {
           setError(`This archive expands to ${formatSize(totalUncompressed(rows))}, which is too large to open on the device.`);
         } else {
-          setRaw(files);
+          setRaw(bytes);
           setEntries(rows);
         }
       } catch (e: any) {
@@ -151,10 +157,18 @@ function ArchiveViewerScreen() {
       setEntryError(`"${e.path}" tries to write outside the archive and was refused.`);
       return;
     }
+    if (e.size > MAX_ENTRY_BYTES) {
+      setEntryError(`"${e.name}" is ${formatSize(e.size)}, too large to extract on the device.`);
+      return;
+    }
     setEntryError('');
     setBusyPath(e.path);
     try {
-      const bytes = raw[e.path];
+      // Inflate ONLY this entry.
+      const one = await new Promise<Unzipped>((resolve, reject) => {
+        unzip(raw, { filter: (f) => f.name === e.path }, (err, out) => (err ? reject(err) : resolve(out)));
+      });
+      const bytes = one[e.path];
       if (!bytes) throw new Error('entry missing from the archive');
       // Flatten into one cache folder per archive: the entry's own directories
       // are not recreated, so a deep path cannot become a deep write.
@@ -177,17 +191,49 @@ function ArchiveViewerScreen() {
 
   const up = parentDir(dir);
 
+  // Hand an unsupported archive straight to another app (the share sheet's
+  // "open with"), not to file-viewer's unknown-type card, which was one more
+  // tap to the same place. A remote file is downloaded into a vt_share_ dir
+  // first — swept at boot/logout, since the other app may still be reading it.
+  const [handingOff, setHandingOff] = useState(false);
+  const openElsewhere = async () => {
+    if (handingOff) return;
+    setHandingOff(true);
+    try {
+      if (!(await Sharing.isAvailableAsync())) {
+        setError('No app on this device can open this archive.');
+        return;
+      }
+      let local = fileUri;
+      if (/^https?:/i.test(fileUri)) {
+        const dir2 = `${FileSystem.cacheDirectory || ''}${VIEWER_TEMP_PREFIX}share_${Date.now()}/`;
+        await FileSystem.makeDirectoryAsync(dir2, { intermediates: true });
+        const token = isOwnServerUrl(fileUri) ? await getAccessToken() : null;
+        const dl = await FileSystem.downloadAsync(fileUri, dir2 + archiveName.replace(/[/\\:*?"<>|]/g, '_'),
+          token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
+        if (dl.status >= 400) throw new Error('GET ' + dl.status);
+        local = dl.uri;
+      }
+      await Sharing.shareAsync(local, { dialogTitle: archiveName });
+    } catch (e: any) {
+      console.warn('[archive-viewer] hand-off failed:', e?.message ?? e);
+      setError('Could not hand this archive to another app. Check your connection and try again.');
+    } finally {
+      setHandingOff(false);
+    }
+  };
+
   return (
     <View style={[S.screen, { paddingTop: insets.top }]}>
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={S.head}>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => (up !== null ? setDir(up) : router.back())} hitSlop={12}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel={up !== null ? 'Up one folder' : 'Back'} onPress={() => (up !== null ? setDir(up) : router.back())} hitSlop={12}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
-          <Text style={S.title} numberOfLines={1}>{archiveName}</Text>
+          <Text style={S.title} numberOfLines={1} accessibilityRole="header">{archiveName}</Text>
           <Text style={S.subtitle} numberOfLines={1}>
             {dir ? `/${dir}` : `${entries.filter(e => !e.isDirectory).length} files · ${formatSize(totalUncompressed(entries))}`}
           </Text>
@@ -200,13 +246,16 @@ function ArchiveViewerScreen() {
           <Ionicons name="file-tray-full-outline" size={44} color={colors.textDim} />
           <Text style={S.emptyTitle}>{`${unsupported} archives can't be opened here`}</Text>
           <Text style={S.emptyBody}>VaultChat can browse ZIP archives only. Open this file in another app on your device.</Text>
+          {!!error && <Text style={[S.emptyBody, { color: colors.danger }]}>{error}</Text>}
           <TouchableOpacity
             style={S.action}
             accessibilityRole="button"
             accessibilityLabel="Open in another app"
-            onPress={() => router.replace({ pathname: '/file-viewer', params: { uri: fileUri, filename: archiveName } } as any)}
+            accessibilityState={{ busy: handingOff, disabled: handingOff }}
+            disabled={handingOff}
+            onPress={openElsewhere}
           >
-            <Text style={S.actionTxt}>Open in another app</Text>
+            {handingOff ? <ActivityIndicator color={colors.primary} /> : <Text style={S.actionTxt}>Open in another app</Text>}
           </TouchableOpacity>
         </View>
       ) : loading ? (

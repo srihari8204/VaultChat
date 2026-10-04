@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect , useMemo} from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, FlatList, ActivityIndicator, Share, Alert } from 'react-native';
-import { type Palette } from '../constants/theme';
+import { type Palette, brandAlpha } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -19,7 +19,11 @@ const MAX_PREVIEW_BYTES = 2 * 1024 * 1024;
 
 
 // Syntax color themes per token type
-const TOKEN_COLORS = {
+type TokenType = 'keyword' | 'string' | 'comment' | 'number' | 'function' | 'type' | 'operator'
+  | 'property' | 'tag' | 'attribute' | 'punctuation' | 'default';
+type Token = { text: string; type: TokenType };
+
+const TOKEN_COLORS: Record<TokenType, string> = {
   keyword: '#FF7B72',
   string: '#A5D6FF',
   comment: '#8B949E',
@@ -35,7 +39,7 @@ const TOKEN_COLORS = {
 };
 
 // Language detection from extension
-const LANG_MAP = {
+const LANG_MAP: Record<string, string> = {
   js: 'javascript', jsx: 'javascript', ts: 'typescript', tsx: 'typescript',
   py: 'python', java: 'java', c: 'c', cpp: 'cpp', h: 'c',
   cs: 'csharp', go: 'go', rs: 'rust', rb: 'ruby', php: 'php',
@@ -48,7 +52,7 @@ const LANG_MAP = {
 };
 
 // Keywords per language
-const KEYWORDS = {
+const KEYWORDS: Record<string, string[]> = {
   javascript: ['const','let','var','function','return','if','else','for','while','switch','case','break','continue','new','this','class','extends','import','export','from','default','async','await','try','catch','throw','typeof','instanceof','null','undefined','true','false','of','in'],
   typescript: ['const','let','var','function','return','if','else','for','while','switch','case','break','continue','new','this','class','extends','import','export','from','default','async','await','try','catch','throw','typeof','instanceof','null','undefined','true','false','interface','type','enum','implements','readonly','as','keyof','never','void','any','string','number','boolean','of','in'],
   python: ['def','class','if','elif','else','for','while','return','import','from','as','try','except','finally','raise','with','yield','lambda','pass','break','continue','and','or','not','in','is','None','True','False','self','print','global','nonlocal','assert','del'],
@@ -66,8 +70,8 @@ const KEYWORDS = {
 };
 
 // Simple tokenizer
-const tokenize = (line, lang) => {
-  const tokens = [];
+const tokenize = (line: string, lang: string): Token[] => {
+  const tokens: Token[] = [];
   const kw = KEYWORDS[lang] || KEYWORDS.javascript || [];
   let i = 0;
 
@@ -102,7 +106,7 @@ const tokenize = (line, lang) => {
       let j = i;
       while (j < line.length && /[a-zA-Z0-9_$]/.test(line[j])) j++;
       const word = line.slice(i, j);
-      let type = 'default';
+      let type: TokenType = 'default';
       if (kw.includes(word) || kw.includes(word.toLowerCase())) type = 'keyword';
       else if (j < line.length && line[j] === '(') type = 'function';
       else if (/^[A-Z]/.test(word) && word.length > 1) type = 'type';
@@ -195,15 +199,26 @@ export default function FilePreviewScreen() {
   }, [filename, uri, fileUri, reloadKey]);
 
   const copyAll = async () => {
-    await copyAndAutoClear(content);
-    Alert.alert('Copied!', 'File content copied to clipboard');
+    try {
+      await copyAndAutoClear(content);
+      Alert.alert('Copied!', 'File content copied to clipboard');
+    } catch {
+      Alert.alert('Could not copy', 'The file content could not be copied. Please try again.');
+    }
   };
 
   const shareFile = async () => {
-    await Share.share({ message: content, title: (filename || 'file') + '' });
+    try {
+      await Share.share({ message: content, title: (filename || 'file') + '' });
+    } catch {
+      Alert.alert('Could not share', 'The file content could not be shared. Please try again.');
+    }
   };
 
   const lines = useMemo(() => content.split('\n'), [content]);
+  // Tokenise each line once per file/language, not on every row render (the
+  // list re-renders rows as they scroll back into the window).
+  const tokens = useMemo(() => lines.map((l) => tokenize(l, lang)), [lines, lang]);
   const lineNumWidth = String(lines.length).length * 9 + 16;
 
   const codeList = (
@@ -218,8 +233,8 @@ export default function FilePreviewScreen() {
         <View style={s.lineRow}>
           <Text style={[s.lineNum, { width: lineNumWidth }]}>{idx + 1}</Text>
           <Text style={[s.codeLine, wordWrap && { flexWrap: 'wrap', flex: 1 }]}>
-            {tokenize(line, lang).map((t, ti) => (
-              <Text key={ti} style={{ color: TOKEN_COLORS[t.type] || TOKEN_COLORS.default }}>{t.text}</Text>
+            {tokens[idx].map((t, ti) => (
+              <Text key={ti} style={{ color: TOKEN_COLORS[t.type] }}>{t.text}</Text>
             ))}
           </Text>
         </View>
@@ -253,18 +268,20 @@ export default function FilePreviewScreen() {
       }} />
       <View style={s.container}>
 
-        {/* File info bar */}
-        <View style={s.infoBar}>
-          <Text style={s.langBadge}>{lang.toUpperCase()}</Text>
-          <Text style={s.lineCount}>{lines.length} lines</Text>
-          <Text style={s.sizeInfo}>{(content.length / 1024).toFixed(1)} KB</Text>
-        </View>
+        {/* File info bar — only once there is content to describe. */}
+        {!loading && !failure && (
+          <View style={s.infoBar}>
+            <Text style={s.langBadge}>{lang.toUpperCase()}</Text>
+            <Text style={s.lineCount}>{lines.length} lines</Text>
+            <Text style={s.sizeInfo}>{(content.length / 1024).toFixed(1)} KB</Text>
+          </View>
+        )}
 
         {loading ? (
           <ActivityIndicator color={colors.accent} style={{ marginTop: 40 }} />
         ) : failure ? (
           <View style={s.failure}>
-            <Text style={s.failureTitle}>
+            <Text style={s.failureTitle} accessibilityRole="header">
               {failure === 'too-large' ? 'Too large to preview here' : "Couldn't load this file"}
             </Text>
             <Text style={s.failureBody}>
@@ -300,7 +317,7 @@ export default function FilePreviewScreen() {
 const makeStyles = (c: Palette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: c.bg },
   infoBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, backgroundColor: c.surfaceSolid, borderBottomWidth: 1, borderBottomColor: c.glassStroke, gap: 12 },
-  langBadge: { backgroundColor: '#4A9FFF22', color: c.accent, fontSize: 12, fontWeight: '800', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 },
+  langBadge: { backgroundColor: brandAlpha(0.14), color: c.accentOn, fontSize: 12, fontWeight: '800', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 },
   lineCount: { color: c.textDim, fontSize: 11 },
   sizeInfo: { color: c.textDim, fontSize: 11 },
   // Syntax tokens use a fixed dark canvas; chrome follows the app theme.
@@ -312,5 +329,5 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   failureTitle: { color: c.text, fontSize: 16, fontWeight: '700', textAlign: 'center' },
   failureBody: { color: c.textDim, fontSize: 13, textAlign: 'center', lineHeight: 19 },
   failureBtn: { marginTop: 6, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20, backgroundColor: c.accent },
-  failureBtnTxt: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  failureBtnTxt: { color: c.bubbleOutText, fontSize: 14, fontWeight: '700' },
 });

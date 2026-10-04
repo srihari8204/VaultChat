@@ -8,6 +8,7 @@ import { BRAND_ACCENT } from '../constants/theme';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Easing,
   FlatList,
@@ -28,6 +29,8 @@ import * as Sharing from 'expo-sharing';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { getAccessToken } from '../lib/api';
+import { isOwnServerUrl } from '../lib/serverOrigin';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { VIEWER_TEMP_PREFIX } from '../lib/mediaCacheGC';
 import { Buffer } from 'buffer';
 import { docKind, MAX_DOC_BYTES } from '../lib/docText';
@@ -292,6 +295,7 @@ function FileViewerScreen() {
   // SkeletonShimmer, a different component, and this screen previously
   // read a frozen module-level Dimensions.get().
   const { width: SW, height: SH } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const params = useLocalSearchParams<{ uri: string; filename: string; mimeType?: string }>();
   const fileUri = (params.uri || '') + '';
@@ -384,7 +388,9 @@ function FileViewerScreen() {
   // openInDeviceApp sent the token, which is why handing the file to another
   // app worked while reading it in-app did not.
   const downloadAuthed = useCallback(async (url: string, dest: string): Promise<string> => {
-    const token = await getAccessToken();
+    // The url comes from route params (deep links too): the token goes to our
+    // own server only, never to whatever host a link names.
+    const token = isOwnServerUrl(url) ? await getAccessToken() : null;
     const dl = await FileSystem.downloadAsync(
       url, dest, token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
     );
@@ -444,7 +450,7 @@ function FileViewerScreen() {
     try {
       const len = st.size ? Math.min(WINDOW_BYTES, st.size - st.pos) : WINDOW_BYTES;
       const b64 = await FileSystem.readAsStringAsync(
-        st.uri, { encoding: 'base64' as any, position: st.pos, length: len },
+        st.uri, { encoding: FileSystem.EncodingType.Base64, position: st.pos, length: len },
       );
       const bytes = Uint8Array.from(Buffer.from(b64, 'base64'));
       // Advance by what CAME BACK, not by what was asked for. A file still being
@@ -495,7 +501,7 @@ function FileViewerScreen() {
     const run = runRef.current;
     const stale = () => runRef.current !== run;
     try {
-      const b64 = await FileSystem.readAsStringAsync(local, { encoding: 'base64' as any });
+      const b64 = await FileSystem.readAsStringAsync(local, { encoding: FileSystem.EncodingType.Base64 });
       const bytes = Uint8Array.from(Buffer.from(b64, 'base64'));
       if (stale()) return;
       // BLOCKS FIRST. Both passes unzip and re-parse the SAME bytes in full, and
@@ -617,7 +623,7 @@ function FileViewerScreen() {
         // readAsStringAsync bounds nothing — the process dies inside the read.
         // Windowing does not need the size; a short read is end of file. The
         // size is only a second, cheaper EOF signal when we do have it.
-        const size = info.exists ? Number((info as any).size ?? 0) : 0;
+        const size = info.exists ? Number(info.size ?? 0) : 0;
         textWin.current = { uri: local, size, pos: 0, carry: new Uint8Array(0), busy: false, done: false };
         await readTextWindow();
       } catch {
@@ -646,7 +652,7 @@ function FileViewerScreen() {
         // readAsStringAsync, long before reaching the check meant to refuse it.
         // The plain-text path already probes getInfoAsync first; this one did not.
         const dinfo = await FileSystem.getInfoAsync(local);
-        if (dinfo.exists && (dinfo as any).size > MAX_DOC_BYTES) {
+        if (dinfo.exists && dinfo.size > MAX_DOC_BYTES) {
           setDocError('This document is too large to open here. Try opening it in another app.');
           setDocLoading(false);
           return;
@@ -662,10 +668,16 @@ function FileViewerScreen() {
       }
     };
     const loadAudioInEffect = async () => {
+      const run = runRef.current;
       try {
-        await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true, staysActiveInBackground: true });
+        // No staysActiveInBackground: this player has no notification or
+        // lock-screen control, so audio that kept going after the app left the
+        // foreground could not be stopped from anywhere.
+        await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true, staysActiveInBackground: false });
+        // Remote audio needs the token (our server only), like every other loader.
+        const token = /^https?:/i.test(fileUri) && isOwnServerUrl(fileUri) ? await getAccessToken() : null;
         const { sound: snd } = await Audio.Sound.createAsync(
-          { uri: fileUri },
+          token ? { uri: fileUri, headers: { Authorization: `Bearer ${token}` } } : { uri: fileUri },
           { shouldPlay: false },
           (status) => {
             if (status.isLoaded) {
@@ -675,10 +687,13 @@ function FileViewerScreen() {
             }
           }
         );
+        // The screen closed or moved to another file while loading: a sound
+        // created now would play with no controls left to stop it.
+        if (runRef.current !== run) { snd.unloadAsync().catch(() => {}); return; }
         soundRef.current = snd;
         setSound(snd);
       } catch {
-        setError('Could not load audio');
+        if (runRef.current === run) setError("This audio couldn't be played. It may be damaged or in an unsupported format.");
       }
     };
     const loadFileMeta = async () => {
@@ -693,7 +708,8 @@ function FileViewerScreen() {
         else if (fileType === 'office' || fileType === 'pdf') setDocLoading(false);
         setLoading(false);
       } catch (e: any) {
-        setError(e.message || 'Failed to load file');
+        console.warn('[file-viewer] load failed:', e?.message ?? e);
+        setError('This file could not be loaded. Check your connection and try again.');
         setLoading(false);
       }
     };
@@ -766,15 +782,9 @@ function FileViewerScreen() {
       let localUri = fileUri;
       if (fileUri.startsWith('http')) {
         // Attachment endpoints are authenticated: without the Bearer token this
-        // downloads a 401 body and then "opens" it as a PDF.
-        const token = await getAccessToken();
-        const dl = await FileSystem.downloadAsync(
-          fileUri,
-          await handoffPath(),
-          token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
-        );
-        if (dl.status >= 400) throw new Error(`Download failed (${dl.status})`);
-        localUri = dl.uri;
+        // downloads a 401 body and then "opens" it as a PDF. downloadAuthed
+        // sends it to our own server only.
+        localUri = await downloadAuthed(fileUri, await handoffPath());
       }
       // Guess from the extension when the caller gave no mime — an intent with
       // no type matches no activity, and the hand-off then does nothing at all.
@@ -806,7 +816,8 @@ function FileViewerScreen() {
         setError('No app on this device can open this file type.');
       }
     } catch (e: any) {
-      setError(e?.message ?? 'Could not open this file');
+      console.warn('[file-viewer] hand-off failed:', e?.message ?? e);
+      setError('This file could not be handed to another app. Check your connection and try again.');
     } finally {
       setOpeningExternally(false);
     }
@@ -819,11 +830,15 @@ function FileViewerScreen() {
       if (fileUri.startsWith('http')) {
         localUri = await downloadAuthed(fileUri, await handoffPath());
       }
-      const available = await Sharing.isAvailableAsync();
-      if (available) {
-        await Sharing.shareAsync(localUri);
+      if (!(await Sharing.isAvailableAsync())) {
+        Alert.alert('Sharing unavailable', 'No app on this device can receive this file.');
+        return;
       }
-    } catch { /* silently fail */ }
+      await Sharing.shareAsync(localUri);
+    } catch (e: any) {
+      console.warn('[file-viewer] share failed:', e?.message ?? e);
+      Alert.alert('Could not share', 'This file could not be shared. Check your connection and try again.');
+    }
   };
 
   // ── Double-tap to zoom (images) ────────────────────────────────
@@ -949,6 +964,9 @@ function FileViewerScreen() {
         onPress={openInDeviceApp}
         disabled={openingExternally}
         activeOpacity={0.85}
+        accessibilityRole="button"
+        accessibilityLabel={`Open in your ${label} app`}
+        accessibilityState={{ busy: openingExternally, disabled: openingExternally }}
       >
         {openingExternally
           ? <ActivityIndicator color="#fff" />
@@ -972,12 +990,15 @@ function FileViewerScreen() {
           }}
         />
         <View style={s.docActionBar}>
-          <Text style={s.docActionHint} numberOfLines={1}>Pinch to zoom</Text>
+          <Text style={s.docActionHint} numberOfLines={1}>Scroll to read the pages</Text>
           <TouchableOpacity
             onPress={openInDeviceApp}
             disabled={openingExternally}
             style={s.docActionBtn}
             activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Open in another app"
+            accessibilityState={{ busy: openingExternally, disabled: openingExternally }}
           >
             {openingExternally
               ? <ActivityIndicator color={C.primary} size="small" />
@@ -1014,7 +1035,8 @@ function FileViewerScreen() {
               ? 'This PDF has no text layer (it may be a scan). Open it in a PDF app to view the pages.'
               : 'No readable text in this document.'}
           </Text>
-          <TouchableOpacity style={s.openBtn} onPress={openInDeviceApp} activeOpacity={0.85}>
+          <TouchableOpacity style={s.openBtn} onPress={openInDeviceApp} activeOpacity={0.85}
+            accessibilityRole="button" accessibilityLabel="Open in another app">
             <Text style={s.openBtnTxt}>Open in another app</Text>
           </TouchableOpacity>
         </View>
@@ -1052,6 +1074,9 @@ function FileViewerScreen() {
             disabled={openingExternally}
             style={s.docActionBtn}
             activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Open in another app"
+            accessibilityState={{ busy: openingExternally, disabled: openingExternally }}
           >
             {openingExternally
               ? <ActivityIndicator color={C.primary} size="small" />
@@ -1105,6 +1130,8 @@ function FileViewerScreen() {
               onPress={() => { textWin.current.done = false; setTextFailed(false); setTextMore(true); }}
               style={{ marginVertical: 16 }}
               activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="Could not read the rest of the file. Try again"
             >
               <Text style={[s.codeLineCount, { textAlign: 'center' }]}>
                 Could not read the rest — tap to try again
@@ -1141,6 +1168,9 @@ function FileViewerScreen() {
           disabled={openingExternally}
           style={s.docActionBtn}
           activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Open in another app"
+          accessibilityState={{ busy: openingExternally, disabled: openingExternally }}
         >
           {openingExternally
             ? <ActivityIndicator color={C.primary} size="small" />
@@ -1169,7 +1199,7 @@ function FileViewerScreen() {
             end={{ x: 1, y: 1 }}
             style={s.audioGradient}
           >
-            <Text style={s.audioIcon}>🎵</Text>
+            <Ionicons name="musical-notes" size={40} color={C.text} />
           </LinearGradient>
         </View>
 
@@ -1183,6 +1213,14 @@ function FileViewerScreen() {
           <TouchableOpacity
             activeOpacity={1}
             style={s.seekTouchArea}
+            accessibilityRole="adjustable"
+            accessibilityLabel="Seek"
+            accessibilityValue={{ text: `${formatDuration(audioPosition)} of ${formatDuration(audioDuration)}` }}
+            accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+            onAccessibilityAction={(e) => {
+              const d = e.nativeEvent.actionName === 'increment' ? 15000 : -15000;
+              seekAudio(Math.max(0, Math.min(1, (audioPosition + d) / (audioDuration || 1))));
+            }}
             onLayout={(e) => setSeekW(e.nativeEvent.layout.width)}
             onPress={(e) => {
               // Measured width, not (SW - 48). SW came from a module-level
@@ -1209,6 +1247,8 @@ function FileViewerScreen() {
           <TouchableOpacity
             onPress={() => seekAudio(Math.max(0, (audioPosition - 15000) / (audioDuration || 1)))}
             style={s.audioBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Back 15 seconds"
           >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
               <Ionicons name="play-back" size={14} color={C.textDim} />
@@ -1216,7 +1256,7 @@ function FileViewerScreen() {
             </View>
           </TouchableOpacity>
 
-          <TouchableOpacity onPress={toggleAudio} accessibilityLabel={audioPlaying ? "Pause" : "Play"} style={s.audioPlayBtn}>
+          <TouchableOpacity onPress={toggleAudio} accessibilityRole="button" accessibilityLabel={audioPlaying ? "Pause" : "Play"} style={s.audioPlayBtn}>
             <LinearGradient
               colors={[C.primary, '#3B82F6']}
               style={s.audioPlayGradient}
@@ -1228,6 +1268,8 @@ function FileViewerScreen() {
           <TouchableOpacity
             onPress={() => seekAudio(Math.min(1, (audioPosition + 15000) / (audioDuration || 1)))}
             style={s.audioBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Forward 15 seconds"
           >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
               <Text style={s.audioBtnText}>15s</Text>
@@ -1244,11 +1286,11 @@ function FileViewerScreen() {
   // ══════════════════════════════════════════════════════════════
   const renderUnknown = () => (
     <View style={[s.centered, { flex: 1, paddingHorizontal: 32 }]}>
-      <Text style={{ fontSize: 64 }}>📎</Text>
+      <Ionicons name="attach" size={64} color={C.textDim} />
       <Text style={[s.errorTitle, { marginTop: 16 }]}>{fileName}</Text>
       {fileSize > 0 && <Text style={s.audioMeta}>{formatBytes(fileSize)}</Text>}
       <Text style={[s.loadingText, { marginTop: 12, textAlign: 'center' }]}>
-        This file type cannot be previewed in-app.{'\n'}Use &quot;Open With...&quot; to view it externally.
+        This file type cannot be previewed in-app.{'\n'}Use &quot;Open in another app&quot; below to view it.
       </Text>
     </View>
   );
@@ -1259,11 +1301,11 @@ function FileViewerScreen() {
   const renderError = () => (
     <View style={[s.centered, { flex: 1 }]}>
       <View style={s.errorCircle}>
-        <Text style={{ fontSize: 36 }}>⚠️</Text>
+        <Ionicons name="alert-circle-outline" size={36} color={C.warning} />
       </View>
-      <Text style={s.errorTitle}>Unable to load file</Text>
+      <Text style={s.errorTitle} accessibilityRole="header">Unable to load file</Text>
       <Text style={s.errorDesc}>{error}</Text>
-      <TouchableOpacity onPress={handleRetry} style={s.retryBtn}>
+      <TouchableOpacity onPress={handleRetry} style={s.retryBtn} accessibilityRole="button" accessibilityLabel="Retry">
         <LinearGradient colors={[C.primary, '#3B82F6']} style={s.retryGradient}>
           <Text style={s.retryText}>Retry</Text>
         </LinearGradient>
@@ -1308,7 +1350,7 @@ function FileViewerScreen() {
       <Stack.Screen options={{ headerShown: false, animation: 'slide_from_bottom' }} />
 
       {/* ── Header ─────────────────────────────────────────────── */}
-      <Animated.View style={[s.header, { opacity: fadeIn, transform: [{ translateY: slideUp }] }]}>
+      <Animated.View style={[s.header, { paddingTop: insets.top + 8, opacity: fadeIn, transform: [{ translateY: slideUp }] }]}>
         {fileType === 'image' && (
           <LinearGradient
             colors={['rgba(0,0,0,0.7)', 'transparent']}
@@ -1317,15 +1359,15 @@ function FileViewerScreen() {
         )}
         <View style={s.headerInner}>
           {/* Back button */}
-          <TouchableOpacity onPress={() => router.back()} accessibilityLabel="Go back" style={s.headerBtn}>
+          <TouchableOpacity onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" style={s.headerBtn}>
             <Ionicons name="arrow-back" size={20} color={C.text} />
           </TouchableOpacity>
 
           {/* File info */}
           <View style={s.headerCenter}>
             <View style={s.headerFilenameRow}>
-              <Text style={s.headerIcon}>{fmt.icon}</Text>
-              <Text style={s.headerFilename} numberOfLines={1}>{fileName}</Text>
+              <Text style={s.headerIcon} importantForAccessibility="no" accessibilityElementsHidden>{fmt.icon}</Text>
+              <Text style={s.headerFilename} numberOfLines={1} accessibilityRole="header">{fileName}</Text>
             </View>
             {fileSize > 0 && (
               <Text style={s.headerSize}>{formatBytes(fileSize)} · {fmt.label.toUpperCase()}</Text>
@@ -1333,28 +1375,34 @@ function FileViewerScreen() {
           </View>
 
           {/* Action buttons */}
-          <TouchableOpacity onPress={handleShare} accessibilityLabel="Share this file" style={s.headerBtn}>
+          <TouchableOpacity onPress={handleShare} accessibilityRole="button" accessibilityLabel="Share this file" style={s.headerBtn}>
             <Ionicons name="share-outline" size={20} color={C.text} />
           </TouchableOpacity>
         </View>
       </Animated.View>
 
       {/* ── Content area ───────────────────────────────────────── */}
-      <Animated.View style={[s.content, { opacity: fadeIn }]}>
+      <Animated.View style={[s.content, { paddingTop: insets.top + 64, opacity: fadeIn }]}>
         {renderContent()}
       </Animated.View>
 
       {/* ── Bottom bar ─────────────────────────────────────────── */}
-      {fileType !== 'video' && (
-        <Animated.View style={[s.bottomBar, { opacity: fadeIn, transform: [{ translateY: Animated.multiply(slideUp, -1) }] }]}>
-          <TouchableOpacity onPress={handleShare} style={s.bottomBtn}>
+      {/* Only where the content has no "Open in another app" of its own: PDF,
+          documents and text carry one in their action bar, and a second button
+          here that merely re-opened the share sheet was a duplicate. Share is
+          the header button. */}
+      {(fileType === 'image' || fileType === 'audio' || fileType === 'unknown') && !error && (
+        <Animated.View style={[s.bottomBar, { paddingBottom: insets.bottom + 12, opacity: fadeIn, transform: [{ translateY: Animated.multiply(slideUp, -1) }] }]}>
+          <TouchableOpacity onPress={openInDeviceApp} disabled={openingExternally} style={s.bottomBtn}
+            accessibilityRole="button" accessibilityLabel="Open in another app"
+            accessibilityState={{ busy: openingExternally, disabled: openingExternally }}>
             <LinearGradient
               colors={[C.primary, C.secondary]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
               style={s.bottomBtnGradient}
             >
-              <Text style={s.bottomBtnText}>Open With...</Text>
+              {openingExternally ? <ActivityIndicator color={C.text} /> : <Text style={s.bottomBtnText}>Open in another app</Text>}
             </LinearGradient>
           </TouchableOpacity>
         </Animated.View>
@@ -1374,8 +1422,7 @@ const s = StyleSheet.create({
   // ── Header ──────────────────────────────────────────────────
   header: {
     position: 'absolute', top: 0, left: 0, right: 0, zIndex: 20,
-    paddingTop: Platform.OS === 'ios' ? 54 : 38,
-    paddingBottom: 12, paddingHorizontal: 8,
+    paddingBottom: 12, paddingHorizontal: 8,   // paddingTop: safe-area inset, set inline
     overflow: 'hidden',
   },
   headerInner: {
@@ -1395,8 +1442,7 @@ const s = StyleSheet.create({
 
   // ── Content ─────────────────────────────────────────────────
   content: {
-    flex: 1, paddingTop: Platform.OS === 'ios' ? 100 : 84,
-    paddingBottom: 80,
+    flex: 1, paddingBottom: 80,   // paddingTop: inset + header height, set inline
   },
 
   // ── Image overlay ───────────────────────────────────────────
@@ -1470,7 +1516,6 @@ const s = StyleSheet.create({
   audioGradient: {
     flex: 1, alignItems: 'center', justifyContent: 'center',
   },
-  audioIcon: { fontSize: 56 },
   audioTitle: { color: C.text, fontSize: 20, fontWeight: '700', textAlign: 'center' },
   audioMeta: { color: C.textDim, fontSize: 13, marginTop: 6 },
   waveContainer: {
@@ -1514,8 +1559,7 @@ const s = StyleSheet.create({
     position: 'absolute', bottom: 0, left: 0, right: 0,
     paddingHorizontal: 20,
     paddingTop: 12,
-    paddingBottom: Platform.OS === 'ios' ? 36 : 20,
-    backgroundColor: 'rgba(2,11,24,0.92)',
+    backgroundColor: 'rgba(2,11,24,0.92)',   // paddingBottom: safe-area inset, set inline
     borderTopWidth: 1, borderTopColor: C.glassBorder,
   },
   bottomBtn: { borderRadius: 14, overflow: 'hidden' },

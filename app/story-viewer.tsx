@@ -23,6 +23,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  BackHandler,
   Image,
   Pressable,
   StatusBar,
@@ -31,7 +32,9 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../lib/theme';
+import { storyDurationMs } from '../lib/storyDuration';
 import { type Palette } from '../constants/theme';
 import { initialOf } from '../lib/format';
 import {
@@ -52,8 +55,6 @@ import { peekStoryFeed, putStoryFeed } from '../lib/storyFeedCache';
 import { unlockKeyWithAnswer } from '../lib/status/gateKey';
 import { puzzleFrameUri } from '../lib/status/puzzleFrame';
 
-const IMAGE_DURATION_MS = 5_000;
-const VIDEO_DURATION_MS = 15_000;
 
 function useS() {
   const { colors } = useTheme();
@@ -126,13 +127,20 @@ function StoryViewerScreen() {
       } catch (e: any) {
         // With a cached entry already on screen there is something to look at,
         // so a failed revalidation must not replace it with an error.
-        if (!cancel && !seed) setError(e?.message ?? 'Failed to load');
+        if (!cancel && !seed) {
+          console.warn('[story-viewer] feed load failed:', e?.message ?? e);
+          setError("Couldn't load these stories. Check your connection and try again.");
+        }
       }
     })();
     return () => { cancel = true; };
   }, [userId]);
 
   const current = entry?.stories[index] ?? null;
+  // The playing video's real length (null until it loads) — drives the bar.
+  const [videoDurMs, setVideoDurMs] = useState<number | null>(null);
+  useEffect(() => { setVideoDurMs(null); }, [current?.id]);
+  const insets = useSafeAreaInsets();
 
   // Which story ids this viewer has already cleared, for this session only.
   // Deliberately NOT persisted: a puzzle re-solved on the next open costs a few
@@ -302,7 +310,7 @@ function StoryViewerScreen() {
     progress.setValue(0);
     const anim = Animated.timing(progress, {
       toValue:  1,
-      duration: current.mediaType === 'video' ? VIDEO_DURATION_MS : IMAGE_DURATION_MS,
+      duration: storyDurationMs(current.mediaType, videoDurMs),
       useNativeDriver: false,
     });
     anim.start(({ finished }) => {
@@ -312,7 +320,7 @@ function StoryViewerScreen() {
   // intentional: re-runs when *index* changes, on pause/resume, once loaded, or
   // when the media source resolves (so mark-viewed sees a non-null mediaSrc).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current?.id, paused, loaded, mediaSrc, gated]);
+  }, [current?.id, paused, loaded, mediaSrc, gated, videoDurMs]);
 
   const close = useCallback(() => router.back(), [router]);
 
@@ -354,6 +362,13 @@ function StoryViewerScreen() {
     setViewersFailed(false);
     setPaused(false);
   }, []);
+  // The sheet is an in-tree overlay, not a Modal, so Android back would leave
+  // the whole viewer; close the sheet first instead.
+  useEffect(() => {
+    if (!viewersOpen) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => { closeViewers(); return true; });
+    return () => sub.remove();
+  }, [viewersOpen, closeViewers]);
 
   const onDelete = useCallback(() => {
     if (!current) return;
@@ -371,7 +386,8 @@ function StoryViewerScreen() {
               setEntry({ ...entry!, stories: next });
               setIndex(Math.min(index, next.length - 1));
             } catch (e: any) {
-              Alert.alert('Delete failed', e?.message ?? 'Try again');
+              console.warn('[story-viewer] delete failed:', e?.message ?? e);
+              Alert.alert('Delete failed', 'The story could not be deleted. Check your connection and try again.');
             }
           }
         },
@@ -423,8 +439,8 @@ function StoryViewerScreen() {
 
       {/* Text status — full-bleed colored card with centered text (WhatsApp). */}
       {!gated && current?.mediaType === 'text' && (
-        <View style={[S.media, { backgroundColor: (current as any).bgColor || '#0B0B10', alignItems: 'center', justifyContent: 'center', padding: 32 }]}>
-          <Text style={{ color: '#fff', fontSize: 28, fontWeight: '700', textAlign: 'center' }}>{(current as any).text || ''}</Text>
+        <View style={[S.media, { backgroundColor: current.bgColor || '#0B0B10', alignItems: 'center', justifyContent: 'center', padding: 32 }]}>
+          <Text style={{ color: '#fff', fontSize: 28, fontWeight: '700', textAlign: 'center' }}>{current.text || ''}</Text>
         </View>
       )}
 
@@ -438,7 +454,7 @@ function StoryViewerScreen() {
             shouldPlay={!paused && loaded}
             isLooping={false}
             useNativeControls={false}
-            onLoad={() => setLoaded(true)}
+            onLoad={(st) => { if (st.isLoaded) setVideoDurMs(st.durationMillis ?? null); setLoaded(true); }}
             onError={() => setLoaded(true)}
           />
         ) : (
@@ -512,7 +528,7 @@ function StoryViewerScreen() {
       )}
 
       {/* Top: per-story progress bars + author + close */}
-      <View style={S.topBar} pointerEvents="box-none">
+      <View style={[S.topBar, { top: insets.top + 12 }]} pointerEvents="box-none">
         {/* One segment per story — this is what tells a viewer the person
             posted more than one. The segments are TAPPABLE because while a
             story is gated the tap zones are withheld, and without this a
@@ -563,7 +579,7 @@ function StoryViewerScreen() {
 
       {/* Bottom: caption */}
       {current.caption && (
-        <View style={S.captionBar} pointerEvents="none">
+        <View style={[S.captionBar, { bottom: insets.bottom + 24 }]} pointerEvents="none">
           <Text style={S.captionTxt} numberOfLines={3}>{current.caption}</Text>
         </View>
       )}
@@ -571,8 +587,8 @@ function StoryViewerScreen() {
       {/* Viewers sheet */}
       {viewersOpen && (
         <Pressable style={S.viewersBackdrop} onPress={closeViewers} accessibilityRole="button" accessibilityLabel="Close viewers list">
-          <Pressable style={S.viewersSheet} onPress={(e) => e.stopPropagation()} accessible={false}>
-            <Text style={S.viewersTitle}>
+          <Pressable style={[S.viewersSheet, { paddingBottom: insets.bottom + 16 }]} onPress={(e) => e.stopPropagation()} accessible={false}>
+            <Text style={S.viewersTitle} accessibilityRole="header">
               {viewers ? `${viewers.length} ${viewers.length === 1 ? 'viewer' : 'viewers'}` : viewersFailed ? 'Viewers' : 'Loading…'}
             </Text>
             {viewersFailed ? (
@@ -638,7 +654,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   // Full-bleed, but BELOW topBar in z-order (declared earlier in the tree), so
   // the progress segments and close button stay reachable over a locked story.
   gateLayer:     { ...StyleSheet.absoluteFillObject, backgroundColor: '#000' },
-  topBar:        { position: 'absolute', top: 56, left: 12, right: 12, gap: 8, padding: 10, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.6)' },
+  topBar:        { position: 'absolute', left: 12, right: 12, gap: 8, padding: 10, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.6)' },
   progressRow:   { flexDirection: 'row', gap: 3 },
   progressTrack: { flex: 1, height: 2, backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: 1, overflow: 'hidden' },
   progressFill:  { height: 2, backgroundColor: '#fff', borderRadius: 1 },
@@ -648,7 +664,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   iconBtn:       { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   iconBtnTxt:    { color: '#FFFFFF', fontSize: 18 },
 
-  captionBar:    { position: 'absolute', left: 16, right: 16, bottom: 40, backgroundColor: 'rgba(0,0,0,0.55)', padding: 12, borderRadius: 12 },
+  captionBar:    { position: 'absolute', left: 16, right: 16, backgroundColor: 'rgba(0,0,0,0.55)', padding: 12, borderRadius: 12 },
   captionTxt:    { color: '#FFFFFF', fontSize: 14, lineHeight: 20 },
 
   errorTxt:      { color: '#FFFFFF', fontSize: 14, marginBottom: 16, textAlign: 'center', paddingHorizontal: 24 },

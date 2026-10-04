@@ -149,6 +149,21 @@ export function refuseDeclared(infos: { originalSize: number }[]): ArchiveRefusa
   return bytes > MAX_UNCOMPRESSED_BYTES ? { reason: 'size', bytes } : null;
 }
 
+/** Compressed-size ceiling for reading the archive at all: the whole file is
+ *  read into JS (base64 string + bytes, ~2.3x its size) to parse it. */
+export const MAX_ARCHIVE_BYTES = 100 * 1024 * 1024;
+
+/** Ceiling for extracting ONE entry: it is inflated, then base64-encoded to be
+ *  written, so it is held ~2.3x over in JS. Larger entries are refused with a
+ *  message instead of crashing the app. */
+export const MAX_ENTRY_BYTES = 64 * 1024 * 1024;
+
+/** Build the listing straight from fflate's central-directory infos (the
+ *  zip-bomb guard pass), so listing an archive inflates nothing. */
+export function entriesFromInfos(infos: { name: string; originalSize: number }[]): ArchiveEntry[] {
+  return toEntries(Object.fromEntries(infos.map((i) => [i.name, { size: Number(i.originalSize) || 0 }])));
+}
+
 /** Archive formats lib/docOpen routes to the archive viewer but fflate cannot
  *  read (it reads ZIP only). Returns a display name, or null for ZIP/unknown. */
 const UNSUPPORTED: Record<string, string> = {

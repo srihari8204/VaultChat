@@ -2,14 +2,14 @@
 //
 // Photos / Videos / Files / Links shared in a conversation, pulled from the
 // real message history (GET /chats/:id/messages) and filtered by type.
-// Thumbnails load through the auth'd attachment endpoint; tapping a photo
-// opens it in a self-contained full-screen viewer (no dependency on other
-// screens). Links open externally. No Firestore.
+// Thumbnails load through the auth'd attachment endpoint; tapping a photo or a
+// video opens it in /media-viewer (zoom, playback, share, save), with the same
+// params the Shelf uses. Links open externally. No Firestore.
 
 import { useAuthHeader } from '../hooks/useAuthHeader';
 import { HEADER_TOP } from '../constants/layout';
 import React, { useState, useEffect, useCallback , useMemo, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, FlatList, SectionList, Dimensions, ActivityIndicator, Alert, Linking, Modal, useWindowDimensions } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, FlatList, SectionList, ActivityIndicator, Alert, Linking, useWindowDimensions } from 'react-native';
 import * as Sharing from 'expo-sharing';
 // expo-image: the 3-up grid recycles tiles, so cache + recyclingKey matter here.
 import { Image } from 'expo-image';
@@ -25,6 +25,7 @@ import { getCurrentUserAsync } from './(constants)/authService';
 import { readCache, writeCache } from '../lib/localCache';
 import { unionWithLocalHistory } from '../lib/messageHistory';
 import { AuroraBackground } from '../components/ui';
+import { shelfOpenParams } from '../lib/shelfOpen';
 
 // No module-level Dimensions.get: it is read ONCE at import, so the 3-up grid
 // kept its launch-time tile size through every rotation, fold and split-screen
@@ -36,6 +37,7 @@ export function gridTileSize(windowWidth: number): number {
   return Math.max(48, (windowWidth - GRID_GUTTER) / GRID_COLS);
 }
 const PAGE = 200;
+const MAX_PAGES = 5;
 
 type ThumbSrc = { uri: string; headers?: Record<string, string> } | null;
 
@@ -117,13 +119,6 @@ interface GalleryCache {
 }
 
 function useS() {
-  // Reactive size. The module-level Dimensions.get above is captured ONCE at
-  // import and never updates, so it froze the layout at the size the app
-  // launched with. Shadowing it here makes every use in this component follow
-  // rotation; StyleSheet.create keeps the initial value, which is fine for
-  // static rules.
-  const {width: SW} = useWindowDimensions();
-
   const { colors } = useTheme();
   return useMemo(() => makeStyles(colors), [colors]);
 }
@@ -132,10 +127,13 @@ export default function MediaGalleryScreen() {
   const { colors } = useTheme();
   const s = useS();
   const router = useRouter();
-  const { chatId, id: idParam, peerName } = useLocalSearchParams<{ chatId?: string; id?: string; peerName?: string }>();
+  const { chatId, id: idParam, peerName, tab: tabParam } = useLocalSearchParams<{ chatId?: string; id?: string; peerName?: string; tab?: string }>();
   const cid = String(chatId ?? idParam ?? '');
 
-  const [tab, setTab] = useState<TabId>('photos');
+  // Callers may open a specific tab (contact-info opens Files); anything else
+  // falls back to Photos.
+  const [tab, setTab] = useState<TabId>(() =>
+    (['photos', 'videos', 'files', 'links'] as const).includes(tabParam as TabId) ? (tabParam as TabId) : 'photos');
   const authHeader = useAuthHeader();
   // Who we are, so a file WE sent resolves to the Sent/ copy already on disk
   // instead of being downloaded back from the server.
@@ -152,7 +150,12 @@ export default function MediaGalleryScreen() {
   const [files, setFiles] = useState<Message[]>([]);
   const [links, setLinks] = useState<LinkItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [viewer, setViewer] = useState<Message | null>(null); // message being viewed full-screen
+  // 'none' | the network refresh failed with nothing cached ('empty') or with
+  // a cached gallery still shown ('stale'). A failure must never read as
+  // "No photos shared yet".
+  const [loadError, setLoadError] = useState<'none' | 'empty' | 'stale'>('none');
+  const [capped, setCapped] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [groupBy, setGroupBy] = useState<GroupBy>('none');
   const [names, setNames] = useState<Record<string, string>>({});
 
@@ -161,6 +164,7 @@ export default function MediaGalleryScreen() {
     // Cache key includes the chat id so different chats' galleries don't collide.
     const cacheKey = 'media-gallery:' + cid;
     let painted = false;
+    setLoadError('none');
     (async () => {
       // Local-first: paint the cached buckets instantly so the gallery opens
       // without a spinner; individual thumbnails still decrypt on demand.
@@ -193,13 +197,17 @@ export default function MediaGalleryScreen() {
         // Walk the history (cap a few pages) and bucket by type.
         const all: Message[] = [];
         let before: number | undefined;
-        for (let i = 0; i < 5; i++) {
+        let full = false;
+        for (let i = 0; i < MAX_PAGES; i++) {
           const page = await getMessages(cid, { before, limit: PAGE });
           all.push(...page);
-          if (page.length < PAGE) break;
+          full = page.length >= PAGE;
+          if (!full) break;
           before = page[page.length - 1].id;
         }
         if (!active) return;
+        // Every page came back full: older history exists that was not walked.
+        setCapped(full);
 
         // UNION with the local cache, never replace it.
         //
@@ -217,13 +225,15 @@ export default function MediaGalleryScreen() {
         setPhotos(ph); setVideos(vd); setFiles(fl); setLinks(lk);
         writeCache<GalleryCache>(cacheKey, { photos: ph, videos: vd, files: fl, links: lk });
       } catch {
-        // Keep painted cache on error; only "empty" when there was nothing cached.
+        // Keep the painted cache on error, but say it may be out of date; with
+        // nothing cached, show an error with Retry instead of an empty tab.
+        if (active) setLoadError(painted ? 'stale' : 'empty');
       } finally {
         if (active && !painted) setLoading(false);
       }
     })();
     return () => { active = false; };
-  }, [cid]);
+  }, [cid, reloadKey]);
 
   useEffect(() => {
     getCurrentUserAsync()
@@ -306,31 +316,65 @@ export default function MediaGalleryScreen() {
         'Can’t open file',
         e instanceof MediaKeyMissingError
           ? 'This file is end-to-end encrypted and this device no longer holds its key.'
-          : e?.message ?? 'Try again',
+          : 'The file could not be downloaded. Check your connection and try again.',
       );
     } finally {
       openingRef.current = null;
     }
   }, [cid, meId, router]);
 
+  // Photos and videos open in /media-viewer: it plays video (the old in-screen
+  // Modal could only show a still), zooms, shares and saves. Encrypted media
+  // needs its per-file key from the message body first — the same two calls
+  // resolveSrc and openFile make — after which media-viewer's getMedia
+  // decrypts it from the persistent store.
+  const openMedia = useCallback(async (m: Message) => {
+    const aid = m.meta?.attachmentId;
+    if (!aid || openingRef.current) return;
+    openingRef.current = String(aid);
+    try {
+      if (m.meta?.encrypted) {
+        const plain = await decryptFromChat(cid, m.senderId, m.content, m.id);
+        await parseMediaContent(String(aid), plain);
+      }
+      router.push({
+        pathname: '/media-viewer',
+        params: shelfOpenParams({
+          attachmentId: String(aid), chatId: cid, senderId: m.senderId != null ? String(m.senderId) : null,
+          filename: m.meta?.fileName || m.meta?.name || m.meta?.filename || (m.type === 'video' ? 'Video' : 'Photo'),
+          mime: m.meta?.mime ?? null, kind: m.type, encrypted: !!m.meta?.encrypted,
+        }, meId),
+      } as any);
+    } catch {
+      Alert.alert('Can’t open', 'This item could not be decrypted on this device.');
+    } finally {
+      openingRef.current = null;
+    }
+  }, [cid, meId, router]);
+
   const renderPhoto = ({ item }: { item: Message }) => (
-    <TouchableOpacity style={[s.tile, { width: tileSize, height: tileSize }]} onPress={() => setViewer(item)} activeOpacity={0.8}>
+    <TouchableOpacity style={[s.tile, { width: tileSize, height: tileSize }]} onPress={() => openMedia(item)} activeOpacity={0.8}
+      accessibilityRole="button" accessibilityLabel={`Photo, ${fmtDate(item.createdAt)}`}>
       <MediaThumb m={item} style={s.tileImg} resolveSrc={resolveSrc} placeholder={colors.surfaceSolid} />
     </TouchableOpacity>
   );
 
   const renderVideo = ({ item }: { item: Message }) => (
-    <TouchableOpacity style={[s.tile, { width: tileSize, height: tileSize }]} onPress={() => setViewer(item)} activeOpacity={0.8} accessibilityLabel="Open video">
+    <TouchableOpacity style={[s.tile, { width: tileSize, height: tileSize }]} onPress={() => openMedia(item)} activeOpacity={0.8}
+      accessibilityRole="button" accessibilityLabel={`Video, ${fmtDate(item.createdAt)}`}>
       <MediaThumb m={item} style={s.tileImg} resolveSrc={resolveSrc} placeholder={colors.surfaceSolid} />
+      {/* White on a dark scrim over the thumbnail: fixed in both themes. */}
       <View style={s.playBadge}><Ionicons name="play" size={16} color="#fff" /></View>
     </TouchableOpacity>
   );
 
+  const fileLabel = (m: Message) => m.meta?.fileName || m.meta?.name || m.meta?.filename || 'File';
   const renderFile = ({ item }: { item: Message }) => (
-    <TouchableOpacity style={s.fileRow} onPress={() => openFile(item)}>
+    <TouchableOpacity style={s.fileRow} onPress={() => openFile(item)}
+      accessibilityRole="button" accessibilityLabel={`${fileLabel(item)}, ${fmtDate(item.createdAt)}`} accessibilityHint="Opens the file">
       <View style={s.fileIcon}><Ionicons name="document-text-outline" size={22} color={colors.accent} /></View>
       <View style={{ flex: 1 }}>
-        <Text style={s.fileName} numberOfLines={1}>{item.meta?.fileName || item.meta?.name || item.meta?.filename || 'File'}</Text>
+        <Text style={s.fileName} numberOfLines={1}>{fileLabel(item)}</Text>
         <Text style={s.fileDate}>{fmtDate(item.createdAt)}</Text>
       </View>
       <Ionicons name="download-outline" size={18} color={colors.textDim} />
@@ -338,7 +382,9 @@ export default function MediaGalleryScreen() {
   );
 
   const renderLink = ({ item }: { item: LinkItem }) => (
-    <TouchableOpacity style={s.fileRow} onPress={() => Linking.openURL(item.url).catch(() => {})}>
+    <TouchableOpacity style={s.fileRow}
+      onPress={() => Linking.openURL(item.url).catch(() => Alert.alert('Can’t open link', 'No app on this device can open this link.'))}
+      accessibilityRole="link" accessibilityLabel={`${item.url}, ${fmtDate(item.createdAt)}`}>
       <View style={s.fileIcon}><Ionicons name="link-outline" size={20} color={colors.accent} /></View>
       <View style={{ flex: 1 }}>
         <Text style={[s.fileName, { color: colors.accent }]} numberOfLines={2}>{item.url}</Text>
@@ -381,18 +427,19 @@ export default function MediaGalleryScreen() {
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10} accessibilityLabel="Back">
+        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={s.title} numberOfLines={1}>{(peerName as string) || 'Shared'} Media</Text>
+        <Text style={s.title} numberOfLines={1} accessibilityRole="header">{(peerName as string) || 'Shared'} Media</Text>
         <View style={{ width: 40 }} />
       </View>
 
-      <View style={s.tabs}>
+      <View style={s.tabs} accessibilityRole="tablist">
         {TABS.map(t => (
-          <TouchableOpacity key={t.id} style={[s.tab, tab === t.id && s.tabActive]} onPress={() => setTab(t.id)}>
+          <TouchableOpacity key={t.id} style={[s.tab, tab === t.id && s.tabActive]} onPress={() => setTab(t.id)}
+            accessibilityRole="tab" accessibilityLabel={`${t.label}, ${t.count}`} accessibilityState={{ selected: tab === t.id }}>
             <Text style={[s.tabTxt, tab === t.id && s.tabTxtActive]}>{t.label}</Text>
-            <Text style={[s.tabCount, tab === t.id && { color: '#FFFFFF' }]}>{t.count}</Text>
+            <Text style={[s.tabCount, tab === t.id && s.tabTxtActive]}>{t.count}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -401,6 +448,7 @@ export default function MediaGalleryScreen() {
         <View style={s.groupBar}>
           {GROUPS.map(g => (
             <TouchableOpacity key={g.id} onPress={() => setGroupBy(g.id)}
+              accessibilityRole="radio" accessibilityLabel={`Group ${g.label}`} accessibilityState={{ selected: groupBy === g.id }}
               style={[s.groupChip, groupBy === g.id && { borderColor: colors.primary, backgroundColor: colors.primary + '1a' }]}>
               <Text style={[s.groupTxt, groupBy === g.id && { color: colors.primary, fontWeight: '700' }]}>{g.label}</Text>
             </TouchableOpacity>
@@ -408,8 +456,29 @@ export default function MediaGalleryScreen() {
         </View>
       )}
 
+      {loadError === 'stale' && (
+        <View style={s.staleBar} accessibilityLiveRegion="polite">
+          <Ionicons name="cloud-offline-outline" size={16} color={colors.textDim} />
+          <Text style={s.staleTxt}>Showing saved media. Couldn’t refresh.</Text>
+          <TouchableOpacity onPress={() => setReloadKey(k => k + 1)} hitSlop={10}
+            accessibilityRole="button" accessibilityLabel="Retry loading media">
+            <Text style={s.retryLink}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {loading ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
+      ) : loadError === 'empty' ? (
+        <View style={s.errorBox}>
+          <Ionicons name="cloud-offline-outline" size={36} color={colors.textDim} />
+          <Text style={s.errorTitle}>Couldn’t load shared media</Text>
+          <Text style={s.errorBody}>Check your connection and try again.</Text>
+          <TouchableOpacity style={s.retryBtn} onPress={() => { setLoading(true); setReloadKey(k => k + 1); }}
+            accessibilityRole="button" accessibilityLabel="Retry loading media">
+            <Text style={s.retryBtnTxt}>Retry</Text>
+          </TouchableOpacity>
+        </View>
       ) : (tab === 'photos' || tab === 'videos') && groupBy !== 'none' ? (
         <SectionList
           sections={sections}
@@ -442,15 +511,9 @@ export default function MediaGalleryScreen() {
           contentContainerStyle={{ padding: 12 }} ListEmptyComponent={<Empty label="No links shared yet" />} />
       )}
 
-      {/* Self-contained full-screen photo viewer */}
-      <Modal visible={!!viewer} transparent animationType="fade" onRequestClose={() => setViewer(null)}>
-        <View style={s.viewerBg}>
-          <TouchableOpacity style={s.viewerClose} onPress={() => setViewer(null)} accessibilityLabel="Close" hitSlop={12}>
-            <Ionicons name="close" size={28} color="#fff" />
-          </TouchableOpacity>
-          {viewer && <MediaThumb m={viewer} style={s.viewerImg} resizeMode="contain" resolveSrc={resolveSrc} placeholder={colors.surfaceSolid} />}
-        </View>
-      </Modal>
+      {capped && !loading && loadError !== 'empty' && (
+        <Text style={s.capNote}>Showing media from the most recent {PAGE * MAX_PAGES} messages.</Text>
+      )}
     </View>
   );
 }
@@ -473,6 +536,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   tab: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: c.glassSoft, borderWidth: 1, borderColor: c.glassStroke },
   tabActive: { backgroundColor: c.primary, borderColor: c.primary },
   tabTxt: { color: c.textDim, fontSize: 12, fontWeight: '700' },
+  // White on the solid primary fill: the deliberate on-accent ink in both themes.
   tabTxtActive: { color: '#FFFFFF' },
   tabCount: { color: c.textDim, fontSize: 10, marginTop: 2 },
   groupBar: { flexDirection: 'row', gap: 7, paddingHorizontal: 12, paddingTop: 10 },
@@ -486,7 +550,13 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   fileIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: c.glassSoft, justifyContent: 'center', alignItems: 'center' },
   fileName: { color: c.text, fontSize: 13, fontWeight: '600' },
   fileDate: { color: c.textDim, fontSize: 11, marginTop: 2 },
-  viewerBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' },
-  viewerClose: { position: 'absolute', top: 54, right: 20, zIndex: 10 },
-  viewerImg: { width: '100%', height: '80%' },
+  staleBar: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 12, marginTop: 10, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: c.glassSoft, borderWidth: 1, borderColor: c.glassStroke },
+  staleTxt: { flex: 1, color: c.textDim, fontSize: 12 },
+  retryLink: { color: c.accentOn, fontSize: 13, fontWeight: '700' },
+  errorBox: { alignItems: 'center', paddingVertical: 60, paddingHorizontal: 24, gap: 8 },
+  errorTitle: { color: c.text, fontSize: 16, fontWeight: '700', textAlign: 'center' },
+  errorBody: { color: c.textDim, fontSize: 13, textAlign: 'center' },
+  retryBtn: { marginTop: 8, paddingHorizontal: 22, paddingVertical: 10, borderRadius: 20, backgroundColor: c.primary },
+  retryBtnTxt: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  capNote: { color: c.textFaint, fontSize: 11, textAlign: 'center', paddingVertical: 8 },
 });

@@ -1,18 +1,25 @@
 // app/whiteboard.tsx — Drawing Whiteboard
-// Draw sketches, annotate, share in chat
-// Touch-based drawing with color picker, brush sizes, undo, clear
+// Draw a sketch, then send it into the chat that opened this screen (the
+// shared capturedUri contract, staged in the chat's caption preview) or share
+// it to another app. Pen, eraser, colours, brush sizes, undo/redo, clear.
 
 import { BRAND_ACCENT, type Palette } from '../constants/theme';
-import React, { useState, useRef , useMemo, useEffect} from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, PanResponder, Alert } from 'react-native';
+import React, { useState, useRef, useMemo, useEffect, memo } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, PanResponder, Alert, ActivityIndicator } from 'react-native';
+import Svg, { Path } from 'react-native-svg';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
-import { Stack, useNavigation } from 'expo-router';
+import { Stack, useNavigation, useLocalSearchParams, useRouter } from 'expo-router';
 import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
 import { AuroraBackground } from '../components/ui';
-import { CANVAS_BG, DEFAULT_INK, commitWhiteboardPath, type Tool } from '../lib/whiteboardStroke';
+import { CANVAS_BG, DEFAULT_INK, commitWhiteboardPath, type Tool, type PathData, type Point } from '../lib/whiteboardStroke';
+import { strokeD } from '../lib/strokePath';
+import { returnParams } from '../lib/camera/cameraMode';
 
 
+// Ink colours are drawing content on the fixed white canvas, not theme roles.
 const COLORS = [DEFAULT_INK, '#FF3C6E', '#4A9FFF', BRAND_ACCENT, '#F59E0B', '#A78BFA', '#FFFFFF', '#EC4899', '#8B5CF6'];
 const BRUSH_SIZES = [2, 4, 8, 14, 22];
 const COLOR_NAMES: Record<string, string> = {
@@ -20,21 +27,41 @@ const COLOR_NAMES: Record<string, string> = {
   '#A78BFA': 'lavender', '#FFFFFF': 'white', '#EC4899': 'pink', '#8B5CF6': 'purple',
 };
 
+/** One SVG path per stroke. Memoised: committed strokes re-render only when
+ *  the stroke list changes, not on every move event of the live stroke. */
+const StrokeLayer = memo(function StrokeLayer({ strokes }: { strokes: PathData[] }) {
+  return (
+    <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
+      {strokes.map((p, i) => (
+        <Path key={i} d={strokeD(p.points)} stroke={p.color} strokeWidth={p.width}
+          strokeLinecap="round" strokeLinejoin="round" fill="none" />
+      ))}
+    </Svg>
+  );
+});
+
 function useS() {
   const { colors } = useTheme();
-  return useMemo(() => makeStyles(colors), [colors]);
+  const insets = useSafeAreaInsets();
+  return useMemo(() => makeStyles(colors, insets.bottom), [colors, insets.bottom]);
 }
 
 export default function WhiteboardScreen() {
   const { colors } = useTheme();
   const s = useS();
-  const canvasRef = useRef(null);
-  const [paths, setPaths] = useState([]);
-  const [currentPath, setCurrentPath] = useState([]);
+  const router = useRouter();
+  const { chatId, peerUid, peerName, returnTo } = useLocalSearchParams<{
+    chatId?: string; peerUid?: string; peerName?: string; returnTo?: string;
+  }>();
+  const canvasRef = useRef<View>(null);
+  const [paths, setPaths] = useState<PathData[]>([]);
+  const [redoStack, setRedoStack] = useState<PathData[]>([]);
+  const [currentPath, setCurrentPath] = useState<Point[]>([]);
   const [color, setColor] = useState(DEFAULT_INK);
   const [brushSize, setBrushSize] = useState(4);
   const [tool, setTool] = useState<Tool>('pen');
-  const currentPathRef = useRef(currentPath);
+  const [busy, setBusy] = useState(false);
+  const currentPathRef = useRef<Point[]>(currentPath);
   const colorRef = useRef(color);
   const brushSizeRef = useRef(brushSize);
   const toolRef = useRef(tool);
@@ -59,27 +86,35 @@ export default function WhiteboardScreen() {
       setCurrentPath(next);
     },
     onPanResponderRelease: () => {
-      const latestPath = currentPathRef.current;
-      const latestTool = toolRef.current;
-      const latestBrush = brushSizeRef.current;
-      const committed = commitWhiteboardPath(latestPath, latestTool, colorRef.current, latestBrush);
+      const committed = commitWhiteboardPath(currentPathRef.current, toolRef.current, colorRef.current, brushSizeRef.current);
       if (committed) {
         setPaths(prev => [...prev, committed]);
+        setRedoStack([]); // a new stroke ends the redo history, as in any editor
       }
       currentPathRef.current = [];
       setCurrentPath([]);
     },
   })).current;
 
-  const undo = () => setPaths(prev => prev.slice(0, -1));
+  const undo = () => {
+    if (paths.length === 0) return;
+    setRedoStack(r => [...r, paths[paths.length - 1]]);
+    setPaths(prev => prev.slice(0, -1));
+  };
+  const redo = () => {
+    if (redoStack.length === 0) return;
+    setPaths(prev => [...prev, redoStack[redoStack.length - 1]]);
+    setRedoStack(r => r.slice(0, -1));
+  };
   const clear = () => {
+    if (paths.length === 0) return;
     Alert.alert('Clear Canvas?', 'This will erase everything.', [
-      { text: 'Cancel' },
-      { text: 'Clear', style: 'destructive', onPress: () => setPaths([]) },
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Clear', style: 'destructive', onPress: () => { setPaths([]); setRedoStack([]); } },
     ]);
   };
 
-  // Strokes drawn since the last share. Leaving with unshared strokes asks
+  // Strokes drawn since the last share/send. Leaving with unsaved strokes asks
   // first: the drawing lives only in memory, and back used to drop it silently.
   const sharedCount = useRef(0);
   const pathsRef = useRef(paths);
@@ -94,61 +129,85 @@ export default function WhiteboardScreen() {
     ]);
   }), [navigation]);
 
-  const saveAndShare = async () => {
+  // JPEG to match the chat's capture contract (it stages captures as
+  // image/jpeg); the canvas is opaque white, so nothing is lost to alpha.
+  const capture = () => captureRef(canvasRef, { format: 'jpg', quality: 0.95 });
+
+  const sendToChat = async () => {
+    if (busy || paths.length === 0 || !chatId) return;
+    setBusy(true);
     try {
-      if (!canvasRef.current) return;
-      const uri = await captureRef(canvasRef.current, { format: 'png', quality: 1 });
+      const uri = await capture();
+      // Mark as saved BEFORE leaving, or the leave guard would block the pop.
+      sharedCount.current = pathsRef.current.length;
+      router.dismissTo({
+        pathname: (returnTo || '/chat') as any,
+        params: returnParams({ chatId, peerUid, peerName }, { uri, type: 'image' }),
+      });
+    } catch {
+      Alert.alert('Could not send', 'The drawing could not be saved as an image. Please try again.');
+      setBusy(false);
+    }
+  };
+
+  const saveAndShare = async () => {
+    if (busy || paths.length === 0) return;
+    setBusy(true);
+    try {
+      const uri = await capture();
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(uri, { mimeType: 'image/png' });
+        await Sharing.shareAsync(uri, { mimeType: 'image/jpeg' });
         sharedCount.current = pathsRef.current.length;
       } else {
         Alert.alert('Sharing unavailable', 'No app on this device can receive the drawing.');
       }
     } catch {
       Alert.alert('Could not share', 'The drawing could not be saved as an image. Please try again.');
+    } finally {
+      setBusy(false);
     }
   };
 
-  const renderPath = (pathData, idx) => {
-    if (pathData.points.length < 2) return null;
-    return (
-      <View key={idx} style={StyleSheet.absoluteFill} pointerEvents="none">
-        {pathData.points.map((point, i) => {
-          if (i === 0) return null;
-          return (
-            <View key={i} style={{
-              position: 'absolute',
-              left: point.x - pathData.width / 2,
-              top: point.y - pathData.width / 2,
-              width: pathData.width,
-              height: pathData.width,
-              borderRadius: pathData.width / 2,
-              backgroundColor: pathData.color,
-            }} />
-          );
-        })}
-      </View>
-    );
-  };
+  const empty = paths.length === 0;
+  const live: PathData | null = currentPath.length > 0
+    ? { points: currentPath, color: tool === 'eraser' ? CANVAS_BG : color, width: tool === 'eraser' ? brushSize * 3 : brushSize }
+    : null;
 
   return (
     <>
       <Stack.Screen options={{
         headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */  title: 'Whiteboard', headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text,
         headerRight: () => (
-          <View style={{ flexDirection: 'row', gap: 14, marginRight: 8 }}>
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Undo last stroke" style={{ minHeight: 44, justifyContent: 'center' }} onPress={undo}><Text style={{ color: colors.accentOn, fontSize: 13, fontWeight: '700' }}>Undo</Text></TouchableOpacity>
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Share drawing" style={{ minHeight: 44, justifyContent: 'center' }} onPress={saveAndShare}><Text style={{ color: colors.accentOn, fontSize: 13, fontWeight: '700' }}>Share</Text></TouchableOpacity>
+          <View style={{ flexDirection: 'row', gap: 14, marginRight: 8, alignItems: 'center' }}>
+            {busy && <ActivityIndicator color={colors.accentOn} />}
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Share drawing to another app"
+              accessibilityState={{ disabled: empty || busy }} disabled={empty || busy}
+              style={{ minHeight: 44, justifyContent: 'center', opacity: empty ? 0.5 : 1 }} onPress={saveAndShare}>
+              <Text style={{ color: colors.accentOn, fontSize: 13, fontWeight: '700' }}>Share</Text>
+            </TouchableOpacity>
+            {!!chatId && (
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Send drawing to this chat"
+                accessibilityState={{ disabled: empty || busy }} disabled={empty || busy}
+                style={{ minHeight: 44, justifyContent: 'center', opacity: empty ? 0.5 : 1 }} onPress={sendToChat}>
+                <Text style={{ color: colors.accentOn, fontSize: 13, fontWeight: '800' }}>Send</Text>
+              </TouchableOpacity>
+            )}
           </View>
         ),
       }} />
       <View style={s.container}>
       <AuroraBackground />
 
-        {/* Canvas */}
-        <View ref={canvasRef} style={s.canvas} {...panResponder.panHandlers}>
-          {paths.map((p, i) => renderPath(p, i))}
-          {currentPath.length > 0 && renderPath({ points: currentPath, color: tool === 'eraser' ? CANVAS_BG : color, width: tool === 'eraser' ? brushSize * 3 : brushSize }, 'current')}
+        {/* Canvas — collapsable={false} keeps the native view that captureRef snapshots. */}
+        <View ref={canvasRef} collapsable={false} style={s.canvas} {...panResponder.panHandlers}
+          accessibilityLabel="Drawing canvas" accessibilityHint="Draw with one finger">
+          <StrokeLayer strokes={paths} />
+          {live && (
+            <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
+              <Path d={strokeD(live.points)} stroke={live.color} strokeWidth={live.width}
+                strokeLinecap="round" strokeLinejoin="round" fill="none" />
+            </Svg>
+          )}
         </View>
 
         {/* Toolbar */}
@@ -157,14 +216,24 @@ export default function WhiteboardScreen() {
           <View style={s.toolRow}>
             <TouchableOpacity style={[s.toolBtn, tool === 'pen' && s.toolActive]} onPress={() => setTool('pen')}
               accessibilityRole="radio" accessibilityLabel="Pen" accessibilityState={{ selected: tool === 'pen' }}>
-              <Text style={s.toolTxt} importantForAccessibility="no" accessibilityElementsHidden>{"\u270F\uFE0F"}</Text>
+              <Ionicons name="pencil" size={20} color={colors.text} />
             </TouchableOpacity>
             <TouchableOpacity style={[s.toolBtn, tool === 'eraser' && s.toolActive]} onPress={() => setTool('eraser')}
               accessibilityRole="radio" accessibilityLabel="Eraser" accessibilityState={{ selected: tool === 'eraser' }}>
-              <Text style={s.toolTxt} importantForAccessibility="no" accessibilityElementsHidden>{"\uD83E\uDDF9"}</Text>
+              <MaterialCommunityIcons name="eraser" size={20} color={colors.text} />
             </TouchableOpacity>
-            <TouchableOpacity style={s.toolBtn} onPress={clear} accessibilityRole="button" accessibilityLabel="Clear canvas">
-              <Text style={s.toolTxt} importantForAccessibility="no" accessibilityElementsHidden>{"\uD83D\uDDD1\uFE0F"}</Text>
+            <TouchableOpacity style={[s.toolBtn, empty && s.toolDisabled]} onPress={undo} disabled={empty}
+              accessibilityRole="button" accessibilityLabel="Undo last stroke" accessibilityState={{ disabled: empty }}>
+              <Ionicons name="arrow-undo" size={20} color={colors.text} />
+            </TouchableOpacity>
+            <TouchableOpacity style={[s.toolBtn, redoStack.length === 0 && s.toolDisabled]} onPress={redo}
+              disabled={redoStack.length === 0}
+              accessibilityRole="button" accessibilityLabel="Redo stroke" accessibilityState={{ disabled: redoStack.length === 0 }}>
+              <Ionicons name="arrow-redo" size={20} color={colors.text} />
+            </TouchableOpacity>
+            <TouchableOpacity style={[s.toolBtn, empty && s.toolDisabled]} onPress={clear} disabled={empty}
+              accessibilityRole="button" accessibilityLabel="Clear canvas" accessibilityState={{ disabled: empty }}>
+              <Ionicons name="trash-outline" size={20} color={colors.danger} />
             </TouchableOpacity>
           </View>
 
@@ -193,16 +262,17 @@ export default function WhiteboardScreen() {
   );
 }
 
-const makeStyles = (c: Palette) => StyleSheet.create({
+const makeStyles = (c: Palette, insetBottom: number) => StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
   canvas: { flex: 1, backgroundColor: CANVAS_BG },
-  toolbar: { backgroundColor: c.glass, padding: 12, paddingBottom: 28, borderTopWidth: 1, borderTopColor: c.glassStroke },
+  toolbar: { backgroundColor: c.glass, padding: 12, paddingBottom: insetBottom + 12, borderTopWidth: 1, borderTopColor: c.glassStroke },
   toolRow: { flexDirection: 'row', justifyContent: 'center', gap: 16, marginBottom: 12 },
   toolBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: c.glassSoft, justifyContent: 'center', alignItems: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
   toolActive: { backgroundColor: c.glass, borderWidth: 2, borderColor: c.primary },
-  toolTxt: { fontSize: 18 },
+  toolDisabled: { opacity: 0.4 },
   colorRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10, marginBottom: 12 },
-  colorDot: { width: 28, height: 28, borderRadius: 14 },
+  // The hairline ring keeps the white swatch visible on the light toolbar.
+  colorDot: { width: 28, height: 28, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
   colorActive: { borderWidth: 3, borderColor: c.primary, transform: [{ scale: 1.15 }] },
   brushRow: { flexDirection: 'row', justifyContent: 'center', gap: 16 },
   brushBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: c.glassSoft, justifyContent: 'center', alignItems: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },

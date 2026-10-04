@@ -1,23 +1,34 @@
-// app/video-player.tsx — World-class Video Player for crazzychat
-// Full-featured playback: controls overlay, PiP, double-tap seek, pinch-zoom, swipe dismiss
+// app/video-player.tsx — full-screen video player.
+// Controls overlay, seekable track, double-tap seek, pinch-zoom, swipe-down dismiss.
+// No picture-in-picture: expo-av (the installed player) has no system PiP API,
+// and the old in-app "mini player" mounted a second <Video> that restarted
+// playback, so it was removed rather than kept as a fake.
 
 import React, { useState, useEffect, useRef, useCallback , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, TouchableWithoutFeedback, StyleSheet,
-  StatusBar, ActivityIndicator, Dimensions, Animated, PanResponder,
-  Platform, Share, useWindowDimensions } from 'react-native';
+  StatusBar, ActivityIndicator, Animated, PanResponder, Alert,
+  useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../lib/theme';
-import { type Palette } from '../constants/theme';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { seekFraction, seekTargetMs, resumeKey } from '../lib/videoSeek';
+import { ErrorBoundary } from '../components/ErrorBoundary';
+import { getAccessToken } from '../lib/api';
+import { isOwnServerUrl } from '../lib/serverOrigin';
+import { VIEWER_TEMP_PREFIX } from '../lib/mediaCacheGC';
 
+// Fixed palette, deliberately not theme tokens: the video stage is black in
+// both themes, so the chrome on it must stay light-on-dark.
 const ACCENT = '#4A9FFF';
 const BG = '#000000';
+const CTA = '#1D4ED8'; // 6.7:1 under white text
 const OVERLAY = 'rgba(0,0,0,0.55)';
 // Controls sit on the fixed black stage + OVERLAY in BOTH themes, so they use
 // a fixed light foreground. c.text is #1B1526 in light theme — invisible here.
@@ -32,22 +43,21 @@ const formatTime = (ms: number) => {
   return `${min}:${sec < 10 ? '0' : ''}${sec}`;
 };
 
-function useS() {
-  // Reactive size. The module-level Dimensions.get above is captured ONCE at
-  // import and never updates, so it froze the layout at the size the app
-  // launched with. Shadowing it here makes every use in this component follow
-  // rotation; StyleSheet.create keeps the initial value, which is fine for
-  // static rules.
-  const {width: SCREEN_W, height: SCREEN_H} = useWindowDimensions();
-
-  const { colors } = useTheme();
-  return useMemo(() => makeStyles(colors), [colors]);
+// A render crash in the player (a bad status payload, a native view error)
+// lands on a recoverable screen instead of taking the app down.
+export default function VideoPlayerScreen() {
+  return (
+    <ErrorBoundary screen="VideoPlayerScreen" fallbackTitle="Video player error" fallbackMessage="This video could not be played.">
+      <VideoPlayerInner />
+    </ErrorBoundary>
+  );
 }
 
-export default function VideoPlayerScreen() {
+function VideoPlayerInner() {
   const { width: SCREEN_W, height: SCREEN_H } = useWindowDimensions();
   const { colors } = useTheme();
-  const styles = useS();
+  const insets = useSafeAreaInsets();
+  const styles = useMemo(() => makeStyles(insets.top, insets.bottom), [insets.top, insets.bottom]);
   const router = useRouter();
   const { uri, filename } = useLocalSearchParams();
   const videoUri = (uri || '') + '';
@@ -112,19 +122,6 @@ export default function VideoPlayerScreen() {
     ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
   }, []);
 
-  // PiP state
-  const [pipActive, setPipActive] = useState(false);
-  const pipPos = useRef(new Animated.ValueXY({ x: SCREEN_W - 180, y: SCREEN_H - 320 })).current;
-  const pipPanResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: () => { pipPos.extractOffset(); },
-      onPanResponderMove: Animated.event([null, { dx: pipPos.x, dy: pipPos.y }], { useNativeDriver: false }),
-      onPanResponderRelease: () => { pipPos.flattenOffset(); },
-    })
-  ).current;
-
   // Animations
   const playBtnScale = useRef(new Animated.Value(1)).current;
   const controlsOpacity = useRef(new Animated.Value(1)).current;
@@ -134,8 +131,10 @@ export default function VideoPlayerScreen() {
   const rippleRightOpacity = useRef(new Animated.Value(0)).current;
   const dismissY = useRef(new Animated.Value(0)).current;
 
-  // Pinch-to-zoom
+  // Pinch-to-zoom. scaleRef mirrors the value we last set, so reading the
+  // current zoom needs no private Animated API.
   const videoScale = useRef(new Animated.Value(1)).current;
+  const scaleRef = useRef(1);
   const baseScale = useRef(1);
   const pinchRef = useRef({ active: false, initialDistance: 0 });
 
@@ -166,15 +165,16 @@ export default function VideoPlayerScreen() {
       const t = e.nativeEvent.touches;
       const dist = Math.hypot(t[1].pageX - t[0].pageX, t[1].pageY - t[0].pageY);
       pinchRef.current = { active: true, initialDistance: dist };
-      baseScale.current = (videoScale as any).__getValue ? (videoScale as any).__getValue() : 1;
+      baseScale.current = scaleRef.current;
     }
-  }, [videoScale]);
+  }, []);
 
   const onTouchMove = useCallback((e: any) => {
     if (pinchRef.current.active && e.nativeEvent.touches.length === 2) {
       const t = e.nativeEvent.touches;
       const dist = Math.hypot(t[1].pageX - t[0].pageX, t[1].pageY - t[0].pageY);
       const scale = Math.min(Math.max((dist / pinchRef.current.initialDistance) * baseScale.current, 0.5), 4);
+      scaleRef.current = scale;
       videoScale.setValue(scale);
     }
   }, [videoScale]);
@@ -182,8 +182,8 @@ export default function VideoPlayerScreen() {
   const onTouchEnd = useCallback(() => {
     if (pinchRef.current.active) {
       pinchRef.current.active = false;
-      const current = (videoScale as any).__getValue ? (videoScale as any).__getValue() : 1;
-      if (current < 1) {
+      if (scaleRef.current < 1) {
+        scaleRef.current = 1;
         Animated.spring(videoScale, { toValue: 1, useNativeDriver: true }).start();
       }
     }
@@ -243,11 +243,9 @@ export default function VideoPlayerScreen() {
       Animated.timing(playBtnScale, { toValue: 0.7, duration: 100, useNativeDriver: true }),
       Animated.spring(playBtnScale, { toValue: 1, friction: 3, useNativeDriver: true }),
     ]).start();
-    if (isPlaying) {
-      await videoRef.current.pauseAsync();
-    } else {
-      await videoRef.current.playAsync();
-    }
+    // A rejected play/pause (player torn down mid-tap) must not surface as an
+    // unhandled rejection; the status callback reports real load failures.
+    await (isPlaying ? videoRef.current.pauseAsync() : videoRef.current.playAsync()).catch(() => {});
   }, [isPlaying, playBtnScale]);
 
   const seekRelative = useCallback(async (deltaMs: number) => {
@@ -292,24 +290,38 @@ export default function VideoPlayerScreen() {
     router.back();
   }, [router]);
 
+  // Share the FILE, not a link: a remote video is downloaded first (with the
+  // bearer token only for our own server), into a vt_share_ dir that
+  // lib/mediaCacheGC sweeps at boot/logout — the receiving app may still be
+  // reading it after the sheet closes, so it is not deleted here.
+  const [sharing, setSharing] = useState(false);
   const handleShare = useCallback(async () => {
+    if (sharing) return;
+    setSharing(true);
     try {
-      if (videoUri.startsWith('http')) {
-        await Share.share({ url: videoUri, message: videoName });
-      } else {
-        const canShare = await Sharing.isAvailableAsync();
-        if (canShare) await Sharing.shareAsync(videoUri);
+      if (!(await Sharing.isAvailableAsync())) {
+        Alert.alert('Sharing unavailable', 'This device has no app to share the video with.');
+        return;
       }
-    } catch {}
-  }, [videoUri, videoName]);
-
-  const activatePip = useCallback(() => {
-    setPipActive(true);
-  }, []);
-
-  const deactivatePip = useCallback(() => {
-    setPipActive(false);
-  }, []);
+      let local = videoUri;
+      if (/^https?:/i.test(videoUri)) {
+        const dir = (FileSystem.cacheDirectory || '') + VIEWER_TEMP_PREFIX + 'share_' + Date.now() + '/';
+        await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+        const name = videoName.replace(/[/\\:*?"<>|]/g, '_') || 'video';
+        const token = isOwnServerUrl(videoUri) ? await getAccessToken() : null;
+        const res = await FileSystem.downloadAsync(videoUri, dir + name,
+          token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
+        if (res.status >= 400) throw new Error('GET ' + res.status);
+        local = res.uri;
+      }
+      await Sharing.shareAsync(local);
+    } catch (e: any) {
+      console.warn('[video-player] share failed:', e?.message ?? e);
+      Alert.alert("Couldn't share video", 'Check your connection and try again.');
+    } finally {
+      setSharing(false);
+    }
+  }, [videoUri, videoName, sharing]);
 
   // --- Double tap detection ---
   const handleAreaTap = useCallback((side: 'left' | 'right') => {
@@ -377,39 +389,6 @@ export default function VideoPlayerScreen() {
   const displayPosition = isSeeking ? seekPosition * durationMs : positionMs;
   const currentSpeed = SPEEDS[speedIndex];
 
-  // ==================== PiP MODE ====================
-  if (pipActive) {
-    return (
-      <Animated.View style={[styles.pipContainer, { transform: pipPos.getTranslateTransform() }]}
-        {...pipPanResponder.panHandlers}>
-        <Video
-          ref={videoRef}
-          source={{ uri: videoUri }}
-          style={styles.pipVideo}
-          resizeMode={ResizeMode.CONTAIN}
-          shouldPlay={isPlaying}
-          isMuted={isMuted}
-          onPlaybackStatusUpdate={onPlaybackStatusUpdate}
-        />
-        {/* Mini controls */}
-        <View style={styles.pipOverlay}>
-          <TouchableOpacity hitSlop={6} onPress={togglePlay} style={styles.pipPlayBtn}
-            accessibilityRole="button" accessibilityLabel={isPlaying ? 'Pause' : 'Play'}>
-            <Text style={styles.pipPlayIcon}>{isPlaying ? '\u275A\u275A' : '\u25B6'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity hitSlop={8} onPress={() => { deactivatePip(); }} style={styles.pipExpandBtn}
-            accessibilityRole="button" accessibilityLabel="Expand player">
-            <Text style={styles.pipExpandIcon}>{'\u2922'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity hitSlop={11} onPress={() => { videoRef.current?.stopAsync(); setPipActive(false); }}
-            style={styles.pipCloseBtn} accessibilityRole="button" accessibilityLabel="Stop mini player">
-            <Text style={styles.pipCloseIcon}>{'\u2715'}</Text>
-          </TouchableOpacity>
-        </View>
-      </Animated.View>
-    );
-  }
-
   // NO SOURCE = NOTHING TO PLAY. Reached by a bare deep link, or a notification
   // whose file was revoked or expired. Without this the player drew a black
   // full-bleed surface with headerShown:false — no text, no control, no exit.
@@ -420,7 +399,7 @@ export default function VideoPlayerScreen() {
         <Stack.Screen options={{ headerShown: false }} />
         <StatusBar hidden />
         <Ionicons name="videocam-off-outline" size={44} color={colors.textDim} />
-        <Text style={{ color: '#fff', fontSize: 17, fontWeight: '700', textAlign: 'center' }}>
+        <Text accessibilityRole="header" style={{ color: FG, fontSize: 17, fontWeight: '700', textAlign: 'center' }}>
           Nothing to play
         </Text>
         <Text style={{ color: colors.textDim, fontSize: 14, textAlign: 'center' }}>
@@ -430,9 +409,9 @@ export default function VideoPlayerScreen() {
           onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/chats' as any))}
           accessibilityRole="button"
           accessibilityLabel="Go back"
-          style={{ marginTop: 8, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, backgroundColor: '#1D4ED8' }}
+          style={{ marginTop: 8, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, backgroundColor: CTA }}
         >
-          <Text style={{ color: '#fff', fontWeight: '700' }}>Go back</Text>
+          <Text style={{ color: FG, fontWeight: '700' }}>Go back</Text>
         </TouchableOpacity>
       </View>
     );
@@ -477,7 +456,7 @@ export default function VideoPlayerScreen() {
         {loadError && (
           <View style={[styles.bufferingOverlay, { padding: 24, gap: 12 }]}>
             <Ionicons name="alert-circle-outline" size={44} color={FG} />
-            <Text style={{ color: FG, fontSize: 17, fontWeight: '700', textAlign: 'center' }}>
+            <Text accessibilityRole="header" style={{ color: FG, fontSize: 17, fontWeight: '700', textAlign: 'center' }}>
               {"Can't play this video"}
             </Text>
             <Text style={{ color: 'rgba(255,255,255,0.75)', fontSize: 14, textAlign: 'center' }}>
@@ -487,7 +466,7 @@ export default function VideoPlayerScreen() {
               <TouchableOpacity
                 onPress={() => { setLoadError(null); setIsBuffering(true); setReloadKey(k => k + 1); }}
                 accessibilityRole="button" accessibilityLabel="Retry loading the video"
-                style={{ paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, backgroundColor: '#1D4ED8' }}
+                style={{ paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, backgroundColor: CTA }}
               >
                 <Text style={{ color: FG, fontWeight: '700' }}>Retry</Text>
               </TouchableOpacity>
@@ -507,7 +486,8 @@ export default function VideoPlayerScreen() {
           opacity: rippleLeftOpacity,
           transform: [{ scale: rippleLeftScale.interpolate({ inputRange: [0, 1], outputRange: [0.3, 2.5] }) }],
         }]}>
-          <Text style={styles.rippleText}>{'\u25C0\u25C0'} 10s</Text>
+          <Ionicons name="play-back" size={18} color={FG} />
+          <Text style={styles.rippleText}>10s</Text>
         </Animated.View>
 
         {/* Double-tap ripple right */}
@@ -515,15 +495,20 @@ export default function VideoPlayerScreen() {
           opacity: rippleRightOpacity,
           transform: [{ scale: rippleRightScale.interpolate({ inputRange: [0, 1], outputRange: [0.3, 2.5] }) }],
         }]}>
-          <Text style={styles.rippleText}>10s {'\u25B6\u25B6'}</Text>
+          <Ionicons name="play-forward" size={18} color={FG} />
+          <Text style={styles.rippleText}>10s</Text>
         </Animated.View>
 
         {/* Tap zones for double-tap detection */}
         <View style={styles.tapZoneContainer} pointerEvents="box-none">
-          <TouchableWithoutFeedback onPress={() => handleAreaTap('left')}>
+          <TouchableWithoutFeedback onPress={() => handleAreaTap('left')}
+            accessibilityRole="button" accessibilityLabel="Show or hide controls"
+            accessibilityHint="Double-tap quickly to rewind 10 seconds">
             <View style={styles.tapZoneLeft} />
           </TouchableWithoutFeedback>
-          <TouchableWithoutFeedback onPress={() => handleAreaTap('right')}>
+          <TouchableWithoutFeedback onPress={() => handleAreaTap('right')}
+            accessibilityRole="button" accessibilityLabel="Show or hide controls"
+            accessibilityHint="Double-tap quickly to skip forward 10 seconds">
             <View style={styles.tapZoneRight} />
           </TouchableWithoutFeedback>
         </View>
@@ -535,13 +520,16 @@ export default function VideoPlayerScreen() {
             <View style={styles.topBar}>
               <TouchableOpacity onPress={handleClose} style={styles.topBtn}
                 accessibilityRole="button" accessibilityLabel="Close video player">
-                <Text style={styles.topBtnIcon}>{'\u2190'}</Text>
+                <Ionicons name="arrow-back" size={24} color={FG} />
               </TouchableOpacity>
               <Text style={styles.titleText} numberOfLines={1}>{videoName}</Text>
               <View style={styles.topRight}>
-                <TouchableOpacity onPress={handleShare} style={styles.topBtn}
-                  accessibilityRole="button" accessibilityLabel="Share video">
-                  <Text style={styles.topBtnIcon}>{'\u2B06'}</Text>
+                <TouchableOpacity onPress={handleShare} style={styles.topBtn} disabled={sharing}
+                  accessibilityRole="button" accessibilityLabel="Share video"
+                  accessibilityState={{ busy: sharing, disabled: sharing }}>
+                  {sharing
+                    ? <ActivityIndicator color={FG} />
+                    : <Ionicons name="share-outline" size={22} color={FG} />}
                 </TouchableOpacity>
               </View>
             </View>
@@ -550,20 +538,20 @@ export default function VideoPlayerScreen() {
             <View style={styles.centerControls}>
               <TouchableOpacity onPress={() => seekRelative(-10000)} style={styles.sideBtn}
                 accessibilityRole="button" accessibilityLabel="Back 10 seconds">
-                <Text style={styles.sideBtnIcon}>{'\u25C0\u25C0'}</Text>
+                <Ionicons name="play-back" size={16} color={FG} />
                 <Text style={styles.sideBtnLabel}>10</Text>
               </TouchableOpacity>
 
               <Animated.View style={{ transform: [{ scale: playBtnScale }] }}>
                 <TouchableOpacity onPress={togglePlay} style={styles.playBtn}
                   accessibilityRole="button" accessibilityLabel={isPlaying ? 'Pause' : 'Play'}>
-                  <Text style={styles.playBtnIcon}>{isPlaying ? '\u275A\u275A' : '\u25B6'}</Text>
+                  <Ionicons name={isPlaying ? 'pause' : 'play'} size={30} color={FG} />
                 </TouchableOpacity>
               </Animated.View>
 
               <TouchableOpacity onPress={() => seekRelative(10000)} style={styles.sideBtn}
                 accessibilityRole="button" accessibilityLabel="Forward 10 seconds">
-                <Text style={styles.sideBtnIcon}>{'\u25B6\u25B6'}</Text>
+                <Ionicons name="play-forward" size={16} color={FG} />
                 <Text style={styles.sideBtnLabel}>10</Text>
               </TouchableOpacity>
             </View>
@@ -596,10 +584,8 @@ export default function VideoPlayerScreen() {
               {/* Bottom buttons row */}
               <View style={styles.bottomBtns}>
                 <TouchableOpacity onPress={toggleMute} style={styles.bottomActionBtn}
-                  accessibilityRole="button" accessibilityLabel={isMuted ? 'Unmute' : 'Mute'}>
-                  <Text style={[styles.bottomActionIcon, isMuted && styles.activeIcon]}>
-                    {isMuted ? '\uD83D\uDD07' : '\uD83D\uDD0A'}
-                  </Text>
+                  accessibilityRole="switch" accessibilityLabel="Mute" accessibilityState={{ checked: isMuted }}>
+                  <Ionicons name={isMuted ? 'volume-mute' : 'volume-high'} size={22} color={isMuted ? ACCENT : FG} />
                 </TouchableOpacity>
 
                 <TouchableOpacity onPress={cycleSpeed} style={styles.speedBtn}
@@ -615,16 +601,9 @@ export default function VideoPlayerScreen() {
                   </View>
                 )}
 
-                <TouchableOpacity onPress={activatePip} style={styles.bottomActionBtn}
-                  accessibilityRole="button" accessibilityLabel="Mini player">
-                  <Text style={styles.bottomActionText}>PiP</Text>
-                </TouchableOpacity>
-
                 <TouchableOpacity onPress={toggleFullscreen} style={styles.bottomActionBtn}
                   accessibilityRole="button" accessibilityLabel={isFullscreen ? 'Exit full screen' : 'Full screen'}>
-                  <Text style={[styles.bottomActionIcon, isFullscreen && styles.activeIcon]}>
-                    {isFullscreen ? '\u2922' : '\u26F6'}
-                  </Text>
+                  <Ionicons name={isFullscreen ? 'contract' : 'expand'} size={22} color={isFullscreen ? ACCENT : FG} />
                 </TouchableOpacity>
               </View>
             </View>
@@ -636,7 +615,7 @@ export default function VideoPlayerScreen() {
 }
 
 // ============================== STYLES ==============================
-const makeStyles = (c: Palette) => StyleSheet.create({
+const makeStyles = (insetTop: number, insetBottom: number) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: BG,
@@ -706,7 +685,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: Platform.OS === 'ios' ? 54 : 36,
+    paddingTop: insetTop + 8,
     paddingHorizontal: 12,
     paddingBottom: 12,
     backgroundColor: OVERLAY,
@@ -717,11 +696,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderRadius: 22,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  topBtnIcon: {
-    color: FG,
-    fontSize: 24,
-    fontWeight: '700',
   },
   titleText: {
     flex: 1,
@@ -753,11 +727,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  playBtnIcon: {
-    color: FG,
-    fontSize: 28,
-    fontWeight: '800',
-  },
   sideBtn: {
     width: 52,
     height: 52,
@@ -765,11 +734,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.12)',
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  sideBtnIcon: {
-    color: FG,
-    fontSize: 14,
-    fontWeight: '700',
   },
   sideBtnLabel: {
     color: FG,
@@ -780,7 +744,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   // Bottom bar
   bottomBar: {
-    paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+    paddingBottom: insetBottom + 16,
     paddingHorizontal: 16,
     backgroundColor: OVERLAY,
     paddingTop: 12,
@@ -843,19 +807,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
-  bottomActionIcon: {
-    color: FG,
-    fontSize: 20,
-  },
-  bottomActionText: {
-    color: FG,
-    fontSize: 14,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  activeIcon: {
-    color: ACCENT,
-  },
   activeText: {
     color: ACCENT,
   },
@@ -883,77 +834,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   speedBadgeText: {
     color: BG,
     fontSize: 10,
-    fontWeight: '800',
-  },
-
-  // PiP
-  pipContainer: {
-    position: 'absolute',
-    width: 170,
-    height: 100,
-    borderRadius: 12,
-    overflow: 'hidden',
-    backgroundColor: BG,
-    borderWidth: 1.5,
-    borderColor: ACCENT,
-    zIndex: 9999,
-    elevation: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.5,
-    shadowRadius: 12,
-  },
-  pipVideo: {
-    width: '100%',
-    height: '100%',
-  },
-  pipOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.35)',
-    gap: 12,
-  },
-  pipPlayBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(0,229,255,0.3)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  pipPlayIcon: {
-    color: FG,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  pipExpandBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  pipExpandIcon: {
-    color: FG,
-    fontSize: 16,
-  },
-  pipCloseBtn: {
-    position: 'absolute',
-    top: 4,
-    right: 4,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: 'rgba(255,60,60,0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  pipCloseIcon: {
-    color: FG,
-    fontSize: 12,
     fontWeight: '800',
   },
 });

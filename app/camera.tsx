@@ -23,11 +23,11 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  AccessibilityInfo, ActivityIndicator, Animated, AppState, Image,
-  KeyboardAvoidingView, Linking, Platform, Pressable, StatusBar, StyleSheet, TextInput, View,
+  AccessibilityInfo, ActivityIndicator, Alert, Animated, AppState, Image,
+  KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, StatusBar, StyleSheet, TextInput, View,
 } from 'react-native';
 import { permissionDenied } from '../lib/permissionDenied';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import * as MediaLibrary from 'expo-media-library';
 import * as ImagePicker from 'expo-image-picker';
@@ -148,8 +148,44 @@ export default function CameraScreen() {
     return () => { if (recTimer.current) clearInterval(recTimer.current); };
   }, []);
 
+  // ── Unsent scanned pages are confirmed before they are thrown away ────
+  // Covers ✕, "Not now", Android back and the swipe-back gesture alike: they
+  // all remove this screen, and beforeRemove sees every one of them. Leaving
+  // WITH the PDF (attachScan) sets allowLeave first, so it never asks.
+  const navigation = useNavigation();
+  const allowLeave = useRef(false);
+  const scanPagesRef = useRef(scanPages);
+  scanPagesRef.current = scanPages;
+  useEffect(() => navigation.addListener('beforeRemove', (e: any) => {
+    if (allowLeave.current || scanPagesRef.current.length === 0) return;
+    e.preventDefault();
+    const n = scanPagesRef.current.length;
+    Alert.alert('Discard scanned pages?', `${n} scanned page${n > 1 ? 's' : ''} will be lost.`, [
+      { text: 'Keep scanning', style: 'cancel' },
+      { text: 'Discard', style: 'destructive', onPress: () => { allowLeave.current = true; navigation.dispatch(e.data.action); } },
+    ]);
+  }), [navigation]);
+
+  // ── Waiting for the preview to reconfigure ─────────────────────────────
+  // Switching PHOTO→VIDEO rebuilds the native camera session; recording before
+  // it is open fails. onCameraReady fires when the rebuilt camera opens
+  // (expo-camera ExpoCameraView.observeCameraState). The timeout is only a
+  // floor for a platform that does not re-fire it on a mode switch.
+  const readyWaiters = useRef<(() => void)[]>([]);
+  const onCameraReady = useCallback(() => {
+    const w = readyWaiters.current;
+    readyWaiters.current = [];
+    w.forEach(f => f());
+  }, []);
+  const waitForCamera = () => new Promise<void>(resolve => {
+    readyWaiters.current.push(resolve);
+    setTimeout(resolve, 1500);
+  });
+
   // ── Leaving: always by chat id, never by popping the stack ────────────
   const leave = useCallback((capture?: Parameters<typeof returnParams>[1]) => {
+    // A capture is what the user came for: never ask before delivering it.
+    if (capture) allowLeave.current = true;
     if (!chatId) { router.back(); return; }   // opened outside a chat — nothing to address
     // dismissTo = POP_TO: pops back to the chat already in the stack (no second
     // copy of it), and pushes it if the stack is shallow — which is exactly the
@@ -195,7 +231,7 @@ export default function CameraScreen() {
     if (!(await ensureMic())) { holdRef.current = false; return; }
     // Hold-to-record from PHOTO: flip the preview to video, then back after.
     const revert = mode !== 'VIDEO';
-    if (revert) { setMode('VIDEO'); await new Promise(r => setTimeout(r, 250)); }
+    if (revert) { const ready = waitForCamera(); setMode('VIDEO'); await ready; }
     setRecording(true);
     setRecSecs(0);
     recTimer.current = setInterval(() => setRecSecs(s => s + 1), 1000);
@@ -228,7 +264,10 @@ export default function CameraScreen() {
         setScanPages(prev => [...prev, ...scannedImages.map(fileUri)].slice(0, MAX_SCAN_PAGES));
       }
     } catch (e: any) {
-      setNotice(e?.message ?? 'The document scanner needs Google Play Services.');
+      // Never ML Kit's raw text. A user cancel is not an error at all.
+      if (/cancel/i.test(String(e?.message ?? ''))) return;
+      console.warn('[camera] scan failed:', e?.message ?? e);
+      setNotice('The document scanner could not start. It needs Google Play Services on this device.');
     } finally { scanningRef.current = false; }
   }, [busy]);
 
@@ -253,9 +292,18 @@ export default function CameraScreen() {
       const uri = await pagesToPdf(scanPages, style);
       leave({ uri, type: 'file', filename: docFilename(docName, style, new Date()) });
     } catch (e: any) {
-      setNotice(e?.message ?? 'Could not build the PDF.');
+      console.warn('[camera] PDF build failed:', e?.message ?? e);
+      setNotice('Could not build the PDF. Your pages are kept — try Attach again.');
     } finally { setBusy(false); }
   }, [busy, scanPages, style, docName, leave]);
+
+  const removePage = useCallback((i: number) => {
+    setScanPages(prev => {
+      const next = prev.filter((_, j) => j !== i);
+      if (next.length === 0) setReviewing(false);
+      return next;
+    });
+  }, []);
 
   const openPicker = useCallback(async () => {
     if (busy || recording) return;
@@ -318,7 +366,7 @@ export default function CameraScreen() {
             <Text variant="bodyStrong" color={BRAND_ACCENT}>Open settings</Text>
           </Pressable>
         )}
-        <Pressable onPress={() => leave()} style={s.gateSkip} accessibilityRole="button">
+        <Pressable onPress={() => leave()} style={s.gateSkip} accessibilityRole="button" accessibilityLabel="Not now">
           <Text variant="callout" color={AuroraDark.textDim}>Not now</Text>
         </Pressable>
       </View>
@@ -344,6 +392,7 @@ export default function CameraScreen() {
         enableTorch={mode === 'VIDEO' && flash === 'on'}
         mode={previewMode(mode)}
         videoQuality="1080p"
+        onCameraReady={onCameraReady}
       />
 
       {/* Round framing for the composer's video note. */}
@@ -519,6 +568,21 @@ export default function CameraScreen() {
               </Pressable>
             </View>
 
+            {/* Every page, with a per-page remove — a bad scan used to mean
+                discarding the whole set. */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.pageStrip}>
+              {scanPages.map((p, i) => (
+                <View key={p + i} style={s.pageCell}>
+                  <Image source={{ uri: p }} style={s.pageThumb}
+                    accessible accessibilityRole="image" accessibilityLabel={`Page ${i + 1}`} />
+                  <Pressable onPress={() => removePage(i)} hitSlop={10} style={s.pageRemove}
+                    accessibilityRole="button" accessibilityLabel={`Remove page ${i + 1}`}>
+                    <Ionicons name="close" size={14} color={AuroraDark.text} />
+                  </Pressable>
+                </View>
+              ))}
+            </ScrollView>
+
             <Text variant="tiny" color={AuroraDark.textDim}>STYLE</Text>
             <View style={s.chips}>
               {DOC_STYLES.map(st => {
@@ -568,6 +632,13 @@ const SHUTTER = 76;
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: AuroraDark.bg },
+  pageStrip: { gap: SPACING.sm, paddingVertical: SPACING.xs },
+  pageCell: { width: 64, height: 84 },
+  pageThumb: { width: 64, height: 84, borderRadius: RADIUS.sm, borderWidth: 1, borderColor: AuroraDark.border },
+  pageRemove: {
+    position: 'absolute', top: 2, right: 2, width: 22, height: 22, borderRadius: RADIUS.pill,
+    backgroundColor: SCRIM_STRONG, alignItems: 'center', justifyContent: 'center',
+  },
   flex: { flex: 1 },
   center: { textAlign: 'center' },
 

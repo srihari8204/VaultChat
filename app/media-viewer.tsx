@@ -1,20 +1,21 @@
 // app/media-viewer.tsx — Universal In-App Media Viewer
-// Images: zoom, pan | Videos: stream while loading | Audio: built-in player | Code: inline preview
+// Images: pinch-zoom, pan, tap to zoom | Videos: stream while loading, seekable
+// track | Audio: built-in player | Code: inline preview
 
-import { BRAND_ACCENT } from '../constants/theme';
+import { AuroraDark } from '../constants/theme';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, StatusBar,
-  ActivityIndicator, Dimensions, ScrollView, Animated,
-  PanResponder, Alert, useWindowDimensions } from 'react-native';
+  ActivityIndicator, ScrollView, Animated,
+  PanResponder, Alert } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Video, Audio, ResizeMode, type AVPlaybackStatusSuccess } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as MediaLibrary from 'expo-media-library';
-import { getMedia } from '../lib/mediaStore';
+import { getMedia, MediaKeyMissingError } from '../lib/mediaStore';
 import { viewerRouteFor } from '../lib/docOpen';
 import { getAccessToken } from '../lib/api';
 import { isOwnServerUrl } from '../lib/serverOrigin';
@@ -24,15 +25,33 @@ import ProtectedMediaView from '../components/ProtectedMediaView';
 import { onScreenshot } from '../lib/screenGuard';
 import { permissionDenied } from '../lib/permissionDenied';
 import { VIEWER_TEMP_PREFIX } from '../lib/mediaCacheGC';
+import { seekFraction, seekTargetMs } from '../lib/videoSeek';
+import { pinchZoom, clampPan } from '../lib/zoomPan';
 
 // Playback status is a union (loaded | error); every read below wants the loaded
 // shape. Partial<> keeps the `{}` initial state honest — the fields genuinely
 // are absent until the first status callback lands.
 type PlaybackState = Partial<AVPlaybackStatusSuccess>;
 
-const C = { bg: '#000', accent: '#4A9FFF', green: BRAND_ACCENT };
+// DARK-MEDIA TOKENS. Media sits on a black stage in BOTH app themes, so this
+// screen takes the dark palette's tokens rather than the active theme's (a
+// light-theme card on a black stage was the old bug).
+const M = {
+  stage: '#000000',
+  card: AuroraDark.card,
+  border: AuroraDark.border,
+  text: AuroraDark.text,
+  dim: AuroraDark.textDim,
+  faint: AuroraDark.textFaint,
+  track: AuroraDark.glassStroke,
+  accent: AuroraDark.accentOn,        // accent as text/icon on dark (9.5:1)
+  accentFill: AuroraDark.accentDeep,  // accent as a fill under white text
+  danger: '#FF7B72',                   // readable red on black
+  scrim: 'rgba(0,0,0,0.67)',
+};
 
-const getFileType = (name) => {
+type FileKind = 'image' | 'video' | 'audio' | 'code' | 'pdf' | 'archive' | 'unknown';
+const getFileType = (name: string): FileKind => {
   const ext = (name || '').split('.').pop()?.toLowerCase() || '';
   if (['jpg','jpeg','png','gif','webp','bmp','svg','heic'].includes(ext)) return 'image';
   if (['mp4','mov','avi','mkv','webm','flv','wmv','m4v'].includes(ext)) return 'video';
@@ -43,8 +62,8 @@ const getFileType = (name) => {
   return 'unknown';
 };
 
-const formatSize = (b) => { if (!b) return ''; if (b<1024) return b+' B'; if (b<1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; };
-const formatDur = (ms) => { if (!ms) return '0:00'; const s=Math.floor(ms/1000); return Math.floor(s/60)+':'+(s%60<10?'0':'')+(s%60); };
+const formatSize = (b: number | undefined): string => { if (!b) return ''; if (b<1024) return b+' B'; if (b<1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; };
+const formatDur = (ms: number | undefined): string => { if (!ms) return '0:00'; const s=Math.floor(ms/1000); return Math.floor(s/60)+':'+(s%60<10?'0':'')+(s%60); };
 
 // The players live at MODULE scope. Defined inside MediaViewerScreen they were
 // a new component type on every render, so any parent state change (the HEAD
@@ -60,68 +79,138 @@ type PlayerProps = {
   onStreaming: () => void;
 };
 
-// IMAGE
+// IMAGE — pinch to zoom (1x–5x), drag to pan while zoomed, tap to toggle 2.5x.
 function ImageViewer({ source, onLoaded, onFail }: PlayerProps) {
   const scale = useRef(new Animated.Value(1)).current;
+  const tx = useRef(new Animated.Value(0)).current;
+  const ty = useRef(new Animated.Value(0)).current;
   const [imgLoaded, setImgLoaded] = useState(false);
-  const lastScale = useRef(1);
+  // Live values + the gesture's starting point (the responder is created once).
+  const cur = useRef({ z: 1, x: 0, y: 0 });
+  const start = useRef({ z: 1, x: 0, y: 0, dist: 0, pinched: false });
+  const box = useRef({ w: 0, h: 0 });
+  const apply = (z: number, x: number, y: number, animate = false) => {
+    const nx = clampPan(x, z, box.current.w), ny = clampPan(y, z, box.current.h);
+    cur.current = { z, x: nx, y: ny };
+    if (animate) {
+      Animated.parallel([
+        Animated.spring(scale, { toValue: z, useNativeDriver: true }),
+        Animated.spring(tx, { toValue: nx, useNativeDriver: true }),
+        Animated.spring(ty, { toValue: ny, useNativeDriver: true }),
+      ]).start();
+    } else { scale.setValue(z); tx.setValue(nx); ty.setValue(ny); }
+  };
+  const dist = (t: any[]) => Math.hypot(t[1].pageX - t[0].pageX, t[1].pageY - t[0].pageY);
   const panResponder = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => true,
-    onPanResponderRelease: (_, g) => {
-      if (Math.abs(g.dx) < 5 && Math.abs(g.dy) < 5) {
-        const ns = lastScale.current > 1 ? 1 : 2.5; lastScale.current = ns;
-        Animated.spring(scale, { toValue: ns, useNativeDriver: true }).start();
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: (e) => {
+      const t = e.nativeEvent.touches;
+      start.current = { ...cur.current, dist: t.length >= 2 ? dist(t) : 0, pinched: t.length >= 2 };
+    },
+    onPanResponderMove: (e, g) => {
+      const t = e.nativeEvent.touches;
+      if (t.length >= 2) {
+        // A second finger can land mid-gesture: start the pinch from there.
+        if (!start.current.dist) start.current = { ...cur.current, dist: dist(t), pinched: true };
+        apply(pinchZoom(start.current.z, start.current.dist, dist(t)), cur.current.x, cur.current.y);
+      } else if (cur.current.z > 1 && !start.current.pinched) {
+        apply(cur.current.z, start.current.x + g.dx, start.current.y + g.dy);
       }
     },
+    onPanResponderRelease: (_, g) => {
+      const tap = !start.current.pinched && Math.abs(g.dx) < 5 && Math.abs(g.dy) < 5;
+      if (tap) apply(cur.current.z > 1 ? 1 : 2.5, 0, 0, true);
+      else if (cur.current.z <= 1.01) apply(1, 0, 0, true);
+    },
+    onPanResponderTerminate: () => { if (cur.current.z <= 1.01) apply(1, 0, 0, true); },
   })).current;
   return (
-    <View style={s.full} {...panResponder.panHandlers}>
-      {!imgLoaded && <ActivityIndicator color={C.accent} style={s.center} />}
-      <Animated.Image source={source} style={[s.fullImg, { transform: [{ scale }] }]} resizeMode="contain"
-        onLoad={() => { setImgLoaded(true); onLoaded(); }} onError={() => onFail('Failed to load image')} />
+    <View style={s.full} {...panResponder.panHandlers}
+      onLayout={(e) => { box.current = { w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height }; }}
+      accessible accessibilityRole="image" accessibilityLabel="Photo"
+      accessibilityHint="Pinch to zoom. Tap to zoom in or out."
+      accessibilityActions={[{ name: 'activate', label: 'Zoom in or out' }]}
+      onAccessibilityAction={() => apply(cur.current.z > 1 ? 1 : 2.5, 0, 0, true)}>
+      {!imgLoaded && <ActivityIndicator color={M.accent} style={s.center} />}
+      <Animated.Image source={source} style={[s.fullImg, { transform: [{ translateX: tx }, { translateY: ty }, { scale }] }]} resizeMode="contain"
+        onLoad={() => { setImgLoaded(true); onLoaded(); }} onError={() => onFail("This photo couldn't be loaded.")} />
     </View>
   );
 }
 
-// VIDEO — streams while loading
+// VIDEO — streams while loading; the track is draggable (lib/videoSeek).
 function VideoPlayer({ source, waitingForAuth, onLoaded, onFail, onStreaming }: PlayerProps) {
   const videoRef = useRef<Video>(null);
   const [st, setSt] = useState<PlaybackState>({});
   const [ctrl, setCtrl] = useState(true);
   const [shouldPlay, setShouldPlay] = useState(true);
+  const [seekFrac, setSeekFrac] = useState<number | null>(null);   // while dragging
+  const durRef = useRef(0);
+  const trackW = useRef(0);
+  durRef.current = st.durationMillis ?? 0;
+  const seekTo = (frac: number) => {
+    const target = seekTargetMs(frac, durRef.current);
+    if (target !== null) videoRef.current?.setPositionAsync(target).catch(() => {});
+  };
+  const seekPan = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderTerminationRequest: () => false,
+    onPanResponderGrant: (e) => setSeekFrac(seekFraction(e.nativeEvent.locationX, trackW.current)),
+    onPanResponderMove: (e) => setSeekFrac(seekFraction(e.nativeEvent.locationX, trackW.current)),
+    onPanResponderRelease: (e) => { seekTo(seekFraction(e.nativeEvent.locationX, trackW.current)); setSeekFrac(null); },
+    onPanResponderTerminate: () => setSeekFrac(null),
+  })).current;
   // eslint-disable-next-line react-hooks/exhaustive-deps -- once auth is settled
   useEffect(() => { if (!waitingForAuth) onStreaming(); }, [waitingForAuth]);
   // expo-av loads a source once and never retries, so mounting before the
   // token is ready would fail permanently rather than briefly.
-  if (waitingForAuth) return <View style={s.full}><ActivityIndicator color={C.accent} style={s.center} /></View>;
+  if (waitingForAuth) return <View style={s.full}><ActivityIndicator color={M.accent} style={s.center} /></View>;
+  const dur = st.durationMillis || 0;
+  const pos = seekFrac !== null ? seekFrac * dur : (st.positionMillis || 0);
+  const frac = dur ? pos / dur : 0;
+  const step = (deltaMs: number) => {
+    if (!dur) return;
+    videoRef.current?.setPositionAsync(Math.max(0, Math.min(dur, (st.positionMillis || 0) + deltaMs))).catch(() => {});
+  };
   return (
     <TouchableOpacity style={s.full} activeOpacity={1} onPress={() => setCtrl(!ctrl)}
       accessibilityRole="button" accessibilityLabel={ctrl ? 'Hide video controls' : 'Show video controls'}>
       <Video ref={videoRef} source={source} style={s.fullVid} resizeMode={ResizeMode.CONTAIN}
         shouldPlay={shouldPlay} isLooping={false} useNativeControls={false} progressUpdateIntervalMillis={250}
         onPlaybackStatusUpdate={(status) => { if (!status.isLoaded) return; setSt(status); if (status.didJustFinish) setShouldPlay(false); }}
-        onLoad={onLoaded} onError={() => onFail('Failed to load video')} />
-      {st.isBuffering && !st.isPlaying && <View style={s.bufOverlay}><ActivityIndicator color={C.accent} size="large" /><Text style={s.bufTxt}>Streaming...</Text></View>}
+        onLoad={onLoaded} onError={() => onFail("This video couldn't be played. It may be damaged or in an unsupported format.")} />
+      {st.isBuffering && !st.isPlaying && <View style={s.bufOverlay}><ActivityIndicator color={M.accent} size="large" /><Text style={s.bufTxt}>Streaming...</Text></View>}
       {ctrl && (
         <View style={s.vidCtrl}>
           <TouchableOpacity style={s.playBtn} accessibilityRole="button" accessibilityLabel={st.isPlaying ? 'Pause video' : 'Play video'} onPress={async () => {
             const v = videoRef.current; if (!v) return;
-            if (st.isPlaying) { await v.pauseAsync(); setShouldPlay(false); }
+            if (st.isPlaying) { await v.pauseAsync().catch(() => {}); setShouldPlay(false); }
             else {
               // Replay from the start if it had reached the end.
-              if (st.didJustFinish || (st.durationMillis && (st.positionMillis ?? 0) >= st.durationMillis)) { await v.setPositionAsync(0); }
-              await v.playAsync(); setShouldPlay(true);
+              if (st.didJustFinish || (st.durationMillis && (st.positionMillis ?? 0) >= st.durationMillis)) { await v.setPositionAsync(0).catch(() => {}); }
+              await v.playAsync().catch(() => {}); setShouldPlay(true);
             }
           }}>
-            <Ionicons name={st.isPlaying ? 'pause' : 'play'} size={40} color="#fff" />
+            <Ionicons name={st.isPlaying ? 'pause' : 'play'} size={40} color={M.text} />
           </TouchableOpacity>
           <View style={s.progRow}>
-            <Text style={s.timeTxt}>{formatDur(st.positionMillis)}</Text>
-            <View style={s.seekBg}>
-              <View style={[s.seekBuf, { width: `${(st.playableDurationMillis||0) / (st.durationMillis||1) * 100}%` }]} />
-              <View style={[s.seekFill, { width: `${(st.positionMillis||0) / (st.durationMillis||1) * 100}%` }]} />
+            <Text style={s.timeTxt}>{formatDur(pos)}</Text>
+            <View style={s.seekHit}
+              onLayout={(e) => { trackW.current = e.nativeEvent.layout.width; }}
+              accessible accessibilityRole="adjustable" accessibilityLabel="Seek"
+              accessibilityValue={{ text: `${formatDur(pos)} of ${formatDur(dur)}` }}
+              accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+              onAccessibilityAction={(e) => step(e.nativeEvent.actionName === 'increment' ? 10000 : -10000)}
+              {...seekPan.panHandlers}>
+              <View style={s.seekBg} pointerEvents="none">
+                <View style={[s.seekBuf, { width: `${(st.playableDurationMillis||0) / (dur||1) * 100}%` }]} />
+                <View style={[s.seekFill, { width: `${frac * 100}%` }]} />
+              </View>
+              <View pointerEvents="none" style={[s.seekThumb, { left: `${frac * 100}%` }]} />
             </View>
-            <Text style={s.timeTxt}>{formatDur(st.durationMillis)}</Text>
+            <Text style={s.timeTxt}>{formatDur(dur)}</Text>
           </View>
         </View>
       )}
@@ -149,29 +238,89 @@ function AudioPlayer({ source, waitingForAuth, onLoaded, onFail, fileName, fileS
         // with no controls left to stop it.
         if (dead) { sound.unloadAsync().catch(() => {}); return; }
         soundRef.current = sound; onLoaded();
-      } catch { if (!dead) onFail('Failed to load audio'); }
+      } catch { if (!dead) onFail("This audio couldn't be played. It may be damaged or in an unsupported format."); }
     })();
     return () => { dead = true; soundRef.current?.unloadAsync(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- load once per source
   }, [waitingForAuth, source]);
   const prog = (ast.positionMillis||0) / (ast.durationMillis||1);
+  const jump = (delta: number) => {
+    if (!soundRef.current) return;
+    const p = Math.max(0, Math.min(1, prog + delta));
+    soundRef.current.setPositionAsync(p * (ast.durationMillis || 0)).catch(() => {});
+  };
   return (
     <View style={s.audioWrap}>
       <View style={s.audioCard}>
-        <Ionicons name="musical-notes" size={48} color="#1F2937" />
+        <Ionicons name="musical-notes" size={48} color={M.accent} />
         <Text style={s.audioName}>{fileName}</Text>
         <Text style={s.audioMeta}>{formatSize(fileSize)}{ast.durationMillis ? ' | ' + formatDur(ast.durationMillis) : ''}</Text>
-        <View style={s.waveform}>{WAVE.map((h,i) => <View key={i} style={[s.waveBar,{height:h,backgroundColor:i/40<prog?C.accent:'#D1D5DB'}]}/>)}</View>
+        <View style={s.waveform} accessible accessibilityRole="progressbar" accessibilityLabel="Playback position"
+          accessibilityValue={{ text: `${formatDur(ast.positionMillis)} of ${formatDur(ast.durationMillis)}` }}>
+          {WAVE.map((h,i) => <View key={i} style={[s.waveBar,{height:h,backgroundColor:i/40<prog?M.accent:M.track}]}/>)}
+        </View>
         <View style={s.audioTimeRow}><Text style={s.audioTime}>{formatDur(ast.positionMillis)}</Text><Text style={s.audioTime}>{formatDur(ast.durationMillis)}</Text></View>
         <View style={s.audioCtrlRow}>
-          <TouchableOpacity onPress={async()=>{if(!soundRef.current)return;const p=Math.max(0,prog-0.1);await soundRef.current.setPositionAsync(p*(ast.durationMillis||0));}} accessibilityRole="button" accessibilityLabel="Back ten per cent"><Ionicons name="play-back" size={26} color="#1F2937" /></TouchableOpacity>
-          <TouchableOpacity style={s.audioPlayBtn} onPress={async()=>{if(!soundRef.current)return;if(ast.isPlaying){await soundRef.current.pauseAsync();}else{await soundRef.current.playAsync();}}} accessibilityRole="button" accessibilityLabel={ast.isPlaying ? 'Pause audio' : 'Play audio'}>
-            <Ionicons name={ast.isPlaying?'pause':'play'} size={30} color="#000" />
+          <TouchableOpacity hitSlop={10} onPress={() => jump(-0.1)} accessibilityRole="button" accessibilityLabel="Back ten per cent"><Ionicons name="play-back" size={26} color={M.text} /></TouchableOpacity>
+          <TouchableOpacity style={s.audioPlayBtn} onPress={async()=>{if(!soundRef.current)return;await (ast.isPlaying ? soundRef.current.pauseAsync() : soundRef.current.playAsync()).catch(() => {});}} accessibilityRole="button" accessibilityLabel={ast.isPlaying ? 'Pause audio' : 'Play audio'}>
+            <Ionicons name={ast.isPlaying?'pause':'play'} size={30} color="#FFFFFF" />
           </TouchableOpacity>
-          <TouchableOpacity onPress={async()=>{if(!soundRef.current)return;const p=Math.min(1,prog+0.1);await soundRef.current.setPositionAsync(p*(ast.durationMillis||0));}} accessibilityRole="button" accessibilityLabel="Forward ten per cent"><Ionicons name="play-forward" size={26} color="#1F2937" /></TouchableOpacity>
+          <TouchableOpacity hitSlop={10} onPress={() => jump(0.1)} accessibilityRole="button" accessibilityLabel="Forward ten per cent"><Ionicons name="play-forward" size={26} color={M.text} /></TouchableOpacity>
         </View>
       </View>
     </View>
+  );
+}
+
+/** Calls onReady once on mount: these cards have nothing to load. */
+function useReady(onReady: () => void) {
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- once on mount
+  useEffect(() => { onReady(); }, []);
+}
+
+// ARCHIVE — browsable, not just downloadable: app/archive-viewer lists the
+// contents and extracts one entry on tap.
+function ArchiveCard({ fileName, fileSize, onReady, onBrowse, onSave }: {
+  fileName: string; fileSize: number; onReady: () => void; onBrowse: () => void; onSave: () => void;
+}) {
+  useReady(onReady);
+  return (
+    <View style={s.audioWrap}><View style={s.audioCard}>
+      <Ionicons name="file-tray-full-outline" size={48} color={M.accent} />
+      <Text style={s.audioName}>{fileName}</Text>
+      <Text style={s.audioMeta}>{formatSize(fileSize)}</Text>
+      <TouchableOpacity style={s.primaryBtn} onPress={onBrowse} accessibilityRole="button" accessibilityLabel="Browse archive contents">
+        <Ionicons name="folder-open-outline" size={16} color="#FFFFFF" /><Text style={s.primaryBtnTxt}>Browse contents</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={s.secondaryBtn} onPress={onSave} accessibilityRole="button" accessibilityLabel="Save to device">
+        <Text style={s.secondaryBtnTxt}>Save to device</Text>
+      </TouchableOpacity>
+    </View></View>
+  );
+}
+
+// PDF / UNKNOWN
+function GenericViewer({ fileName, fileSize, onReady, onSave, onOpen }: {
+  fileName: string; fileSize: number; onReady: () => void; onSave: () => void; onOpen: () => void;
+}) {
+  useReady(onReady);
+  return (
+    <View style={s.audioWrap}><View style={s.audioCard}>
+      <Ionicons name="document-outline" size={48} color={M.accent} />
+      <Text style={s.audioName}>{fileName}</Text>
+      <Text style={s.audioMeta}>{formatSize(fileSize)}</Text>
+      <TouchableOpacity style={s.primaryBtn} onPress={onSave} accessibilityRole="button" accessibilityLabel="Download and open">
+        <Ionicons name="download-outline" size={16} color="#FFFFFF" /><Text style={s.primaryBtnTxt}>Download & Open</Text>
+      </TouchableOpacity>
+      {/* app/file-viewer.tsx shows file metadata and hands documents to the
+          device's own PDF/Office app WITHOUT saving a copy to shared storage,
+          which "Download & Open" above does do. */}
+      <TouchableOpacity style={s.secondaryBtn} onPress={onOpen} activeOpacity={0.8}
+        accessibilityRole="button" accessibilityLabel="Open without saving">
+        <Ionicons name="eye-outline" size={16} color={M.accent} />
+        <Text style={s.secondaryBtnTxt}>Open without saving</Text>
+      </TouchableOpacity>
+    </View></View>
   );
 }
 
@@ -212,13 +361,13 @@ function CodeViewer({ fileUri, fileName, needsAuth, onLoaded, onOpenHighlighted 
       <View style={{padding:12,backgroundColor:CODE.head,borderBottomWidth:1,borderBottomColor:CODE.border}}>
         <Text style={{color:CODE.text,fontSize:14,fontWeight:'800'}}>{fileName}</Text>
         <Text style={{color:CODE.dim,fontSize:11,marginTop:4}}>{lines.length} lines | {formatSize(content.length)}</Text>
-        <TouchableOpacity style={{marginTop:10,backgroundColor:'#4A9FFF22',borderRadius:10,paddingVertical:10,flexDirection:'row',gap:6,justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:'#4A9FFF44'}}
+        <TouchableOpacity style={{marginTop:10,minHeight:44,borderRadius:10,paddingVertical:10,flexDirection:'row',gap:6,justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:M.border}}
           onPress={onOpenHighlighted} accessibilityRole="button" accessibilityLabel="Open with syntax highlighting">
-          <Ionicons name="code-slash-outline" size={14} color="#4A9FFF" />
-          <Text style={{color:'#4A9FFF',fontSize:12,fontWeight:'700'}}>Open with Syntax Highlighting</Text>
+          <Ionicons name="code-slash-outline" size={14} color={M.accent} />
+          <Text style={{color:M.accent,fontSize:12,fontWeight:'700'}}>Open with Syntax Highlighting</Text>
         </TouchableOpacity>
       </View>
-      {failed && <Text style={{color:'#FF7B72',fontSize:13,textAlign:'center',padding:20}}>{"Couldn't read this file."}</Text>}
+      {failed && <Text style={{color:M.danger,fontSize:13,textAlign:'center',padding:20}}>{"Couldn't read this file."}</Text>}
       {lines.slice(0,500).map((l,i)=><View key={i} style={{flexDirection:'row',minHeight:22}}><Text style={{color:CODE.gutter,fontSize:12,fontFamily:'monospace',width:40,textAlign:'right',paddingRight:12,paddingTop:2}}>{i+1}</Text><Text style={{color:CODE.text,fontSize:12,fontFamily:'monospace',flex:1,paddingTop:2}}>{l}</Text></View>)}
       {lines.length>500&&<Text style={{color:CODE.gutter,fontSize:12,textAlign:'center',padding:20}}>...{lines.length-500} more lines</Text>}
       <View style={{height:100}}/>
@@ -232,10 +381,8 @@ function MediaViewerScreen() {
   // launched with. Shadowing it here makes every use in this component follow
   // rotation; StyleSheet.create keeps the initial value, which is fine for
   // static rules.
-  const {width: SW, height: SH} = useWindowDimensions();
-
   const router = useRouter();
-  const { uri, mediaUrl, attachmentId, needsAuth, save, isMine, mime, filename, msgType, viewOnce, chatId, encrypted } = useLocalSearchParams();
+  const { uri, mediaUrl, attachmentId, needsAuth, isMine, mime, filename, msgType, viewOnce, chatId, encrypted } = useLocalSearchParams();
   const isViewOnce = viewOnce === '1';
 
   // ── VaultView watermark identity ─────────────────────────
@@ -292,6 +439,8 @@ function MediaViewerScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [fileSize, setFileSize] = useState(0);
+  // Bumped by Retry: re-runs the attachment resolve and remounts the player.
+  const [reloadKey, setReloadKey] = useState(0);
   // When opened by attachmentId (the common path from a chat bubble) we resolve
   // a local file here — so the bubble navigates INSTANTLY and we show a spinner,
   // instead of the bubble awaiting a download (which made taps feel unreliable
@@ -324,7 +473,13 @@ function MediaViewerScreen() {
   useEffect(() => {
     if (fileUri || !attachmentId) return;
     let cancel = false;
-    const onErr = () => { if (!cancel) { setError('Failed to load media'); setLoading(false); } };
+    const onErr = (e?: unknown) => {
+      if (cancel) return;
+      setError(e instanceof MediaKeyMissingError
+        ? 'This media is end-to-end encrypted and this device no longer holds its key.'
+        : "This media couldn't be loaded. Check your connection and try again.");
+      setLoading(false);
+    };
     if (isViewOnce) {
       // View-once: download to an EPHEMERAL cache file (not the browsable media
       // folder) so it's never saved. The GET runs while viewed_at is still NULL,
@@ -373,7 +528,8 @@ function MediaViewerScreen() {
       .then(u => { if (!cancel) setFileUri(u); })
       .catch(onErr);
     return () => { cancel = true; };
-  }, [attachmentId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- resolve once per attachment (and per Retry)
+  }, [attachmentId, reloadKey]);
 
   useEffect(() => {
     if (fileUri.startsWith('http')) fetch(fileUri, { method: 'HEAD' }).then(r => setFileSize(parseInt(r.headers.get('content-length') || '0'))).catch(() => {});
@@ -420,7 +576,8 @@ function MediaViewerScreen() {
         dialogTitle: fileName,
       });
     } catch (e: any) {
-      Alert.alert('Could not share', e?.message ?? 'Try again');
+      console.warn('[media-viewer] share failed:', e?.message ?? e);
+      Alert.alert('Could not share', 'This file could not be shared. Please try again.');
     }
   };
 
@@ -433,8 +590,11 @@ function MediaViewerScreen() {
       //   IllegalArgumentException: Expected URL scheme 'http' or 'https' but was 'file'
       // which surfaced as a bare red "Error" dialog on tapping Save/Download.
       let localPath = fileUri;
+      let temp = false;
       if (/^https?:\/\//i.test(fileUri)) {
-        localPath = FileSystem.cacheDirectory + 'vc_' + Date.now() + '.' + ext;
+        // A vt_ temp, so a copy left by a crash is swept at boot/logout.
+        localPath = FileSystem.cacheDirectory + VIEWER_TEMP_PREFIX + 'save_' + Date.now() + '.' + ext;
+        temp = true;
         const token = isOwnServerUrl(fileUri) ? await getAccessToken() : null;
         const res = await FileSystem.downloadAsync(fileUri, localPath,
           token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
@@ -446,8 +606,20 @@ function MediaViewerScreen() {
         // one: nothing happened and nothing was said (2026-09-17).
         if (status !== 'granted') { permissionDenied('Photo access needed', 'Allow photo access to save this to your gallery.', canAskAgain); return; }
         await MediaLibrary.saveToLibraryAsync(localPath); Alert.alert('Saved!', fileName + ' saved to gallery');
+        // The library holds its own copy now; the download was only a carrier.
+        if (temp) FileSystem.deleteAsync(localPath, { idempotent: true }).catch(() => {});
       } else if (await Sharing.isAvailableAsync()) { await Sharing.shareAsync(localPath); }
-    } catch (e) { Alert.alert('Error', e.message); }
+      else Alert.alert('Sharing unavailable', 'No app on this device can open this file.');
+    } catch (e: any) {
+      console.warn('[media-viewer] save failed:', e?.message ?? e);
+      Alert.alert('Could not save', 'This file could not be saved. Check your connection and storage, then try again.');
+    }
+  };
+
+  const retry = () => {
+    setError('');
+    setLoading(true);
+    setReloadKey(k => k + 1);
   };
 
   const playerProps: PlayerProps = {
@@ -456,41 +628,6 @@ function MediaViewerScreen() {
     onLoaded: () => { setLoading(false); markViewedAfterLoad(); },
     onFail: (msg) => { setError(msg); setLoading(false); },
     onStreaming: () => setLoading(false),
-  };
-
-  // PDF / UNKNOWN
-  // A zip is browsable, not just downloadable: app/archive-viewer lists its
-  // contents and extracts a single entry on tap, so reading one file out of an
-  // archive does not mean unpacking all of it onto the device.
-  const ArchiveCard = () => { useEffect(()=>{setLoading(false);},[]);
-    return (<View style={s.audioWrap}><View style={s.audioCard}><Ionicons name="file-tray-full-outline" size={48} color="#1F2937" /><Text style={s.audioName}>{fileName}</Text><Text style={s.audioMeta}>{formatSize(fileSize)}</Text>
-      <TouchableOpacity style={{marginTop:20,backgroundColor:C.accent,borderRadius:14,flexDirection:'row',gap:8,alignItems:'center',paddingVertical:14,paddingHorizontal:32}}
-        onPress={()=>router.push({pathname:'/archive-viewer',params:{uri:fileUri,filename:fileName}} as any)} accessibilityRole="button" accessibilityLabel="Browse archive contents">
-        <Ionicons name="folder-open-outline" size={16} color="#000" /><Text style={{color:'#000',fontSize:14,fontWeight:'800'}}>Browse contents</Text>
-      </TouchableOpacity>
-      <TouchableOpacity style={{marginTop:12,borderRadius:14,borderWidth:1,borderColor:'#4A9FFF55',paddingVertical:12,paddingHorizontal:28}} onPress={saveToDevice} accessibilityRole="button" accessibilityLabel="Save to device">
-        <Text style={{color:'#4A9FFF',fontSize:13,fontWeight:'700'}}>Save to device</Text>
-      </TouchableOpacity>
-    </View></View>);
-  };
-
-  const GenericViewer = () => { useEffect(()=>{setLoading(false);},[]);
-    return (<View style={s.audioWrap}><View style={s.audioCard}><Ionicons name="document-outline" size={48} color="#1F2937" /><Text style={s.audioName}>{fileName}</Text><Text style={s.audioMeta}>{formatSize(fileSize)}</Text>
-      <TouchableOpacity style={{marginTop:20,backgroundColor:C.accent,borderRadius:14,flexDirection:'row',gap:8,alignItems:'center',paddingVertical:14,paddingHorizontal:32}} onPress={saveToDevice} accessibilityRole="button" accessibilityLabel="Download and open"><Ionicons name="download-outline" size={16} color="#000" /><Text style={{color:'#000',fontSize:14,fontWeight:'800'}}>Download & Open</Text></TouchableOpacity>
-      {/* The universal viewer (app/file-viewer.tsx) was unreachable — registered
-          as a route but never navigated to. It shows file metadata and hands
-          documents to the device's own PDF/Office app WITHOUT saving a copy to
-          shared storage, which "Download & Open" above does do. */}
-      <TouchableOpacity
-        style={{marginTop:12,borderRadius:14,borderWidth:1,borderColor:'#4A9FFF55',flexDirection:'row',gap:8,alignItems:'center',paddingVertical:12,paddingHorizontal:28}}
-        onPress={()=>router.push({pathname:'/file-viewer',params:{uri:fileUri,filename:fileName,mimeType:(mime||'')+''}})}
-        activeOpacity={0.8}
-        accessibilityRole="button" accessibilityLabel="Open without saving"
-      >
-        <Ionicons name="eye-outline" size={16} color="#4A9FFF" />
-        <Text style={{color:'#4A9FFF',fontSize:13,fontWeight:'700'}}>Open without saving</Text>
-      </TouchableOpacity>
-    </View></View>);
   };
 
   // NO SOURCE = NOTHING TO VIEW, AND THE USER MUST NOT BE STRANDED.
@@ -504,23 +641,23 @@ function MediaViewerScreen() {
       <>
         <Stack.Screen options={{
           headerShown: true, title: 'Media unavailable',
-          headerStyle: { backgroundColor: '#000' }, headerTintColor: '#fff',
+          headerStyle: { backgroundColor: M.stage }, headerTintColor: M.text,
         }} />
         <View style={[s.container, { alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 }]}>
-          <Ionicons name="image-outline" size={44} color="#8A94A6" />
-          <Text style={{ color: '#fff', fontSize: 17, fontWeight: '700', textAlign: 'center' }}>
+          <Ionicons name="image-outline" size={44} color={M.dim} />
+          <Text accessibilityRole="header" style={{ color: M.text, fontSize: 17, fontWeight: '700', textAlign: 'center' }}>
             Nothing to show
           </Text>
-          <Text style={{ color: '#8A94A6', fontSize: 14, textAlign: 'center' }}>
+          <Text style={{ color: M.dim, fontSize: 14, textAlign: 'center' }}>
             This link carried no media, or the file is no longer available.
           </Text>
           <TouchableOpacity
             onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/chats' as any))}
             accessibilityRole="button"
             accessibilityLabel="Go back"
-            style={{ marginTop: 8, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, backgroundColor: '#1D4ED8' }}
+            style={{ marginTop: 8, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, backgroundColor: M.accentFill }}
           >
-            <Text style={{ color: '#fff', fontWeight: '700' }}>Go back</Text>
+            <Text style={{ color: '#FFFFFF', fontWeight: '700' }}>Go back</Text>
           </TouchableOpacity>
         </View>
       </>
@@ -529,23 +666,30 @@ function MediaViewerScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ headerShown: true, title: fileName, headerStyle: { backgroundColor: '#000' }, headerTintColor: '#fff',
+      <Stack.Screen options={{ headerShown: true, title: fileName, headerStyle: { backgroundColor: M.stage }, headerTintColor: M.text,
         // Share/Save are hidden for view-once media. Offering "Download" on a
         // photo the sender was promised is one-view-only would hand the
         // recipient a permanent copy through the app's own UI — the protection
         // has to hold in the viewer, not only on the server.
         headerRight: () => isViewOnce ? null : <View style={{flexDirection:'row',gap:20,marginRight:8}}>
-          <TouchableOpacity onPress={shareFile} hitSlop={8} accessibilityRole="button" accessibilityLabel="Share"><Ionicons name="share-social-outline" size={22} color="#fff" /></TouchableOpacity>
-          <TouchableOpacity onPress={saveToDevice} hitSlop={8} accessibilityRole="button" accessibilityLabel="Save to device"><Ionicons name="download-outline" size={22} color="#fff" /></TouchableOpacity>
+          <TouchableOpacity onPress={shareFile} hitSlop={11} accessibilityRole="button" accessibilityLabel="Share"><Ionicons name="share-social-outline" size={22} color={M.text} /></TouchableOpacity>
+          <TouchableOpacity onPress={saveToDevice} hitSlop={11} accessibilityRole="button" accessibilityLabel="Save to device"><Ionicons name="download-outline" size={22} color={M.text} /></TouchableOpacity>
         </View>,
       }} />
       <View style={s.container}>
-        <StatusBar barStyle="light-content" backgroundColor="#000" />
-        {loading && <ActivityIndicator color={C.accent} style={s.center} />}
-        {error ? <Text style={{color:'#FF3C6E',textAlign:'center',padding:20}}>{error}</Text> : null}
-        {!fileUri && !error ? (
-          <ActivityIndicator color={C.accent} style={s.center} size="large" />
-        ) : fileUri ? (
+        <StatusBar barStyle="light-content" backgroundColor={M.stage} />
+        {loading && !error && <ActivityIndicator color={M.accent} style={s.center} />}
+        {error ? (
+          <View style={s.errorBox} accessibilityLiveRegion="polite">
+            <Ionicons name="alert-circle-outline" size={40} color={M.danger} />
+            <Text style={s.errorTxt}>{error}</Text>
+            <TouchableOpacity style={s.primaryBtn} onPress={retry} accessibilityRole="button" accessibilityLabel="Retry">
+              <Ionicons name="refresh" size={16} color="#FFFFFF" /><Text style={s.primaryBtnTxt}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        ) : !fileUri ? (
+          <ActivityIndicator color={M.accent} style={s.center} size="large" />
+        ) : (
           // Protected media renders inside the VaultView guard: watermarked, and
           // refused outright while a recording/mirror is active. Everything else
           // renders exactly as before.
@@ -555,56 +699,71 @@ function MediaViewerScreen() {
               watermarkPhone={me?.phone}
               onBlocked={() => { if (chatId) reportScreenshotCaptured(String(chatId)).catch(() => {}); }}
             >
-              {fileType === 'image' ? <ImageViewer {...playerProps} /> : <VideoPlayer {...playerProps} />}
+              {fileType === 'image' ? <ImageViewer key={reloadKey} {...playerProps} /> : <VideoPlayer key={reloadKey} {...playerProps} />}
             </ProtectedMediaView>
           ) : (
             <>
-              {fileType === 'image' && <ImageViewer {...playerProps} />}
-              {fileType === 'video' && <VideoPlayer {...playerProps} />}
-              {fileType === 'audio' && <AudioPlayer {...playerProps} fileName={fileName} fileSize={fileSize} />}
+              {fileType === 'image' && <ImageViewer key={reloadKey} {...playerProps} />}
+              {fileType === 'video' && <VideoPlayer key={reloadKey} {...playerProps} />}
+              {fileType === 'audio' && <AudioPlayer key={reloadKey} {...playerProps} fileName={fileName} fileSize={fileSize} />}
               {fileType === 'code' && (
-                <CodeViewer fileUri={fileUri} fileName={fileName} needsAuth={!!needsAuth}
+                <CodeViewer key={reloadKey} fileUri={fileUri} fileName={fileName} needsAuth={!!needsAuth}
                   onLoaded={() => setLoading(false)}
                   onOpenHighlighted={() => router.push({ pathname: '/file-preview', params: { uri: fileUri, filename: fileName, mediaUrl: fileUri } })} />
               )}
-              {fileType === 'archive' && <ArchiveCard />}
-              {(fileType === 'pdf' || fileType === 'unknown') && <GenericViewer />}
+              {fileType === 'archive' && (
+                <ArchiveCard fileName={fileName} fileSize={fileSize} onReady={() => setLoading(false)} onSave={saveToDevice}
+                  onBrowse={() => router.push({ pathname: '/archive-viewer', params: { uri: fileUri, filename: fileName } } as any)} />
+              )}
+              {(fileType === 'pdf' || fileType === 'unknown') && (
+                <GenericViewer fileName={fileName} fileSize={fileSize} onReady={() => setLoading(false)} onSave={saveToDevice}
+                  onOpen={() => router.push({ pathname: '/file-viewer', params: { uri: fileUri, filename: fileName, mimeType: (mime || '') + '' } })} />
+              )}
             </>
           )
-        ) : null}
+        )}
       </View>
     </>
   );
 }
 
 const s = StyleSheet.create({
-  container:{flex:1,backgroundColor:'#000'},
+  container:{flex:1,backgroundColor:M.stage},
   full:{flex:1,justifyContent:'center',alignItems:'center'},
   center:{position:'absolute',top:'45%',alignSelf:'center',zIndex:10},
   fullImg:{width:'100%',height:'100%'},
   fullVid:{width:'100%',height:'100%'},
   bufOverlay:{position:'absolute',justifyContent:'center',alignItems:'center'},
-  bufTxt:{color:'#6B7280',fontSize:12,marginTop:8},
-  vidCtrl:{position:'absolute',bottom:0,left:0,right:0,backgroundColor:'#000000AA',padding:16,paddingBottom:30},
+  bufTxt:{color:M.dim,fontSize:12,marginTop:8},
+  vidCtrl:{position:'absolute',bottom:0,left:0,right:0,backgroundColor:M.scrim,padding:16,paddingBottom:30},
   playBtn:{alignSelf:'center',marginBottom:12},
   progRow:{flexDirection:'row',alignItems:'center',gap:8},
-  timeTxt:{color:'#ccc',fontSize:11,width:40},
-  seekBg:{flex:1,height:4,backgroundColor:'#D1D5DB',borderRadius:2,overflow:'hidden'},
-  seekBuf:{position:'absolute',height:'100%',backgroundColor:'#6B7280',borderRadius:2},
-  seekFill:{height:'100%',backgroundColor:C.accent,borderRadius:2},
+  timeTxt:{color:M.dim,fontSize:11,width:40},
+  // The 32 is touch slop around a 4dp bar; a minimum, so it never clips.
+  seekHit:{flex:1,minHeight:32,justifyContent:'center'},
+  seekBg:{height:4,backgroundColor:M.track,borderRadius:2,overflow:'hidden'},
+  seekBuf:{position:'absolute',height:'100%',backgroundColor:M.faint,borderRadius:2},
+  seekFill:{height:'100%',backgroundColor:M.accent,borderRadius:2},
+  seekThumb:{position:'absolute',width:14,height:14,borderRadius:7,marginLeft:-7,backgroundColor:M.accent},
   audioWrap:{flex:1,justifyContent:'center',padding:24},
-  audioCard:{backgroundColor:'#F9FAFB',borderRadius:24,padding:32,alignItems:'center',borderWidth:1,borderColor:'#E5E7EB'},
-  audioName:{color:'#1F2937',fontSize:16,fontWeight:800,marginTop:12,textAlign:'center'},
-  audioMeta:{color:'#9CA3AF',fontSize:12,marginTop:4},
+  audioCard:{backgroundColor:M.card,borderRadius:24,padding:32,alignItems:'center',borderWidth:1,borderColor:M.border},
+  audioName:{color:M.text,fontSize:16,fontWeight:800,marginTop:12,textAlign:'center'},
+  audioMeta:{color:M.dim,fontSize:12,marginTop:4},
   waveform:{
     // layout-exempt: draws fixed-width bars, no text — height is the drawing.
     flexDirection:'row',alignItems:'center',gap:2,marginTop:24,height:40,
   },
   waveBar:{width:3,borderRadius:2},
   audioTimeRow:{flexDirection:'row',justifyContent:'space-between',width:'100%',marginTop:8},
-  audioTime:{color:'#9CA3AF',fontSize:11},
+  audioTime:{color:M.dim,fontSize:11},
   audioCtrlRow:{flexDirection:'row',alignItems:'center',gap:24,marginTop:20},
-  audioPlayBtn:{width:64,height:64,borderRadius:32,backgroundColor:C.accent,justifyContent:'center',alignItems:'center'},
+  audioPlayBtn:{width:64,height:64,borderRadius:32,backgroundColor:M.accentFill,justifyContent:'center',alignItems:'center'},
+  primaryBtn:{marginTop:20,backgroundColor:M.accentFill,borderRadius:14,flexDirection:'row',gap:8,alignItems:'center',justifyContent:'center',paddingVertical:14,paddingHorizontal:32},
+  primaryBtnTxt:{color:'#FFFFFF',fontSize:14,fontWeight:'800'},
+  secondaryBtn:{marginTop:12,borderRadius:14,borderWidth:1,borderColor:M.border,flexDirection:'row',gap:8,alignItems:'center',justifyContent:'center',paddingVertical:12,paddingHorizontal:28},
+  secondaryBtnTxt:{color:M.accent,fontSize:13,fontWeight:'700'},
+  errorBox:{flex:1,alignItems:'center',justifyContent:'center',padding:24,gap:12},
+  errorTxt:{color:M.text,fontSize:15,textAlign:'center',lineHeight:21},
 });
 
 // A render fault in a viewer used to take the WHOLE app down: these screens
