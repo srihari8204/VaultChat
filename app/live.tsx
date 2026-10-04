@@ -11,7 +11,7 @@
 // encrypted", so if an encrypted broadcast mode ever ships this screen tells
 // the truth without being edited.
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, ScrollView, TouchableOpacity, StyleSheet, TextInput,
   ActivityIndicator, Alert, RefreshControl,
@@ -79,14 +79,20 @@ export default function LiveScreen() {
     router.push(`/live/join/${encodeURIComponent(code)}`);
   }, [joinCode, router]);
 
+  // The list request can land after the screen is gone: no state updates then.
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const load = useCallback(async () => {
-    try { setLive(await listLive()); setLoadError(false); }
-    catch { setLoadError(true); /* offline — keep what we have, and say so */ }
-    setLoading(false);
+    try {
+      const rows = await listLive();
+      if (!mounted.current) return;
+      setLive(rows); setLoadError(false);
+    } catch { if (mounted.current) setLoadError(true); /* offline — keep what we have, and say so */ }
+    if (mounted.current) setLoading(false);
   }, []);
   const refresh = useCallback(async () => {
     setRefreshing(true);
-    try { await load(); } finally { setRefreshing(false); }
+    try { await load(); } finally { if (mounted.current) setRefreshing(false); }
   }, [load]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
@@ -122,13 +128,15 @@ export default function LiveScreen() {
     } catch (e: any) {
       // Three outcomes worth telling apart, because the user's next action
       // differs for each.
-      const msg = String(e?.message ?? '');
-      const already = msg.includes('409') || /already/i.test(msg);
+      // Told apart by the HTTP status lib/api puts on the error, not by matching
+      // the message text (the server's wording is free to change).
+      const status = typeof e?.status === 'number' ? e.status : null;
+      const already = status === 409;
       // 503 is the deployment saying Go Live has no LiveKit of its own. It does
       // NOT fall back to the calling cluster, so this is a real, final answer —
       // and "something went wrong" would send the user into a retry loop that
       // cannot succeed.
-      const unconfigured = msg.includes('503') || /not configured/i.test(msg);
+      const unconfigured = status === 503;
       Alert.alert(
         'Could not go live',
         already
@@ -138,7 +146,7 @@ export default function LiveScreen() {
             : 'Something went wrong starting the broadcast.',
       );
     } finally {
-      setStarting(false);
+      if (mounted.current) setStarting(false);
     }
   };
 

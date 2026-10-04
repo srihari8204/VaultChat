@@ -4,7 +4,7 @@
 // page, with a per-manufacturer step list + an "I've done this" confirmation.
 
 import { HEADER_TOP } from '../constants/layout';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Platform, Switch } from 'react-native';
 import { useRouter, Stack, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -29,28 +29,39 @@ export default function CallReliabilityScreen() {
   const router = useRouter();
   const [oem, setOem] = useState<OemStep | null>(null);
   // null = could not be read back; never shown as done.
-  const [battOk, setBattOk] = useState<boolean | null>(false);
+  const [battOk, setBattOkState] = useState<boolean | null>(false);
   const [autoOk, setAutoOk] = useState(false);
   const [lowData, setLowData] = useState(false);
   const [lowDataFailed, setLowDataFailed] = useState(false);
+  // One save at a time: rapid toggles could otherwise land out of order and
+  // leave the stored value different from the Switch.
+  const [savingLowData, setSavingLowData] = useState(false);
   const [oemFailed, setOemFailed] = useState(false);
-  useEffect(() => { getLowDataMode().then(setLowData).catch(() => {}); }, []);
+  // Every read below resolves after the user may have left (Settings round
+  // trips, slow native reads): no state updates once the screen is gone.
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const ifMounted = <T,>(set: (v: T) => void) => (v: T) => { if (mounted.current) set(v); };
+  const setBattOk = ifMounted(setBattOkState);
+  useEffect(() => { getLowDataMode().then(ifMounted(setLowData)).catch(() => {}); }, []);
 
   useEffect(() => {
-    oemInstructions().then(setOem).catch(() => setOemFailed(true));
-    AsyncStorage.getItem(DONE_KEY).then(v => setAutoOk(v === '1')).catch(() => {});
+    oemInstructions().then(ifMounted(setOem)).catch(() => { if (mounted.current) setOemFailed(true); });
+    AsyncStorage.getItem(DONE_KEY).then(v => { if (mounted.current) setAutoOk(v === '1'); }).catch(() => {});
   }, []);
   // A failed write is put back and said, or the tick would vanish next visit.
   const [doneSaveFailed, setDoneSaveFailed] = useState(false);
   const markAutoStart = (done: boolean) => {
     setAutoOk(done);
     setDoneSaveFailed(false);
-    AsyncStorage.setItem(DONE_KEY, done ? '1' : '0').catch(() => { setAutoOk(!done); setDoneSaveFailed(true); });
+    AsyncStorage.setItem(DONE_KEY, done ? '1' : '0').catch(() => {
+      if (mounted.current) { setAutoOk(!done); setDoneSaveFailed(true); }
+    });
   };
   // Which "Open settings" button could not open its page, if any. Each opener
   // resolves false instead of throwing; without this a tap did nothing visible.
   const [openFailed, setOpenFailed] = useState<null | 'fsi' | 'battery' | 'autostart'>(null);
-  const noteOpened = (which: 'fsi' | 'battery' | 'autostart', ok: boolean) => setOpenFailed(ok ? null : which);
+  const noteOpened = (which: 'fsi' | 'battery' | 'autostart', ok: boolean) => { if (mounted.current) setOpenFailed(ok ? null : which); };
   const openFailedTxt = 'Couldn’t open this setting. Open your phone’s Settings, then Apps, then crazzychat, and change it there.';
 
   // Android 14 turned USE_FULL_SCREEN_INTENT into a user-granted permission for
@@ -69,8 +80,10 @@ export default function CallReliabilityScreen() {
   // still offers the settings, rather than claiming it is done.
   const [fsiOk, setFsiOk] = useState(true);
   const refresh = () => {
-    canUseFullScreenIntent().then(setFsiOk).catch(() => {});
-    if (Platform.OS === 'android') readBatteryExemption().then(setBattOk).catch(() => setBattOk(null));
+    canUseFullScreenIntent().then(ifMounted(setFsiOk)).catch(() => {});
+    if (Platform.OS === 'android') {
+      readBatteryExemption().then(setBattOk).catch(() => setBattOk(null));
+    }
   };
   useFocusEffect(useCallback(() => { refresh(); }, []));
 
@@ -188,10 +201,18 @@ export default function CallReliabilityScreen() {
             <Switch
               value={lowData}
               accessibilityLabel="Low data mode"
+              disabled={savingLowData}
+              accessibilityState={{ checked: lowData, disabled: savingLowData, busy: savingLowData }}
               onValueChange={async (v) => {
+                if (savingLowData) return;
+                setSavingLowData(true);
                 setLowData(v);
-                try { await setLowDataMode(v); setLowDataFailed(false); }
-                catch { setLowData(!v); setLowDataFailed(true); }
+                let ok = true;
+                try { await setLowDataMode(v); } catch { ok = false; }
+                if (!mounted.current) return;
+                if (!ok) setLowData(!v);
+                setLowDataFailed(!ok);
+                setSavingLowData(false);
               }}
               trackColor={{ true: colors.primary }}
             />

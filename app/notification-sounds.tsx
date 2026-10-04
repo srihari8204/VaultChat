@@ -4,7 +4,7 @@
 // vibration. Theme-aware (light + dark). Prefs persist via lib/sounds.
 
 import { HEADER_TOP } from '../constants/layout';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, TouchableOpacity, StyleSheet, ScrollView, Switch, ActivityIndicator, Alert } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -26,17 +26,33 @@ export default function NotificationSoundsScreen() {
   // The Switch thumb is the on-primary ink (white in both themes, the platform
   // look). colors.card would turn it near-black on the dark theme's dark track.
   const thumb = colors.onPrimary;
+  // setSoundPrefs reads, merges and writes the whole object, so two saves in
+  // flight (rapid Switch toggles, or a toggle during a ringtone save) could
+  // land out of order and undo each other. Saves run one after another instead.
+  const saveChain = useRef<Promise<unknown>>(Promise.resolve());
+  const mounted = useRef(true);
 
   useEffect(() => {
-    getSoundPrefs().then(setPrefs);
+    mounted.current = true;
+    getSoundPrefs().then(p => { if (mounted.current) setPrefs(p); });
     // Only the preview: stopRingtone() here also silenced a real incoming call.
-    return () => { void stopRingtonePreview(); };
+    return () => { mounted.current = false; void stopRingtonePreview(); };
   }, []);
 
   // A failed save must not look saved: setSoundPrefs keeps the old value and throws.
-  const patch = async (p: Partial<SoundPrefs>): Promise<boolean> => {
-    try { setPrefs(await setSoundPrefs(p)); return true; }
-    catch { Alert.alert('Could not save', 'Your sound setting was not changed. Please try again.'); return false; }
+  const patch = (p: Partial<SoundPrefs>): Promise<boolean> => {
+    const run = saveChain.current.then(async () => {
+      try {
+        const next = await setSoundPrefs(p);
+        if (mounted.current) setPrefs(next);
+        return true;
+      } catch {
+        if (mounted.current) Alert.alert('Could not save', 'Your sound setting was not changed. Please try again.');
+        return false;
+      }
+    });
+    saveChain.current = run;
+    return run;
   };
 
   const pickRingtone = async (id: string) => {
@@ -44,10 +60,31 @@ export default function NotificationSoundsScreen() {
     setSavingTone(true);
     try {
       if (await patch({ ringtone: id })) previewRingtone(id);   // play it once so they hear the choice
-    } finally { setSavingTone(false); }
+    } finally { if (mounted.current) setSavingTone(false); }
   };
 
-  if (!prefs) return <View style={[s.root, { justifyContent: 'center' }]}><ActivityIndicator color={colors.primary} /></View>;
+  const header = (
+    <View style={s.header}>
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => (router.canGoBack() ? router.back() : router.replace('/settings'))} style={s.iconBtn} hitSlop={8}>
+        <Ionicons name="arrow-back" size={24} color={colors.text} />
+      </TouchableOpacity>
+      <Text style={s.headerTitle} accessibilityRole="header">Notifications & Sounds</Text>
+    </View>
+  );
+
+  // Loading keeps the header, so Back works and the screen says where you are.
+  if (!prefs) {
+    return (
+      <View style={s.root}>
+        <AuroraBackground />
+        <Stack.Screen options={{ headerShown: false }} />
+        {header}
+        <View style={s.loading}>
+          <ActivityIndicator color={colors.primary} accessibilityLabel="Loading sound settings" />
+        </View>
+      </View>
+    );
+  }
 
   // "Phone ringtone" only where the native ringer exists to play it.
   const options = [
@@ -59,12 +96,7 @@ export default function NotificationSoundsScreen() {
     <View style={s.root}>
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
-      <View style={s.header}>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => (router.canGoBack() ? router.back() : router.replace('/settings'))} style={s.iconBtn} hitSlop={8}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={s.headerTitle} accessibilityRole="header">Notifications & Sounds</Text>
-      </View>
+      {header}
 
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
         {/* Message tones */}
@@ -138,6 +170,7 @@ export default function NotificationSoundsScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: 'transparent' },
+  loading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   header: { flexDirection: 'row', alignItems: 'center', paddingTop: HEADER_TOP, paddingHorizontal: 12, paddingBottom: 12, backgroundColor: c.bg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke, gap: 8 },
   iconBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { color: c.text, fontSize: 18, fontWeight: '700' },

@@ -9,7 +9,7 @@
 import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator, Alert, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View,
 } from 'react-native';
@@ -49,6 +49,9 @@ export default function CacheCleanupScreen() {
   const [lastClean, setLastClean] = useState<number | null>(null);
 
   const [loadFailed, setLoadFailed] = useState(false);
+  // Measuring and cleaning outlive a quick Back: no state updates once gone.
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const load = useCallback(async () => {
     setLoading(true);
     setLoadFailed(false);
@@ -57,11 +60,12 @@ export default function CacheCleanupScreen() {
       const [s, days, logout, last] = await Promise.all([
         measureCacheSizes(), getAutoCleanDays(), getClearOnLogout(), getLastCleanAt(),
       ]);
+      if (!mounted.current) return;
       setSizes(s); setAutoDays(days); setClearLogout(logout); setLastClean(last);
     } catch {
-      setLoadFailed(true);
+      if (mounted.current) setLoadFailed(true);
     } finally {
-      setLoading(false);
+      if (mounted.current) setLoading(false);
     }
   }, []);
 
@@ -94,7 +98,7 @@ export default function CacheCleanupScreen() {
               Alert.alert('Cache cleared', `Freed about ${formatBytes(res.freedBytes)}.`);
             } catch {
               Alert.alert('Cleanup failed', 'Some cache could not be cleared. Please try again.');
-            } finally { setBusy(false); load(); }
+            } finally { if (mounted.current) { setBusy(false); load(); } }
           },
         },
       ],

@@ -12,7 +12,7 @@
 // delete the files that actually took up the space (audit F-6).
 
 import React, { useState, useEffect, useMemo, useRef, useCallback, type ComponentProps } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator, AccessibilityInfo } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { type Palette } from '../constants/theme';
@@ -153,8 +153,10 @@ export default function StorageManagerScreen() {
     setLoading(true);
     setLoadFailed(false);
     setProgress(0);
+    AccessibilityInfo.announceForAccessibility('Measuring storage…');
     const stats: WalkStats = { skipped: 0, removed: 0, seen: 0 };
     const tick = setInterval(() => { if (mounted.current) setProgress(stats.seen); }, 400);
+    let failed = false;
     try {
       const acc: Record<string, number> = { img: 0, vid: 0, aud: 0, file: 0, other: 0 };
       const attMap = await getAttachmentChatMap().catch(() => ({} as Record<string, string>));
@@ -194,11 +196,16 @@ export default function StorageManagerScreen() {
 
       try { setFreeSpace(await FileSystem.getFreeDiskStorageAsync()); } catch { setFreeSpace(0); }
     } catch {
+      failed = true;
       // Nothing from an earlier load may stay on screen as if it were current.
       if (mounted.current) { setLoadFailed(true); setChatStores([]); }
     } finally {
       clearInterval(tick);
-      if (mounted.current) setLoading(false);
+      if (mounted.current) {
+        setLoading(false);
+        // The finish is announced once; the running count is never announced.
+        AccessibilityInfo.announceForAccessibility(failed ? 'Storage could not be measured.' : 'Storage measured.');
+      }
     }
   }, []);
 
@@ -311,7 +318,10 @@ export default function StorageManagerScreen() {
         <AuroraBackground />
         <Stack.Screen options={{ headerShown: false }} />
         {header}
-        <View style={s.loadingWrap} accessibilityLiveRegion="polite">
+        {/* Not a live region: the count changes every 400 ms and would be
+            re-announced each time. Start and finish are announced once by
+            loadStorageData instead. */}
+        <View style={s.loadingWrap}>
           <ActivityIndicator size="large" color={colors.accent} />
           <Text style={s.loadingText}>
             {progress > 0 ? `Measuring storage… ${progress.toLocaleString()} items checked` : 'Measuring storage…'}

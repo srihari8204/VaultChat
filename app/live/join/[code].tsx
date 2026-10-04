@@ -26,7 +26,7 @@
 // A redeemed link grants VIEWING, never a seat on the 20-person stage. Only the
 // host promoting someone puts their camera up.
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, TextInput,
 } from 'react-native';
@@ -80,6 +80,10 @@ export default function LiveJoinScreen() {
   // Every "Cancel"/"Done" lands on the chats tab, as Cancel always did.
   // replace, not back: an invite-link arrival has no history to go back to.
   const leave = useCallback(() => router.replace('/(tabs)/chats'), [router]);
+  // A successful redeem replaces this screen before `finally` runs: no state
+  // updates once it is gone.
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
   // Prefill the name from the profile. Failure is not worth surfacing — the
   // field is editable and the server falls back to the profile name anyway.
@@ -103,6 +107,7 @@ export default function LiveJoinScreen() {
     setBusy(true);
     try {
       const res = await redeemInviteLink(code, { passcode: pc, displayName: name });
+      if (!mounted.current) return;
       if (res.ok) {
         // replace, not push, so Back does not bounce through the redeem flow.
         router.replace({ pathname: '/live-view', params: { id: res.broadcastId } });
@@ -111,7 +116,7 @@ export default function LiveJoinScreen() {
       if (res.reason === 'passcode') { setPhase({ kind: 'passcode', wrong: showWrong }); return; }
       setPhase({ kind: 'error', network: res.reason === 'network' });
     } finally {
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   }, [code, name, router]);
 
@@ -151,7 +156,7 @@ export default function LiveJoinScreen() {
         <Stack.Screen options={{ headerShown: false }} />
         <View style={s.body}>
           <Ionicons name="person-circle-outline" size={48} color={colors.primary} />
-          <Text style={s.title}>Join the live</Text>
+          <Text style={s.title} accessibilityRole="header">Join the live</Text>
           {/* OPTIONAL, AND IT HAS TO LOOK OPTIONAL.
               Joining works with this box empty — the account name is used, the
               same one a public live shows. A field that is actually optional but
@@ -205,7 +210,7 @@ export default function LiveJoinScreen() {
         <Stack.Screen options={{ headerShown: false }} />
         <View style={s.body} accessibilityLiveRegion="polite">
           <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={s.title}>Joining live…</Text>
+          <Text style={s.title} accessibilityRole="header">Joining live…</Text>
           <Text style={s.sub}>Checking your invitation</Text>
         </View>
       </View>
@@ -256,7 +261,7 @@ export default function LiveJoinScreen() {
       <Stack.Screen options={{ headerShown: false }} />
       <View style={s.body}>
         <Ionicons name="lock-closed-outline" size={48} color={colors.primary} />
-        <Text style={s.title}>This live is protected</Text>
+        <Text style={s.title} accessibilityRole="header">This live is protected</Text>
         <Text style={s.sub}>Enter the passcode the host gave you.</Text>
 
         <Text style={s.label}>Your name (optional)</Text>

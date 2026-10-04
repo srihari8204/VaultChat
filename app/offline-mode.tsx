@@ -70,6 +70,7 @@ export default function OfflineModeScreen() {
   // The outbox as it was when the last manual retry started. Sends still in
   // flight when flush() returns finish later; each recount (queue events call
   // loadOutbox) re-describes the retry against this, so the line catches up.
+  // Cleared once the retry settles or a new message is queued (see below).
   const retryBase = useRef<Outbox | null>(null);
   // Queue events can land after the screen is gone; no state updates then.
   const mounted = useRef(true);
@@ -91,6 +92,10 @@ export default function OfflineModeScreen() {
       setOutbox(next);
       setLoadError(null);
       if (retryBase.current) setRetryResult(describeRetry(retryBase.current, next));
+      // Settled: nothing is in flight any more (every row was sent or rejected),
+      // so that line is final. Later recounts must not describe new messages
+      // against the old retry's snapshot.
+      if (next.waiting === 0) retryBase.current = null;
       return next;
     } catch (e: any) {
       if (mounted.current) setLoadError(e?.message ?? 'Could not read the outbox');
@@ -107,7 +112,9 @@ export default function OfflineModeScreen() {
       setConnectionType(state.type || 'unknown');
     });
     // The queue says when a row is added, sent, retried or rejected; recount then.
-    const offs = [on('pending', refresh), on('sent', refresh), on('failed', refresh), on('retry', refresh)];
+    // A newly queued message is not part of the last retry: stop describing it.
+    const onPending = () => { retryBase.current = null; refresh(); };
+    const offs = [on('pending', onPending), on('sent', refresh), on('failed', refresh), on('retry', refresh)];
     refresh();
     AsyncStorage.multiRemove(LEGACY_MOCK_KEYS).catch(() => {});
     return () => { alive = false; unsubNet(); offs.forEach(off => off()); };

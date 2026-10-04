@@ -1,6 +1,6 @@
 // components/live/LiveInvitePanel.tsx — the host's Private Live invitation panel.
 //
-// Moved out of app/live-view.tsx unchanged.
+// Moved out of app/live-view.tsx.
 //
 // PRIVATE INVITATION — the link IS the access mechanism. Shows the URL, and
 // nothing else: no room name, no key, no infrastructure detail. Copy and Share
@@ -13,6 +13,16 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { AppText } from '../ui/Text';
 import { LIVE, S } from './liveStyles';
+
+/** Copy, and say whether it worked: a failed write must not read as "Copied". */
+async function copyAndSay(text: string, done: string) {
+  try {
+    await Clipboard.setStringAsync(text);
+    Alert.alert('Copied', done);
+  } catch {
+    Alert.alert('Could not copy', 'Select the text above and copy it by hand.');
+  }
+}
 
 export function LiveInvitePanel({ inviteUrl, pc, inviteBusy, onClose, makeInvite }: {
   inviteUrl: string;
@@ -40,7 +50,8 @@ export function LiveInvitePanel({ inviteUrl, pc, inviteBusy, onClose, makeInvite
 
       {/* The passcode, if this broadcast has one.
 
-          Shown from the route param, not from the server: only a
+          Shown from this device's memory of what the host typed
+          (lib/golive/hostPasscodeMemo.ts), not from the server: only a
           bcrypt hash is stored, so there is nothing to fetch back.
           Its own Copy button because it must travel on a DIFFERENT
           channel from the link — pasting both into one message
@@ -53,10 +64,7 @@ export function LiveInvitePanel({ inviteUrl, pc, inviteBusy, onClose, makeInvite
           </View>
           <TouchableOpacity accessibilityRole="button" accessibilityLabel="Copy the passcode"
             style={S.inviteBtn}
-            onPress={async () => {
-              await Clipboard.setStringAsync(pc);
-              Alert.alert('Copied', 'Passcode copied. Send it separately from the link.');
-            }}
+            onPress={() => { void copyAndSay(pc, 'Passcode copied. Send it separately from the link.'); }}
           >
             <Ionicons name="copy-outline" size={15} color={LIVE.text} />
             <AppText style={S.inviteBtnText}>Copy</AppText>
@@ -66,17 +74,14 @@ export function LiveInvitePanel({ inviteUrl, pc, inviteBusy, onClose, makeInvite
       <View style={S.inviteRow}>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Copy the invite link"
           style={S.inviteBtn}
-          onPress={async () => {
-            await Clipboard.setStringAsync(inviteUrl);
-            Alert.alert('Copied', 'Invite link copied.');
-          }}
+          onPress={() => { void copyAndSay(inviteUrl, 'Invite link copied.'); }}
         >
           <Ionicons name="copy-outline" size={15} color={LIVE.text} />
           <AppText style={S.inviteBtnText}>Copy</AppText>
         </TouchableOpacity>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Share the invite link"
           style={S.inviteBtn}
-          onPress={() => Share.share({ message: 'Join my private live on crazzychat\n' + inviteUrl })}
+          onPress={() => { Share.share({ message: 'Join my private live on crazzychat\n' + inviteUrl }).catch(() => {}); }}
         >
           <Ionicons name="share-social-outline" size={15} color={LIVE.text} />
           <AppText style={S.inviteBtnText}>Share</AppText>

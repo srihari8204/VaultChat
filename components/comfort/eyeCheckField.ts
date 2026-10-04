@@ -5,7 +5,8 @@
 // test stimulus, so they must not follow the dark theme. Kept here as one named
 // field palette (like constants/theme.ts) instead of literals scattered through
 // the screen. Marks the screen draws ON this field (answer feedback) use the
-// light palette, which is tuned for white — see app/eye-check.tsx ON_WHITE_FIELD.
+// light palette, which is tuned for white — see ON_WHITE_FIELD in
+// components/comfort/EyeCheckPhases.tsx.
 
 export const EYE_FIELD = {
   /** The chart card behind every test. */

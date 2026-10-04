@@ -251,8 +251,12 @@ export function Sheet({
  * rather than as a button whose label happens to end in "On".
  */
 export function SettingRow({
-  label, hint, value, onPress, checked,
-}: { label: string; hint?: string; value: string; onPress: () => void; checked?: boolean }) {
+  label, hint, value, onPress, checked, accessibilityLabel,
+}: {
+  label: string; hint?: string; value: string; onPress: () => void; checked?: boolean;
+  /** When "<label>, <value>" does not say what the tap does (e.g. "Ravi, Send"). */
+  accessibilityLabel?: string;
+}) {
   const C = useGamePalette();
   const t = useType();
   return (
@@ -260,7 +264,7 @@ export function SettingRow({
       onPress={onPress}
       accessibilityRole={checked == null ? 'button' : 'switch'}
       accessibilityState={checked == null ? undefined : { checked }}
-      accessibilityLabel={checked == null ? `${label}, ${value}` : label}
+      accessibilityLabel={accessibilityLabel ?? (checked == null ? `${label}, ${value}` : label)}
       accessibilityHint={hint}
       style={{
         flexDirection: 'row', alignItems: 'center', gap: S[3],
@@ -393,7 +397,8 @@ export function VoiceSheet({
 
   return (
     <Sheet visible={visible} title="Table voice" onClose={onClose}>
-      <Text style={{ color: voice.phase === 'error' ? C.bad : C.muted, fontSize: t.sm, lineHeight: 19 }}>{status}</Text>
+      {/* Live: the status moves on by itself (asking → connecting → connected). */}
+      <Text accessibilityLiveRegion="polite" style={{ color: voice.phase === 'error' ? C.bad : C.muted, fontSize: t.sm, lineHeight: 19 }}>{status}</Text>
 
       {denied && (
         <Text style={{ color: C.muted, fontSize: 12, lineHeight: 18 }}>
@@ -408,7 +413,8 @@ export function VoiceSheet({
           </Text>
           <View style={{ gap: S[1] }}>
             {voice.participants.map(id => (
-              <View key={id} style={{ flexDirection: 'row', alignItems: 'center', gap: S[2], paddingVertical: 4 }}>
+              <View key={id} accessible accessibilityLabel={`${nameOf ? nameOf(id) : id}${voice.speaking.has(id) ? ', speaking' : ''}`}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: S[2], paddingVertical: 4 }}>
                 <View style={{
                   width: 8, height: 8, borderRadius: 4,
                   backgroundColor: voice.speaking.has(id) ? C.good : 'rgba(255,255,255,0.22)',
@@ -438,7 +444,9 @@ export function VoiceSheet({
               icon={voice.speaker ? 'speaker' : 'headset'}
               compact
               onPress={voice.toggleSpeaker}
-              accessibilityLabel={voice.speaker ? 'Loudspeaker on' : 'Following your headset'}
+              // A toggle: its state is announced, not folded into a label that changes.
+              selected={voice.speaker}
+              accessibilityLabel="Loudspeaker"
             />
             <Btn label="Leave voice" kind="danger" compact onPress={voice.leave} accessibilityLabel="Leave voice but stay at the table" />
           </>

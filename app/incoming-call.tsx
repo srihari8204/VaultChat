@@ -290,10 +290,12 @@ export default function IncomingCallScreen() {
 /** How long Decline waits for the first send before leaving the ring screen anyway. */
 const DECLINE_WAIT_MS = 2500;
 
-// ponytail: "sent" means emitted on a connected socket, not received. The server
-// relays webrtc_end without an acknowledgement (vaultchat-backend-go
-// internal/realtime/handlers.go `relay`), so an acked emit would always time
-// out. Switch to socket.emitWithAck once the relay calls the ack.
+// ponytail: "sent" means emitted on a connected socket, not received. The
+// realtime transport is ccwire, and its event dispatch gives legacy events like
+// webrtc_end no semantic acknowledgement (vaultchat-backend-go
+// internal/realtime/ccwire_app_events.go `appEvent`: a transport Ack "must never
+// be interpreted as durable delivery"). Switch to an acknowledged send once
+// ccwire carries a semantic ack for relayed call events.
 /** Send the decline, waiting `delayMs` before each attempt. True once sent. */
 async function sendDecline(peerUid: string, chatId: string, attempts: number, delayMs = 0): Promise<boolean> {
   for (let i = 0; i < attempts; i++) {

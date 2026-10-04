@@ -29,10 +29,14 @@ export default function InviteSheet() {
   const C = useGamePalette();
   const [target, setTarget] = useState<{ game: GameKind; room: string } | null>(null);
   const [chats, setChats] = useState<ChatSummary[] | null>(null);
+  // A failed load is not "No chats yet": it says so and offers a retry.
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => registerInvitePicker((game, room) => {
     setTarget({ game, room });
     setChats(null);
+    setLoadFailed(false);
   }), []);
 
   // Loaded per open rather than held: the list is small, and a stale one would
@@ -41,10 +45,11 @@ export default function InviteSheet() {
     if (!target) return;
     let live = true;
     listChats()
-      .then(rows => { if (live) setChats(rows.filter(c => !c.archived)); })
-      .catch(() => { if (live) setChats([]); });
+      .then(rows => { if (live) { setChats(rows.filter(c => !c.archived)); setLoadFailed(false); } })
+      .catch(() => { if (live) { setChats([]); setLoadFailed(true); } });
     return () => { live = false; };
-  }, [target]);
+  }, [target, attempt]);
+  const retry = useCallback(() => { setChats(null); setLoadFailed(false); setAttempt(a => a + 1); }, []);
 
   const close = useCallback(() => setTarget(null), []);
 
@@ -93,13 +98,22 @@ Send the link instead?`,
         label="Share a link instead"
         hint="WhatsApp, SMS, anywhere — works even if they don't have crazzychat"
         value="Share"
+        accessibilityLabel="Share a link instead"
         onPress={() => { const t = target; close(); if (t) void inviteToTable(t.game, t.room); }}
       />
 
       {chats === null ? (
         <View style={{ paddingVertical: S[4], alignItems: 'center' }}>
-          <ActivityIndicator color={C.text} />
+          <ActivityIndicator color={C.text} accessibilityLabel="Loading your chats" />
         </View>
+      ) : loadFailed ? (
+        <SettingRow
+          label="Couldn't load your chats"
+          hint="Check your connection. The link above still works."
+          value="Try again"
+          onPress={retry}
+          accessibilityLabel="Couldn't load your chats. Try again"
+        />
       ) : chats.length === 0 ? (
         <Text style={{ color: C.muted, fontSize: 13, paddingVertical: S[2] }}>
           No chats yet.
@@ -111,6 +125,7 @@ Send the link instead?`,
             label={chatLabel(c)}
             hint={c.type === 'group' ? 'Group' : undefined}
             value="Send"
+            accessibilityLabel={`Send the invite to ${chatLabel(c)}${c.type === 'group' ? ', group' : ''}`}
             onPress={() => { void post(c); }}
           />
         ))

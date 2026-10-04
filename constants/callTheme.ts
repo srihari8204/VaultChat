@@ -23,6 +23,11 @@ export const CALL = {
   handQueue:  '#FFD479',              // raised-hand queue line
   pagerDim:   '#BBBBBB',              // pager label
   pagerOff:   '#555555',              // pager arrow at either end
+  textMuted:  'rgba(255,255,255,0.6)',  // secondary line under the title
+  nameScrim:  'rgba(0,0,0,0.4)',      // behind a name on a tile
+  badgeScrim: 'rgba(0,0,0,0.55)',     // behind a small badge on a tile
+  shareTint:  'rgba(157,110,255,0.30)', // "X is sharing" banner (lavender)
+  pill:       'rgba(255,255,255,0.16)', // small chip on the dark surface
 };
 
 // Text over live video needs a shadow to stay legible on bright frames.

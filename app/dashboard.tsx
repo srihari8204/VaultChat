@@ -24,7 +24,12 @@ type Check = { name: string; icon: React.ComponentProps<typeof Ionicons>['name']
 function buildChecks(ov: SecurityOverview): Check[] {
   return [
     { name: 'End-to-End Encryption', icon: 'lock-closed-outline', ok: E2EE_ENABLED && ov.e2eeKeyPublished,
-      desc: E2EE_ENABLED ? (ov.e2eeKeyPublished ? 'Keys published — direct chats are encrypted' : 'Open a chat to publish your keys') : 'Encrypted in transit (TLS)',
+      // With E2EE off in this build it still counts: messages are protected in
+      // transit only, which is a real gap. Nothing on the account can change
+      // it, so the row says so instead of linking anywhere.
+      desc: E2EE_ENABLED
+        ? (ov.e2eeKeyPublished ? 'Keys published — direct chats are encrypted' : 'Open a chat to publish your keys')
+        : 'Encrypted in transit (TLS) only. End-to-end encryption is not available in this version yet, so this stays under review — there is nothing to change on your account.',
       href: E2EE_ENABLED && !ov.e2eeKeyPublished ? '/(tabs)/chats' : null },
     { name: 'Last Seen Hidden', icon: 'eye-off-outline', ok: ov.settings.lastSeenVisible === false,
       desc: ov.settings.lastSeenVisible === false ? 'Your last-seen is private' : 'Your last-seen is visible to contacts',
@@ -123,12 +128,12 @@ function DashboardContent() {
     <View style={S.container}>
       <AuroraBackground variant="profile" />
 
-      <Animated.View style={[{flex:1},{ opacity:fadeAnim}]}>
+      <Animated.View style={[S.fill,{ opacity:fadeAnim}]}>
         <View style={S.header}>
           <TouchableOpacity hitSlop={4} accessibilityRole="button" accessibilityLabel="Back" onPress={()=>(router.canGoBack() ? router.back() : router.replace('/settings'))} style={S.backBtn}><Ionicons name="arrow-back" size={24} color={colors.primary} /></TouchableOpacity>
-          <View style={{flex:1}}>
+          <View style={S.fill}>
             <Text variant="h2" style={S.title} accessibilityRole="header">Security Hub</Text>
-            <Text style={{color:colors.textDim,fontSize:12}}>Your account security</Text>
+            <Text style={S.subtitle}>Your account security</Text>
           </View>
           <TouchableOpacity accessibilityRole="button" accessibilityLabel="Refresh security overview" accessibilityState={{ disabled: loading, busy: loading }} disabled={loading} onPress={load} style={S.scanBtn}>
             {loading ? <ActivityIndicator size="small" color={colors.primary} /> : <Ionicons name="refresh-outline" size={22} color={colors.primary} />}
@@ -145,14 +150,14 @@ function DashboardContent() {
           >
             <View style={S.radarBg}/>
             <Animated.View style={[S.radarSweep,{transform:[{rotate:radarDeg}]}]}/>
-            <View style={[S.radarRing,{width:100,height:100,borderRadius:50}]}/>
-            <View style={[S.radarRing,{width:68,height:68,borderRadius:34}]}/>
+            <View style={[S.radarRing,S.radarOuter]}/>
+            <View style={[S.radarRing,S.radarInner]}/>
             <View style={S.scoreCenter}>
               <Text style={[S.scoreNum,{color:scoreColor}]}>{overview ? score : '—'}</Text>
               <Text style={S.scoreLabel}>Security score</Text>
-              <View style={{flexDirection:'row',alignItems:'center',gap:4,marginTop:3}}>
-                <View style={{width:6,height:6,borderRadius:3,backgroundColor:scoreColor}}/>
-                <Text style={{color:scoreColor,fontSize:12,fontWeight:'700'}}>{scoreWord}</Text>
+              <View style={S.wordRow}>
+                <View style={[S.wordDot,{backgroundColor:scoreColor}]}/>
+                <Text style={[S.word,{color:scoreColor}]}>{scoreWord}</Text>
               </View>
             </View>
           </Animated.View>
@@ -167,8 +172,8 @@ function DashboardContent() {
           ].map((s)=>(
             <View key={s.label} style={S.statCard} accessible accessibilityLabel={`${s.label}: ${s.value}`}>
               <Ionicons name={s.icon} size={22} color={s.color} />
-              <Text style={{color:colors.text,fontSize:20,fontWeight:'800'}}>{s.value}</Text>
-              <Text style={{color:colors.textDim,fontSize:12,textAlign:'center',marginTop:1}}>{s.label}</Text>
+              <Text style={S.statValue}>{s.value}</Text>
+              <Text style={S.statLabel}>{s.label}</Text>
             </View>
           ))}
         </View>
@@ -179,12 +184,12 @@ function DashboardContent() {
               <Text style={S.staleText}>Couldn&apos;t refresh. This is your last saved overview and may be out of date.</Text>
             </View>
           )}
-          {loading && <ActivityIndicator color={colors.primary} style={{marginTop:30}} />}
+          {loading && <ActivityIndicator color={colors.primary} style={S.spinner} />}
           {error && !loading && (
-            <View style={{alignItems:'center',marginTop:24,gap:12}}>
-              <Text style={{color:colors.danger,textAlign:'center',fontSize:13}}>{error}</Text>
+            <View style={S.errorBox}>
+              <Text style={S.errorText}>{error}</Text>
               <TouchableOpacity accessibilityRole="button" accessibilityLabel="Try loading the security overview again" onPress={load} style={S.retryBtn}>
-                <Text style={{color:colors.primary,fontSize:14,fontWeight:'700'}}>Try again</Text>
+                <Text style={S.retryText}>Try again</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -205,14 +210,14 @@ function DashboardContent() {
                 <View style={[S.modIcon,{backgroundColor:col+'18',borderColor:col+'44'}]}>
                   <Ionicons name={c.icon} size={22} color={col} />
                 </View>
-                <View style={{flex:1}}>
-                  <View style={{flexDirection:'row',flexWrap:'wrap',alignItems:'center',gap:8,marginBottom:4}}>
-                    <Text style={{color:colors.text,fontSize:15,fontWeight:'700',flexShrink:1}}>{c.name}</Text>
-                    <View style={{backgroundColor:col+'18',borderRadius:5,paddingHorizontal:5,paddingVertical:2,borderWidth:1,borderColor:col}}>
-                      <Text style={{color:col,fontSize:11,fontWeight:'800'}}>{verdict}</Text>
+                <View style={S.fill}>
+                  <View style={S.modHead}>
+                    <Text style={S.modName}>{c.name}</Text>
+                    <View style={[S.verdict,{backgroundColor:col+'18',borderColor:col}]}>
+                      <Text style={[S.verdictText,{color:col}]}>{verdict}</Text>
                     </View>
                   </View>
-                  <Text style={{color:colors.textDim,fontSize:13,lineHeight:19}}>{c.desc}</Text>
+                  <Text style={S.modDesc}>{c.desc}</Text>
                 </View>
                 {href && <Ionicons name="chevron-forward" size={18} color={colors.textDim} />}
               </TouchableOpacity>
@@ -261,4 +266,22 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   modIcon:{width:44,height:44,borderRadius:22,justifyContent:'center',alignItems:'center',borderWidth:1},
   staleRow:{flexDirection:'row',alignItems:'center',gap:8,marginBottom:12,paddingHorizontal:4},
   staleText:{flex:1,color:c.textDim,fontSize:12,lineHeight:17},
+  fill:{flex:1},
+  subtitle:{color:c.textDim,fontSize:12},
+  radarOuter:{width:100,height:100,borderRadius:50},
+  radarInner:{width:68,height:68,borderRadius:34},
+  wordRow:{flexDirection:'row',alignItems:'center',gap:4,marginTop:3},
+  wordDot:{width:6,height:6,borderRadius:3},
+  word:{fontSize:12,fontWeight:'700'},
+  statValue:{color:c.text,fontSize:20,fontWeight:'800'},
+  statLabel:{color:c.textDim,fontSize:12,textAlign:'center',marginTop:1},
+  spinner:{marginTop:30},
+  errorBox:{alignItems:'center',marginTop:24,gap:12},
+  errorText:{color:c.danger,textAlign:'center',fontSize:13},
+  retryText:{color:c.primary,fontSize:14,fontWeight:'700'},
+  modHead:{flexDirection:'row',flexWrap:'wrap',alignItems:'center',gap:8,marginBottom:4},
+  modName:{color:c.text,fontSize:15,fontWeight:'700',flexShrink:1},
+  verdict:{borderRadius:5,paddingHorizontal:5,paddingVertical:2,borderWidth:1},
+  verdictText:{fontSize:11,fontWeight:'800'},
+  modDesc:{color:c.textDim,fontSize:13,lineHeight:19},
 });

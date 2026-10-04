@@ -142,7 +142,13 @@ function GroupCallEngine() {
   const handUp      = useMyHandRaised();
   const canModerate = useCanModerate();
   const hands       = useRaisedHands();
-  const [sheet, setSheet] = useState<{ title: string; message?: string; actions: SheetAction[] } | null>(null);
+  const [sheet, setSheetState] = useState<{ title: string; message?: string; actions: SheetAction[] } | null>(null);
+  // Role changes, the roster load and invites all resolve after a network round
+  // trip, by which time the call may have ended and this screen left. Drop the
+  // result then rather than set state on an unmounted screen (as voice/video do).
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const setSheet = useCallback((v: typeof sheet) => { if (mounted.current) setSheetState(v); }, []);
   // Height of the control bar, measured. CallExtras is pinned from the bottom
   // and must clear it; the bar is 1-3 rows depending on width and call state,
   // so a literal cannot be right on every device. 110 is the single-row value
@@ -170,14 +176,14 @@ function GroupCallEngine() {
     let ok = false;
     try { ok = await engine.setRole(uid, role); } catch { ok = false; }
     if (!ok) setSheet({ title: name, message: 'Could not change their role. Check your connection, or whether you are still a host.', actions: [] });
-  }, []);
+  }, [setSheet]);
   // Same contract as changeRole: a refused lower is reported, and the engine
   // puts the hand back up so the queue stays true.
   const lowerHand = useCallback(async (uid: string, name: string) => {
     let ok = false;
     try { ok = await engine.lowerPeerHand(uid); } catch { ok = false; }
     if (!ok) setSheet({ title: name, message: 'Could not lower their hand. Check your connection, or whether you are still a host.', actions: [] });
-  }, []);
+  }, [setSheet]);
   const moderate = useCallback((uid: string, name: string) => {
     setSheet({
       title: name,
@@ -195,7 +201,7 @@ function GroupCallEngine() {
         { label: 'Lower hand', icon: 'hand-left-outline', onPress: () => { void lowerHand(uid, name); } },
       ],
     });
-  }, [changeRole, lowerHand]);
+  }, [changeRole, lowerHand, setSheet]);
   const toggleHand = useCallback(() => engine.raiseHand(!handUp), [handUp]);
 
   // ── invite: how a call actually fills up ────────────────────────────
@@ -213,7 +219,7 @@ function GroupCallEngine() {
   // Say what an invite tap did: zero rung (already here, call over) is not success.
   const reportInvite = useCallback((outcome: Promise<string>) => {
     void outcome.then(message => setSheet({ title: 'Add people', message, actions: [] }));
-  }, []);
+  }, [setSheet]);
   const invite = useCallback(async () => {
     const id = String(chatId ?? '');
     if (!id) return;
@@ -281,7 +287,7 @@ function GroupCallEngine() {
         })),
       ].slice(0, ADD_LIST_MAX),
     });
-  }, [chatId, peerIds, seatsLeft, reportInvite]);
+  }, [chatId, peerIds, seatsLeft, reportInvite, setSheet]);
 
   useEffect(() => {
     engine.startGroup({
@@ -833,11 +839,15 @@ function CtrlBtn({ icon, onPress, active, danger, colors, label }: {
       accessibilityLabel={label}
       // Only toggles carry a state; End and Switch camera are plain actions.
       accessibilityState={active === undefined ? undefined : { selected: active }}
-      style={{ width: 60, height: 60, borderRadius: 30, alignItems: 'center', justifyContent: 'center', backgroundColor: danger ? colors.danger : active ? colors.primary : CALL.ctrl }}>
+      style={[CTRL_BTN.btn, { backgroundColor: danger ? colors.danger : active ? colors.primary : CALL.ctrl }]}>
       <Ionicons name={icon} size={26} color={CALL.text} />
     </TouchableOpacity>
   );
 }
+
+const CTRL_BTN = StyleSheet.create({
+  btn: { width: 60, height: 60, borderRadius: 30, alignItems: 'center', justifyContent: 'center' },
+});
 
 // Call chrome is always dark whatever the app theme (video surfaces sit on it),
 // so the greys and whites here are deliberate; only the accent follows the theme.
@@ -845,29 +855,29 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   screen:    { flex: 1, backgroundColor: CALL.bg },
   topBar:    { paddingTop: HEADER_TOP, paddingHorizontal: 20, paddingBottom: 8, alignItems: 'center' },
   title:     { color: CALL.text, fontSize: 18, fontWeight: '800' },
-  sub:       { color: 'rgba(255,255,255,0.6)', fontSize: 13, marginTop: 2 },
+  sub:       { color: CALL.textMuted, fontSize: 13, marginTop: 2 },
   err:       { color: CALL.errorText, textAlign: 'center', fontSize: 13, paddingHorizontal: 20 },
   grid:      { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', paddingHorizontal: 6, paddingTop: 8 },
   tile:      { aspectRatio: 0.8, marginHorizontal: '1%', marginBottom: 10, borderRadius: 14, overflow: 'hidden', backgroundColor: CALL.tile, justifyContent: 'flex-end' },
   video:     { ...StyleSheet.absoluteFillObject, backgroundColor: CALL.video },
   audioTile: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: c.primary },
-  tileName:  { color: CALL.text, fontSize: 12, fontWeight: '600', padding: 6, backgroundColor: 'rgba(0,0,0,0.4)' },
+  tileName:  { color: CALL.text, fontSize: 12, fontWeight: '600', padding: 6, backgroundColor: CALL.nameScrim },
   handBadge: { position: 'absolute', top: 6, left: 6, width: 26, height: 26, borderRadius: 13,
-               alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.55)' },
+               alignItems: 'center', justifyContent: 'center', backgroundColor: CALL.badgeScrim },
   handBadgeTxt: { fontSize: 14 },
   roleBadge: { position: 'absolute', top: 6, right: 6, width: 22, height: 22, borderRadius: 11,
-               alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.55)' },
+               alignItems: 'center', justifyContent: 'center', backgroundColor: CALL.badgeScrim },
   handQueue: { color: CALL.handQueue, fontSize: 12, textAlign: 'center', paddingBottom: 6 },
   shareBanner: {
     flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'center',
     marginTop: 6, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 14,
-    backgroundColor: 'rgba(157,110,255,0.30)',
+    backgroundColor: CALL.shareTint,
   },
   shareBannerTxt: { color: CALL.text, fontSize: 12, fontWeight: '700', maxWidth: 260 },
   addPeoplePill: {
     flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'center',
     marginTop: 6, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.16)',
+    backgroundColor: CALL.pill,
   },
   addPeopleTxt: { color: CALL.text, fontSize: 12, fontWeight: '600' },
   pager:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 18, paddingBottom: 4 },

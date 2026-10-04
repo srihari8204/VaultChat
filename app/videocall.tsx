@@ -509,7 +509,7 @@ function VideoCallEngine() {
               >
                 <View style={[S.filterSwatch,
                   opt.matrix ? { backgroundColor: opt.swatch } : { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.4)' },
-                  filter === opt.id && { borderColor: '#FFFFFF' }]} />
+                  filter === opt.id && { borderColor: CALL.text }]} />
                 <Text style={[S.filterLabel, filter === opt.id && S.filterLabelActive]}>{opt.label}</Text>
               </TouchableOpacity>
             ))}
@@ -1130,7 +1130,7 @@ function makeStyles() { return StyleSheet.create({
   filterChipActive:{ },
   filterSwatch:    { width: 38, height: 38, borderRadius: 19, borderWidth: 2, borderColor: 'transparent' },
   filterLabel:     { color: 'rgba(255,255,255,0.65)', fontSize: 11, fontWeight: '600' },
-  filterLabelActive:{ color: '#FFFFFF' },
+  filterLabelActive:{ color: CALL.text },
   filterNote:      { color: 'rgba(255,255,255,0.7)', fontSize: 12, paddingHorizontal: 16, paddingBottom: 8 },
 
   // flexWrap → the 7 controls fold onto a second centered row on narrow phones

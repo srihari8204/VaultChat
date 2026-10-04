@@ -38,6 +38,8 @@ type TestResult = {
   jitter: number;
   connectionType: string;
   timestamp: number;
+  /** Host that measured it. Absent on results saved before it was recorded. */
+  server?: string;
 };
 
 type TestPhase = 'idle' | 'ping' | 'download' | 'upload' | 'done' | 'failed';
@@ -150,9 +152,12 @@ export default function NetworkTestScreen() {
     return cf;
   };
 
-  /** Notes a 429 from our endpoint mid-run; the run then ends with that sentence. */
+  /** Notes a 429 from our endpoint mid-run; the run then ends with that sentence.
+   *  A 401 means the token expired mid-run: the figures are incomplete, and the
+   *  next run re-probes with the current token (or falls back to Cloudflare). */
   const noteLimit = (resp: Response) => {
     if (resp.status === 429) limitHit.current = rateLimitMessage(resp.headers.get('Retry-After'));
+    else if (resp.status === 401 && !limitHit.current) limitHit.current = 'The test server asked this device to sign in again. Run the test again.';
   };
 
   // The list as last loaded or saved. runTest's closure holds `history` as it
@@ -267,8 +272,11 @@ export default function NetworkTestScreen() {
 
     try {
       const connection = await checkConnection();
-      // Re-probed only when there is no target yet, or the last probe was a 429.
-      const t = target ?? await checkServerStatus();
+      // Re-probed every run, with the token as it is now: one HEAD request.
+      // Holding the first target for the screen's lifetime kept its token, so
+      // an expired one turned every request into a 401 that read as "No request
+      // reached …", and a server that gained /net/speed was never picked up.
+      const t = await checkServerStatus();
       if (!mounted.current) return;
       if (!t) { setRunError(limitHit.current ?? 'Too many speed tests. Try again later.'); setPhase('failed'); return; }
 
@@ -308,6 +316,7 @@ export default function NetworkTestScreen() {
           jitter: pg.jitter,
           connectionType: connection,
           timestamp: Date.now(),
+          server: t.host,
         });
       }
     } catch (e: any) {
@@ -506,11 +515,12 @@ export default function NetworkTestScreen() {
                 key={item.id} style={styles.historyRow} accessible
                 // The arrows and stopwatch are read raw by a screen reader, so the
                 // row speaks one sentence instead.
-                accessibilityLabel={`${formatDate(item.timestamp)}, ${item.connectionType}: download ${item.download.toFixed(1)}, upload ${item.upload.toFixed(1)} megabits per second, ping ${item.ping} milliseconds`}
+                accessibilityLabel={`${formatDate(item.timestamp)}, ${item.connectionType}${item.server ? `, measured by ${item.server}` : ''}: download ${item.download.toFixed(1)}, upload ${item.upload.toFixed(1)} megabits per second, ping ${item.ping} milliseconds`}
               >
                 <View style={styles.historyLeft}>
                   <Text style={styles.historyDate}>{formatDate(item.timestamp)}</Text>
-                  <Text style={styles.historyConn}>{item.connectionType}</Text>
+                  {/* Results from different servers are not comparable, so each row says which measured it. */}
+                  <Text style={styles.historyConn} numberOfLines={1}>{item.server ? `${item.connectionType} · ${item.server}` : item.connectionType}</Text>
                 </View>
                 <View style={styles.historyRight}>
                   <View style={styles.historyMetric}>

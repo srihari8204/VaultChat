@@ -67,14 +67,21 @@ function NotificationsContent() {
   const [notifPreview, setNotifPreviewState] = useState<NotifPreview>('name');
   const [remoteLinks, setRemoteLinksState] = useState(false);
 
+  // The history request (and the reload after an SOS) can land after the
+  // screen is gone: no state updates or alerts then.
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const loadSos = useCallback(async () => {
-    try { setSos(await listSOSHistory()); setSosFailed(false); }
-    catch { return false; }
+    try {
+      const rows = await listSOSHistory();
+      if (mounted.current) { setSos(rows); setSosFailed(false); }
+    } catch { return false; }
     return true;
   }, []);
   const refreshSos = useCallback(async () => {
     setSosRefreshing(true);
     const ok = await loadSos();
+    if (!mounted.current) return;
     setSosRefreshing(false);
     if (!ok) Alert.alert('Could not refresh', 'Check your connection and try again.');
   }, [loadSos]);
@@ -151,7 +158,7 @@ function NotificationsContent() {
     } catch (e: any) {
       Alert.alert('Could not send alert', e?.message ?? 'Please try again.');
     } finally {
-      setSending(false);
+      if (mounted.current) setSending(false);
     }
   }, [loadSos]);
 
