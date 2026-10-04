@@ -185,7 +185,7 @@ func (s *ccwireSession) sendViewerList(chatID, uid string, viewers []cvViewer) {
 // location, `ended` picks the terminal event.
 //
 // CHAT SCOPE ONLY. subscribeAllowed maps every ScopeKind to an existing gate,
-// but SCOPE_KIND_CHANNEL is ungated there by design and a run has its own
+// but SCOPE_KIND_CHANNEL is a subscription, not a chat, and a run has its own
 // per-run room and relay (registerRunRelay). Live location has only ever been
 // chat-scoped on the other transport, so anything else is refused rather than
 // silently given a weaker gate than the feature has today.

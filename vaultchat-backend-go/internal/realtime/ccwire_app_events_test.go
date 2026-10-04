@@ -48,7 +48,9 @@ func TestAppEventsNegotiationRequiresBothSides(t *testing.T) {
 func TestAppEventsSharedAuthorizationAndFanout(t *testing.T) {
 	h := &Hub{}
 	sender, _ := newSession("sender", map[string]cachedPerm{"chat": {ok: true, at: time.Now()}})
-	receiver, out := newSession("receiver", nil)
+	// Channel rooms are authorised now (channelAllowed): seed the receiver as a
+	// subscriber of "news", as the DB would answer.
+	receiver, out := newSession("receiver", map[string]cachedPerm{"channel:news": permAt("channel:news", true)})
 	sender.hub, receiver.hub = h, h
 	enableTestEvents(sender)
 	enableTestEvents(receiver)

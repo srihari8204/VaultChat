@@ -21,6 +21,7 @@ import (
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/emitx"
 	"vaultchat/backend-go/internal/httpx"
+	"vaultchat/backend-go/internal/realtime"
 	"vaultchat/backend-go/internal/vault"
 )
 
@@ -230,6 +231,8 @@ func channelJoin(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 500, "Failed to join channel")
 		return
 	}
+	// A cached "no" from before subscribing must not keep the room shut.
+	realtime.BumpChannelPermissions(ch.ID)
 	var n int64
 	if err := db.Pool.QueryRow(ctx,
 		`SELECT COUNT(*) AS n FROM channel_subscribers WHERE channel_id = $1`, ch.ID).Scan(&n); err != nil {
@@ -634,5 +637,7 @@ func channelLeave(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 500, "Failed to leave channel")
 		return
 	}
+	// Live sockets re-check the room on every delivery; drop their cached "yes".
+	realtime.BumpChannelPermissions(ch.ID)
 	httpx.JSON(w, 200, map[string]any{"ok": true})
 }

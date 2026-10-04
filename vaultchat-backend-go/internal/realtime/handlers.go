@@ -206,8 +206,16 @@ func (h *Hub) registerChatHandlersPeer(s *eventPeer) {
 		}
 	})
 
+	// Same rule as join_chat: the room is authorised, not self-asserted. Only
+	// the channel's admin or a current subscriber may listen, so someone who
+	// left (POST /channels/{id}/leave) cannot rejoin the live feed.
 	s.On("channel_join", func(args ...any) {
 		if id := mstr(argMap("channel_join", args), "channelId"); id != "" {
+			if !h.channelAllowed(d, id, s.Context()) {
+				log.Printf("[channel_join] refused uid=%s channel=%s (not a subscriber)", d.uid, id)
+				metrics.Inc("socket_channel_join_refused")
+				return
+			}
 			if !s.Join(Room("channel:" + id)) {
 				return
 			}
@@ -516,6 +524,53 @@ func (h *Hub) runAllowed(d *sockData, runID string, drive bool, parents ...conte
 	d.mu.Unlock()
 	return ok
 }
+
+// channelAllowed is THE broadcast-channel room check, shared by channel_join,
+// the CC-Wire SCOPE_KIND_CHANNEL subscribe and the per-delivery recheck
+// (canReceiveRooms): the channel's admin or a row in channel_subscribers.
+// Cached per socket like chat membership, under the key "channel:<id>" with
+// its own generation, which BumpChannelPermissions (called by the REST leave
+// and join) invalidates. Fails closed with no database.
+func (h *Hub) channelAllowed(d *sockData, channelID string, parents ...context.Context) bool {
+	ctx, cancel := realtimeContext(parents...)
+	defer cancel()
+	if ctx.Err() != nil {
+		return false
+	}
+	key := "channel:" + channelID
+	gen := permGenerationOf(key)
+	d.mu.Lock()
+	entry, cached := d.chatMemberOk[key]
+	d.mu.Unlock()
+	if cached && entry.fresh(gen) {
+		return entry.ok
+	}
+	if db.Pool == nil {
+		return false
+	}
+	ok := false
+	if err := db.Pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM channels c
+		                 WHERE c.id::text = $1
+		                   AND (c.admin_id::text = $2
+		                        OR EXISTS (SELECT 1 FROM channel_subscribers cs
+		                                    WHERE cs.channel_id = c.id AND cs.user_id::text = $2)))`,
+		channelID, d.uid).Scan(&ok); err != nil {
+		return false // not cached: a transient error must not stick for permTTL
+	}
+	d.mu.Lock()
+	if d.chatMemberOk == nil {
+		d.chatMemberOk = map[string]cachedPerm{}
+	}
+	d.chatMemberOk[key] = cachedPerm{ok: ok, gen: gen, at: time.Now()}
+	d.mu.Unlock()
+	return ok
+}
+
+// BumpChannelPermissions drops every socket's cached channel-room decision for
+// this channel, so a leave takes effect on the next delivery instead of after
+// permTTL. Per-process, like BumpChatPermissions (permTTL bounds other replicas).
+func BumpChannelPermissions(channelID string) { BumpChatPermissions("channel:" + channelID) }
 
 // chatMemberAllowed caches the chat-membership check per socket per chat (RLS,
 // server.js db.queryAs). One query per chat for the socket's lifetime.

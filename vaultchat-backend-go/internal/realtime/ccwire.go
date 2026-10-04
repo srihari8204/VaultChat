@@ -907,11 +907,10 @@ func (s *ccwireSession) subscribeAllowed(kind uint32, id string) (allowed bool, 
 		return s.hub.runAllowed(s.d, id, false, s.ctxOrBG()), false, nil
 
 	case ccwire.ScopeKindChannel:
-		// UNGATED, and recorded as such in envelope.proto. channel_join has no
-		// check today; adding one HERE would be a second, divergent policy.
-		// When channels grow a membership gate it belongs in one function both
-		// transports call.
-		return true, false, nil
+		// channelAllowed is the one gate both transports call (channel_join in
+		// handlers.go uses it too): admin or current subscriber. This used to
+		// be ungated (envelope.proto still says so in its comment).
+		return s.hub.channelAllowed(s.d, id, s.ctxOrBG()), false, nil
 
 	case ccwire.ScopeKindAdmin:
 		// The admin key is a Socket.IO handshake concept and is not accepted on

@@ -341,10 +341,10 @@ func sbDecideReturn(w http.ResponseWriter, r *http.Request) {
 	if b.Approve {
 		sbNotify(ctx, custID, "Return approved ✅",
 			sbMoney(ctx, shopID, refund.Float())+" has been credited to your account",
-			map[string]any{"event": "return_approved", "returnId": returnID, "creditNoteId": noteID})
+			map[string]any{"event": "return_approved", "returnId": returnID, "orderId": orderID, "creditNoteId": noteID})
 	} else {
 		sbNotify(ctx, custID, "Return declined",
-			b.Note, map[string]any{"event": "return_rejected", "returnId": returnID})
+			b.Note, map[string]any{"event": "return_rejected", "returnId": returnID, "orderId": orderID})
 	}
 	out := map[string]any{"ok": true, "status": map[bool]string{true: "completed", false: "rejected"}[b.Approve]}
 	if noteID != "" {

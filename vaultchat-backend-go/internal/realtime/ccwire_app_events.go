@@ -325,7 +325,11 @@ func (s *ccwireSession) canReceiveRooms(rooms []string, parents ...context.Conte
 				return true
 			}
 		case "channel":
-			return true // same public-channel policy as the shared join handler
+			// Re-checked per delivery like chats: a subscriber who left stops
+			// receiving even if their session is still in the room.
+			if s.hub.channelAllowed(s.d, id, ctx) {
+				return true
+			}
 		}
 	}
 	return false

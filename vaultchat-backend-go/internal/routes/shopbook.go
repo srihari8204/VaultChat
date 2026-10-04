@@ -1362,7 +1362,22 @@ func sbMyShop(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	httpx.JSON(w, 200, map[string]any{"shop": m})
+	// The owner's account state beside the shop: the plan every Pro gate
+	// actually checks (sbEntitledPlan) and a pending "request Pro" (migration
+	// 141; cleared by the admin entitlement write), so the app needs no
+	// second call to know either.
+	shopID, _ := m["id"].(string)
+	var proRequested *time.Time
+	if err := db.Pool.QueryRow(ctx,
+		`SELECT pro_requested_at FROM shopbook_shop WHERE id=$1`, shopID).Scan(&proRequested); err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	httpx.JSON(w, 200, map[string]any{
+		"shop":           m,
+		"entitledPlan":   sbEntitledPlan(ctx, shopID),
+		"proRequestedAt": httpx.JST(proRequested),
+	})
 }
 
 func sbUpsertShop(w http.ResponseWriter, r *http.Request) {
