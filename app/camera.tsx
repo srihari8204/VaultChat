@@ -58,8 +58,8 @@ const SCRIM_STRONG = 'rgba(0,0,0,0.62)';
 export default function CameraScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { chatId, peerUid, peerName, returnTo, startMode } = useLocalSearchParams<{
-    chatId?: string; peerUid?: string; peerName?: string; returnTo?: string; startMode?: string;
+  const { chatId, peerUid, peerName, startMode } = useLocalSearchParams<{
+    chatId?: string; peerUid?: string; peerName?: string; startMode?: string;
   }>();
   // The composer's slide-up gesture opens straight into a round video note.
   const noteStart = startMode === 'note';
@@ -218,10 +218,10 @@ export default function CameraScreen() {
     // copy of it), and pushes it if the stack is shallow — which is exactly the
     // notification-deep-link case where a plain back() would land on the list.
     router.dismissTo({
-      pathname: (returnTo || '/chat') as any,
+      pathname: '/chat',   // the only return target (callers' `returnTo` is always '/chat'); a route param must not pick an arbitrary screen
       params: returnParams({ chatId, peerUid, peerName }, capture),
     });
-  }, [router, returnTo, chatId, peerUid, peerName, dropPages]);
+  }, [router, chatId, peerUid, peerName, dropPages]);
 
   // ── Permissions, asked at the moment they are earned ──────────────────
   const ensureMic = useCallback(async () => {
@@ -243,18 +243,37 @@ export default function CameraScreen() {
   }, [recording, mode, ensureMic]);
 
   // ── Capture ───────────────────────────────────────────────────────────
+  // Only one capture goes back to the chat, so a photo, video or gallery pick
+  // taken while scanned pages are waiting would throw the pages away. Ask
+  // first, and capture nothing either way: a discard clears the pages and the
+  // next press shoots; "Keep pages" leaves everything as it was.
+  const pagesBlockCapture = useCallback(() => {
+    const n = scanPagesRef.current.length;
+    if (!n) return false;
+    Alert.alert('Discard scanned pages?', `You have ${n} scanned page${n > 1 ? 's' : ''} not attached yet. A photo or video is sent on its own, so attach the pages first or discard them.`, [
+      { text: 'Keep pages', style: 'cancel' },
+      { text: 'Discard pages', style: 'destructive', onPress: () => {
+        dropPages(scanPagesRef.current);
+        setScanPages([]);
+      } },
+    ]);
+    return true;
+  }, [dropPages]);
+
   const takePhoto = useCallback(async () => {
     if (busy || recording || !cameraRef.current) return;
+    if (pagesBlockCapture()) return;
     setBusy(true);
     try {
       const photo = await cameraRef.current.takePictureAsync({ quality: 0.85 });
       if (photo?.uri) leave({ uri: photo.uri, type: 'image', viewOnce });
     } catch { setNotice('Could not take the photo. Try again.'); }
     finally { setBusy(false); }
-  }, [busy, recording, leave, viewOnce]);
+  }, [busy, recording, leave, viewOnce, pagesBlockCapture]);
 
   const startRecording = useCallback(async () => {
     if (recording || busy || !cameraRef.current) return;
+    if (pagesBlockCapture()) { holdRef.current = false; return; }
     if (!(await ensureMic())) { holdRef.current = false; return; }
     // Hold-to-record from PHOTO: flip the preview to video, then back after.
     const revert = mode !== 'VIDEO';
@@ -276,7 +295,7 @@ export default function CameraScreen() {
       setRecSecs(0);
       if (revert) setMode('PHOTO');
     }
-  }, [recording, busy, ensureMic, mode, isNote, leave, viewOnce]);
+  }, [recording, busy, ensureMic, mode, isNote, leave, viewOnce, pagesBlockCapture]);
 
   const stopRecording = useCallback(() => {
     try { cameraRef.current?.stopRecording(); } catch {}
@@ -294,10 +313,11 @@ export default function CameraScreen() {
       if (scannedImages?.length) {
         setScanPages(prev => [...prev, ...scannedImages.map(fileUri)].slice(0, MAX_SCAN_PAGES));
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       // Never ML Kit's raw text. A user cancel is not an error at all.
-      if (/cancel/i.test(String(e?.message ?? ''))) return;
-      console.warn('[camera] scan failed:', e?.message ?? e);
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/cancel/i.test(msg)) return;
+      console.warn('[camera] scan failed:', msg);
       setNotice('The document scanner could not start. It needs Google Play Services on this device.');
     } finally { scanningRef.current = false; }
   }, [busy]);
@@ -324,8 +344,8 @@ export default function CameraScreen() {
       // The pages are inside the PDF now; their plaintext copies can go.
       dropPages(scanPages);
       leave({ uri, type: 'file', filename: docFilename(docName, style, new Date()) });
-    } catch (e: any) {
-      console.warn('[camera] PDF build failed:', e?.message ?? e);
+    } catch (e: unknown) {
+      console.warn('[camera] PDF build failed:', e instanceof Error ? e.message : e);
       setNotice('Could not build the PDF. Your pages are kept — try Attach again.');
     } finally { setBusy(false); }
   }, [busy, scanPages, style, docName, leave, dropPages]);
@@ -350,13 +370,14 @@ export default function CameraScreen() {
 
   const openPicker = useCallback(async () => {
     if (busy || recording) return;
+    if (pagesBlockCapture()) return;
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) { setNotice('Allow photo access to pick from your gallery.'); return; }
     const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images', 'videos'], quality: 1 });
     const a = r.assets?.[0];
     if (r.canceled || !a) return;
     leave({ uri: a.uri, type: a.type === 'video' ? 'video' : 'image', viewOnce });
-  }, [busy, recording, leave, viewOnce]);
+  }, [busy, recording, leave, viewOnce, pagesBlockCapture]);
 
   const onShutter = useCallback(() => {
     if (mode === 'SCAN') return scanPage();
@@ -442,7 +463,10 @@ export default function CameraScreen() {
       {isNote && <View pointerEvents="none" style={s.noteFrame} />}
 
       {/* Top rail — over the preview, no bar background. */}
-      <View style={[s.rail, { top: Math.max(insets.top, SPACING.md) }]}>
+      {/* While the review sheet is open the rails behind it are hidden from
+          screen readers (Android here; iOS via accessibilityViewIsModal below). */}
+      <View style={[s.rail, { top: Math.max(insets.top, SPACING.md) }]}
+        importantForAccessibility={reviewing ? 'no-hide-descendants' : 'auto'}>
         <Pressable onPress={() => leave()} style={s.railBtn} hitSlop={8}
           accessibilityRole="button" accessibilityLabel="Close camera">
           <Ionicons name="close" size={26} color={AuroraDark.text} />
@@ -470,7 +494,8 @@ export default function CameraScreen() {
       )}
 
       {/* Bottom — opaque black footer. */}
-      <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, SPACING.md) }]}>
+      <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, SPACING.md) }]}
+        importantForAccessibility={reviewing ? 'no-hide-descendants' : 'auto'}>
         {recording ? (
           <View style={s.timerRow}>
             <View style={s.recDot} />
@@ -597,6 +622,7 @@ export default function CameraScreen() {
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={s.sheetWrap}
+          accessibilityViewIsModal
         >
           <Pressable style={s.sheetScrim} onPress={() => setReviewing(false)}
             accessibilityRole="button" accessibilityLabel="Back to scanning" />
@@ -635,7 +661,7 @@ export default function CameraScreen() {
                     style={[s.chip, on && s.chipOn]}
                     accessibilityRole="radio" accessibilityState={{ selected: on }}
                     accessibilityLabel={`${st.label} style`}>
-                    <Ionicons name={st.icon as any} size={16}
+                    <Ionicons name={st.icon as keyof typeof Ionicons.glyphMap} size={16}
                       color={on ? BRAND_ACCENT : AuroraDark.textDim} />
                     <Text variant="callout" color={on ? AuroraDark.text : AuroraDark.textDim}>
                       {st.label}

@@ -308,18 +308,18 @@ function FileViewerScreen() {
                 const full = extractDocBlocks(bytes, fileName);
                 if (stale() || full.empty) return;
                 setDocBlocks(full.blocks);
-              } catch (fe: any) {
+              } catch (fe: unknown) {
                 // The preview is already on screen and stays there. A failure
                 // here costs the tail of the document, never the head.
-                console.warn('[docBlocks] full parse failed, keeping the preview —', fe?.message ?? fe);
+                console.warn('[docBlocks] full parse failed, keeping the preview —', fe instanceof Error ? fe.message : fe);
               } finally {
                 if (!stale()) setDocMore(false);
               }
             });
           }
         }
-      } catch (be: any) {
-        console.warn('[docBlocks] structured read failed, showing plain text —', be?.message ?? be);
+      } catch (be: unknown) {
+        console.warn('[docBlocks] structured read failed, showing plain text —', be instanceof Error ? be.message : be);
         setDocBlocks(null);
       }
       if (!blocked) {
@@ -329,7 +329,7 @@ function FileViewerScreen() {
         setDocText(empty ? '' : text);
         setDocEmpty(empty);
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       // Fall back to the hand-off card rather than a dead end — but say WHY.
       // Silently showing "open in another app" is indistinguishable from the
       // feature not existing, which is exactly how it was reported.
@@ -343,7 +343,7 @@ function FileViewerScreen() {
       // — which tells the person holding the phone nothing and leaks an
       // internal path. Anything that names a native module or a Java class is
       // ours to explain, not theirs to read.
-      const raw = String(e?.message ?? '');
+      const raw = e instanceof Error ? e.message : '';
       const internal = /ExponentFileSystem|java\.io\.|java\.lang\.|rejected|ENOENT|EACCES/i.test(raw);
       console.warn('[docText] could not read', fileName, '—', raw || e);
       if (stale()) return;
@@ -416,8 +416,8 @@ function FileViewerScreen() {
         // it is read when pdf.js actually gives up — see the effect below.
         if (fileType === 'pdf') { setDocLoading(false); return; }
         await readDoc(local);
-      } catch (e: any) {
-        console.warn('[docText] could not reach', fileName, '—', e?.message ?? e);
+      } catch (e: unknown) {
+        console.warn('[docText] could not reach', fileName, '—', e instanceof Error ? e.message : e);
         setDocError('This file could not be opened from where it is stored. Try opening it in another app.');
         setDocLoading(false);
       }
@@ -462,8 +462,8 @@ function FileViewerScreen() {
         if ((fileType === 'office' || fileType === 'pdf') && docKind(fileName) !== 'unsupported') await loadDocTextInEffect();
         else if (fileType === 'office' || fileType === 'pdf') setDocLoading(false);
         setLoading(false);
-      } catch (e: any) {
-        console.warn('[file-viewer] load failed:', e?.message ?? e);
+      } catch (e: unknown) {
+        console.warn('[file-viewer] load failed:', e instanceof Error ? e.message : e);
         setError('This file could not be loaded. Check your connection and try again.');
         setLoading(false);
       }
@@ -568,8 +568,8 @@ function FileViewerScreen() {
       } else {
         setError('No app on this device can open this file type.');
       }
-    } catch (e: any) {
-      console.warn('[file-viewer] hand-off failed:', e?.message ?? e);
+    } catch (e: unknown) {
+      console.warn('[file-viewer] hand-off failed:', e instanceof Error ? e.message : e);
       setError('This file could not be handed to another app. Check your connection and try again.');
     } finally {
       setOpeningExternally(false);
@@ -588,8 +588,8 @@ function FileViewerScreen() {
         return;
       }
       await Sharing.shareAsync(localUri);
-    } catch (e: any) {
-      console.warn('[file-viewer] share failed:', e?.message ?? e);
+    } catch (e: unknown) {
+      console.warn('[file-viewer] share failed:', e instanceof Error ? e.message : e);
       Alert.alert('Could not share', 'This file could not be shared. Check your connection and try again.');
     }
   };
@@ -706,7 +706,7 @@ function FileViewerScreen() {
 
           <View style={s.headerCenter}>
             <View style={s.headerFilenameRow}>
-              <Text style={s.headerIcon} importantForAccessibility="no" accessibilityElementsHidden>{fmt.icon}</Text>
+              <Ionicons name={fmt.icon} size={16} color={C.accent} style={s.headerIcon} importantForAccessibility="no" accessibilityElementsHidden />
               <Text style={s.headerFilename} numberOfLines={1} accessibilityRole="header">{fileName}</Text>
             </View>
             {fileSize > 0 && (

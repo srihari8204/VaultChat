@@ -35,6 +35,15 @@ const FONT_FAMILY: Record<ReaderSettings['font'], string | undefined> = {
   mono: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
 };
 
+/** `#RRGGBB` at opacity `a`. The reader palettes are fixed 6-digit hex
+ *  (lib/readerSettings READER_THEMES), so this replaces string-appended
+ *  alpha suffixes with one checked conversion. */
+function withAlpha(hex: string, a: number): string {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  if (!m) return hex;
+  return `rgba(${parseInt(m[1], 16)},${parseInt(m[2], 16)},${parseInt(m[3], 16)},${a})`;
+}
+
 function ReaderScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -48,11 +57,16 @@ function ReaderScreen() {
   const [cached, setCached] = useState<string | null>(fromCache ? null : '');
   // A failed cache READ is an error with Retry, not "no longer available".
   const [readFailed, setReadFailed] = useState(false);
+  // Why an empty read is empty: the row is not in this device's store yet
+  // (a server message the chat has not saved locally), or it is stored only
+  // as ciphertext this device has no plaintext for. Neither means "deleted".
+  const [unavailable, setUnavailable] = useState<null | 'notHere' | 'locked'>(null);
   const [reloadKey, setReloadKey] = useState(0);
   useEffect(() => {
     if (!fromCache) return;
     let live = true;
     setReadFailed(false);
+    setUnavailable(null);
     setCached(null);
     getCachedMessagesByIds(params.chatId!, [msgId])
       .then(async ([m]) => {
@@ -64,7 +78,9 @@ function ReaderScreen() {
           const pt = await e2eeGetCached(params.chatId!, msgId, m.content);
           if (pt && pt !== E2EE_UNDECRYPTABLE) text = pt;
         }
-        if (live) setCached(text);
+        if (!live) return;
+        setUnavailable(!m ? 'notHere' : m.content && !text ? 'locked' : null);
+        setCached(text);
       })
       .catch(() => { if (live) { setReadFailed(true); setCached(''); } });
     return () => { live = false; };
@@ -94,6 +110,7 @@ function ReaderScreen() {
   }, []);
 
   const theme = READER_THEMES[cfg.theme];
+  const rule = withAlpha(theme.dim, 0.13);
   const pad = MARGIN_PX[cfg.margins];
   const fontFamily = FONT_FAMILY[cfg.font];
 
@@ -102,38 +119,38 @@ function ReaderScreen() {
     switch (b.kind) {
       case 'heading':
         return (
-          <Text key={i} style={[common, { fontSize: cfg.size + 5, fontWeight: '700', marginTop: 26, marginBottom: 8, lineHeight: (cfg.size + 5) * 1.3 }]}>
+          <Text key={i} style={[common, st.heading, { fontSize: cfg.size + 5, lineHeight: (cfg.size + 5) * 1.3 }]}>
             {b.text}
           </Text>
         );
       case 'bullet':
         return (
-          <View key={i} style={{ flexDirection: 'row', marginTop: 8, paddingRight: 6 }}>
-            <Text style={[common, { fontSize: cfg.size, marginRight: 10 }]}>•</Text>
-            <Text style={[common, { fontSize: cfg.size, flex: 1 }]}>{b.text}</Text>
+          <View key={i} style={st.bullet}>
+            <Text style={[common, st.bulletDot, { fontSize: cfg.size }]}>•</Text>
+            <Text style={[common, st.flex, { fontSize: cfg.size }]}>{b.text}</Text>
           </View>
         );
       case 'quote':
         return (
-          <View key={i} style={{ flexDirection: 'row', marginTop: 16 }}>
-            <View style={{ width: 3, borderRadius: 2, backgroundColor: theme.dim, marginRight: 12 }} />
-            <Text style={[common, { fontSize: cfg.size, flex: 1, fontStyle: 'italic', color: theme.dim }]}>{b.text}</Text>
+          <View key={i} style={st.quote}>
+            <View style={[st.quoteBar, { backgroundColor: theme.dim }]} />
+            <Text style={[common, st.quoteText, { fontSize: cfg.size, color: theme.dim }]}>{b.text}</Text>
           </View>
         );
       default:
-        return <Text key={i} style={[common, { fontSize: cfg.size, marginTop: 16 }]}>{b.text}</Text>;
+        return <Text key={i} style={[common, st.para, { fontSize: cfg.size }]}>{b.text}</Text>;
     }
   };
 
   const atLabel = params.at ? new Date(String(params.at)).toLocaleString() : '';
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.bg }}>
+    <View style={[st.flex, { backgroundColor: theme.bg }]}>
       <Stack.Screen options={{ headerShown: false }} />
       <StatusBar barStyle={cfg.theme === 'light' || cfg.theme === 'sepia' ? 'dark-content' : 'light-content'} />
 
       {/* Header */}
-      <View style={[st.head, { paddingTop: insets.top + 8, borderBottomColor: theme.dim + '22' }]}>
+      <View style={[st.head, { paddingTop: insets.top + 8, borderBottomColor: rule }]}>
         <TouchableOpacity onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Close the reader" hitSlop={12}>
           <Ionicons name="chevron-down" size={26} color={theme.text} />
         </TouchableOpacity>
@@ -146,7 +163,7 @@ function ReaderScreen() {
       </View>
 
       {cached === null ? (
-        <ActivityIndicator style={{ marginTop: 48 }} color={theme.dim} accessibilityLabel="Loading message" />
+        <ActivityIndicator style={st.loading} color={theme.dim} accessibilityLabel="Loading message" />
       ) : readFailed ? (
         <View style={st.state} accessibilityLiveRegion="polite">
           <Ionicons name="alert-circle-outline" size={44} color={theme.dim} />
@@ -158,39 +175,54 @@ function ReaderScreen() {
           </TouchableOpacity>
         </View>
       ) : !body.trim() ? (
-        // Reached without a message (bare deep link): say so rather than
-        // render "Long message · 0 words".
-        <View style={st.state}>
+        // Reached without a message (bare deep link), or the message is not
+        // readable on this device: say which, rather than render
+        // "Long message · 0 words" or claim a message that exists is gone.
+        <View style={st.state} accessibilityLiveRegion="polite">
           <Ionicons name="document-text-outline" size={44} color={theme.dim} />
-          <Text accessibilityRole="header" style={[st.stateTitle, { color: theme.text }]}>Nothing to read</Text>
-          <Text style={[st.stateBody, { color: theme.dim }]}>This message is no longer available.</Text>
+          <Text accessibilityRole="header" style={[st.stateTitle, { color: theme.text }]}>
+            {unavailable === 'notHere' ? 'Not on this device yet' : unavailable === 'locked' ? 'Can’t show this message here' : 'Nothing to read'}
+          </Text>
+          <Text style={[st.stateBody, { color: theme.dim }]}>
+            {unavailable === 'notHere'
+              ? 'This message hasn’t been saved on this device yet. Go back to the chat, let it finish loading, then try again.'
+              : unavailable === 'locked'
+                ? 'This message is end-to-end encrypted and hasn’t been decrypted on this device. Open it in the chat first, then try again.'
+                : 'This message is no longer available.'}
+          </Text>
+          {unavailable && (
+            <TouchableOpacity onPress={() => setReloadKey(k => k + 1)} accessibilityRole="button" accessibilityLabel="Try again"
+              style={st.stateBtn}>
+              <Text style={[st.stateBtnTxt, { color: theme.text }]}>Try again</Text>
+            </TouchableOpacity>
+          )}
         </View>
       ) : (
       <ScrollView
         ref={scrollRef}
-        style={{ flex: 1 }}
+        style={st.flex}
         contentContainerStyle={{ paddingHorizontal: pad, paddingBottom: insets.bottom + 48 }}
         showsVerticalScrollIndicator={false}
       >
-        <Text numberOfLines={1} style={{ color: theme.text, fontFamily, fontSize: cfg.size + 12, fontWeight: '800', marginTop: 24, lineHeight: (cfg.size + 12) * 1.2 }}>
+        <Text numberOfLines={1} style={[st.pageTitle, { color: theme.text, fontFamily, fontSize: cfg.size + 12, lineHeight: (cfg.size + 12) * 1.2 }]}>
           {title || 'Long message'}
         </Text>
-        <Text style={{ color: theme.dim, fontSize: 13, marginTop: 10 }}>
+        <Text style={[st.byline, { color: theme.dim }]}>
           {[author, atLabel].filter(Boolean).join(' · ')}
         </Text>
-        <Text style={{ color: theme.dim, fontSize: 12, marginTop: 4 }}>{formatStats(stats)}</Text>
-        <View style={{ height: 1, backgroundColor: theme.dim + '22', marginTop: 18 }} />
+        <Text style={[st.stats, { color: theme.dim }]}>{formatStats(stats)}</Text>
+        <View style={[st.rule, { backgroundColor: rule }]} />
 
         {(pages[page] ?? []).map(renderBlock)}
 
         {cfg.layout === 'pages' && pages.length > 1 && (
           <View style={st.pager}>
             <TouchableOpacity disabled={page === 0} onPress={() => setPage(p => p - 1)} accessibilityRole="button" accessibilityLabel="Previous page" accessibilityState={{ disabled: page === 0 }} hitSlop={10}>
-              <Ionicons name="chevron-back" size={22} color={page === 0 ? theme.dim + '55' : theme.text} />
+              <Ionicons name="chevron-back" size={22} color={page === 0 ? withAlpha(theme.dim, 0.33) : theme.text} />
             </TouchableOpacity>
-            <Text style={{ color: theme.dim, fontSize: 13 }}>{page + 1} / {pages.length}</Text>
+            <Text style={[st.pageNum, { color: theme.dim }]}>{page + 1} / {pages.length}</Text>
             <TouchableOpacity disabled={page >= pages.length - 1} onPress={() => setPage(p => p + 1)} accessibilityRole="button" accessibilityLabel="Next page" accessibilityState={{ disabled: page >= pages.length - 1 }} hitSlop={10}>
-              <Ionicons name="chevron-forward" size={22} color={page >= pages.length - 1 ? theme.dim + '55' : theme.text} />
+              <Ionicons name="chevron-forward" size={22} color={page >= pages.length - 1 ? withAlpha(theme.dim, 0.33) : theme.text} />
             </TouchableOpacity>
           </View>
         )}
@@ -200,7 +232,7 @@ function ReaderScreen() {
       {/* ── Settings sheet ─────────────────────────────────────────── */}
       <Modal visible={showSettings} transparent animationType="slide" onRequestClose={() => setShowSettings(false)}>
         <Pressable style={st.scrim} onPress={() => setShowSettings(false)} accessibilityRole="button" accessibilityLabel="Close reading settings" />
-        <View style={[st.sheet, { backgroundColor: theme.bg, borderColor: theme.dim + '33', paddingBottom: insets.bottom + 16, maxHeight: '80%' }]}>
+        <View style={[st.sheet, { backgroundColor: theme.bg, borderColor: withAlpha(theme.dim, 0.2), paddingBottom: insets.bottom + 16 }]}>
           <ScrollView showsVerticalScrollIndicator={false}>
             <Text style={[st.sheetTitle, { color: theme.text }]}>Reader settings</Text>
 
@@ -230,10 +262,10 @@ function ReaderScreen() {
 
             <View style={st.sheetActions}>
               <TouchableOpacity onPress={async () => setCfg(await resetReaderSettings())} accessibilityRole="button" accessibilityLabel="Reset reading settings">
-                <Text style={{ color: theme.dim, fontSize: 15, fontWeight: '600' }}>Reset</Text>
+                <Text style={[st.resetTxt, { color: theme.dim }]}>Reset</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => setShowSettings(false)} accessibilityRole="button" accessibilityLabel="Done">
-                <Text style={{ color: theme.text, fontSize: 15, fontWeight: '700' }}>Done</Text>
+                <Text style={[st.doneTxt, { color: theme.text }]}>Done</Text>
               </TouchableOpacity>
             </View>
           </ScrollView>
@@ -248,22 +280,21 @@ function Seg({ label, options, value, onChange, theme }: {
   onChange: (v: string) => void; theme: { text: string; dim: string; bg: string };
 }) {
   return (
-    <View style={{ marginTop: 20 }}>
-      <Text style={{ color: theme.dim, fontSize: 12, fontWeight: '700', letterSpacing: 1, marginBottom: 8 }}>
+    <View style={st.group}>
+      <Text style={[st.groupLabel, { color: theme.dim }]}>
         {label.toUpperCase()}
       </Text>
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+      <View style={st.segRow}>
         {options.map(([v, lbl]) => {
           const on = v === value;
           return (
             <TouchableOpacity key={v} onPress={() => onChange(v)} activeOpacity={0.8}
               accessibilityRole="radio" accessibilityLabel={`${label}: ${lbl}`} accessibilityState={{ selected: on }}
-              style={{
-                paddingVertical: 9, paddingHorizontal: 16, borderRadius: 10, borderWidth: 1,
-                borderColor: on ? theme.text : theme.dim + '44',
-                backgroundColor: on ? theme.text + '18' : 'transparent',
-              }}>
-              <Text style={{ color: on ? theme.text : theme.dim, fontSize: 14, fontWeight: on ? '700' : '500' }}>{lbl}</Text>
+              style={[st.seg, {
+                borderColor: on ? theme.text : withAlpha(theme.dim, 0.27),
+                backgroundColor: on ? withAlpha(theme.text, 0.09) : 'transparent',
+              }]}>
+              <Text style={[st.segTxt, on && st.segTxtOn, { color: on ? theme.text : theme.dim }]}>{lbl}</Text>
             </TouchableOpacity>
           );
         })}
@@ -277,18 +308,43 @@ function Stepper({ label, value, onDec, onInc, theme }: {
   theme: { text: string; dim: string };
 }) {
   return (
-    <View style={{ marginTop: 20, flexDirection: 'row', alignItems: 'center' }}>
-      <Text style={{ color: theme.dim, fontSize: 12, fontWeight: '700', letterSpacing: 1, flex: 1 }}>
+    <View style={[st.group, st.stepRow]}>
+      <Text style={[st.groupLabel, st.stepLabel, { color: theme.dim }]}>
         {label.toUpperCase()}
       </Text>
       <TouchableOpacity onPress={onDec} accessibilityRole="button" accessibilityLabel={`Decrease ${label.toLowerCase()}`} hitSlop={10}><Ionicons name="remove-circle-outline" size={26} color={theme.text} /></TouchableOpacity>
-      <Text style={{ color: theme.text, fontSize: 15, fontWeight: '600', minWidth: 56, textAlign: 'center' }}>{value}</Text>
+      <Text style={[st.stepValue, { color: theme.text }]}>{value}</Text>
       <TouchableOpacity onPress={onInc} accessibilityRole="button" accessibilityLabel={`Increase ${label.toLowerCase()}`} hitSlop={10}><Ionicons name="add-circle-outline" size={26} color={theme.text} /></TouchableOpacity>
     </View>
   );
 }
 
 const st = StyleSheet.create({
+  flex: { flex: 1 },
+  loading: { marginTop: 48 },
+  heading: { fontWeight: '700', marginTop: 26, marginBottom: 8 },
+  bullet: { flexDirection: 'row', marginTop: 8, paddingRight: 6 },
+  bulletDot: { marginRight: 10 },
+  quote: { flexDirection: 'row', marginTop: 16 },
+  quoteBar: { width: 3, borderRadius: 2, marginRight: 12 },
+  quoteText: { flex: 1, fontStyle: 'italic' },
+  para: { marginTop: 16 },
+  pageTitle: { fontWeight: '800', marginTop: 24 },
+  byline: { fontSize: 13, marginTop: 10 },
+  stats: { fontSize: 12, marginTop: 4 },
+  rule: { height: 1, marginTop: 18 },
+  pageNum: { fontSize: 13 },
+  resetTxt: { fontSize: 15, fontWeight: '600' },
+  doneTxt: { fontSize: 15, fontWeight: '700' },
+  group: { marginTop: 20 },
+  groupLabel: { fontSize: 12, fontWeight: '700', letterSpacing: 1, marginBottom: 8 },
+  segRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  seg: { paddingVertical: 9, paddingHorizontal: 16, borderRadius: 10, borderWidth: 1 },
+  segTxt: { fontSize: 14, fontWeight: '500' },
+  segTxtOn: { fontWeight: '700' },
+  stepRow: { flexDirection: 'row', alignItems: 'center' },
+  stepLabel: { flex: 1, marginBottom: 0 },
+  stepValue: { fontSize: 15, fontWeight: '600', minWidth: 56, textAlign: 'center' },
   head: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
     paddingHorizontal: 16, paddingBottom: 10, borderBottomWidth: StyleSheet.hairlineWidth,
@@ -297,7 +353,7 @@ const st = StyleSheet.create({
   pager: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 26, marginTop: 36 },
   scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)' },
   sheet: {
-    position: 'absolute', left: 0, right: 0, bottom: 0,
+    position: 'absolute', left: 0, right: 0, bottom: 0, maxHeight: '80%',
     borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1,
     paddingHorizontal: 20, paddingTop: 18,
   },

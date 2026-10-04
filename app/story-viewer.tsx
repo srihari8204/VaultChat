@@ -149,11 +149,11 @@ function StoryViewerScreen() {
         if (cancel) return;
         putStoryFeed(feed);
         apply(feed, !seed);
-      } catch (e: any) {
+      } catch (e: unknown) {
         // With a cached entry already on screen there is something to look at,
         // so a failed revalidation must not replace it with an error.
         if (!cancel && !seed) {
-          console.warn('[story-viewer] feed load failed:', e?.message ?? e);
+          console.warn('[story-viewer] feed load failed:', e instanceof Error ? e.message : e);
           setError("Couldn't load these stories. Check your connection and try again.");
         }
       }
@@ -313,9 +313,11 @@ function StoryViewerScreen() {
   }, [entry, index, loaded]);
 
   // Reset the "loaded" gate whenever the current story changes. Text stories
-  // have no media to wait for, so they're ready immediately.
+  // have no media to wait for, so they're ready immediately — and so is a
+  // media story with no attachment id: nothing will ever load, so its time
+  // runs at once instead of after the 12 s stall timer below.
   useEffect(() => {
-    setLoaded(current?.mediaType === 'text');
+    setLoaded(current?.mediaType === 'text' || (!!current && !current.attachmentId));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id]);
 
@@ -443,8 +445,8 @@ function StoryViewerScreen() {
               if (next.length === 0) { close(); return; }
               setEntry({ ...entry!, stories: next });
               setIndex(Math.min(index, next.length - 1));
-            } catch (e: any) {
-              console.warn('[story-viewer] delete failed:', e?.message ?? e);
+            } catch (e: unknown) {
+              console.warn('[story-viewer] delete failed:', e instanceof Error ? e.message : e);
               Alert.alert('Delete failed', 'The story could not be deleted. Check your connection and try again.');
             }
           }
@@ -548,7 +550,7 @@ function StoryViewerScreen() {
             onSolved={() => clear(current.id)}
             onAnswer={async (ans) => {
               if (!lockedEnvelope || !current.gateSalt) return false;
-              let locked: any;
+              let locked: { salt?: string; envelope: string };
               try { locked = JSON.parse(lockedEnvelope); } catch { return false; }
               const mk = await unlockKeyWithAnswer(
                 { salt: locked.salt ?? current.gateSalt, envelope: locked.envelope },
@@ -648,8 +650,12 @@ function StoryViewerScreen() {
 
       {/* Viewers sheet */}
       {viewersOpen && (
-        <Pressable style={S.viewersBackdrop} onPress={closeViewers} accessibilityRole="button" accessibilityLabel="Close viewers list">
-          <Pressable style={[S.viewersSheet, { paddingBottom: insets.bottom + 16 }]} onPress={(e) => e.stopPropagation()} accessible={false} accessibilityRole="none">
+        // The backdrop is a sibling of the sheet, not its parent: an accessible
+        // button wrapping the sheet hid its rows from VoiceOver. The overlay is
+        // modal for screen readers, so the story behind it is not reachable.
+        <View style={S.viewersBackdrop} accessibilityViewIsModal>
+          <Pressable style={StyleSheet.absoluteFill} onPress={closeViewers} accessibilityRole="button" accessibilityLabel="Close viewers list" />
+          <View style={[S.viewersSheet, { paddingBottom: insets.bottom + 16 }]}>
             <Text style={S.viewersTitle} accessibilityRole="header">
               {viewers ? `${viewers.length} ${viewers.length === 1 ? 'viewer' : 'viewers'}` : viewersFailed ? 'Viewers' : 'Loading…'}
             </Text>
@@ -684,8 +690,8 @@ function StoryViewerScreen() {
                 <Text style={S.viewerWhen}>{formatAgo(v.viewedAt)}</Text>
               </View>
             ))}
-          </Pressable>
-        </Pressable>
+          </View>
+        </View>
       )}
     </View>
   );

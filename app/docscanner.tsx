@@ -29,6 +29,7 @@ import { listChats, chatTitle, type ChatSummary } from '../lib/chatService';
 import DocumentScanner from 'react-native-document-scanner-plugin';
 import { docFilename, DEFAULT_STYLE } from '../lib/docs/docStyle';
 import { sealJson, openJson, encryptFileTo, decryptToTemp } from '../lib/scanVault';
+import { updateRecent, RecentListUnavailable, type RecentStore } from '../lib/media/scanRecent';
 import type { MediaKey } from '../lib/mediaCrypto';
 
 /** Pre-encryption list: plaintext JSON. Read once, migrated, then removed. */
@@ -126,11 +127,25 @@ function DocScannerContent() {
   };
   useEffect(() => () => { runRef.current++; dropPageFiles(); }, []);
 
-  // Throws when the sealed list cannot be written: it holds every scan's key,
-  // so a failed write must fail the caller rather than look saved.
-  const persistRecent = async (docs: ScannedDoc[]) => {
-    await AsyncStorage.setItem(RECENT_KEY, await sealJson(docs.slice(0, 20)));
-    setRecentDocs(docs);
+  // Every change to the sealed list re-reads it and applies the change to
+  // what is STORED (lib/media/scanRecent), never to this screen's copy: after
+  // a failed load that copy is [], and saving it would drop every older
+  // scan's key. Throws when the list cannot be read or written, so a failed
+  // save fails the caller rather than looking saved.
+  const recentStore = useMemo<RecentStore<ScannedDoc>>(() => ({
+    readSealed: () => AsyncStorage.getItem(RECENT_KEY),
+    hasLegacy: async () => (await AsyncStorage.getItem(LEGACY_RECENT_KEY)) != null,
+    open: sealed => openJson<ScannedDoc[]>(sealed),
+    write: async docs => { await AsyncStorage.setItem(RECENT_KEY, await sealJson(docs)); },
+  }), []);
+  const changeRecent = async (change: (stored: ScannedDoc[]) => ScannedDoc[]) => {
+    try {
+      setRecentDocs(await updateRecent(recentStore, change));
+      setRecentError(null);
+    } catch (e) {
+      if (e instanceof RecentListUnavailable && e.reason === 'locked') setRecentError('locked');
+      throw e;
+    }
   };
 
   const loadRecent = async () => {
@@ -150,7 +165,7 @@ function DocScannerContent() {
       for (const d of JSON.parse(legacy) as ScannedDoc[]) migrated.push(await migrateDoc(d));
       const docs = migrated.map(m => m.doc);
       try {
-        await AsyncStorage.setItem(RECENT_KEY, await sealJson(docs.slice(0, 20)));
+        await AsyncStorage.setItem(RECENT_KEY, await sealJson(docs));
       } catch (e) {
         // The new keys were never saved: drop the unreadable .vcs copies and
         // keep the plaintext + legacy list so the next open retries.
@@ -212,11 +227,12 @@ function DocScannerContent() {
         setImageUris(uris);
         setStep('type');
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       // A user cancel is not an error; anything else gets fixed copy, never
       // the raw ML Kit / VisionKit message.
-      if (/cancel/i.test(String(e?.message ?? ''))) return;
-      console.warn('[docscanner] scan failed:', e?.message ?? e);
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/cancel/i.test(msg)) return;
+      console.warn('[docscanner] scan failed:', msg);
       Alert.alert('Scanner unavailable', 'The document scanner could not start on this device. You can pick photos from the gallery instead.');
     }
   };
@@ -301,18 +317,25 @@ function DocScannerContent() {
       // Persist BEFORE showing "PDF ready": the sealed list is the only place
       // the scan's key is kept, so a failed save is a failed scan (the catch
       // below deletes the unreadable .vcs and says so).
-      await persistRecent([doc, ...recentDocs]);
+      await changeRecent(stored => [doc, ...stored.filter(d => d.id !== doc.id)]);
       setCurrentDoc(doc);
       setProcessingProgress(100);
       setStep('preview');
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (stale()) {
         if (produced) FileSystem.deleteAsync(produced, { idempotent: true }).catch(() => {});
         return;
       }
       if (produced) FileSystem.deleteAsync(produced, { idempotent: true }).catch(() => {});
-      console.warn('[docscanner] PDF build failed:', e?.message ?? e);
-      Alert.alert('Could not save the PDF', 'The document could not be built and saved securely. Your pages are still selected — try Convert again.');
+      console.warn('[docscanner] PDF build failed:', e instanceof Error ? e.message : e);
+      if (e instanceof RecentListUnavailable) {
+        // Saving now would replace a list holding older scans' keys.
+        Alert.alert('Scan not saved', e.reason === 'locked'
+          ? 'Your recent documents list can’t be opened on this device, and saving this scan would replace it. Reset the list on the Doc Scanner start page, then scan again.'
+          : 'Your earlier documents haven’t finished moving to secure storage, and saving this scan now could lose them. Tap Retry on the Doc Scanner start page, then scan again.');
+      } else {
+        Alert.alert('Could not save the PDF', 'The document could not be built and saved securely. Your pages are still selected — try Convert again.');
+      }
       setStep('type');
     }
   };
@@ -385,8 +408,8 @@ function DocScannerContent() {
       // screen used to leave people with. chat.tsx adopts pending outbox items
       // on focus, so the bubble is already there with its upload progress.
       router.push({ pathname: '/chat', params: { id: targetChatId } });
-    } catch (e: any) {
-      console.warn('[docscanner] send failed:', e?.message ?? e);
+    } catch (e: unknown) {
+      console.warn('[docscanner] send failed:', e instanceof Error ? e.message : e);
       Alert.alert('Could not send', 'The document could not be prepared for sending. Please try again.');
     } finally {
       if (temp) FileSystem.deleteAsync(temp.slice(0, temp.lastIndexOf('/') + 1), { idempotent: true }).catch(() => {});
@@ -399,7 +422,7 @@ function DocScannerContent() {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
         try {
-          await persistRecent(recentDocs.filter(d => d.id !== doc.id));
+          await changeRecent(stored => stored.filter(d => d.id !== doc.id));
         } catch {
           Alert.alert('Could not delete', 'The document list could not be saved. Please try again.');
           return;
@@ -636,8 +659,11 @@ function DocScannerContent() {
         animationType="slide"
         onRequestClose={() => setPickerDoc(null)}
       >
-        <Pressable style={S.sheetBackdrop} onPress={() => setPickerDoc(null)} accessibilityRole="button" accessibilityLabel="Close chat picker">
-          <Pressable style={[S.sheet, { paddingBottom: insets.bottom + 18 }]} onPress={e => e.stopPropagation()} accessible={false} accessibilityRole="none">
+        {/* The backdrop is a sibling of the sheet, not its parent: an
+            accessible button wrapping the sheet hid the chat rows from VoiceOver. */}
+        <View style={S.sheetBackdrop}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setPickerDoc(null)} accessibilityRole="button" accessibilityLabel="Close chat picker" />
+          <View style={[S.sheet, { paddingBottom: insets.bottom + 18 }]} accessibilityViewIsModal>
             <View style={S.sheetHead}>
               <Text style={[S.sheetTitle, S.flex]} accessibilityRole="header">Send to…</Text>
               <TouchableOpacity onPress={() => setPickerDoc(null)} hitSlop={10} style={S.sheetClose}
@@ -672,8 +698,8 @@ function DocScannerContent() {
                 )}
               />
             )}
-          </Pressable>
-        </Pressable>
+          </View>
+        </View>
       </Modal>
     </View>
   );
@@ -752,7 +778,7 @@ const makeStyles = (c: Palette, insetTop: number) => StyleSheet.create({
   docRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 14, padding: 14, gap: 12, borderWidth: 1, borderColor: c.glassStroke },
   typeCard: { width: '30%', flex: 1, minWidth: 100, backgroundColor: c.glassSoft, borderRadius: 16, padding: 14, alignItems: 'center', borderWidth: 1.5, borderColor: c.glassStroke },
   input: { backgroundColor: c.glassSoft, borderRadius: 14, padding: 15, color: c.text, fontSize: 14, borderWidth: 1, borderColor: c.glassStroke },
-  sheetBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
+  sheetBackdrop: { flex: 1, backgroundColor: c.scrim, justifyContent: 'flex-end' },
   sheet: {
     maxHeight: '70%', backgroundColor: c.card, borderTopLeftRadius: 22, borderTopRightRadius: 22,
     paddingTop: 18, paddingHorizontal: 18, gap: 4,

@@ -30,7 +30,7 @@ import { getCurrentUserAsync } from './(constants)/authService';
 
 const PINS_KEY = 'vc_shelf_pins_v1';
 
-const KIND_ICON: Record<ShelfKind, any> = {
+const KIND_ICON: Record<ShelfKind, keyof typeof Ionicons.glyphMap> = {
   document: 'document-text-outline',
   image: 'image-outline',
   video: 'videocam-outline',
@@ -207,7 +207,7 @@ export default function ShelfScreen() {
       )}
 
       {loading ? (
-        <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
+        <ActivityIndicator color={colors.primary} style={S.spinner} />
       ) : loadFailed && files.length === 0 ? (
         <View style={S.empty}>
           <Ionicons name="alert-circle-outline" size={44} color={colors.textDim} />
@@ -247,7 +247,7 @@ export default function ShelfScreen() {
               <View style={S.rowIcon}>
                 <Ionicons name={KIND_ICON[item.kind]} size={20} color={colors.primary} />
               </View>
-              <View style={{ flex: 1 }}>
+              <View style={S.flex}>
                 <Text style={S.rowName} numberOfLines={1}>{item.filename}</Text>
                 <Text style={S.rowMeta} numberOfLines={1}>
                   {[formatSize(item.size), item.createdAt ? new Date(item.createdAt).toLocaleDateString() : '']
@@ -293,7 +293,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   chipCount: { color: c.textFaint, fontSize: 11, fontWeight: '700' },
   sortRow: { flexDirection: 'row', gap: 18, paddingHorizontal: 16, paddingBottom: 10 },
   sortTxt: { color: c.textDim, fontSize: 12, fontWeight: '600' },
-  sortTxtOn: { color: c.primary },
+  sortTxtOn: { color: c.accentOn },
   row: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     paddingHorizontal: 16, paddingVertical: 12,
@@ -309,7 +309,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   emptyTitle: { color: c.text, fontSize: 16, fontWeight: '700' },
   emptyBody: { color: c.textDim, fontSize: 13, textAlign: 'center', lineHeight: 19 },
   retry: { marginTop: 6, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20, backgroundColor: brandAlpha(0.16) },
-  retryTxt: { color: c.primary, fontSize: 14, fontWeight: '700' },
+  retryTxt: { color: c.accentOn, fontSize: 14, fontWeight: '700' },
+  spinner: { marginTop: 40 },
+  flex: { flex: 1 },
   staleBar: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: c.glassSoft },
   staleTxt: { flex: 1, color: c.textDim, fontSize: 12 },
   retryLink: { color: c.accentOn, fontSize: 13, fontWeight: '700' },

@@ -9,14 +9,20 @@
 import React, { useRef, useState } from 'react';
 import { ActivityIndicator, Animated, PanResponder, StyleSheet, View, type GestureResponderEvent } from 'react-native';
 // expo-image, not RN Image: it decodes SVG and HEIC everywhere, which the file
-// viewer relied on, and keeps a disk cache for the media viewer.
-import { Image } from 'expo-image';
+// viewer relied on. Its default cache policy is 'disk', which for a LOCAL file
+// would leave a decoded copy in Glide's/SDWebImage's disk cache after the file
+// itself is deleted (view-once) or while it is meant to stay private
+// (decrypted media) — so local files are cached in memory only, and a caller
+// can ask for no cache at all.
+import { Image, type ImageProps } from 'expo-image';
 import { clampPan, pinchZoom } from '../../lib/zoomPan';
 
 type Touches = GestureResponderEvent['nativeEvent']['touches'];
 
-export function ZoomableImage({ source, spinnerColor, onLoaded, onFail, label = 'Photo' }: {
+export function ZoomableImage({ source, spinnerColor, onLoaded, onFail, label = 'Photo', cachePolicy }: {
   source: { uri: string; headers?: Record<string, string> };
+  /** Defaults to 'disk' for http(s) sources and 'memory' for local files. */
+  cachePolicy?: ImageProps['cachePolicy'];
   spinnerColor: string;
   onLoaded: () => void;
   /** Called with user-facing copy. */
@@ -77,6 +83,7 @@ export function ZoomableImage({ source, spinnerColor, onLoaded, onFail, label = 
       {!imgLoaded && <ActivityIndicator color={spinnerColor} style={s.center} />}
       <Animated.View style={[s.fullImg, { transform: [{ translateX: tx }, { translateY: ty }, { scale }] }]}>
         <Image source={source} style={s.fullImg} contentFit="contain"
+          cachePolicy={cachePolicy ?? (/^https?:/i.test(source.uri) ? 'disk' : 'memory')}
           onLoad={() => { setImgLoaded(true); onLoaded(); }} onError={() => onFail("This photo couldn't be loaded.")} />
       </Animated.View>
     </View>

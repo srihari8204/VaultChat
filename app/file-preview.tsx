@@ -4,7 +4,7 @@
 // Dark theme with line numbers
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, FlatList, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, FlatList, ActivityIndicator, Alert, useWindowDimensions } from 'react-native';
 import * as Sharing from 'expo-sharing';
 import { type Palette, brandAlpha } from '../constants/theme';
 import { useTheme } from '../lib/theme';
@@ -173,8 +173,18 @@ export default function FilePreviewScreen() {
           // any other host.
           tmp = FileSystem.cacheDirectory + VIEWER_TEMP_PREFIX + 'preview_' + Date.now() + '.' + ext;
           const token = isOwnServerUrl(fileUri) ? await getAccessToken() : null;
-          const res = await FileSystem.downloadAsync(fileUri, tmp,
-            token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
+          const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+          // Ask for the size first, so a file past the preview limit is not
+          // downloaded in full only to be refused. A server that does not
+          // answer HEAD (or sends no length) falls through to the size check
+          // after the download, as before.
+          const head = await fetch(fileUri, { method: 'HEAD', headers }).catch(() => null);
+          const declared = head?.ok ? Number(head.headers.get('content-length')) : NaN;
+          if (declared > MAX_PREVIEW_BYTES) {
+            if (!dead) setFailure('too-large');
+            return;
+          }
+          const res = await FileSystem.downloadAsync(fileUri, tmp, headers ? { headers } : undefined);
           if (res.status >= 400) throw new Error('GET ' + res.status);
           local = tmp;
         }
@@ -186,8 +196,8 @@ export default function FilePreviewScreen() {
         }
         const text = await FileSystem.readAsStringAsync(local);
         if (!dead) setContent(text);
-      } catch (e: any) {
-        console.warn('[file-preview] load failed:', e?.message ?? e);
+      } catch (e: unknown) {
+        console.warn('[file-preview] load failed:', e instanceof Error ? e.message : e);
         if (!dead) setFailure('error');
       } finally {
         // The downloaded copy is plaintext and already in memory: don't keep it.
@@ -250,7 +260,10 @@ export default function FilePreviewScreen() {
     if (!tk) { tk = tokenize(lines[idx] ?? '', lang); tokenCache.set(idx, tk); }
     return tk;
   }, [tokenCache, lines, lang]);
-  const lineNumWidth = String(lines.length).length * 9 + 16;
+  // 9 px per digit at 12 px monospace, scaled with the system text size so
+  // large fonts do not clip the numbers.
+  const { fontScale } = useWindowDimensions();
+  const lineNumWidth = Math.ceil(String(lines.length).length * 9 * Math.max(1, fontScale)) + 16;
   const actionsOff = !!failure || loading;
 
   const codeList = (

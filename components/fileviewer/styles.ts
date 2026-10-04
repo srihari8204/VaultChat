@@ -74,7 +74,7 @@ export const s = StyleSheet.create({
   },
   headerCenter: { flex: 1, marginHorizontal: 10 },
   headerFilenameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  headerIcon: { fontSize: 16 },
+  headerIcon: { marginRight: 2 },
   headerFilename: { color: C.text, fontSize: 15, fontWeight: '600', flex: 1 },
   headerSize: { color: C.textDim, fontSize: 12, marginTop: 2, marginLeft: 22 },
 
@@ -96,7 +96,7 @@ export const s = StyleSheet.create({
   loadingPane: { flex: 1, gap: 16 },
   loadingCaption: { marginTop: 12 },
   // Document (pdf/office) hand-off card.
-  fileIcon: { fontSize: 64, marginBottom: 12 },
+  fileIcon: { marginBottom: 12 },
   cardNote: { fontSize: 12, opacity: 0.7, marginTop: 6, textAlign: 'center', paddingHorizontal: 32 },
   openBtn: {
     marginTop: 22, minWidth: 160, paddingVertical: 14, paddingHorizontal: 28,

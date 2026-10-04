@@ -5,7 +5,7 @@
 
 import { BRAND_ACCENT, type Palette } from '../constants/theme';
 import React, { useState, useRef, useMemo, useEffect, memo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, PanResponder, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, PanResponder, Alert, ActivityIndicator, AccessibilityInfo } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -39,6 +39,9 @@ const StrokeLayer = memo(function StrokeLayer({ strokes }: { strokes: PathData[]
   );
 });
 
+
+const strokeCountText = (n: number) => (n === 0 ? 'Empty' : `${n} stroke${n === 1 ? '' : 's'}`);
+
 function useS() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -49,8 +52,8 @@ export default function WhiteboardScreen() {
   const { colors } = useTheme();
   const s = useS();
   const router = useRouter();
-  const { chatId, peerUid, peerName, returnTo } = useLocalSearchParams<{
-    chatId?: string; peerUid?: string; peerName?: string; returnTo?: string;
+  const { chatId, peerUid, peerName } = useLocalSearchParams<{
+    chatId?: string; peerUid?: string; peerName?: string;
   }>();
   const canvasRef = useRef<View>(null);
   const [paths, setPaths] = useState<PathData[]>([]);
@@ -121,6 +124,15 @@ export default function WhiteboardScreen() {
     setRedoStack(r => r.slice(0, -1));
     version.current++;
   };
+  // The canvas has no non-gesture alternative; screen-reader users at least
+  // hear what each stroke, undo, redo or clear did to the drawing.
+  const announcedCount = useRef(paths.length);
+  useEffect(() => {
+    if (announcedCount.current === paths.length) return;
+    announcedCount.current = paths.length;
+    AccessibilityInfo.announceForAccessibility(strokeCountText(paths.length));
+  }, [paths.length]);
+
   const clear = () => {
     if (paths.length === 0) return;
     Alert.alert('Clear Canvas?', 'This will erase everything.', [
@@ -157,7 +169,7 @@ export default function WhiteboardScreen() {
       // Mark as saved BEFORE leaving, or the leave guard would block the pop.
       sharedVersion.current = version.current;
       router.dismissTo({
-        pathname: (returnTo || '/chat') as any,
+        pathname: '/chat',   // the only return target (callers' `returnTo` is always '/chat'); a route param must not pick an arbitrary screen
         params: returnParams({ chatId, peerUid, peerName }, { uri, type: 'image' }),
       });
     } catch {
@@ -219,7 +231,8 @@ export default function WhiteboardScreen() {
 
         {/* Canvas — collapsable={false} keeps the native view that captureRef snapshots. */}
         <View ref={canvasRef} collapsable={false} style={s.canvas} {...panResponder.panHandlers}
-          accessibilityLabel="Drawing canvas" accessibilityHint="Draw with one finger">
+          accessible accessibilityLabel="Drawing canvas" accessibilityHint="Draw with one finger"
+          accessibilityValue={{ text: strokeCountText(paths.length) }}>
           <StrokeLayer strokes={paths} />
           {live && (
             <Svg style={StyleSheet.absoluteFill} pointerEvents="none">

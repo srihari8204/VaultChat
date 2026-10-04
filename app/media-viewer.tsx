@@ -8,8 +8,8 @@ import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, StatusBar,
-  ActivityIndicator, ScrollView,
-  PanResponder, Alert } from 'react-native';
+  ActivityIndicator,
+  PanResponder, Alert, FlatList } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Video, Audio, ResizeMode, type AVPlaybackStatusSuccess } from 'expo-av';
@@ -80,12 +80,16 @@ type PlayerProps = {
   onFail: (msg: string) => void;
   /** Video streams: hide the screen spinner once mounted (it has its own). */
   onStreaming: () => void;
+  /** View-once: the file is the only copy and is deleted on close, so the
+   *  image must not be cached anywhere (not even in memory). */
+  ephemeral?: boolean;
 };
 
 // IMAGE — pinch to zoom (1x–5x), drag to pan while zoomed, tap to toggle 2.5x
 // (components/media/ZoomableImage, shared with file-viewer).
-function ImageViewer({ source, onLoaded, onFail }: PlayerProps) {
-  return <ZoomableImage source={source} spinnerColor={M.accent} onLoaded={onLoaded} onFail={onFail} />;
+function ImageViewer({ source, onLoaded, onFail, ephemeral }: PlayerProps) {
+  return <ZoomableImage source={source} spinnerColor={M.accent} onLoaded={onLoaded} onFail={onFail}
+    cachePolicy={ephemeral ? 'none' : undefined} />;
 }
 
 // VIDEO — streams while loading; the track is draggable (lib/videoSeek).
@@ -315,23 +319,41 @@ function CodeViewer({ fileUri, fileName, needsAuth, onLoaded, onOpenHighlighted 
     return () => { dead = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- load once per file
   }, [fileUri]);
-  const lines = content.split('\n');
+  const lines = useMemo(() => content.split('\n'), [content]);
+  const shown = useMemo(() => lines.slice(0, 500), [lines]);
+  // Virtualised: only the rows near the viewport are mounted (up to 500 used
+  // to mount at once inside a ScrollView).
   return (
-    <ScrollView style={s.codeScroll}>
-      <View style={s.codeHead}>
-        <Text style={s.codeName}>{fileName}</Text>
-        <Text style={s.codeMeta}>{lines.length} lines | {formatSize(content.length)}</Text>
-        <TouchableOpacity style={s.codeOpenBtn}
-          onPress={onOpenHighlighted} accessibilityRole="button" accessibilityLabel="Open with syntax highlighting">
-          <Ionicons name="code-slash-outline" size={14} color={M.accent} />
-          <Text style={s.codeOpenTxt}>Open with Syntax Highlighting</Text>
-        </TouchableOpacity>
-      </View>
-      {failed && <Text style={s.codeFail} accessibilityLiveRegion="polite">{"Couldn't read this file."}</Text>}
-      {lines.slice(0,500).map((l,i)=><View key={i} style={s.codeRow}><Text style={s.codeGutter}>{i+1}</Text><Text style={s.codeLine}>{l}</Text></View>)}
-      {lines.length>500&&<Text style={s.codeMore}>...{lines.length-500} more lines</Text>}
-      <View style={s.codeTail}/>
-    </ScrollView>
+    <FlatList
+      style={s.codeScroll}
+      data={shown}
+      keyExtractor={(_, i) => String(i)}
+      initialNumToRender={40}
+      windowSize={7}
+      ListHeaderComponent={
+        <>
+          <View style={s.codeHead}>
+            <Text style={s.codeName}>{fileName}</Text>
+            <Text style={s.codeMeta}>{lines.length} lines | {formatSize(content.length)}</Text>
+            <TouchableOpacity style={s.codeOpenBtn}
+              onPress={onOpenHighlighted} accessibilityRole="button" accessibilityLabel="Open with syntax highlighting">
+              <Ionicons name="code-slash-outline" size={14} color={M.accent} />
+              <Text style={s.codeOpenTxt}>Open with Syntax Highlighting</Text>
+            </TouchableOpacity>
+          </View>
+          {failed && <Text style={s.codeFail} accessibilityLiveRegion="polite">{"Couldn't read this file."}</Text>}
+        </>
+      }
+      renderItem={({ item, index }) => (
+        <View style={s.codeRow}><Text style={s.codeGutter}>{index + 1}</Text><Text style={s.codeLine}>{item}</Text></View>
+      )}
+      ListFooterComponent={
+        <>
+          {lines.length > 500 && <Text style={s.codeMore}>...{lines.length - 500} more lines</Text>}
+          <View style={s.codeTail} />
+        </>
+      }
+    />
   );
 }
 
@@ -348,7 +370,8 @@ function MediaViewerScreen() {
   useEffect(() => {
     if (!isViewOnce) return;
     getCurrentUserAsync()
-      .then((u: any) => setMe({ name: u?.name || u?.email, phone: u?.phone || u?.phoneNumber }))
+      .then((u: { name?: string; email?: string; phone?: string; phoneNumber?: string } | null) =>
+        setMe({ name: u?.name || u?.email, phone: u?.phone || u?.phoneNumber }))
       .catch(() => {});
   }, [isViewOnce]);
 
@@ -383,8 +406,8 @@ function MediaViewerScreen() {
     }
   };
   const fileName = (filename || 'file') + '';
-  // For our own /uploads images we attach the Bearer header so Fresco serves the
-  // already-cached image instantly (no re-download).
+  // Our own /uploads URLs need the Bearer header (attached by `source` below,
+  // for every player).
   const [authHeaders, setAuthHeaders] = useState<{ Authorization: string } | undefined>(undefined);
   // No token (signed out, or the read failed) must end in an error, not a
   // player that waits for headers forever.
@@ -500,9 +523,19 @@ function MediaViewerScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- resolve once per attachment (and per Retry)
   }, [attachmentId, reloadKey]);
 
+  // Size for the archive/generic cards. Our own server needs the token (the
+  // URL comes from route params, so it goes to our server only); a newer file
+  // or an unmount drops a late answer.
   useEffect(() => {
-    if (fileUri.startsWith('http')) fetch(fileUri, { method: 'HEAD' }).then(r => setFileSize(parseInt(r.headers.get('content-length') || '0'))).catch(() => {});
-  }, [fileUri]);
+    if (!fileUri.startsWith('http')) return;
+    let dead = false;
+    (async () => {
+      const token = needsAuth && isOwnServerUrl(fileUri) ? await getAccessToken().catch(() => null) : null;
+      const r = await fetch(fileUri, { method: 'HEAD', headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+      if (!dead && r.ok) setFileSize(parseInt(r.headers.get('content-length') || '0', 10) || 0);
+    })().catch(() => {});
+    return () => { dead = true; };
+  }, [fileUri, needsAuth]);
 
   // Documents READ here, they do not sit behind a download button.
   //
@@ -597,6 +630,7 @@ function MediaViewerScreen() {
     onLoaded: () => { setLoading(false); markViewedAfterLoad(); },
     onFail: (msg) => { setError(msg); setLoading(false); },
     onStreaming: () => setLoading(false),
+    ephemeral: isViewOnce,
   };
 
   // NO SOURCE = NOTHING TO VIEW, AND THE USER MUST NOT BE STRANDED.
@@ -696,7 +730,6 @@ const s = StyleSheet.create({
   container:{flex:1,backgroundColor:M.stage},
   full:{flex:1,justifyContent:'center',alignItems:'center'},
   center:{position:'absolute',top:'45%',alignSelf:'center',zIndex:10},
-  fullImg:{width:'100%',height:'100%'},
   fullVid:{width:'100%',height:'100%'},
   bufOverlay:{position:'absolute',justifyContent:'center',alignItems:'center'},
   bufTxt:{color:M.dim,fontSize:12,marginTop:8},

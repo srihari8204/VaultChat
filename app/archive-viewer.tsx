@@ -67,6 +67,9 @@ function ArchiveViewerScreen() {
   useEffect(() => () => {
     FileSystem.deleteAsync(workDir, { idempotent: true }).catch(() => {});
   }, [workDir]);
+  // The remote archive as already downloaded into workDir, so a hand-off after
+  // a size refusal copies it locally instead of downloading it again.
+  const downloaded = useRef<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -92,6 +95,7 @@ function ArchiveViewerScreen() {
           );
           if (dl.status >= 400) throw new Error(`Could not download the archive (${dl.status})`);
           local = dl.uri;
+          downloaded.current = dl.uri;
         }
         // The whole archive is read into JS to parse it; refuse a huge one
         // before that read rather than crash in it.
@@ -130,7 +134,7 @@ function ArchiveViewerScreen() {
           setRaw(bytes);
           setEntries(rows);
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         // Do NOT interpolate e.message. expo-file-system rejects with the raw
         // platform text, so opening this screen without a usable uri put
         //   "Call to function 'ExponentFileSystem.readAsStringAsync' has been
@@ -141,7 +145,7 @@ function ArchiveViewerScreen() {
         //
         // The detail is kept for whoever has to debug it, just not in the UI.
         if (alive) {
-          console.warn('[archive-viewer] read failed:', e?.message ?? e);
+          console.warn('[archive-viewer] read failed:', e instanceof Error ? e.message : e);
           setError('Could not read this archive. It may be damaged, or the file is no longer on this device.');
         }
       } finally {
@@ -200,8 +204,8 @@ function ArchiveViewerScreen() {
         { encoding: FileSystem.EncodingType.Base64 },
       );
       router.push({ pathname: '/file-viewer', params: { uri: outPath, filename: e.name } });
-    } catch (err: any) {
-      console.warn('[archive-viewer] extract failed:', err?.message ?? err);
+    } catch (err: unknown) {
+      console.warn('[archive-viewer] extract failed:', err instanceof Error ? err.message : err);
       setEntryError(`Could not extract "${e.name}".`);
     } finally {
       setBusyPath(null);
@@ -227,15 +231,24 @@ function ArchiveViewerScreen() {
       if (/^https?:/i.test(fileUri)) {
         const dir2 = `${FileSystem.cacheDirectory || ''}${VIEWER_TEMP_PREFIX}share_${Date.now()}/`;
         await FileSystem.makeDirectoryAsync(dir2, { intermediates: true });
-        const token = isOwnServerUrl(fileUri) ? await getAccessToken() : null;
-        const dl = await FileSystem.downloadAsync(fileUri, dir2 + archiveName.replace(/[/\\:*?"<>|]/g, '_'),
-          token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
-        if (dl.status >= 400) throw new Error('GET ' + dl.status);
-        local = dl.uri;
+        const dest = dir2 + archiveName.replace(/[/\\:*?"<>|]/g, '_');
+        // workDir is deleted when this screen closes, while the other app may
+        // still be reading — so the copy it gets lives in the share dir.
+        const have = downloaded.current && (await FileSystem.getInfoAsync(downloaded.current)).exists;
+        if (have) {
+          await FileSystem.copyAsync({ from: downloaded.current!, to: dest });
+          local = dest;
+        } else {
+          const token = isOwnServerUrl(fileUri) ? await getAccessToken() : null;
+          const dl = await FileSystem.downloadAsync(fileUri, dest,
+            token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
+          if (dl.status >= 400) throw new Error('GET ' + dl.status);
+          local = dl.uri;
+        }
       }
       await Sharing.shareAsync(local, { dialogTitle: archiveName });
-    } catch (e: any) {
-      console.warn('[archive-viewer] hand-off failed:', e?.message ?? e);
+    } catch (e: unknown) {
+      console.warn('[archive-viewer] hand-off failed:', e instanceof Error ? e.message : e);
       setError('Could not hand this archive to another app. Check your connection and try again.');
     } finally {
       setHandingOff(false);
@@ -374,7 +387,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   emptyBody: { color: c.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20 },
   emptyTitle: { color: c.text, fontSize: 16, fontWeight: '700', textAlign: 'center' },
   action: { marginTop: 4, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20, backgroundColor: brandAlpha(0.16) },
-  actionTxt: { color: c.primary, fontSize: 14, fontWeight: '700' },
+  actionTxt: { color: c.accentOn, fontSize: 14, fontWeight: '700' },
   banner: {
     flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginBottom: 8,
     padding: 10, borderRadius: 10, backgroundColor: c.glassSoft,

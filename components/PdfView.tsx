@@ -48,6 +48,7 @@ import type { Palette } from '../constants/theme';
 import { useColors } from '../lib/theme';
 import { pdfInfo, pdfNativeAvailable, renderPdfPage, type PdfInfo } from '../lib/pdfNative';
 import { PDF_MAX_ZOOM, PDF_MIN_ZOOM, keepCentre, pdfZoom, pdfZoomLabel, stepZoom } from '../lib/media/pdfZoom';
+import { sameFileUrl } from '../lib/media/fileUrl';
 
 /** Render scale over the layout width — keeps text crisp without a zoom re-render. */
 const OVERSAMPLE = 2;
@@ -95,10 +96,11 @@ function Page({
     const attempt = (px: number) => {
       renderPdfPage(uri, index, px, cacheDir, docKey)
         .then(r => { if (!dead) { setImg(r.uri); setErr(null); } })
-        .catch((e: any) => {
+        .catch((e: unknown) => {
           if (dead) return;
-          if (e?.code === 'TOO_LARGE' && px > FLOOR) { attempt(Math.max(FLOOR, Math.round(px / 2))); return; }
-          setErr(e?.code === 'TOO_LARGE'
+          const code = (e as { code?: string } | null)?.code;
+          if (code === 'TOO_LARGE' && px > FLOOR) { attempt(Math.max(FLOOR, Math.round(px / 2))); return; }
+          setErr(code === 'TOO_LARGE'
             ? 'Page too large to display on this device'
             : `Page ${index + 1} could not be rendered`);
         });
@@ -112,10 +114,12 @@ function Page({
       {img ? (
         // recyclingKey: FlatList reuses rows, and without it a recycled row
         // briefly shows the PREVIOUS page's bitmap while the new one decodes.
+        // Memory cache only: the page JPEG is already on disk under dc_, where
+        // the document purge removes it; a disk-cache copy would escape that.
         <ExpoImage
           source={{ uri: img }} style={{ width, height }}
           accessible accessibilityRole="image" accessibilityLabel={`Page ${index + 1}`}
-          contentFit="contain" cachePolicy="disk" recyclingKey={`${docKey}_${index}`}
+          contentFit="contain" cachePolicy="memory" recyclingKey={`${docKey}_${index}`}
         />
       ) : (
         <View style={s.pagePending}>
@@ -140,8 +144,9 @@ function IosPdf({ uri, onFail, s }: { uri: string; onFail: (why: string) => void
         allowFileAccess
         javaScriptEnabled={false}
         // The document itself, and nothing else: a link inside the PDF must
-        // not turn this into a browser.
-        onShouldStartLoadWithRequest={r => r.url === fileUrl}
+        // not turn this into a browser. Compared by decoded path — WKWebView
+        // reports a space or non-ASCII name percent-encoded.
+        onShouldStartLoadWithRequest={r => sameFileUrl(r.url, fileUrl)}
         onError={() => onFail('This PDF could not be opened.')}
         onHttpError={() => onFail('This PDF could not be opened.')}
         style={s.fill}
@@ -215,7 +220,7 @@ export function PdfView({ uri, onFail, onReady }: {
   // Hoisted above the early return below: hooks must run in the same order on
   // every render. FlatList additionally refuses a changing onViewableItemsChanged
   // identity at runtime, so both are refs rather than inline callbacks.
-  const onViewable = useRef(({ viewableItems }: any) => {
+  const onViewable = useRef(({ viewableItems }: { viewableItems: { index: number | null }[] }) => {
     const first = viewableItems?.[0]?.index;
     if (typeof first === 'number') setPage(first + 1);
   }).current;
@@ -226,7 +231,7 @@ export function PdfView({ uri, onFail, onReady }: {
   // dc_ prefix the rest of the document cache uses and are swept by the same
   // purge (lib/mediaCacheGC.purgeDocumentCache) on revoke, view-once and logout.
   const cacheDir = useMemo(
-    () => `${(FileSystem as any).cacheDirectory}dc_pdfpages`, [],
+    () => `${FileSystem.cacheDirectory}dc_pdfpages`, [],
   );
 
   // An Android build without the native module says so plainly rather than
@@ -247,15 +252,16 @@ export function PdfView({ uri, onFail, onReady }: {
         if (!i.pageCount) { fail('This PDF has no pages.'); return; }
         setInfo(i);
         onReady?.({ version: 'native/PdfRenderer', pages: i.pageCount });
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (dead) return;
         // Each of these is a different thing to tell the user. The old viewer
         // collapsed them all into "no text layer (it may be a scan)", which was
         // the wrong diagnosis for an encrypted file.
+        const err = e as { code?: string; message?: string } | null;
         fail(
-          e?.code === 'PASSWORD_REQUIRED' ? 'This PDF is password protected.'
-          : e?.code === 'CORRUPT' ? 'This PDF is damaged or incomplete.'
-          : e?.message || 'This PDF could not be opened.',
+          err?.code === 'PASSWORD_REQUIRED' ? 'This PDF is password protected.'
+          : err?.code === 'CORRUPT' ? 'This PDF is damaged or incomplete.'
+          : err?.message || 'This PDF could not be opened.',
         );
       }
     })();
@@ -269,7 +275,7 @@ export function PdfView({ uri, onFail, onReady }: {
       <View style={s.fill}>
         {!failedRef.current && (
           <View style={s.cover}>
-            <ActivityIndicator color="#FFFFFF" />
+            <ActivityIndicator color={c.textDim} />
             <Text style={s.coverTxt}>Opening document…</Text>
           </View>
         )}

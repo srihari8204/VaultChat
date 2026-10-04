@@ -7,8 +7,8 @@
 import React, { useState, useEffect, useRef, useCallback , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, TouchableWithoutFeedback, StyleSheet,
-  StatusBar, ActivityIndicator, Animated, PanResponder, Alert,
-  useWindowDimensions } from 'react-native';
+  StatusBar, ActivityIndicator, Animated, PanResponder, Alert, AccessibilityInfo,
+  useWindowDimensions, type GestureResponderEvent } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -89,17 +89,22 @@ function VideoPlayerInner() {
   const durationRef = useRef(0);
   const positionRef = useRef(0);
 
-  // Resume from the last position. Read on mount, APPLIED in onLoad: a seek
-  // issued before the video has loaded is dropped by the player, so the old
-  // mount-time seek mostly did nothing. Applied once per file.
+  // Resume from the last position. Read on mount, APPLIED once the video has
+  // loaded: a seek issued before that is dropped by the player, so the old
+  // mount-time seek mostly did nothing. Applied once per file — from onLoad,
+  // from the first loaded status update, or at once when storage answers
+  // after either (loadedRef), so no ordering of the three misses it.
   const resumeAt = useRef<number | null>(null);
-  const applyResume = () => {
+  const loadedRef = useRef(false);
+  const applyResume = useCallback(() => {
+    loadedRef.current = true;
     const pos = resumeAt.current;
     resumeAt.current = null;
     if (pos != null && videoRef.current) videoRef.current.setPositionAsync(pos).catch(() => {});
-  };
+  }, []);
   useEffect(() => {
     resumeAt.current = null;
+    loadedRef.current = false;
     if (!videoUri) return;
     // The old key (lib/videoSeek.resumeKey) kept a readable prefix of the path
     // and was shared by every video in the same folder: drop it.
@@ -109,10 +114,10 @@ function VideoPlayerInner() {
       if (pos > 1000) {
         resumeAt.current = pos;
         // Already loaded by the time storage answered: seek now.
-        if (durationRef.current > 0) applyResume();
+        if (loadedRef.current) applyResume();
       }
     }).catch(() => {});
-  }, [videoUri]);
+  }, [videoUri, applyResume]);
 
   // Save the resume position on pause and on unmount only. Keying the cleanup
   // on positionMs re-ran it on every 250 ms progress tick (~4 writes/s).
@@ -171,7 +176,7 @@ function VideoPlayerInner() {
   ).current;
 
   // Pinch gesture via touch events on the wrapper
-  const onTouchStart = useCallback((e: any) => {
+  const onTouchStart = useCallback((e: GestureResponderEvent) => {
     if (e.nativeEvent.touches.length === 2) {
       const t = e.nativeEvent.touches;
       const dist = Math.hypot(t[1].pageX - t[0].pageX, t[1].pageY - t[0].pageY);
@@ -180,7 +185,7 @@ function VideoPlayerInner() {
     }
   }, []);
 
-  const onTouchMove = useCallback((e: any) => {
+  const onTouchMove = useCallback((e: GestureResponderEvent) => {
     if (pinchRef.current.active && e.nativeEvent.touches.length === 2) {
       const t = e.nativeEvent.touches;
       const dist = Math.hypot(t[1].pageX - t[0].pageX, t[1].pageY - t[0].pageY);
@@ -201,8 +206,25 @@ function VideoPlayerInner() {
   }, [videoScale]);
 
   // --- Controls visibility ---
+  // A screen-reader user cannot tap an invisible overlay back into view, so
+  // the controls never auto-hide while one is running.
+  const [screenReader, setScreenReader] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    AccessibilityInfo.isScreenReaderEnabled().then(v => { if (alive) setScreenReader(!!v); }).catch(() => {});
+    const sub = AccessibilityInfo.addEventListener('screenReaderChanged', v => { if (alive) setScreenReader(!!v); });
+    return () => { alive = false; sub.remove(); };
+  }, []);
+  useEffect(() => {
+    if (!screenReader) return;
+    if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
+    controlsOpacity.stopAnimation();
+    controlsOpacity.setValue(1);
+    setShowControls(true);
+  }, [screenReader, showControls, controlsOpacity]);
   const scheduleHideControls = useCallback(() => {
     if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
+    if (screenReader) return;
     controlsTimeout.current = setTimeout(() => {
       if (isPlaying && !isSeeking) {
         Animated.timing(controlsOpacity, { toValue: 0, duration: 300, useNativeDriver: true }).start(() => {
@@ -210,7 +232,7 @@ function VideoPlayerInner() {
         });
       }
     }, 3000);
-  }, [isPlaying, isSeeking, controlsOpacity]);
+  }, [isPlaying, isSeeking, controlsOpacity, screenReader]);
 
   const toggleControls = useCallback(() => {
     if (showControls) {
@@ -237,6 +259,7 @@ function VideoPlayerInner() {
       setIsBuffering(true);
       return;
     }
+    if (!loadedRef.current || resumeAt.current != null) applyResume();
     positionRef.current = s.positionMillis || 0;
     durationRef.current = s.durationMillis || 0;
     setIsPlaying(s.isPlaying);
@@ -244,7 +267,7 @@ function VideoPlayerInner() {
     setDurationMs(s.durationMillis || 0);
     setIsBuffering(s.isBuffering || false);
     setBufferedMs(s.playableDurationMillis || 0);
-  }, []);
+  }, [applyResume]);
 
   const togglePlay = useCallback(async () => {
     if (!videoRef.current) return;
@@ -330,8 +353,8 @@ function VideoPlayerInner() {
         local = res.uri;
       }
       await Sharing.shareAsync(local);
-    } catch (e: any) {
-      console.warn('[video-player] share failed:', e?.message ?? e);
+    } catch (e: unknown) {
+      console.warn('[video-player] share failed:', e instanceof Error ? e.message : e);
       Alert.alert("Couldn't share video", 'Check your connection and try again.');
     } finally {
       setSharing(false);

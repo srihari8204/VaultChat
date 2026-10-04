@@ -2,6 +2,8 @@
 // is looking at, and how to name it to a person. PURE (no react-native import):
 // fileTypes.selftest.ts runs it under Node.
 
+import type { Ionicons } from '@expo/vector-icons';
+
 export type FileKind = 'image' | 'video' | 'audio' | 'pdf' | 'office' | 'text' | 'unknown';
 
 // ── File type detection ──────────────────────────────────────────
@@ -87,9 +89,12 @@ export function formatDuration(ms: number): string {
   return `${min}:${sec < 10 ? '0' : ''}${sec}`;
 }
 
-const FILE_ICONS: Record<FileKind, string> = {
-  image: '🖼️', video: '🎬', audio: '🎵', pdf: '📄',
-  office: '📊', text: '📝', unknown: '📎',
+/** An Ionicons glyph name (type-only import: this module stays pure). */
+export type FileIcon = keyof typeof Ionicons.glyphMap;
+
+const FILE_ICONS: Record<FileKind, FileIcon> = {
+  image: 'image-outline', video: 'film-outline', audio: 'musical-notes-outline', pdf: 'document-outline',
+  office: 'briefcase-outline', text: 'document-text-outline', unknown: 'attach-outline',
 };
 
 /**
@@ -102,24 +107,26 @@ const FILE_ICONS: Record<FileKind, string> = {
  * picking code paths and wrong for showing a person.
  *
  * Keyed by extension because that is what actually determines the format; the
- * bucket is the fallback for everything with no specific name.
+ * bucket is the fallback for everything with no specific name. Icons are
+ * Ionicons glyphs (they were emoji, which render differently per platform and
+ * are read aloud by some screen readers).
  */
-const FORMAT: Record<string, { label: string; icon: string }> = {
-  docx: { label: 'Word',       icon: '📘' },
-  doc:  { label: 'Word',       icon: '📘' },
-  xlsx: { label: 'Excel',      icon: '📗' },
-  xls:  { label: 'Excel',      icon: '📗' },
-  csv:  { label: 'CSV',        icon: '📗' },
-  pptx: { label: 'PowerPoint', icon: '📙' },
-  ppt:  { label: 'PowerPoint', icon: '📙' },
-  pdf:  { label: 'PDF',        icon: '📕' },
+const FORMAT: Record<string, { label: string; icon: FileIcon }> = {
+  docx: { label: 'Word',       icon: 'document-text-outline' },
+  doc:  { label: 'Word',       icon: 'document-text-outline' },
+  xlsx: { label: 'Excel',      icon: 'grid-outline' },
+  xls:  { label: 'Excel',      icon: 'grid-outline' },
+  csv:  { label: 'CSV',        icon: 'grid-outline' },
+  pptx: { label: 'PowerPoint', icon: 'easel-outline' },
+  ppt:  { label: 'PowerPoint', icon: 'easel-outline' },
+  pdf:  { label: 'PDF',        icon: 'document-outline' },
 };
 
-export function formatOf(filename: string, fileType: FileKind): { label: string; icon: string } {
+export function formatOf(filename: string, fileType: FileKind): { label: string; icon: FileIcon } {
   const ext = (filename || '').split('.').pop()?.toLowerCase() || '';
   return FORMAT[ext] ?? {
     label: (ext || fileType).toUpperCase(),
-    icon: FILE_ICONS[fileType] ?? '📎',
+    icon: FILE_ICONS[fileType] ?? 'attach-outline',
   };
 }
 

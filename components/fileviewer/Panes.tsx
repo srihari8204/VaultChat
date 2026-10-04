@@ -14,7 +14,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import type { Block } from '../../lib/docBlocks';
 import { DocView } from '../DocView';
 import { ZoomableImage } from '../media/ZoomableImage';
-import { formatBytes, formatDuration, type FileKind } from './fileTypes';
+import { formatBytes, formatDuration, type FileIcon, type FileKind } from './fileTypes';
+import { useReducedMotion } from '../../lib/useReducedMotion';
+import { getAccessToken } from '../../lib/api';
+import { isOwnServerUrl } from '../../lib/serverOrigin';
 import { C, CTA_GRADIENT, paperColors, s } from './styles';
 
 // ── Skeleton shimmer ─────────────────────────────────────────────
@@ -22,11 +25,16 @@ function SkeletonShimmer({ width: w, height: h, style }: { width?: number; heigh
   // Live window width: a module-level Dimensions.get froze it at launch size.
   const { width: SW } = useWindowDimensions();
   const shimmer = useRef(new Animated.Value(0)).current;
+  // Reduce Motion: a still placeholder instead of the endless sweep.
+  const reduceMotion = useReducedMotion();
   useEffect(() => {
-    Animated.loop(
+    if (reduceMotion) { shimmer.stopAnimation(); shimmer.setValue(0.5); return; }
+    const loop = Animated.loop(
       Animated.timing(shimmer, { toValue: 1, duration: 1200, easing: Easing.linear, useNativeDriver: true })
-    ).start();
-  }, [shimmer]);
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [shimmer, reduceMotion]);
   const translateX = shimmer.interpolate({ inputRange: [0, 1], outputRange: [-(w || SW), (w || SW)] });
   return (
     <View style={[{ width: w || SW, height: h || 200, borderRadius: 8, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.04)' }, style]}>
@@ -54,11 +62,27 @@ export function LoadingPane({ fileType }: { fileType: FileKind }) {
 export function ImagePane({ uri, fileName, onLoaded, onFail }: {
   uri: string; fileName: string; onLoaded: () => void; onFail: (msg: string) => void;
 }) {
+  // Our own /uploads URLs need the bearer token, like every other loader in
+  // the screen (downloadAuthed); the URL comes from route params, so the token
+  // goes to our server only. Anything else loads as it is.
+  const needsToken = /^https?:/i.test(uri) && isOwnServerUrl(uri);
+  const [source, setSource] = useState<{ uri: string; headers?: Record<string, string> } | null>(needsToken ? null : { uri });
+  useEffect(() => {
+    if (!needsToken) { setSource({ uri }); return; }
+    let dead = false;
+    setSource(null);
+    getAccessToken()
+      .then(t => { if (!dead) setSource(t ? { uri, headers: { Authorization: `Bearer ${t}` } } : { uri }); })
+      .catch(() => { if (!dead) setSource({ uri }); });
+    return () => { dead = true; };
+  }, [uri, needsToken]);
   return (
     <View style={[s.contentFill, { backgroundColor: C.bgPure }]}>
-      <ZoomableImage source={{ uri }} spinnerColor={C.accent} label={fileName}
-        onLoaded={onLoaded}
-        onFail={() => onFail("This image couldn't be shown. It may be damaged or in a format this device can't display.")} />
+      {source ? (
+        <ZoomableImage source={source} spinnerColor={C.accent} label={fileName}
+          onLoaded={onLoaded}
+          onFail={() => onFail("This image couldn't be shown. It may be damaged or in a format this device can't display.")} />
+      ) : <ActivityIndicator color={C.accent} style={s.flex} />}
       {/* Glassmorphic filename overlay */}
       <View style={s.imageOverlay} pointerEvents="none">
         <View style={s.glassChip}>
@@ -99,11 +123,11 @@ export function DocActionBar({ hint, opening, onOpen }: { hint: string; opening:
 // FileProvider can share it, then handed to ACTION_VIEW on Android / the
 // open-in sheet on iOS (see openInDeviceApp in the screen).
 export function DocumentCard({ icon, fileName, label, reason, opening, onOpen }: {
-  icon: string; fileName: string; label: string; reason?: string; opening: boolean; onOpen: () => void;
+  icon: FileIcon; fileName: string; label: string; reason?: string; opening: boolean; onOpen: () => void;
 }) {
   return (
     <View style={[s.centered, s.contentFill]}>
-      <Text style={s.fileIcon} importantForAccessibility="no" accessibilityElementsHidden>{icon}</Text>
+      <Ionicons name={icon} size={64} color={C.accent} style={s.fileIcon} importantForAccessibility="no" accessibilityElementsHidden />
       <Text style={s.loadingText}>{fileName}</Text>
       <Text style={[s.loadingText, s.cardNote]}>
         {reason ? reason : `Opens in your ${label} app. The file stays on this device.`}
@@ -152,11 +176,11 @@ export function DocReader({ blocks, text, more, opening, onOpen }: {
 }
 
 export function DocEmpty({ icon, fileName, isPdf, onOpen }: {
-  icon: string; fileName: string; isPdf: boolean; onOpen: () => void;
+  icon: FileIcon; fileName: string; isPdf: boolean; onOpen: () => void;
 }) {
   return (
     <View style={[s.centered, s.contentFill]}>
-      <Text style={s.fileIcon} importantForAccessibility="no" accessibilityElementsHidden>{icon}</Text>
+      <Ionicons name={icon} size={64} color={C.accent} style={s.fileIcon} importantForAccessibility="no" accessibilityElementsHidden />
       <Text style={s.loadingText}>{fileName}</Text>
       <Text style={[s.loadingText, s.cardNote]}>
         {isPdf

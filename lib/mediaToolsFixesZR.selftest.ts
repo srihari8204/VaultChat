@@ -35,12 +35,12 @@ const read = (f: string) => readFileSync(f, 'utf8');
 // failed list save fails the scan.
 {
   const src = read('app/docscanner.tsx');
-  const seal = src.indexOf('await AsyncStorage.setItem(RECENT_KEY, await sealJson(docs.slice(0, 20)));\n      } catch');
+  const seal = src.indexOf('await AsyncStorage.setItem(RECENT_KEY, await sealJson(docs));\n      } catch');
   const del = src.indexOf('if (m.plain) await FileSystem.deleteAsync(m.plain');
   assert.ok(seal > 0 && del > seal, 'migration deletes plaintext after the sealed save');
   assert.ok(!/migrateDoc[^]*?deleteAsync\(doc\.pdfUri[^]*?function DocScannerContent/.test(src), 'migrateDoc no longer deletes plaintext');
   assert.ok(!/sealJson\(docs\.slice\(0, 20\)\)\); \} catch \{\}/.test(src), 'persistRecent does not swallow a failed save');
-  const persist = src.indexOf('await persistRecent([doc, ...recentDocs]);');
+  const persist = src.indexOf('await changeRecent(stored => [doc, ...stored.filter(d => d.id !== doc.id)]);');
   const ready = src.indexOf("setStep('preview');");
   assert.ok(persist > 0 && ready > persist, '"PDF ready" only after the list is saved');
   assert.ok(!src.includes('can never lose a scan'));

@@ -31,6 +31,8 @@ import {
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy';
 import ViewShot, { captureRef, releaseCapture } from 'react-native-view-shot';
+import { Buffer } from 'buffer';
+import { isUniformPng } from '../lib/media/blankImage';
 import {
   exportSize, mapForCrop, mapForRotate90, scaleCrop, toExport, type OverlayMap,
 } from '../lib/media/editExport';
@@ -56,10 +58,12 @@ type ToolMode = 'none' | 'crop' | 'rotate' | 'draw' | 'text' | 'filter' | 'adjus
 
 /** The photo with the colour matrix applied, or the plain Image when there is
  *  no colour edit (no SVG filter pass at all). */
-function EditedImage({ uri, matrix, style, onLoad }: {
+function EditedImage({ uri, matrix, style, onLoad, onError }: {
   uri: string; matrix: Matrix | null; style: StyleProp<ImageStyle>; onLoad?: () => void;
+  /** RN Image only: react-native-svg's image (the filtered path) has no error event. */
+  onError?: () => void;
 }) {
-  if (!matrix) return <Image source={{ uri }} style={style} resizeMode="contain" onLoad={onLoad} />;
+  if (!matrix) return <Image source={{ uri }} style={style} resizeMode="contain" onLoad={onLoad} onError={onError} />;
   return (
     <FilterImage source={{ uri }} style={style} resizeMode="contain" onLoad={onLoad}
       filters={[{ name: 'feColorMatrix', type: 'matrix', values: matrix }]} />
@@ -89,6 +93,25 @@ function useS() {
 /** Resolves on the next-but-one frame: an image that just reported onLoad has
  *  been drawn by then. */
 const twoFrames = () => new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+const TEXT_MOVES = [
+  { name: 'moveUp', label: 'Move up' }, { name: 'moveDown', label: 'Move down' },
+  { name: 'moveLeft', label: 'Move left' }, { name: 'moveRight', label: 'Move right' },
+];
+/** How long Done waits for the offscreen copy of the photo to load. */
+const EXPORT_LOAD_MS = 4000;
+
+/** Shrink a capture to 8×8 and check whether every pixel is one colour
+ *  (lib/media/blankImage). A probe that fails says "not blank". */
+async function captureLooksBlank(uri: string): Promise<boolean> {
+  try {
+    const probe = await ImageManipulator.manipulateAsync(uri, [{ resize: { width: 8, height: 8 } }],
+      { format: ImageManipulator.SaveFormat.PNG, base64: true });
+    FileSystem.deleteAsync(probe.uri, { idempotent: true }).catch(() => {});
+    return !!probe.base64 && isUniformPng(Uint8Array.from(Buffer.from(probe.base64, 'base64')));
+  } catch {
+    return false;
+  }
+}
 
 export default function ImageEditorScreen() {
   // Live metrics owned by THIS component — follows rotation and folds.
@@ -98,8 +121,8 @@ export default function ImageEditorScreen() {
   const { colors } = useTheme();
   const styles = useS();
   const router = useRouter();
-  const { uri, chatId, peerUid, peerName, returnTo } = useLocalSearchParams<{
-    uri: string; chatId?: string; peerUid?: string; peerName?: string; returnTo?: string;
+  const { uri, chatId, peerUid, peerName } = useLocalSearchParams<{
+    uri: string; chatId?: string; peerUid?: string; peerName?: string;
   }>();
   const viewShotRef = useRef<ViewShot>(null);
 
@@ -134,7 +157,16 @@ export default function ImageEditorScreen() {
 
   // Draw
   const [lines, setLines] = useState<DrawLine[]>([]);
-  const [currentLine, setCurrentLine] = useState<DrawLine | null>(null);
+  // The live stroke grows in a ref; a render is asked for at most once per
+  // frame (app/whiteboard's pattern) instead of copying every point per move.
+  const currentLine = useRef<DrawLine | null>(null);
+  const [, setFrame] = useState(0);
+  const frameReq = useRef<number | null>(null);
+  const requestFrame = () => {
+    if (frameReq.current != null) return;
+    frameReq.current = requestAnimationFrame(() => { frameReq.current = null; setFrame(f => f + 1); });
+  };
+  useEffect(() => () => { if (frameReq.current != null) cancelAnimationFrame(frameReq.current); }, []);
   const [drawColor, setDrawColor] = useState('#FFFFFF');
   const [brushSize, setBrushSize] = useState(3);
 
@@ -210,17 +242,19 @@ export default function ImageEditorScreen() {
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: (e) => {
         const { locationX, locationY } = e.nativeEvent;
-        setCurrentLine({ points: [{ x: locationX, y: locationY }], color: drawColorRef.current, width: brushSizeRef.current });
+        currentLine.current = { points: [{ x: locationX, y: locationY }], color: drawColorRef.current, width: brushSizeRef.current };
+        requestFrame();
       },
       onPanResponderMove: (e) => {
         const { locationX, locationY } = e.nativeEvent;
-        setCurrentLine(prev => prev ? { ...prev, points: [...prev.points, { x: locationX, y: locationY }] } : prev);
+        currentLine.current?.points.push({ x: locationX, y: locationY });
+        requestFrame();
       },
       onPanResponderRelease: () => {
-        setCurrentLine(prev => {
-          if (prev) setLines(l => [...l, prev]);
-          return null;
-        });
+        const done = currentLine.current;
+        currentLine.current = null;
+        if (done) setLines(l => [...l, done]);
+        requestFrame();
       },
     })
   ).current;
@@ -348,6 +382,14 @@ export default function ImageEditorScreen() {
     return pan;
   };
 
+  // Screen-reader alternative to dragging a text overlay: 5% of the canvas a step.
+  const nudgeText = (id: string, action: string) => {
+    const step = Math.round(Math.min(canvasW, canvasH) * 0.05);
+    const [dx, dy] = action === 'moveLeft' ? [-step, 0] : action === 'moveRight' ? [step, 0]
+      : action === 'moveUp' ? [0, -step] : action === 'moveDown' ? [0, step] : [0, 0];
+    setTextOverlays(prev => prev.map(t => (t.id === id ? { ...t, x: t.x + dx, y: t.y + dy } : t)));
+  };
+
   const dirty = imageUri !== (uri || '') || lines.length > 0 || textOverlays.length > 0 || !!matrix;
 
   // Hardware back and swipe leave through beforeRemove, not Cancel, so the
@@ -379,14 +421,17 @@ export default function ImageEditorScreen() {
   // cap only with a native renderer that works in tiles.
   const [exportPlan, setExportPlan] = useState<{ w: number; h: number } | null>(null);
   const exportRef = useRef<View>(null);
-  const exportLoaded = useRef<(() => void) | null>(null);
+  const exportLoaded = useRef<{ ok: () => void; fail: () => void } | null>(null);
   const exportFullRes = async (): Promise<string> => {
     if (!frame || !imgSize) throw new Error('image size unknown');
     const px = exportSize(imgSize.w, imgSize.h);
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // The offscreen image is the same local file already decoded on screen,
+    // so it loads in well under a second; a view that never reports onLoad
+    // (or errors) falls back after EXPORT_LOAD_MS rather than spinning.
     const loaded = new Promise<void>((res, rej) => {
-      exportLoaded.current = res;
-      timer = setTimeout(() => rej(new Error('export render timed out')), 10000);
+      exportLoaded.current = { ok: res, fail: () => rej(new Error('export image failed to load')) };
+      timer = setTimeout(() => rej(new Error('export render timed out')), EXPORT_LOAD_MS);
     });
     setExportPlan({ w: px.w / PixelRatio.get(), h: px.h / PixelRatio.get() });
     try {
@@ -394,6 +439,9 @@ export default function ImageEditorScreen() {
       await twoFrames();
       const out = await captureRef(exportRef, { format: 'jpg', quality: 0.92 });
       temps.current.add(out);
+      // A platform that did not draw the offscreen view can hand back a
+      // uniformly black bitmap instead of throwing: never send that.
+      if (await captureLooksBlank(out)) { dropTemp(out); throw new Error('export capture came back blank'); }
       return out;
     } finally {
       clearTimeout(timer);
@@ -433,10 +481,11 @@ export default function ImageEditorScreen() {
       if (lines.length > 0 || textOverlays.length > 0 || matrix) {
         try {
           finalUri = await exportFullRes();
-        } catch (e: any) {
+        } catch (e: unknown) {
           // Out of memory, or a platform that will not draw the offscreen
-          // view: a screen-resolution photo beats no photo.
-          console.warn('[image-editor] full-resolution export failed, using the screen capture —', e?.message ?? e);
+          // view (an error, no onLoad, or a blank capture): a
+          // screen-resolution photo beats no photo.
+          console.warn('[image-editor] full-resolution export failed, using the screen capture —', e instanceof Error ? e.message : e);
           finalUri = await exportScreen();
         }
       }
@@ -448,7 +497,7 @@ export default function ImageEditorScreen() {
       // pushing a second /chat, exactly as app/camera.tsx leaves.
       leaving.current = true;
       router.dismissTo({
-        pathname: (returnTo || '/chat') as any,
+        pathname: '/chat',   // the only return target (callers' `returnTo` is always '/chat'); a route param must not pick an arbitrary screen
         params: returnParams({ chatId, peerUid, peerName }, { uri: finalUri, type: 'image' }),
       });
     } catch {
@@ -500,15 +549,20 @@ export default function ImageEditorScreen() {
 
             {/* Draw lines */}
             <Strokes lines={lines} />
-            {currentLine && <Strokes lines={[currentLine]} />}
+            {currentLine.current && <Strokes lines={[currentLine.current]} />}
 
             {/* Text overlays */}
             {textOverlays.map(t => (
               <View
                 key={t.id}
-                style={{ position: 'absolute', left: t.x, top: t.y }}
+                style={[styles.abs, { left: t.x, top: t.y }]}
                 onLayout={e => textSizes.current.set(t.id, { w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}
                 {...textPanFor(t.id).panHandlers}
+                // Drag is the only gesture; screen readers move it in steps.
+                accessible accessibilityLabel={`Text: ${t.text}`}
+                accessibilityHint="Use the actions to move it up, down, left or right"
+                accessibilityActions={TEXT_MOVES}
+                onAccessibilityAction={e => nudgeText(t.id, e.nativeEvent.actionName)}
               >
                 <Text style={[styles.overlayText, { color: t.color, fontSize: t.fontSize }]}>
                   {t.text}
@@ -563,7 +617,8 @@ export default function ImageEditorScreen() {
         <View ref={exportRef} collapsable={false} pointerEvents="none"
           importantForAccessibility="no-hide-descendants" accessibilityElementsHidden
           style={[styles.exportLayer, { width: exportPlan.w, height: exportPlan.h, left: -(exportPlan.w + SW) }]}>
-          <EditedImage uri={imageUri} matrix={matrix} style={styles.image} onLoad={() => exportLoaded.current?.()} />
+          <EditedImage uri={imageUri} matrix={matrix} style={styles.image}
+            onLoad={() => exportLoaded.current?.ok()} onError={() => exportLoaded.current?.fail()} />
           <Strokes lines={lines} viewBox={`${frame.x} ${frame.y} ${frame.w} ${frame.h}`} />
           {textOverlays.map(t => {
             const k = exportPlan.w / frame.w;
@@ -572,7 +627,7 @@ export default function ImageEditorScreen() {
             // text breaks into the same lines.
             const w = textSizes.current.get(t.id)?.w;
             return (
-              <View key={t.id} style={{ position: 'absolute', left: at.x, top: at.y, width: w ? Math.ceil(w * k * 1.02) : undefined }}>
+              <View key={t.id} style={[styles.abs, { left: at.x, top: at.y, width: w ? Math.ceil(w * k * 1.02) : undefined }]}>
                 <Text style={[styles.overlayText, { color: t.color, fontSize: t.fontSize * k, textShadowRadius: 3 * k }]}>{t.text}</Text>
               </View>
             );
@@ -663,7 +718,7 @@ export default function ImageEditorScreen() {
                 </TouchableOpacity>
               ))}
             </View>
-            <TouchableOpacity onPress={undoLastLine} disabled={lines.length === 0} style={styles.undoBtn}
+            <TouchableOpacity onPress={undoLastLine} disabled={lines.length === 0} style={styles.undoBtn} hitSlop={10}
               accessibilityRole="button" accessibilityLabel="Undo last stroke" accessibilityState={{ disabled: lines.length === 0 }}>
               <Text style={styles.undoBtnText}>Undo</Text>
             </TouchableOpacity>
@@ -707,17 +762,17 @@ export default function ImageEditorScreen() {
                   accessibilityState={{ selected: textFontSize === s }}
                   onPress={() => setTextFontSize(s)}
                 >
-                  <Text style={{ color: colors.text, fontSize: 12 }}>{s}</Text>
+                  <Text style={styles.sizeTxt}>{s}</Text>
                 </TouchableOpacity>
               ))}
             </View>
           </View>
           {textOverlays.length > 0 && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 6 }}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tagRow}>
               {textOverlays.map(t => (
                 <TouchableOpacity key={t.id} onPress={() => removeTextOverlay(t.id)} style={styles.textTag} accessibilityRole="button" accessibilityLabel={`Remove text ${t.text}`}>
-                  <Text style={{ color: t.color, fontSize: 12 }}>{t.text}</Text>
-                  <Ionicons name="close" size={12} color={colors.danger} style={{ marginLeft: 4 }} />
+                  <Text style={[styles.tagTxt, { color: t.color }]}>{t.text}</Text>
+                  <Ionicons name="close" size={12} color={colors.danger} style={styles.tagX} />
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -830,8 +885,13 @@ const makeStyles = (c: Palette, SW: number, SH: number, insetTop: number, insetB
   sliderLabel: { color: c.textDim, fontSize: 12, marginRight: 4 },
   sizeBtn: { width: 30, height: 30, borderRadius: 15, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: c.border },
   sizeBtnActive: { borderColor: c.accent, backgroundColor: brandAlpha(0.15) },
-  undoBtn: { marginLeft: 'auto', paddingHorizontal: 12, paddingVertical: 6, backgroundColor: 'rgba(255,60,110,0.15)', borderRadius: 6 },
+  undoBtn: { marginLeft: 'auto', paddingHorizontal: 12, paddingVertical: 6, backgroundColor: c.glassSoft, borderWidth: 1, borderColor: c.danger, borderRadius: 6 },
   undoBtnText: { color: c.danger, fontSize: 12, fontWeight: '600' },
+  abs: { position: 'absolute' },
+  sizeTxt: { color: c.text, fontSize: 12 },
+  tagRow: { marginTop: 6 },
+  tagTxt: { fontSize: 12 },
+  tagX: { marginLeft: 4 },
   textInputRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   textInput: { flex: 1, backgroundColor: c.glassSoft, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, color: c.text, fontSize: 14, borderWidth: 1, borderColor: c.border },
   addTextBtn: { marginLeft: 8, backgroundColor: c.accent, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },

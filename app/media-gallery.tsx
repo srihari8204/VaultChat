@@ -87,7 +87,10 @@ function MediaThumb({ m, style, resizeMode = 'cover', resolveSrc, placeholder }:
     return () => { cancel = true; };
   }, [m, resolveSrc]);
   if (!src) return <View style={[style, { backgroundColor: placeholder }]} />;
-  return <Image source={src} style={style} contentFit={resizeMode} cachePolicy="memory-disk" recyclingKey={String(m.id)} />;
+  // A file:// source is a decrypted local copy: keep its thumbnail in memory
+  // only, so no decoded copy lands in the image library's disk cache.
+  return <Image source={src} style={style} contentFit={resizeMode} recyclingKey={String(m.id)}
+    cachePolicy={/^https?:/i.test(src.uri) ? 'memory-disk' : 'memory'} />;
 }
 
 type TabId = 'photos' | 'videos' | 'files' | 'links';
@@ -144,6 +147,8 @@ export default function MediaGalleryScreen() {
   // Who we are, so a file WE sent resolves to the Sent/ copy already on disk
   // instead of being downloaded back from the server.
   const [meId, setMeId] = useState<string | null>(null);
+  // The lookup has answered (meId may still be null when it failed).
+  const [meKnown, setMeKnown] = useState(false);
   // One open at a time. Repeated taps on a row otherwise start a second
   // download of the same attachment and push a second viewer on top.
   const openingRef = useRef<string | null>(null);
@@ -161,6 +166,8 @@ export default function MediaGalleryScreen() {
   // "No photos shared yet".
   const [loadError, setLoadError] = useState<'none' | 'empty' | 'stale'>('none');
   const [capped, setCapped] = useState(false);
+  // The network walk for this chat finished and the lists hold its result.
+  const [walked, setWalked] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [groupBy, setGroupBy] = useState<GroupBy>('none');
   const [names, setNames] = useState<Record<string, string>>({});
@@ -171,6 +178,7 @@ export default function MediaGalleryScreen() {
     const cacheKey = 'media-gallery:' + cid;
     let painted = false;
     setLoadError('none');
+    setWalked(false);
     (async () => {
       // Local-first: paint the cached buckets instantly so the gallery opens
       // without a spinner; individual thumbnails still decrypt on demand.
@@ -230,6 +238,7 @@ export default function MediaGalleryScreen() {
         const { photos: ph, videos: vd, files: fl, links: lk } = bucket(merged);
         setPhotos(ph); setVideos(vd); setFiles(fl); setLinks(lk);
         writeCache<GalleryCache>(cacheKey, { photos: ph, videos: vd, files: fl, links: lk });
+        setWalked(true);
       } catch {
         // Keep the painted cache on error, but say it may be out of date; with
         // nothing cached, show an error with Retry instead of an empty tab.
@@ -243,8 +252,9 @@ export default function MediaGalleryScreen() {
 
   useEffect(() => {
     getCurrentUserAsync()
-      .then((u: any) => setMeId(u?.id != null ? String(u.id) : null))
-      .catch(() => {});
+      .then((u: { id?: string | number } | null) => setMeId(u?.id != null ? String(u.id) : null))
+      .catch(() => {})
+      .finally(() => setMeKnown(true));
   }, []);
 
   const fmtDate = useCallback((iso: string) => { try { return new Date(iso).toLocaleDateString(); } catch { return ''; } }, []);
@@ -316,7 +326,7 @@ export default function MediaGalleryScreen() {
         pathname: route,
         params: { uri, filename, mimeType: m.meta?.mime || '', msgType: 'file' },
       });
-    } catch (e: any) {
+    } catch (e: unknown) {
       // A missing key is a STATE, not a crash: it is the normal situation after
       // a reinstall, and saying so is the difference between an explicable
       // screen and "nothing happens when I tap".
@@ -331,15 +341,26 @@ export default function MediaGalleryScreen() {
     }
   }, [unlockKey, meId, router]);
 
-  // Open the requested file once, after the list holds it (cache or network).
+  // Open the requested file once, after the list holds it (cache or network)
+  // and after we know who we are — so a file we sent opens from the Sent/ copy
+  // instead of being downloaded back. A file the walked history does not hold
+  // says so instead of doing nothing.
   const autoOpened = useRef(false);
   useEffect(() => {
-    if (!openParam || autoOpened.current) return;
+    if (!openParam || autoOpened.current || !meKnown) return;
     const row = files.find((m) => String(m.id) === String(openParam));
-    if (!row) return;
+    if (!row) {
+      if (walked) {
+        autoOpened.current = true;
+        Alert.alert('File not found', capped
+          ? 'That file is older than the history loaded here, or it was deleted. Open it from the chat instead.'
+          : 'That file is no longer in this chat. It may have been deleted.');
+      }
+      return;
+    }
     autoOpened.current = true;
     openFile(row);
-  }, [openParam, files, openFile]);
+  }, [openParam, files, openFile, meKnown, walked, capped]);
 
   // Photos and videos open in /media-viewer: it plays video (the old in-screen
   // Modal could only show a still), zooms, shares and saves. Encrypted media
@@ -365,8 +386,8 @@ export default function MediaGalleryScreen() {
           mime: m.meta?.mime ?? null, kind: m.type, encrypted: !!m.meta?.encrypted,
         }, meId),
       });
-    } catch (e: any) {
-      console.warn('[media-gallery] open failed:', e?.message ?? e);
+    } catch (e: unknown) {
+      console.warn('[media-gallery] open failed:', e instanceof Error ? e.message : e);
       Alert.alert('Can’t open', 'The viewer could not be opened. Please try again.');
     } finally {
       openingRef.current = null;
@@ -394,7 +415,7 @@ export default function MediaGalleryScreen() {
     <TouchableOpacity style={s.fileRow} onPress={() => openFile(item)}
       accessibilityRole="button" accessibilityLabel={`${fileLabel(item)}, ${fmtDate(item.createdAt)}`} accessibilityHint="Opens the file">
       <View style={s.fileIcon}><Ionicons name="document-text-outline" size={22} color={colors.accent} /></View>
-      <View style={{ flex: 1 }}>
+      <View style={s.flex}>
         <Text style={s.fileName} numberOfLines={1}>{fileLabel(item)}</Text>
         <Text style={s.fileDate}>{fmtDate(item.createdAt)}</Text>
       </View>
@@ -407,7 +428,7 @@ export default function MediaGalleryScreen() {
       onPress={() => Linking.openURL(item.url).catch(() => Alert.alert('Can’t open link', 'No app on this device can open this link.'))}
       accessibilityRole="link" accessibilityLabel={`${item.url}, ${fmtDate(item.createdAt)}`}>
       <View style={s.fileIcon}><Ionicons name="link-outline" size={20} color={colors.accent} /></View>
-      <View style={{ flex: 1 }}>
+      <View style={s.flex}>
         <Text style={[s.fileName, { color: colors.accent }]} numberOfLines={2}>{item.url}</Text>
         <Text style={s.fileDate}>{fmtDate(item.createdAt)}</Text>
       </View>
@@ -452,7 +473,7 @@ export default function MediaGalleryScreen() {
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.title} numberOfLines={1} accessibilityRole="header">{(peerName as string) || 'Shared'} Media</Text>
-        <View style={{ width: 40 }} />
+        <View style={s.headSpacer} />
       </View>
 
       <View style={s.tabs} accessibilityRole="tablist">
@@ -489,7 +510,7 @@ export default function MediaGalleryScreen() {
       )}
 
       {loading ? (
-        <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
+        <ActivityIndicator color={colors.primary} style={s.spinner} />
       ) : loadError === 'empty' ? (
         <View style={s.errorBox}>
           <Ionicons name="cloud-offline-outline" size={36} color={colors.textDim} />
@@ -505,10 +526,10 @@ export default function MediaGalleryScreen() {
           sections={sections}
           keyExtractor={(row, i) => `${row.map(m => m.id).join('-')}-${i}`}
           stickySectionHeadersEnabled={false}
-          contentContainerStyle={{ padding: 8 }}
+          contentContainerStyle={s.gridPad}
           renderSectionHeader={({ section }) => <Text numberOfLines={1} style={s.sectionHdr}>{section.title}</Text>}
           renderItem={({ item: row }) => (
-            <View style={{ flexDirection: 'row' }}>
+            <View style={s.row}>
               {row.map(m => (
                 <React.Fragment key={m.id}>
                   {tab === 'photos' ? renderPhoto({ item: m }) : renderVideo({ item: m })}
@@ -520,16 +541,16 @@ export default function MediaGalleryScreen() {
         />
       ) : tab === 'photos' ? (
         <FlatList data={photos} numColumns={3} keyExtractor={m => String(m.id)} renderItem={renderPhoto}
-          contentContainerStyle={{ padding: 8 }} ListEmptyComponent={<Empty label="No photos shared yet" />} />
+          contentContainerStyle={s.gridPad} ListEmptyComponent={<Empty label="No photos shared yet" />} />
       ) : tab === 'videos' ? (
         <FlatList data={videos} numColumns={3} keyExtractor={m => String(m.id)} renderItem={renderVideo}
-          contentContainerStyle={{ padding: 8 }} ListEmptyComponent={<Empty label="No videos shared yet" />} />
+          contentContainerStyle={s.gridPad} ListEmptyComponent={<Empty label="No videos shared yet" />} />
       ) : tab === 'files' ? (
         <FlatList data={files} keyExtractor={m => String(m.id)} renderItem={renderFile}
-          contentContainerStyle={{ padding: 12 }} ListEmptyComponent={<Empty label="No files shared yet" />} />
+          contentContainerStyle={s.listPad} ListEmptyComponent={<Empty label="No files shared yet" />} />
       ) : (
         <FlatList data={links} keyExtractor={(l, i) => `${l.id}-${i}`} renderItem={renderLink}
-          contentContainerStyle={{ padding: 12 }} ListEmptyComponent={<Empty label="No links shared yet" />} />
+          contentContainerStyle={s.listPad} ListEmptyComponent={<Empty label="No links shared yet" />} />
       )}
 
       {capped && !loading && loadError !== 'empty' && (
@@ -540,15 +561,23 @@ export default function MediaGalleryScreen() {
 }
 
 const Empty = ({ label }: { label: string }) => {
-  const { colors } = useTheme();
+  const s = useS();
   return (
-    <View style={{ alignItems: 'center', paddingVertical: 60 }}>
-      <Text style={{ color: colors.textDim, fontSize: 14 }}>{label}</Text>
+    <View style={s.empty}>
+      <Text style={s.emptyTxt}>{label}</Text>
     </View>
   );
 };
 
 const makeStyles = (c: Palette, insetTop: number) => StyleSheet.create({
+  flex: { flex: 1 },
+  headSpacer: { width: 40 },
+  spinner: { marginTop: 40 },
+  row: { flexDirection: 'row' },
+  gridPad: { padding: 8 },
+  listPad: { padding: 12 },
+  empty: { alignItems: 'center', paddingVertical: 60 },
+  emptyTxt: { color: c.textDim, fontSize: 14 },
   container: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: insetTop + 8, paddingHorizontal: 16, paddingBottom: 8, gap: 12 },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
@@ -566,7 +595,7 @@ const makeStyles = (c: Palette, insetTop: number) => StyleSheet.create({
   tile: { margin: 4, borderRadius: 8, overflow: 'hidden', backgroundColor: c.surfaceSolid },
   tileImg: { width: '100%', height: '100%' },
   // A scrim over the photo, so it is dark in both themes.
-  playBadge: { position: 'absolute', top: '50%', left: '50%', marginLeft: -16, marginTop: -16, width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  playBadge: { position: 'absolute', top: '50%', left: '50%', marginLeft: -16, marginTop: -16, width: 32, height: 32, borderRadius: 16, backgroundColor: AuroraDark.scrim, justifyContent: 'center', alignItems: 'center' },   // fixed dark scrim under the fixed light play glyph, over any photo
   fileRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 12, padding: 12, marginBottom: 6, borderWidth: 1, borderColor: c.glassStroke, gap: 12 },
   fileIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: c.glassSoft, justifyContent: 'center', alignItems: 'center' },
   fileName: { color: c.text, fontSize: 13, fontWeight: '600' },
