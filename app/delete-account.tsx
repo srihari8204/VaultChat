@@ -16,10 +16,10 @@
 // RE-AUTHENTICATION (2026-10-04). Typing the number back is a confirmation,
 // not proof of who is holding the phone (lib/confirmIdentity.ts says so), and
 // the number is on the profile for anyone with the unlocked phone to read. The
-// account MPIN is now checked against the server (POST /auth/mpin/verify, the
-// same check the lock screen uses) before DELETE /user/account is sent.
-// ponytail: client-side gate — the DELETE endpoint itself does not yet demand a
-// fresh MPIN proof; binding one to the request needs a backend change.
+// account MPIN is sent IN the DELETE /user/account body and the server checks
+// it there (400 mpin_required, 403 invalid_mpin, 423 locked + retryAfter). It
+// shares the /auth/mpin/verify attempt budget, so there is deliberately no
+// separate pre-check: that would spend a second attempt per delete.
 
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -31,11 +31,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { HEADER_TOP } from '../constants/layout';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
-import { api, getCachedUser } from '../lib/api';
-import { onboardingError, verifyMpinRemote } from '../lib/onboarding';
+import { api } from '../lib/api';
+import { onboardingError, retryAfterSec } from '../lib/onboarding';
+import { deleteAccount } from '../lib/chatService';
 import { profileFromProtobuf } from '../lib/userProfilePolicy';
 import { identityMatches, type AccountIdentity } from '../lib/confirmIdentity';
-import { deleteAccount } from '../lib/chatService';
 import { unregisterPushToken } from '../lib/push';
 import { disconnect as disconnectSocket } from '../lib/socket';
 import { resetTo } from '../lib/authNav';
@@ -67,7 +67,6 @@ export default function DeleteAccountScreen() {
   const S = useS();
 
   const [me, setMe] = useState<AccountIdentity | null>(null);
-  const [userId, setUserId] = useState<string | null>(null);
   const [mpin, setMpin] = useState('');
   const [authErr, setAuthErr] = useState<string | null>(null);
   const [loadErr, setLoadErr] = useState(false);
@@ -86,11 +85,6 @@ export default function DeleteAccountScreen() {
       // be deleted. Rendering the form anyway leaves a button that can never
       // arm; the retry at least has a way forward.
       if (!id.phone && !id.email && !id.vaultId) { setLoadErr(true); return; }
-      const uid = u?.id || u?.userId || (await getCachedUser().catch(() => null))?.id || null;
-      // No user id means the MPIN cannot be checked — a failed load, not a
-      // form that skips re-authentication.
-      if (!uid) { setLoadErr(true); return; }
-      setUserId(String(uid));
       setMe(id);
     } catch {
       setLoadErr(true);
@@ -108,19 +102,10 @@ export default function DeleteAccountScreen() {
   const armed = identityOk && /^\d{6}$/.test(mpin);
 
   const run = useCallback(async () => {
-    if (!userId) return;
     setBusy(true);
     setAuthErr(null);
     try {
-      await verifyMpinRemote(userId, mpin);
-    } catch (e: any) {
-      setBusy(false);
-      setMpin('');
-      setAuthErr(onboardingError(e, 'Incorrect MPIN. The account was not deleted.'));
-      return;
-    }
-    try {
-      await deleteAccount(reason ?? undefined);
+      await deleteAccount(mpin, reason ?? undefined);
       // Order matters: the account is gone, so these are best-effort cleanups
       // of this device. A failure here must not strand the user on a screen for
       // an account that no longer exists.
@@ -133,9 +118,27 @@ export default function DeleteAccountScreen() {
       resetTo('/onboard');
     } catch (e: any) {
       setBusy(false);
-      Alert.alert('Delete failed', e?.message ?? 'Check your connection and try again.');
+      // The MPIN answers belong next to the MPIN field; anything else is a
+      // failed request, said in words rather than a raw error.
+      const code = e?.body?.error?.code;
+      if (code === 'invalid_mpin' || e?.status === 403) {
+        setMpin('');
+        setAuthErr('Incorrect MPIN. Your account was not deleted.');
+        return;
+      }
+      if (code === 'locked' || e?.status === 423) {
+        setMpin('');
+        const mins = Math.max(1, Math.ceil(retryAfterSec(e) / 60));
+        setAuthErr(`Too many MPIN attempts. Try again in about ${mins} minute${mins === 1 ? '' : 's'}. Your account was not deleted.`);
+        return;
+      }
+      if (code === 'mpin_required' || e?.status === 400) {
+        setAuthErr('Enter your 6-digit MPIN to delete this account.');
+        return;
+      }
+      Alert.alert('Delete failed', onboardingError(e, 'Check your connection and try again.'));
     }
-  }, [reason, userId, mpin]);
+  }, [reason, mpin]);
 
   const confirm = useCallback(() => {
     if (!armed || busy) return;
@@ -153,10 +156,10 @@ export default function DeleteAccountScreen() {
     <KeyboardSafe style={S.screen} >
       <AuroraBackground />
       <View style={S.header}>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7} hitSlop={6}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={S.title}>Delete account</Text>
+        <Text style={S.title} accessibilityRole="header">Delete account</Text>
       </View>
 
       <ScrollView contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
@@ -215,7 +218,7 @@ export default function DeleteAccountScreen() {
 
             {identityOk && (
               <>
-                <Text style={S.sectionLabel}>ENTER YOUR MPIN</Text>
+                <Text style={S.sectionLabel} accessibilityRole="header">ENTER YOUR MPIN</Text>
                 <TextInput
                   style={S.input}
                   value={mpin}
@@ -233,7 +236,7 @@ export default function DeleteAccountScreen() {
               </>
             )}
 
-            <Text style={S.sectionLabel}>WHY ARE YOU LEAVING? (OPTIONAL)</Text>
+            <Text style={S.sectionLabel} accessibilityRole="header">WHY ARE YOU LEAVING? (OPTIONAL)</Text>
             <View style={S.chips}>
               {REASONS.map(r => (
                 <TouchableOpacity
