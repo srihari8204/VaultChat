@@ -18,6 +18,8 @@ import { AuroraBackground } from '../components/ui';
 import { AppText as Text } from '../components/ui/Text';
 import { tint } from '../lib/tintColor';
 
+const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message) || fallback;
+
 const JOIN_BASE = 'https://vaultchat.app/join/';
 const EXPIRY_OPTS = [
   { label: 'Permanent', hours: 0 },
@@ -42,12 +44,14 @@ export default function InviteLinkScreen() {
   const [error, setError] = useState<string | null>(null);
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  // One revoke request at a time: a second row's Revoke waits for the first.
+  const [revokingId, setRevokingId] = useState<InviteLink['id'] | null>(null);
 
   const load = useCallback(async () => {
     // A missing id used to render an empty list, indistinguishable from "no links".
     if (!chatId) { setError('This screen did not say which group to show.'); setLoading(false); return; }
     try { setLinks(await listInviteLinks(chatId)); setError(null); }
-    catch (e: any) { setError(e?.message ?? 'Failed to load links'); }
+    catch (e: unknown) { setError(errText(e, 'Failed to load links')); }
     finally { setLoading(false); }
   }, [chatId]);
 
@@ -78,8 +82,8 @@ export default function InviteLinkScreen() {
       const link = await createInviteLink(chatId, { expiresInHours: hours });
       setLinks(prev => [link, ...prev]);
       Alert.alert('Link created', JOIN_BASE + link.code);
-    } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'Could not create link');
+    } catch (e: unknown) {
+      Alert.alert('Error', errText(e, 'Could not create link'));
     } finally {
       setCreating(false);
     }
@@ -103,16 +107,20 @@ export default function InviteLinkScreen() {
   };
 
   const revoke = (link: InviteLink) => {
+    if (revokingId != null) return;
     Alert.alert('Revoke link?', 'This link will no longer work.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Revoke', style: 'destructive', onPress: async () => {
+        setRevokingId(link.id);
         setLinks(list => list.map(l => l.id === link.id ? { ...l, revoked: true } : l));
         try { await revokeInviteLink(chatId!, link.id); }
-        catch (e: any) {
+        catch (e: unknown) {
           // Undo only this row: restoring a snapshot taken at the tap would also
           // undo anything else that changed meanwhile (a new link, another revoke).
           setLinks(list => list.map(l => l.id === link.id ? { ...l, revoked: link.revoked } : l));
-          Alert.alert('Error', e?.message ?? 'Revoke failed');
+          Alert.alert('Error', errText(e, 'Revoke failed'));
+        } finally {
+          setRevokingId(null);
         }
       } },
     ]);
@@ -137,7 +145,7 @@ export default function InviteLinkScreen() {
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={s.header}>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/chats'))} style={s.backBtn} hitSlop={10}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.title} accessibilityRole="header">Invite Links</Text>
@@ -206,7 +214,8 @@ export default function InviteLinkScreen() {
                       <Ionicons name="qr-code-outline" size={15} color={colors.text} />
                       <Text style={s.linkBtnTxt}>QR</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={s.linkBtn} accessibilityRole="button" accessibilityLabel={`Revoke link ${item.code}`} onPress={() => revoke(item)}>
+                    <TouchableOpacity style={s.linkBtn} accessibilityRole="button" accessibilityLabel={`Revoke link ${item.code}`} onPress={() => revoke(item)}
+                      disabled={revokingId != null} accessibilityState={{ disabled: revokingId != null }}>
                       <Ionicons name="trash-outline" size={15} color={colors.danger} />
                       <Text style={[s.linkBtnTxt, { color: colors.danger }]}>Revoke</Text>
                     </TouchableOpacity>

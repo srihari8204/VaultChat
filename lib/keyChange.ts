@@ -17,11 +17,23 @@
 //
 // Storage is local and per-peer. Nothing is reported to the server: the server
 // is exactly who this protects against.
+//
+// It also remembers WHICH safety number the user verified for a peer (a hash
+// of it, lib/verification.safetyFingerprint), so app/verify-contact.tsx can
+// say "the security code changed" instead of keeping "Verified" across a key
+// change. Every key here starts with vc_peer_ik_, which lib/backupSecretKeys
+// keeps out of backups in both directions: a restored bundle must not be able
+// to forge a verification any more than it may pre-acknowledge a change.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const seenKey = (peerId: string) => `vc_peer_ik_${peerId}`;
 const ackKey = (peerId: string) => `vc_peer_ik_ack_${peerId}`;
+const verifiedKey = (peerId: string) => `vc_peer_ik_verified_${peerId}`;
+/** Stored by acknowledgeKeyChange when no verified number was recorded: a
+ *  verification from before the change (or from before numbers were recorded)
+ *  no longer counts. Never equal to a real fingerprint. */
+export const STALE_VERIFICATION = 'key-changed';
 
 export interface KeyChange {
   peerId: string;
@@ -72,7 +84,25 @@ export async function acknowledgeKeyChange(peerId: string, currentHex: string): 
   try {
     await AsyncStorage.setItem(ackKey(peerId), currentHex);
     await AsyncStorage.setItem(seenKey(peerId), currentHex);
+    // After this the change is no longer "pending", so verify-contact could not
+    // tell an old, unrecorded verification from a current one. Mark it stale.
+    // A recorded number needs nothing: it no longer matches by itself.
+    if (!(await AsyncStorage.getItem(verifiedKey(peerId)))) {
+      await AsyncStorage.setItem(verifiedKey(peerId), STALE_VERIFICATION);
+    }
   } catch { /* best effort — the banner reappearing is a far smaller problem */ }
 }
 
-export default { checkKeyChange, acknowledgeKeyChange };
+/** The fingerprint of the safety number last verified for this peer on this
+ *  device, STALE_VERIFICATION, or null when none was recorded. */
+export async function getVerifiedFingerprint(peerId: string): Promise<string | null> {
+  return AsyncStorage.getItem(verifiedKey(peerId));
+}
+
+/** Record (or with null, forget) the verified safety number's fingerprint. */
+export async function setVerifiedFingerprint(peerId: string, fingerprint: string | null): Promise<void> {
+  if (fingerprint) await AsyncStorage.setItem(verifiedKey(peerId), fingerprint);
+  else await AsyncStorage.removeItem(verifiedKey(peerId));
+}
+
+export default { checkKeyChange, acknowledgeKeyChange, getVerifiedFingerprint, setVerifiedFingerprint };

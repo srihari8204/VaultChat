@@ -823,31 +823,39 @@ export function looksLikeEnvelope(text: string | null | undefined): boolean {
   return false;
 }
 
+/** One chat-list preview row. `protected` = the newest message is view-once or
+ *  Invisible Ink (or its meta is unreadable): its content is withheld here and
+ *  the row must not print any later-filled text for it either. */
+export interface LastMessagePreview { content: string | null; type: string | null; senderId: string | null; id: number; protected?: boolean }
+
 /**
  * The newest cached message for each chat — used by the chat list to render a
  * real last-message preview (WhatsApp-style) from local plaintext, since the
  * server only holds ciphertext. One query, decrypted at-rest on the way out.
+ * View-once / Invisible Ink text is never returned (same rule as search).
  */
-export async function getLastMessagePerChat(): Promise<Map<string, { content: string | null; type: string | null; senderId: string | null; id: number }>> {
+export async function getLastMessagePerChat(): Promise<Map<string, LastMessagePreview>> {
   const db = await getLocalDb();
   // One bridge crossing, with one idx_messages_preview seek per visible chat.
   // A window function produced the same result but scanned every cached
   // message, making chat-list startup grow with years of local history.
   const rows = await db.getAllAsync(
-    `SELECT m.chat_id, m.id, m.content, m.type, m.sender_id
+    `SELECT m.chat_id, m.id, m.content, m.type, m.sender_id, m.meta
        FROM chats c JOIN messages m ON m.id = (
          SELECT id FROM messages
           WHERE chat_id = c.id AND deleted_at IS NULL AND type <> 'reaction'
           ORDER BY id DESC LIMIT 1
        )`, []);
-  const out = new Map<string, { content: string | null; type: string | null; senderId: string | null; id: number }>();
+  const out = new Map<string, LastMessagePreview>();
   for (const r of rows as any[]) {
-    const text = decField(r.content);
+    const hidden = searchHidden(r.meta);
+    const text = hidden ? null : decField(r.content);
     // Never surface an un-decrypted envelope as preview text — null it so the
     // chat list shows a lock placeholder instead of raw ciphertext.
     out.set(r.chat_id, {
       content: looksLikeEnvelope(text) ? null : text,
       type: r.type ?? null, senderId: r.sender_id ?? null, id: r.id,
+      ...(hidden ? { protected: true } : {}),
     });
   }
   return out;
@@ -856,9 +864,11 @@ export async function getLastMessagePerChat(): Promise<Map<string, { content: st
 /**
  * Global message search across ALL chats, on-device (WhatsApp-style, zero-
  * knowledge). Decrypts the at-rest cache in JS and substring-matches plaintext.
+ * View-once / Invisible Ink messages are never hits (same rule as in-chat
+ * search), and messages in `skipChats` (locked chats) are not searched.
  */
 export async function searchAllMessages(
-  query: string, limit = 40,
+  query: string, limit = 40, skipChats?: ReadonlySet<string>,
 ): Promise<{ chatId: string; id: number; content: string; senderId: string | null; createdAt: string }[]> {
   const q = query.trim().toLowerCase();
   if (!q) return [];
@@ -876,7 +886,7 @@ export async function searchAllMessages(
         let candidateBefore: number | null = null;
         for (;;) {
           const rows = await db.getAllAsync(
-            `SELECT m.chat_id, m.id, m.content, m.sender_id, m.created_at
+            `SELECT m.chat_id, m.id, m.content, m.sender_id, m.created_at, m.meta
                FROM msg_fts f JOIN messages m ON m.id = f.rowid
               WHERE msg_fts MATCH ? AND m.deleted_at IS NULL
                 ${candidateBefore == null ? '' : 'AND m.id < ?'}
@@ -886,6 +896,7 @@ export async function searchAllMessages(
               : [toks.map(t => `"${t}"`).join(' '), candidateBefore],
           ) as any[];
           for (const r of rows) {
+            if (skipChats?.has(r.chat_id) || searchHidden(r.meta)) continue;
             const text = decField(r.content);
             if (!text || text.startsWith('enc:v1:') || looksLikeEnvelope(text)) continue;
             // MATCH is an unordered token conjunction. Keep paging candidates
@@ -913,13 +924,14 @@ export async function searchAllMessages(
   let before: number | null = null;
   while (out.length < limit) {
     const rows = await db.getAllAsync(
-      `SELECT chat_id, id, content, sender_id, created_at FROM messages
+      `SELECT chat_id, id, content, sender_id, created_at, meta FROM messages
         WHERE content IS NOT NULL AND deleted_at IS NULL
           ${before == null ? '' : 'AND id < ?'}
         ORDER BY id DESC LIMIT 500`,
       before == null ? [] : [before],
     ) as any[];
     for (const r of rows) {
+      if (skipChats?.has(r.chat_id) || searchHidden(r.meta)) continue;
       const text = decField(r.content);
       // Skip un-decrypted envelopes ({..."v":"dr1"...} / GSK1:) and match plaintext.
       if (!text || text.startsWith('enc:v1:') || looksLikeEnvelope(text)) continue;

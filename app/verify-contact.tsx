@@ -4,7 +4,9 @@
 // keys. If it matches what the contact sees on their device (scanned as a QR
 // code side by side, read aloud, or copied over a different channel), there is
 // no man-in-the-middle. The "verified" decision is the user's own and is
-// persisted (synced across their devices).
+// persisted (synced across their devices). It holds only for the number that
+// was verified: this device records a hash of it (lib/keyChange), and when the
+// number changes the screen says so and treats the contact as not verified.
 
 import { HEADER_TOP } from '../constants/layout';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -19,7 +21,12 @@ import { AuroraDark, type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { getCachedUser } from '../lib/api';
 import { computeSafetyNumber, formatSafetyNumber } from '../services/security/safetyNumber';
-import { fetchIdentityKey, getVerifiedContacts, setContactVerified } from '../lib/verification';
+import {
+  fetchIdentityKey, getVerifiedContacts, safetyFingerprint, setContactVerified, verificationStatus,
+} from '../lib/verification';
+import {
+  acknowledgeKeyChange, checkKeyChange, getVerifiedFingerprint, setVerifiedFingerprint, type KeyChange,
+} from '../lib/keyChange';
 import { AuroraBackground } from '../components/ui';
 import { AppText as Text } from '../components/ui/Text';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
@@ -46,6 +53,10 @@ export default function VerifyContactScreen() {
 
   const [state, setState] = useState<State>({ kind: 'loading' });
   const [verified, setVerified] = useState(false);
+  // Verified before, but for a different safety number than the one shown now.
+  const [codeChanged, setCodeChanged] = useState(false);
+  // An unacknowledged key-change banner for this peer; re-verifying clears it.
+  const keyChange = useRef<KeyChange | null>(null);
   const [saving, setSaving] = useState(false);
   const [showQr, setShowQr] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
@@ -64,39 +75,60 @@ export default function VerifyContactScreen() {
       const myId = me?.id;
       if (!myId || !peerId) { set({ kind: 'unavailable', reason: 'Missing account or contact.', retryable: false }); return; }
 
-      const [myKey, peerKey, verifiedList] = await Promise.all([
+      const [myKey, peerKey, verifiedList, recorded, change] = await Promise.all([
         fetchIdentityKey(myId),
         fetchIdentityKey(peerId),
         getVerifiedContacts().catch(() => [] as string[]),
+        getVerifiedFingerprint(peerId).catch(() => null),
+        checkKeyChange(peerId),
       ]);
       if (!alive.current) return;
 
       if (!myKey) { set({ kind: 'unavailable', reason: 'Your encryption keys aren’t published yet. Open a chat once to set up E2EE, then try again.', retryable: true }); return; }
       if (!peerKey) { set({ kind: 'unavailable', reason: `${peerName} hasn’t set up end-to-end encryption yet, so there’s no safety number to compare.`, retryable: true }); return; }
 
-      setVerified(verifiedList.includes(peerId));
-      set({ kind: 'ready', number: computeSafetyNumber(myId, myKey, peerId, peerKey) });
-    } catch (e: any) {
-      set({ kind: 'unavailable', reason: e?.message ?? 'Could not load the safety number.', retryable: true });
+      const number = computeSafetyNumber(myId, myKey, peerId, peerKey);
+      const fp = safetyFingerprint(number);
+      const status = verificationStatus(verifiedList.includes(peerId), recorded, fp, change != null);
+      // A verification with no recorded number (older, or from another device)
+      // that still holds is bound to today's number from now on.
+      if (status === 'verified' && !recorded) setVerifiedFingerprint(peerId, fp).catch(() => {});
+      keyChange.current = change;
+      setVerified(status === 'verified');
+      setCodeChanged(status === 'changed');
+      set({ kind: 'ready', number });
+    } catch (e: unknown) {
+      set({ kind: 'unavailable', reason: e instanceof Error && e.message ? e.message : 'Could not load the safety number.', retryable: true });
     }
   }, [peerId, peerName]);
 
   useEffect(() => { load(); }, [load]);
 
   const toggleVerified = useCallback(async () => {
-    if (saving) return;
+    if (saving || state.kind !== 'ready') return;
     const next = !verified;
     setSaving(true);
     setVerified(next);
     try {
       await setContactVerified(peerId, next);
-    } catch (e: any) {
+      // Bind the decision to the number on screen (or forget it). Local only:
+      // the server keeps just the flag, so other devices bind on their next visit.
+      await setVerifiedFingerprint(peerId, next ? safetyFingerprint(state.number) : null).catch(() => {});
+      if (next) {
+        setCodeChanged(false);
+        // The new number is verified, so the chat's "security code changed"
+        // banner has been dealt with.
+        const change = keyChange.current;
+        keyChange.current = null;
+        if (change) await acknowledgeKeyChange(change.peerId, change.currentHex);
+      }
+    } catch (e: unknown) {
       setVerified(!next); // revert on failure
-      Alert.alert('Could not save', e?.message ?? 'Try again');
+      Alert.alert('Could not save', e instanceof Error && e.message ? e.message : 'Try again');
     } finally {
-      setSaving(false);
+      if (alive.current) setSaving(false);
     }
-  }, [saving, verified, peerId]);
+  }, [saving, verified, peerId, state]);
 
   // Copy for comparing over a trusted text channel; the clipboard clears itself.
   const copyNumber = useCallback(async (n: string) => {
@@ -159,8 +191,8 @@ export default function VerifyContactScreen() {
             <Ionicons name="information-circle" size={28} color={colors.textDim} />
             <Text style={S.unavailable}>{state.reason}</Text>
             {state.retryable && (
-              <TouchableOpacity onPress={load} accessibilityRole="button" accessibilityLabel="Try again" style={{ padding: 10, minHeight: 44, justifyContent: 'center' }}>
-                <Text style={{ color: colors.primary, fontWeight: '700' }}>Try again</Text>
+              <TouchableOpacity onPress={load} accessibilityRole="button" accessibilityLabel="Try again" style={S.retryBtn}>
+                <Text style={S.retryTxt}>Try again</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -201,6 +233,16 @@ export default function VerifyContactScreen() {
               not being intercepted. If the numbers ever differ, the keys changed — do not trust
               the chat until you re-verify.
             </Text>
+
+            {codeChanged && (
+              <View style={S.changed} accessibilityLiveRegion="polite">
+                <Ionicons name="warning-outline" size={18} color={colors.warning} />
+                <Text style={S.changedTxt}>
+                  Not verified — the security code changed since you verified {peerName}. Compare the new
+                  number above, then mark as verified again.
+                </Text>
+              </View>
+            )}
 
             <TouchableOpacity
               style={[S.verifyBtn, verified ? S.verifyBtnOn : S.verifyBtnOff]}
@@ -275,4 +317,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   verifyBtnText: { fontSize: 15, fontWeight: '800' },
 
   unavailable: { color: c.textDim, fontSize: 14, lineHeight: 20, textAlign: 'center' },
+  retryBtn: { padding: 10, minHeight: 44, justifyContent: 'center' },
+  retryTxt: { color: c.primary, fontWeight: '700' },
+  changed: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, padding: 12, marginBottom: 14, borderRadius: 12, borderWidth: 1, borderColor: c.warning, backgroundColor: c.glassSoft },
+  changedTxt: { flex: 1, color: c.text, fontSize: 13.5, lineHeight: 19 },
 });

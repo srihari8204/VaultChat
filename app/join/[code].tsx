@@ -25,6 +25,9 @@ import { joinViaInvite, previewInvite } from '../../lib/chatService';
 import { AuroraBackground } from '../../components/ui';
 import { AppText as Text } from '../../components/ui/Text';
 
+const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message) || fallback;
+const errStatus = (e: unknown) => (e as { status?: number } | null)?.status;
+
 const PREVIEW_WAIT_MS = 4000;
 
 type Phase =
@@ -61,11 +64,11 @@ export default function JoinScreen() {
       // Joined (or already a member) — go straight to the chat, replacing this
       // screen so Back doesn't bounce through the redeem flow.
       router.replace({ pathname: '/chat', params: { id: res.chatId } });
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (cancelledRef.current) return;
       // 410 = revoked, expired or used up (as the preview says): retrying the
       // same code cannot work. Anything else (offline, a 5xx) can.
-      setPhase({ kind: 'error', message: e?.message ?? 'This link is invalid, expired, or revoked.', retry: e?.status !== 410 });
+      setPhase({ kind: 'error', message: errText(e, 'This link is invalid, expired, or revoked.'), retry: errStatus(e) !== 410 });
     }
   }, [code, router]);
 
@@ -75,11 +78,11 @@ export default function JoinScreen() {
     if (!clean) { setPhase({ kind: 'error', message: 'This invite link is missing its code.', retry: false }); return; }
     let dead = false;
     const settle = setTimeout(() => { if (!dead) setPreviewSettled(true); }, PREVIEW_WAIT_MS);
-    previewInvite(clean).then((p) => { if (!dead) setPreview(p); }).catch((e: any) => {
+    previewInvite(clean).then((p) => { if (!dead) setPreview(p); }).catch((e: unknown) => {
       if (dead) return;
       // 410 = revoked, expired, used up or unknown: there is nothing to join.
       // Anything else (offline, an older server) keeps the generic confirm.
-      if (e?.status === 410) setPhase({ kind: 'error', message: 'This invite link is invalid, expired, or revoked.', retry: false });
+      if (errStatus(e) === 410) setPhase({ kind: 'error', message: 'This invite link is invalid, expired, or revoked.', retry: false });
     }).finally(() => { if (!dead) setPreviewSettled(true); });
     return () => { dead = true; clearTimeout(settle); };
   }, [code]);

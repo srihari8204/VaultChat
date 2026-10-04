@@ -77,6 +77,12 @@ type CallGroup = {
   entries: CallHistoryEntry[];
 };
 
+// Hoisted: an inline separator was a new component type on every render.
+function CallSeparator() {
+  const S = useS();
+  return <View style={S.sep} />;
+}
+
 export default function CallsScreen() {
   const { colors } = useTheme();
   const S = useS();
@@ -305,8 +311,8 @@ export default function CallsScreen() {
           keyExtractor={g => g.entries[0].id}
           renderItem={renderItem}
           contentContainerStyle={{ paddingVertical: 6, paddingBottom: TAB_BAR_SPACE + 84 }}
-          ListHeaderComponent={<Text style={S.sectionLabel}>RECENT</Text>}
-          ItemSeparatorComponent={() => <View style={S.sep} />}
+          ListHeaderComponent={<Text style={S.sectionLabel} accessibilityRole="header">RECENT</Text>}
+          ItemSeparatorComponent={CallSeparator}
         />
       )}
 
@@ -394,7 +400,7 @@ const makeStyles = (c: Palette, m: ReturnType<typeof useVisionComfort>['metrics'
   noticeTxt:    { flex: 1, color: c.textDim, fontSize: 12.5, lineHeight: 17 },
   infoWrap:     { flex: 1, justifyContent: 'flex-end' },
   // Scrim over whatever is behind the modal: dark in both themes by design.
-  infoBackdrop: { backgroundColor: 'rgba(0,0,0,0.5)' },
+  infoBackdrop: { backgroundColor: c.scrim },
   infoSheet:    { backgroundColor: c.surfaceSolid, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 18, paddingTop: 8, paddingBottom: 28 },
   grip:         { alignSelf: 'center', width: 38, height: 4, borderRadius: 2, backgroundColor: c.border, marginBottom: 12 },
   infoHead:     { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 14 },

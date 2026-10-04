@@ -2,11 +2,12 @@
 // (Not named ChatRow: that was components/ui/ChatRow.tsx, deleted with the dead
 // screens it linked to, and lib/orphanRoutes.selftest.ts guards the name.)
 //
-// Moved out of the screen unchanged, with one fix: the handlers now take the
-// chat they act on and the screen passes STABLE callbacks, so the plain memo
-// below holds. The old comparator ignored the handler props (they were fresh
-// closures every render), which kept the memo working only by trusting that
-// every closure it skipped was still current.
+// Moved out of the screen with one fix: the handlers now take the chat they
+// act on and the screen passes STABLE callbacks, so the plain memo below holds.
+// The old comparator ignored the handler props (they were fresh closures every
+// render), which kept the memo working only by trusting that every closure it
+// skipped was still current. The preview line comes from ./chatPreview, which
+// hides locked chats' text and drafts and view-once / Invisible Ink text.
 
 import { memo, useRef } from 'react';
 // RN Text, not AppText: the styles already apply the vision-comfort scale.
@@ -16,12 +17,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../lib/theme';
 import { Avatar } from '../ui';
 import { attachmentUrl, type ChatSummary } from '../../lib/chatService';
-import { isFamEvent } from '../../lib/family/alerts';
-import { NOTE_PREFIX } from '../../lib/groups/notes';
-import { TASK_PREFIX } from '../../lib/groups/tasks';
 import { useChatListStyles } from './chatListStyles';
+import { chatRowPreview, type LastMsg } from './chatPreview';
 
-export type LastMsg = { content: string | null; type: string | null; senderId: string | null; id: number };
+export type { LastMsg };
 
 type RowAction = (chat: ChatSummary) => void;
 
@@ -31,13 +30,15 @@ export function ChatListSeparator() {
 }
 
 export const ChatListRow = memo(function ChatListRow({
-  chat, authHeader, draft, lastMsg, meId, isTyping, selectMode, isSelected, avatarBusy,
+  chat, authHeader, draft, lastMsg, meId, isTyping, selectMode, isSelected, avatarBusy, locked,
   onPress, onAvatarPress, onLongPress, onPin, onMute, onArchive, onDelete,
 }: {
   chat: ChatSummary; authHeader: string | null; draft?: string; lastMsg?: LastMsg; meId?: string | null; isTyping?: boolean;
   selectMode?: boolean; isSelected?: boolean;
   /** The first avatar tap is looking up whether this person has a story. */
   avatarBusy?: boolean;
+  /** Locked chat (or unreadable lock table): no message or draft text in the row. */
+  locked?: boolean;
   onPress: RowAction; onAvatarPress: RowAction; onLongPress: RowAction;
   onPin: RowAction; onMute: RowAction; onArchive: RowAction; onDelete: RowAction;
 }) {
@@ -48,50 +49,15 @@ export const ChatListRow = memo(function ChatListRow({
   const photoId = chat.type === 'direct' ? chat.peerPhotoURL : chat.photoURL;
   const showPhoto = !!photoId && !!authHeader;
   const time = chat.lastMessageAt ? formatRelative(chat.lastMessageAt) : '';
-  const draftText = draft && draft.trim() ? draft.trim() : '';
-  // Real last-message preview from the local plaintext cache (WhatsApp-style).
-  const previewBody = (() => {
-    if (!lastMsg) return chat.lastMessageId ? 'Tap to open chat' : 'No messages yet';
-    // famEvent envelopes are hidden from the thread, so they must not become a
-    // row's "last message" TEXT either. This is a PREVIEW-ONLY fix: the row's
-    // sort position and unread badge come from the server's chat.lastMessageAt/
-    // unreadCount, which the server cannot correct for famEvent specifically —
-    // it never sees plaintext content (E2EE), so it cannot tell a famEvent
-    // system message apart from any other. A crossing can still bump a chat to
-    // the top and mark it unread; opening it then shows nothing new. Accepted
-    // trade-off, not silently swept: the alternative (client-side markRead up
-    // to the famEvent's id) would also retroactively mark any REAL unread
-    // message with a lower id as read, which is worse.
-    // Group notes/tasks ops are hidden from the thread for the same reason.
-    if (isFamEvent(lastMsg.type, lastMsg.content)
-      || (typeof lastMsg.content === 'string'
-        && (lastMsg.content.startsWith(NOTE_PREFIX) || lastMsg.content.startsWith(TASK_PREFIX)))) {
-      return 'Tap to open chat';
-    }
-    const t = lastMsg.type;
-    // content is null for a text message whose ciphertext couldn't be decrypted
-    // (the cache layer withholds raw envelopes) — show a lock, never blank/JSON.
-    const textFallback = lastMsg.content || (chat.lastMessageId ? '🔒 Encrypted message' : '');
-    const label = t === 'image' ? '📷 Photo'
-      : t === 'video' ? '🎥 Video'
-      : t === 'audio' ? '🎙️ Voice message'
-      : t === 'file' ? '📎 File'
-      : t === 'vaultbeam' ? '📦 File'
-      : t === 'location' ? '📍 Location'
-      : t === 'poll' ? '📊 Poll'
-      : t === 'sticker' ? 'Sticker'
-      : textFallback;
-    const mine = !!meId && lastMsg.senderId === meId;
-    return (mine ? 'You: ' : '') + label;
-  })();
-  const preview = draftText || previewBody;
+  // Preview text: never a locked chat's text or draft, never view-once / Ink text.
+  const { draftText, preview } = chatRowPreview({ lastMsg, hasLastMessage: !!chat.lastMessageId, meId, draft, locked });
 
   const close = () => swipeRef.current?.close();
   const act = (fn: RowAction) => { close(); fn(chat); };
 
   const leftActions = () => (
     <View style={S.actionsRow}>
-      <TouchableOpacity style={[S.action, { backgroundColor: colors.primary }]} onPress={() => act(onPin)} accessibilityRole="button">
+      <TouchableOpacity style={[S.action, { backgroundColor: colors.accentDeep }]} onPress={() => act(onPin)} accessibilityRole="button">
         <Ionicons name={chat.pinned ? 'pin' : 'pin-outline'} size={20} color={colors.onPrimary} /><Text style={S.actionLbl}>{chat.pinned ? 'Unpin' : 'Pin'}</Text>
       </TouchableOpacity>
       <TouchableOpacity style={[S.action, { backgroundColor: colors.purple }]} onPress={() => act(onMute)} accessibilityRole="button">

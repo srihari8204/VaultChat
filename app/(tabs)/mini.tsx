@@ -25,7 +25,7 @@ import {
   View,
 } from 'react-native';
 import { AppText, AuroraBackground } from '../../components/ui';
-import type { Palette } from '../../constants/theme';
+import { AuroraLight, type Palette } from '../../constants/theme';
 import { useColors } from '../../lib/theme';
 import { useVisionComfort } from '../../lib/visionComfort';
 import { GLOW } from '../../constants/glass';
@@ -34,7 +34,8 @@ type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
 // ── Mini app tiles, in grid order (3/4/5 columns by width) ─────
 // Each gradient is the tile's own brand artwork under a white glyph, the same
-// in both themes.
+// in both themes. Notes is the exception: white on its amber is 2.15:1 (under
+// the 3:1 a graphic needs), so its glyph is dark ink (≥5.58:1 on both stops).
 const MINI_APPS_MAIN = [
   // Broadcast. The ONLY mode that is not end-to-end encrypted \u2014 app/live.tsx
   // states that before anything is published, rather than leaving someone to
@@ -49,14 +50,14 @@ const MINI_APPS_MAIN = [
   { id: 'familyspace', icon: 'people-outline', name: 'Spaces', route: '/family', gradient: ['#7C3AED', '#2563EB'] as [string, string] },
   { id: 'finance',     icon: 'cash-outline', name: 'Vault Finance', route: '/finance', gradient: ['#6D3FA8', '#1552E0'] as [string, string] },
   { id: 'shopbook',    icon: 'storefront-outline', name: 'Shop Book', route: '/shop-book', gradient: ['#0B7A3B', '#16A34A'] as [string, string] },
-  { id: 'notes',       icon: 'document-text-outline', name: 'Notes',       route: '/encrypted-notes', gradient: ['#F59E0B', '#D97706'] as [string, string] },
+  { id: 'notes',       icon: 'document-text-outline', name: 'Notes',       route: '/encrypted-notes', gradient: ['#F59E0B', '#D97706'] as [string, string], darkGlyph: true },
   { id: 'scanner',     icon: 'scan-outline', name: 'Scanner',     route: '/docscanner',     gradient: ['#1777FE', '#1D4ED8'] as [string, string] },
   { id: 'shelf',       icon: 'library-outline', name: 'Shelf',        route: '/shelf',      gradient: ['#B45309', '#D97706'] as [string, string] },
   // Hosted at games.corefinite.com, rendered in a WebView. Auth is not wired
   // yet by design \u2014 the site loads anonymously until it is.
   { id: 'games',       icon: 'game-controller-outline', name: 'Games',       route: '/games',      gradient: ['#DB2777', '#7C3AED'] as [string, string] },
   { id: 'security',    icon: 'shield-checkmark-outline', name: 'Security Hub', route: '/aiguardian', gradient: ['#0E7490', '#164E63'] as [string, string] },
-] satisfies readonly { id: string; icon: IoniconName; name: string; route: string; gradient: [string, string] }[];
+] satisfies readonly { id: string; icon: IoniconName; name: string; route: string; gradient: [string, string]; darkGlyph?: boolean }[];
 
 // The Todo List's saved items are still on device under `vc_miniapp_todos`,
 // sealed with the cache DEK. NOT deleted with the feature: that key holds the
@@ -131,7 +132,7 @@ export default function MiniAppsScreen() {
               accessibilityLabel={app.name}
             >
               <LinearGradient colors={app.gradient} style={styles.appIconWrap}>
-                <Ionicons name={app.icon} size={24} color="#FFFFFF" />
+                <Ionicons name={app.icon} size={24} color={'darkGlyph' in app && app.darkGlyph ? AuroraLight.text : '#FFFFFF'} />
               </LinearGradient>
               <AppText variant="tiny" style={styles.appName}>{app.name}</AppText>
             </TouchableOpacity>

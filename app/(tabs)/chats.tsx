@@ -35,12 +35,26 @@ import { takePrimedChats } from '../../lib/chatsPrefetch';
 import { applyLocalReadPointers, setUnreadTotal } from '../../lib/unreadStore';
 import { getDraftMap } from '../../lib/drafts';
 import { getLastMessagePerChat, getCachedChats, cacheChats } from '../../lib/localDb';
+import { isLockedIn, lockedChatIds } from '../../lib/lockedChats';
 import { getCurrentUserAsync } from '../(constants)/authService';
 // The row, the avatar popup and the styles live in components/chats/ (split
 // 2026-10-04 to keep this screen under ~800 lines; behaviour unchanged).
 import { ChatListRow, ChatListSeparator, type LastMsg } from '../../components/chats/ChatListRow';
 import { AvatarPopup } from '../../components/chats/AvatarPopup';
 import { useChatListStyles } from '../../components/chats/chatListStyles';
+
+// Row previews and the lock table, read together: a locked chat's text is never
+// painted before its lock is known. lockedChatIds() never rejects (null = the
+// lock table is unreadable → every row is treated as locked).
+const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message) || fallback;
+
+async function readPreviews() {
+  const [msgs, locked] = await Promise.all([
+    getLastMessagePerChat().then(hydrateOwnPreviews).catch(() => null),
+    lockedChatIds(),
+  ]);
+  return { msgs, locked };
+}
 
 type FolderId = 'all' | 'unread' | 'favourites' | 'groups' | 'pinned' | 'archive';
 const FOLDERS: { id: FolderId; label: string }[] = [
@@ -95,12 +109,14 @@ export default function ChatsScreen() {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   // Real last-message previews from the local plaintext cache (WhatsApp-style).
   const [lastMsgs, setLastMsgs] = useState<Map<string, LastMsg>>(new Map());
+  // Locked chats show no preview or draft text. undefined = not read yet (drafts wait for it).
+  const [lockedIds, setLockedIds] = useState<Set<string> | null | undefined>(undefined);
   const [meId, setMeId] = useState<string | null>(null);
   const meIdRef = useRef<string | null>(null);
   useEffect(() => { meIdRef.current = meId; }, [meId]);
   // Chats with someone typing right now (chatId set) — shows "typing…" in the row.
   const [typingChats, setTypingChats] = useState<Set<string>>(new Set());
-  const typingTimers = useRef<Record<string, any>>({});
+  const typingTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const { width: winW, height: winH } = useWindowDimensions();
   const splitReady = canSplit(winW, winH);
 
@@ -161,7 +177,9 @@ export default function ChatsScreen() {
     // row fell back to "Tap to open chat" even though the text was on disk.
     // Measured: online showed "You: Hiiiii", the same row offline showed the
     // placeholder. Load them first, unconditionally.
-    if (refreshPreviews) getLastMessagePerChat().then(hydrateOwnPreviews).then(setLastMsgs).catch(() => {});
+    if (refreshPreviews) {
+      readPreviews().then(({ msgs, locked }) => { if (msgs) setLastMsgs(msgs); setLockedIds(locked); }).catch(() => {});
+    }
     mark('chats_fetch_start');
     try {
       // Boot dispatched this request already (lib/chatsPrefetch.ts); take that
@@ -184,9 +202,9 @@ export default function ChatsScreen() {
       setError(null);
       // Publish total unread (non-archived) so the Chats tab can badge it.
       setUnreadTotal(list.reduce((n, c) => n + (c.archived ? 0 : (c.unreadCount > 0 ? 1 : 0)), 0));
-    } catch (e: any) {
+    } catch (e: unknown) {
       mark('chats_fetch_error');
-      setError(e?.message ?? 'Failed to load chats');
+      setError(errText(e, 'Failed to load chats'));
     }
   }, []);
 
@@ -196,7 +214,7 @@ export default function ChatsScreen() {
   // single lightweight refetch, instead of one full fetchList() per event.
   // Previously a chatty thread triggered a network listChats() + whole-list
   // re-render on every message.
-  const refreshTimer = useRef<any>(null);
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleRefresh = useCallback(() => {
     if (refreshTimer.current) return;   // already scheduled → coalesce
     refreshTimer.current = setTimeout(() => { refreshTimer.current = null; loadList(); }, 350);
@@ -206,15 +224,18 @@ export default function ChatsScreen() {
   // unmounted screen (P1.4).
   useEffect(() => () => {
     if (refreshTimer.current) { clearTimeout(refreshTimer.current); refreshTimer.current = null; }
-    Object.values(typingTimers.current).forEach((t: any) => clearTimeout(t));
+    Object.values(typingTimers.current).forEach(t => clearTimeout(t));
     typingTimers.current = {};
   }, []);
 
   useEffect(() => {
     let cancel = false;
     (async () => {
-      const previewPromise = getLastMessagePerChat().then(hydrateOwnPreviews);
-      previewPromise.then(m => { if (!cancel) setLastMsgs(m); }).catch(() => {});
+      readPreviews().then(({ msgs, locked }) => {
+        if (cancel) return;
+        if (msgs) setLastMsgs(msgs);
+        setLockedIds(locked);
+      }).catch(() => {});
       // Paint cached chats instantly (WhatsApp-style) so there's no spinner on
       // cold start; the network fetch then reconciles in the background.
       try {
@@ -370,7 +391,7 @@ export default function ChatsScreen() {
           s.off('message_edited', refresh); s.off('presence_changed', onPresence);
           s.off('typing_start', onTyping); s.off('typing_stop', onTypingStop);
         };
-      } catch (e: any) { if (!cancelled) setError(e?.message ?? 'Realtime unavailable'); }
+      } catch (e: unknown) { if (!cancelled) setError(errText(e, 'Realtime unavailable')); }
     })();
     return () => { cancelled = true; if (off) off(); };
   }, [scheduleRefresh]);
@@ -445,19 +466,19 @@ export default function ChatsScreen() {
     const next = !chat.pinned;
     patch(chat.id, { pinned: next });
     try { await pinChat(chat.id, next); await fetchList(); }
-    catch (e: any) { patch(chat.id, { pinned: !next }); setError(e?.message ?? 'Pin failed'); }
+    catch (e: unknown) { patch(chat.id, { pinned: !next }); setError(errText(e, 'Pin failed')); }
   }, [patch, fetchList]);
   const doMute = useCallback(async (chat: ChatSummary) => {
     const next = !chat.muted;
     patch(chat.id, { muted: next });
     try { await muteChat(chat.id, next); await fetchList(); }
-    catch (e: any) { patch(chat.id, { muted: !next }); setError(e?.message ?? 'Mute failed'); }
+    catch (e: unknown) { patch(chat.id, { muted: !next }); setError(errText(e, 'Mute failed')); }
   }, [patch, fetchList]);
   const doArchive = useCallback(async (chat: ChatSummary) => {
     const next = !chat.archived;
     patch(chat.id, { archived: next });
     try { await archiveChat(chat.id, next); await fetchList(); }
-    catch (e: any) { patch(chat.id, { archived: !next }); setError(e?.message ?? 'Archive failed'); }
+    catch (e: unknown) { patch(chat.id, { archived: !next }); setError(errText(e, 'Archive failed')); }
   }, [patch, fetchList]);
   const doDelete = useCallback((chat: ChatSummary) => {
     Alert.alert(
@@ -469,7 +490,7 @@ export default function ChatsScreen() {
           text: 'Delete', style: 'destructive', onPress: async () => {
             setChats(prev => prev.filter(c => c.id !== chat.id));
             try { await setHidden(chat.id, true); await fetchList(); }
-            catch (e: any) { setError(e?.message ?? 'Delete failed'); fetchList(); }
+            catch (e: unknown) { setError(errText(e, 'Delete failed')); fetchList(); }
           },
         },
       ],
@@ -500,7 +521,7 @@ export default function ChatsScreen() {
   // and reported through the same `error` bar the single-chat actions use.
   // Reported AFTER the refetch is awaited, because loadList() calls
   // setError(null) on success and would otherwise erase the message.
-  const bulkRun = async (fn: (id: string) => Promise<any>, label: string) => {
+  const bulkRun = async (fn: (id: string) => Promise<unknown>, label: string) => {
     const ids = [...selected];
     exitSelect();
     // In parallel: one slow request no longer holds up the rest.
@@ -617,7 +638,7 @@ export default function ChatsScreen() {
                     it was rendering correctly (this device passes canSplit at
                     820dp tall), just undiscoverable. Dimmed at one selection it
                     advertises itself and says what it is waiting for. */}
-                <Text style={{ color: selected.size === 2 ? colors.primary : colors.textDim, fontSize: 13 }}>
+                <Text style={[S.splitLbl, { color: selected.size === 2 ? colors.primary : colors.textDim }]}>
                   {selected.size === 2 ? 'Split' : 'Pick 2'}
                 </Text>
               </TouchableOpacity>
@@ -738,7 +759,8 @@ export default function ChatsScreen() {
             <ChatListRow
               chat={item}
               authHeader={authHeader}
-              draft={drafts[item.id]}
+              draft={lockedIds === undefined ? undefined : drafts[item.id]}
+              locked={lockedIds !== undefined && isLockedIn(lockedIds, item.id)}
               lastMsg={lastMsgs.get(item.id)}
               meId={meId}
               isTyping={typingChats.has(item.id)}

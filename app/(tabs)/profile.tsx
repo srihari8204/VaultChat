@@ -7,7 +7,7 @@ import { useAuthHeader } from '../../hooks/useAuthHeader';
 import { HEADER_TOP, SCREEN_BOTTOM } from '../../constants/layout';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState, type ComponentProps } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import type { KeyboardTypeOptions } from 'react-native';
 import { useTheme } from '../../lib/theme';
 import { useVisionComfort } from '../../lib/visionComfort';
@@ -37,6 +37,8 @@ import { initialOf } from '../../lib/format';
 import { currentVersionName } from '../../lib/appVersion';
 import { permissionDenied } from '../../lib/permissionDenied';
 import { profileFromProtobuf } from '../../lib/userProfilePolicy';
+
+const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message) || fallback;
 
 interface UserProfile {
   id: string;
@@ -79,6 +81,9 @@ export default function ProfileScreen() {
   const [status, setStatus] = useState('');
   const [phone,  setPhone]  = useState('');
   const [editing, setEditing] = useState<null | 'name' | 'status' | 'phone'>(null);
+  // The profile fetch can settle after the tab unmounts (sign-out, deep link away).
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
 
   const load = useCallback(async () => {
     // Local-first: paint last-known profile instantly, then fetch fresh.
@@ -90,7 +95,7 @@ export default function ProfileScreen() {
     let cached: UserProfile | null = null;
     try {
       cached = await readCache<UserProfile>('my-profile');
-      if (cached) {
+      if (cached && alive.current) {
         setProfile(cached);
         setName(cached.name ?? '');
         setStatus(cached.status ?? '');
@@ -103,17 +108,18 @@ export default function ProfileScreen() {
       // parsed by the unchanged path in api(), with no second request. The
       // PUT calls below still send and receive JSON — they carry bodies.
       const p = await api<UserProfile>('/user/profile', { proto: profileFromProtobuf });
+      writeCache('my-profile', p);
+      if (!alive.current) return;
       setLoadError(null);
       setProfile(p);
       setName(p.name ?? '');
       setStatus(p.status ?? '');
       setPhone(p.phone ?? '');
-      writeCache('my-profile', p);
-    } catch (e: any) {
+    } catch (e: unknown) {
       // Keep cached data for offline read; only surface if nothing painted.
-      if (!cached) setLoadError(e?.message ?? 'Check your connection and try again.');
+      if (!cached && alive.current) setLoadError(errText(e, 'Check your connection and try again.'));
     } finally {
-      setLoading(false);
+      if (alive.current) setLoading(false);
     }
   }, []);
 
@@ -133,8 +139,8 @@ export default function ProfileScreen() {
       });
       setProfile(updated);
       return true;
-    } catch (e: any) {
-      Alert.alert('Save failed', e?.message ?? 'Try again');
+    } catch (e: unknown) {
+      Alert.alert('Save failed', errText(e, 'Try again'));
       return false;
     } finally {
       setSaving(false);
@@ -177,8 +183,8 @@ export default function ProfileScreen() {
         json: { photoURL: up.id },
       });
       setProfile(updated);
-    } catch (e: any) {
-      Alert.alert('Photo upload failed', e?.message ?? 'Try again');
+    } catch (e: unknown) {
+      Alert.alert('Photo upload failed', errText(e, 'Try again'));
     } finally {
       setPhotoBusy(false);
     }
@@ -193,8 +199,8 @@ export default function ProfileScreen() {
         json: { photoURL: '' },
       });
       setProfile(updated);
-    } catch (e: any) {
-      Alert.alert('Could not remove photo', e?.message ?? 'Try again');
+    } catch (e: unknown) {
+      Alert.alert('Could not remove photo', errText(e, 'Try again'));
     } finally {
       setPhotoBusy(false);
     }
@@ -226,8 +232,8 @@ export default function ProfileScreen() {
       setVerifyStep('code');
       setPhoneCode('');
       setResendIn(30);
-    } catch (e: any) {
-      Alert.alert('Could not send code', e?.message ?? 'Try again');
+    } catch (e: unknown) {
+      Alert.alert('Could not send code', errText(e, 'Try again'));
     } finally {
       setVerifying(false);
     }
@@ -241,8 +247,8 @@ export default function ProfileScreen() {
       setVerifyStep('done');
       // Reload the profile to pick up the verified phone
       await load();
-    } catch (e: any) {
-      Alert.alert('Verification failed', e?.message ?? 'Try again');
+    } catch (e: unknown) {
+      Alert.alert('Verification failed', errText(e, 'Try again'));
     } finally {
       setVerifying(false);
     }
@@ -265,10 +271,10 @@ export default function ProfileScreen() {
           try { disconnectSocket(); } catch {}
           try {
             await logoutUser();
-          } catch (e: any) {
+          } catch (e: unknown) {
             registerPushToken().catch(() => {});
             getSocket().catch(() => {});
-            Alert.alert('Could not sign out', `${e?.message ?? 'Something went wrong.'} You are still signed in. Try again.`);
+            Alert.alert('Could not sign out', `${errText(e, 'Something went wrong.')} You are still signed in. Try again.`);
             return;
           }
           // resetTo, not replace: anything pushed above the tabs stayed in the
@@ -315,7 +321,7 @@ export default function ProfileScreen() {
         space under Sign out. SCREEN_BOTTOM is the safe-area inset, which is all
         that is actually below the content now. */}
     <KeyboardSafe keyboardOnly>
-    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: SCREEN_BOTTOM + 16 }} keyboardShouldPersistTaps="handled">
+    <ScrollView style={S.flex1} contentContainerStyle={S.scrollPad} keyboardShouldPersistTaps="handled">
       <View style={S.header}>
         {/* ADDED WITH THE TAB BAR'S REMOVAL (2026-09-23). This screen had no
             way off it except the bar — no header back, no router.back() in the
@@ -329,7 +335,7 @@ export default function ProfileScreen() {
           hitSlop={11}
           accessibilityRole="button"
           accessibilityLabel="Back"
-          style={{ marginRight: 10 }}
+          style={S.backBtn}
         >
           <Ionicons name="arrow-back" size={22} color={colors.text} />
         </TouchableOpacity>
@@ -388,7 +394,7 @@ export default function ProfileScreen() {
       {!!profile?.vaultId && (
         <View style={[S.card, S.vaultCard]}>
           <Ionicons name="at-circle-outline" size={22} color={colors.primary} />
-          <View style={{ flex: 1 }}>
+          <View style={S.flex1}>
             <Text style={S.vaultLabel}>Your VaultID</Text>
             <Text style={S.vaultId}>@{profile.vaultId}</Text>
           </View>
@@ -469,8 +475,8 @@ export default function ProfileScreen() {
             placeholder="123456" placeholderTextColor={colors.textDim} keyboardType="number-pad" maxLength={6}
             accessibilityLabel="6-digit verification code" textContentType="oneTimeCode" autoComplete="sms-otp"
           />
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            <TouchableOpacity style={[S.btn, { flex: 1 }, verifying && S.btnOff]} onPress={onVerifyPhoneOtp} disabled={verifying} activeOpacity={0.85}
+          <View style={S.btnRow}>
+            <TouchableOpacity style={[S.btn, S.flex1, verifying && S.btnOff]} onPress={onVerifyPhoneOtp} disabled={verifying} activeOpacity={0.85}
               accessibilityRole="button" accessibilityLabel="Verify" accessibilityState={{ disabled: verifying, busy: verifying }}>
               {verifying ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={S.btnTxt}>Verify</Text>}
             </TouchableOpacity>
@@ -505,7 +511,7 @@ export default function ProfileScreen() {
       <TouchableOpacity style={S.actionRow} onPress={() => router.push('/settings')} activeOpacity={0.85} accessibilityRole="button">
         <Ionicons name="settings-outline" size={20} color={colors.text} />
         <Text style={S.actionTxt}>Privacy & settings</Text>
-        <Ionicons name="chevron-forward" size={18} color={colors.textDim} style={{ marginLeft: 'auto' }} />
+        <Ionicons name="chevron-forward" size={18} color={colors.textDim} style={S.chevron} />
       </TouchableOpacity>
       <TouchableOpacity style={[S.actionRow, { borderColor: colors.danger }]} onPress={onSignOut} activeOpacity={0.85} accessibilityRole="button">
         <Ionicons name="log-out-outline" size={20} color={colors.danger} />
@@ -546,7 +552,7 @@ function EditRow({ icon, label, value, placeholder, editing, onEdit, onCancel, o
   return (
     <View style={S.editRow}>
       <Ionicons name={icon} size={22} color={colors.primary} style={S.editIcon} />
-      <View style={{ flex: 1 }}>
+      <View style={S.flex1}>
         <Text style={S.editLabel}>{label}</Text>
         {editing ? (
           <TextInput
@@ -555,7 +561,7 @@ function EditRow({ icon, label, value, placeholder, editing, onEdit, onCancel, o
             maxLength={maxLength} autoFocus accessibilityLabel={label}
           />
         ) : (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <View style={S.valueRow}>
             <Text style={[S.editValue, !value && { color: colors.textDim, fontWeight: '400' }]}>
               {value || placeholder}
             </Text>
@@ -592,6 +598,12 @@ function InfoRow({ k, v, small }: { k: string; v: string; small?: boolean }) {
 
 const makeStyles = (c: Palette, m: ReturnType<typeof useVisionComfort>['metrics']) => StyleSheet.create({
   screen:       { flex: 1, backgroundColor: c.bg },
+  flex1:        { flex: 1 },
+  scrollPad:    { paddingBottom: SCREEN_BOTTOM + 16 },
+  backBtn:      { marginRight: 10 },
+  btnRow:       { flexDirection: 'row', gap: 8 },
+  chevron:      { marginLeft: 'auto' },
+  valueRow:     { flexDirection: 'row', alignItems: 'center', gap: 6 },
   center:       { justifyContent: 'center', alignItems: 'center' },
   header:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: HEADER_TOP, paddingBottom: 8 },
   title:        { color: c.text, fontSize: 26, fontWeight: '800' },
@@ -600,7 +612,7 @@ const makeStyles = (c: Palette, m: ReturnType<typeof useVisionComfort>['metrics'
   avatar:       { width: 120, height: 120, borderRadius: 60, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   avatarImg:    { width: '100%', height: '100%' },
   avatarTxt:    { color: c.onPrimary, fontSize: 46, fontWeight: '800' },
-  avatarBusy:   { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.4)' },
+  avatarBusy:   { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: c.scrim },
   cameraBadge:  { position: 'absolute', right: 2, bottom: 2, width: 36, height: 36, borderRadius: 18, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: c.bg },
   nameBig:      { maxWidth: '100%', color: c.text, fontSize: 22, fontWeight: '800', marginTop: 14, textAlign: 'center' },
   emailDisplay: { maxWidth: '100%', color: c.textDim, fontSize: 13, marginTop: 2, textAlign: 'center' },

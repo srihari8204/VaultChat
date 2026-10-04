@@ -53,6 +53,8 @@ import { initialOf } from '../lib/format';
 import { readSealedCache, writeSealedCache } from '../lib/localCache';
 import { tint } from '../lib/tintColor';
 
+const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message) || fallback;
+
 interface PhoneEntry {
   hash:        string;
   contactId:   string;
@@ -175,9 +177,9 @@ export default function ContactsScreen() {
         try {
           const partial = await matchContacts(chunk);
           results.push(...partial);
-        } catch (err: any) {
+        } catch (err: unknown) {
           chunkFailed = true;
-          console.warn('[contacts] match chunk failed:', err?.message);
+          console.warn('[contacts] match chunk failed:', errText(err, String(err)));
         }
         if (!alive.current) return;
       }
@@ -215,8 +217,8 @@ export default function ContactsScreen() {
         setScannedAt(at);
         writeSealedCache<CachedScan>(CACHE_KEY, { at, matched: matchedRows, invite: inviteRows });
       }
-    } catch (e: any) {
-      if (alive.current) setError(e?.message ?? 'Contact scan failed');
+    } catch (e: unknown) {
+      if (alive.current) setError(errText(e, 'Contact scan failed'));
     } finally {
       if (alive.current) { setScanning(false); setProgress(null); }
     }
@@ -257,20 +259,12 @@ export default function ContactsScreen() {
       } else {
         router.replace({ pathname: '/chat', params: { id: res.id } });
       }
-    } catch (e: any) {
-      Alert.alert(call ? 'Could not start the call' : 'Could not open chat', e?.message ?? 'Try again');
+    } catch (e: unknown) {
+      Alert.alert(call ? 'Could not start the call' : 'Could not open chat', errText(e, 'Try again'));
     } finally {
       setOpeningId(null);
     }
   }, [router, openingId]);
-
-  const pickCall = useCallback((m: MatchedRow) => {
-    Alert.alert(`Call ${m.contactName || m.name || 'this contact'}`, undefined, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Voice', onPress: () => openChat(m, 'voice') },
-      { text: 'Video', onPress: () => openChat(m, 'video') },
-    ]);
-  }, [openChat]);
 
   const sendInvite = useCallback(async (row: InviteRow) => {
     const message = `Hey, I'm on crazzychat — encrypted messaging without the noise. Try it: ${INVITE_URL}`;
@@ -285,8 +279,8 @@ export default function ContactsScreen() {
       } else {
         await Share.share({ message, title: 'Invite to crazzychat' });
       }
-    } catch (e: any) {
-      Alert.alert('Could not open invite', e?.message ?? 'Try again');
+    } catch (e: unknown) {
+      Alert.alert('Could not open invite', errText(e, 'Try again'));
     }
   }, []);
 
@@ -301,19 +295,40 @@ export default function ContactsScreen() {
     if (section.key === 'matched') {
       const m = item as MatchedRow;
       const initial = initialOf(m.contactName, m.name);
+      const who = m.contactName || m.name || 'crazzychat user';
+      // Call mode: Voice and Video are buttons on the row itself (was an Alert).
+      if (callMode) {
+        const busy = openingId === m.id;
+        return (
+          <View style={S.row}>
+            <View style={[S.avatar, S.avatarOnApp]}><Text style={S.avatarTxt}>{initial}</Text></View>
+            <View style={S.rowBody}>
+              <Text style={S.rowName} numberOfLines={1}>{who}</Text>
+              <Text style={S.rowSub} numberOfLines={1}>{m.rawPhone || 'On crazzychat'}</Text>
+            </View>
+            {busy ? <ActivityIndicator color={colors.primary} accessibilityLabel={`Calling ${who}`} /> : (['voice', 'video'] as const).map(kind => (
+              <TouchableOpacity key={kind} style={S.callBtn} onPress={() => openChat(m, kind)} disabled={!!openingId}
+                accessibilityRole="button" accessibilityLabel={`${kind === 'video' ? 'Video' : 'Voice'} call ${who}`}
+                accessibilityState={{ disabled: !!openingId }}>
+                <Ionicons name={kind === 'video' ? 'videocam-outline' : 'call-outline'} size={22} color={colors.primary} />
+              </TouchableOpacity>
+            ))}
+          </View>
+        );
+      }
       return (
-        <TouchableOpacity style={S.row} onPress={() => (callMode ? pickCall(m) : openChat(m))} activeOpacity={0.7} disabled={openingId === m.id}
+        <TouchableOpacity style={S.row} onPress={() => openChat(m)} activeOpacity={0.7} disabled={openingId === m.id}
           accessibilityRole="button"
-          accessibilityLabel={`${m.contactName || m.name || 'crazzychat user'}. ${callMode ? 'Call' : 'Message'}`}
+          accessibilityLabel={`${who}. Message`}
           accessibilityState={{ busy: openingId === m.id }}>
           <View style={[S.avatar, S.avatarOnApp]}><Text style={S.avatarTxt}>{initial}</Text></View>
           <View style={S.rowBody}>
-            <Text style={S.rowName} numberOfLines={1}>{m.contactName || m.name || 'crazzychat user'}</Text>
+            <Text style={S.rowName} numberOfLines={1}>{who}</Text>
             <Text style={S.rowSub} numberOfLines={1}>{m.rawPhone || 'On crazzychat'}</Text>
           </View>
           {openingId === m.id
             ? <ActivityIndicator color={colors.primary} />
-            : <Text style={S.action}>{callMode ? 'Call' : 'Message →'}</Text>}
+            : <Text style={S.action}>Message →</Text>}
         </TouchableOpacity>
       );
     }
@@ -435,6 +450,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   rowSub:        { color: c.textDim, fontSize: 12, marginTop: 2 },
   action:        { color: c.primary, fontSize: 13, fontWeight: '600' },
   actionInvite:  { color: c.textDim },
+  callBtn:       { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
 
   ctaBtn:        { marginTop: 16, backgroundColor: c.primary, paddingHorizontal: 28, paddingVertical: 12, borderRadius: 24 },
   ctaTxt:        { color: c.onPrimary, fontWeight: '700', fontSize: 14 },

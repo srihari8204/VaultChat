@@ -261,7 +261,9 @@ export default function AlertsScreen() {
         <TouchableOpacity
           style={[S.banner, S.bannerBad]}
           onPress={onRefresh}
+          disabled={refreshing}
           accessibilityRole="button"
+          accessibilityState={{ disabled: refreshing, busy: refreshing }}
           accessibilityLabel={`Couldn't refresh security events. ${error}. Tap to retry.`}
         >
           <Ionicons name="cloud-offline-outline" size={15} color={colors.danger} />
@@ -313,7 +315,9 @@ const makeStyles = (c: Palette, m: ReturnType<typeof useVisionComfort>['metrics'
   header:   { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', paddingHorizontal: 20, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 12 },
   title:    { color: c.text, fontSize: 28, fontWeight: '800' },
   subtitle: { color: c.textDim, fontSize: 13, marginTop: 2 },
-  scanBtn:  { minHeight: 44 * m.controlScale, flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.primary, paddingHorizontal: 14, paddingVertical: 9 * m.controlScale, borderRadius: 12 },
+  // accentDeep, not primary: the 13-px white label is 6.33:1 on it; on the dark
+  // theme's primary (#1777FE) it was 4.11:1, under AA. Same hex in light.
+  scanBtn:  { minHeight: 44 * m.controlScale, flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.accentDeep, paddingHorizontal: 14, paddingVertical: 9 * m.controlScale, borderRadius: 12 },
   scanBtnText: { flexShrink: 1, color: c.onPrimary, fontWeight: '700', fontSize: 13 },
 
   banner:   { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10, borderWidth: 1 },

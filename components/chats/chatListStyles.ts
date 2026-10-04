@@ -98,7 +98,7 @@ export const makeChatListStyles = (c: Palette, v = { textScale: 1, lineScale: 1,
   rowPreview: { color: highContrast ? c.text : c.textDim, fontSize: 14 * v.textScale, lineHeight: Math.ceil(19 * v.textScale * v.lineScale), flex: 1, minWidth: 0 },
   rowPreviewUnread: { color: c.text, fontWeight: '600' },
   // Temporary-chat sheet
-  sheetBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  sheetBackdrop: { flex: 1, backgroundColor: c.scrim, justifyContent: 'flex-end' },
   sheet: { backgroundColor: c.surfaceSolid, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 32, paddingTop: 10 },
   sheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: c.border, alignSelf: 'center', marginBottom: 8 },
   sheetTitle: { color: c.textDim, fontSize: 13 * v.textScale, fontWeight: '700', paddingHorizontal: 20, paddingVertical: 10 },
@@ -106,13 +106,20 @@ export const makeChatListStyles = (c: Palette, v = { textScale: 1, lineScale: 1,
   sheetItem: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingHorizontal: 20, paddingVertical: 15, minHeight: 44 },
   sheetItemTxt: { color: c.text, fontSize: 16 * v.textScale, fontWeight: '500' },
   draftLabel: { color: c.danger, fontWeight: '700' },
-  unreadBadge: { backgroundColor: c.primary, borderRadius: 11, minWidth: 22 * v.controlScale, minHeight: 22 * v.controlScale, paddingHorizontal: 7, alignItems: 'center', justifyContent: 'center' },
+  // accentDeep, not primary: white 11-px digits are 6.33:1 on it; on the dark
+  // theme's primary (#1777FE) they were 4.11:1, under AA. Same hex in light.
+  unreadBadge: { backgroundColor: c.accentDeep, borderRadius: 11, minWidth: 22 * v.controlScale, minHeight: 22 * v.controlScale, paddingHorizontal: 7, alignItems: 'center', justifyContent: 'center' },
   unreadTxt: { color: c.onPrimary, fontSize: 11 * v.textScale, lineHeight: Math.ceil(14 * v.textScale * v.lineScale), fontWeight: '600' },
 
   actionsRow: { flexDirection: 'row' },
   action: { width: 76, alignItems: 'center', justifyContent: 'center', gap: 4 },
-  // Pin and Mute sit on primary / purple fills; Delete overrides with onDanger.
+  // Pin sits on accentDeep (6.33:1 for this 11-px white label; dark primary is
+  // 4.11:1), Mute on purple (4.69:1); Delete overrides with onDanger — white
+  // on dark danger #EF4444 stays 3.76:1 until the on-fill ink decision lands.
   actionLbl: { color: c.onPrimary, fontSize: 11 * v.textScale, fontWeight: '700' },
+
+  // "Split" / "Pick 2" beside the split-screen icon in selection mode.
+  splitLbl: { fontSize: 13 * v.textScale },
 
   fab: { position: 'absolute', right: 22, bottom: TAB_BAR_SPACE + 18, width: 60 * v.controlScale, height: 60 * v.controlScale, borderRadius: 30 * v.controlScale, backgroundColor: c.accentDeep, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, elevation: 8, shadowColor: c.accentDeep, shadowOpacity: 0.55, shadowOffset: { width: 0, height: 10 }, shadowRadius: 24 },
 });

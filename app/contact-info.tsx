@@ -27,6 +27,9 @@ import { unionWithLocalHistory } from '../lib/messageHistory';
 import { AppText as Text, Avatar, AuroraBackground } from '../components/ui';
 import { HEADER_TOP } from '../constants/layout';
 import { tint } from '../lib/tintColor';
+import { isChatLocked } from '../lib/chatLock';
+
+const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message) || fallback;
 
 const URL_RE = /(https?:\/\/[^\s]+)/gi;
 
@@ -116,6 +119,17 @@ export default function ContactInfoScreen() {
   const [staleShown, setStaleShown] = useState(false);
   const [groupsFailed, setGroupsFailed] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  // Reachable from the Chats list avatar without opening the chat, so a locked
+  // chat's shared media, files and links (message content) are not shown here.
+  // null = not known yet; an unreadable lock table counts as locked.
+  const [chatLocked, setChatLocked] = useState<boolean | null>(chatId ? null : false);
+  useEffect(() => {
+    if (!chatId) return;
+    let active = true;
+    isChatLocked(chatId).catch(() => true).then((l) => { if (active) setChatLocked(l); });
+    return () => { active = false; };
+  }, [chatId]);
+  const sharedShown = chatLocked === false;
 
   const displayName = peer?.name || peerName || 'Contact';
 
@@ -217,7 +231,7 @@ export default function ContactInfoScreen() {
     if (!chatId) return;
     const next = !muted;
     setMuted(next);
-    try { await muteChat(chatId, next); } catch (e: any) { setMuted(!next); Alert.alert('Error', e?.message ?? 'Mute failed'); }
+    try { await muteChat(chatId, next); } catch (e: unknown) { setMuted(!next); Alert.alert('Error', errText(e, 'Mute failed')); }
   };
 
   const toggleBlock = () => {
@@ -227,7 +241,7 @@ export default function ContactInfoScreen() {
         { text: 'Cancel', style: 'cancel' },
         { text: 'Unblock', onPress: async () => {
           setBlocked(false);
-          try { await unblockUser(peerUid); } catch (e: any) { setBlocked(true); Alert.alert('Error', e?.message ?? 'Failed'); }
+          try { await unblockUser(peerUid); } catch (e: unknown) { setBlocked(true); Alert.alert('Error', errText(e, 'Failed')); }
         } },
       ]);
       return;
@@ -236,7 +250,7 @@ export default function ContactInfoScreen() {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Block', style: 'destructive', onPress: async () => {
         setBlocked(true);
-        try { await blockUser(peerUid); } catch (e: any) { setBlocked(false); Alert.alert('Error', e?.message ?? 'Failed'); }
+        try { await blockUser(peerUid); } catch (e: unknown) { setBlocked(false); Alert.alert('Error', errText(e, 'Failed')); }
       } },
     ]);
   };
@@ -250,17 +264,17 @@ export default function ContactInfoScreen() {
         // report went through must not read as if nothing was filed.
         try {
           await reportUser(peerUid, 'reported_from_contact_info', chatId ? String(chatId) : undefined);
-        } catch (e: any) {
-          Alert.alert('Report not sent', `${e?.message ?? 'Something went wrong.'} ${displayName} was not reported or blocked.`);
+        } catch (e: unknown) {
+          Alert.alert('Report not sent', `${errText(e, 'Something went wrong.')} ${displayName} was not reported or blocked.`);
           return;
         }
         setBlocked(true);
         try {
           await blockUser(peerUid);
           Alert.alert('Done', `${displayName} was reported and blocked.`);
-        } catch (e: any) {
+        } catch (e: unknown) {
           setBlocked(false);
-          Alert.alert('Reported, but not blocked', `Your report was sent. Blocking failed: ${e?.message ?? 'try again'} — you can block from this screen.`);
+          Alert.alert('Reported, but not blocked', `Your report was sent. Blocking failed: ${errText(e, 'try again')} — you can block from this screen.`);
         }
       } },
     ]);
@@ -302,8 +316,8 @@ export default function ContactInfoScreen() {
         {/* Live Chat Viewers (#58) — share whether you're currently viewing this chat */}
         <View style={s.section}>
           <Text style={s.sectionTitle}>Privacy</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8 }}>
-            <View style={{ flex: 1, paddingRight: 12 }}>
+          <View style={s.prefRow}>
+            <View style={s.prefBody}>
               <Text style={s.prefTitle}>Share my viewing status</Text>
               <Text style={s.prefSub}>Let {displayName} see when you’re viewing this chat right now</Text>
             </View>
@@ -327,16 +341,28 @@ export default function ContactInfoScreen() {
             <Text style={s.loadErrTxt}>Couldn’t load shared media, files and links. Tap to retry.</Text>
           </TouchableOpacity>
         )}
-        {(staleShown || groupsFailed) && !loading && (
-          <TouchableOpacity style={[s.section, s.loadErr]} onPress={() => setReloadKey(k => k + 1)}
-            accessibilityRole="button" accessibilityLabel={`${staleShown ? 'Showing saved info; couldn’t refresh' : 'Couldn’t load groups in common'}. Tap to retry.`}>
-            <Ionicons name="cloud-offline-outline" size={18} color={colors.textDim} />
-            <Text style={s.staleTxt}>{staleShown ? 'Showing saved info — couldn’t refresh.' : 'Couldn’t load groups in common.'} Tap to retry.</Text>
-          </TouchableOpacity>
+        {(staleShown || groupsFailed) && !loading && (() => {
+          // Names every part that failed: both can fail at once (offline).
+          const what = [staleShown && 'Showing saved info — couldn’t refresh.', groupsFailed && 'Couldn’t load groups in common.']
+            .filter(Boolean).join(' ');
+          return (
+            <TouchableOpacity style={[s.section, s.loadErr]} onPress={() => setReloadKey(k => k + 1)}
+              accessibilityRole="button" accessibilityLabel={`${what} Tap to retry.`}>
+              <Ionicons name="cloud-offline-outline" size={18} color={colors.textDim} />
+              <Text style={s.staleTxt}>{what} Tap to retry.</Text>
+            </TouchableOpacity>
+          );
+        })()}
+
+        {chatLocked && (
+          <View style={[s.section, s.loadErr]}>
+            <Ionicons name="lock-closed-outline" size={18} color={colors.textDim} />
+            <Text style={s.staleTxt}>This chat is locked, so its shared media, files and links aren’t shown here.</Text>
+          </View>
         )}
 
         {/* Shared Media */}
-        {media.length > 0 && (
+        {sharedShown && media.length > 0 && (
           <View style={s.section}>
             <View style={s.sectionHeader}>
               <Text style={s.sectionTitle}>Shared Media</Text>
@@ -354,7 +380,7 @@ export default function ContactInfoScreen() {
         )}
 
         {/* Shared Files */}
-        {files.length > 0 && (
+        {sharedShown && files.length > 0 && (
           <View style={s.section}>
             <Text style={s.sectionTitle}>Shared Files</Text>
             {/* Files open through the gallery's Files tab (`open` = this message),
@@ -373,7 +399,7 @@ export default function ContactInfoScreen() {
         )}
 
         {/* Shared Links — preview card (OG) + tappable URL */}
-        {links.length > 0 && (
+        {sharedShown && links.length > 0 && (
           <View style={s.section}>
             <Text style={s.sectionTitle}>Shared Links</Text>
             {links.slice(0, 20).map(l => (
@@ -505,6 +531,8 @@ const makeStyles = (c: Palette, SW: number) => StyleSheet.create({
   loadErrTxt: { flex: 1, color: c.danger, fontSize: 13, lineHeight: 18 },
   dangerText: { color: c.danger, fontSize: 15, fontWeight: '600' },
   staleTxt: { flex: 1, color: c.textDim, fontSize: 13, lineHeight: 18 },
+  prefRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8 },
+  prefBody: { flex: 1, paddingRight: 12 },
   prefTitle: { color: c.text, fontSize: 15, fontWeight: '600' },
   prefSub: { color: c.textDim, fontSize: 12, marginTop: 2 },
   ghostEmoji: { fontSize: 22 },

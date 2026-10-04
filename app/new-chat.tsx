@@ -21,6 +21,8 @@ import { getCachedChats } from '../lib/localDb';
 import { getCachedUser } from '../lib/api';
 import { dialCodeOf } from '../lib/dialCodeOf';
 
+const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message) || fallback;
+
 type Contact = { chatId: string; userId: string; name: string; photoURL: string | null; online: boolean };
 
 // Hoisted out of render so React keeps one component identity across renders.
@@ -69,10 +71,10 @@ export default function NewChatScreen() {
     if (ttlSeconds) {
       try {
         await setDisappearing(chatId, ttlSeconds);
-      } catch (e: any) {
+      } catch (e: unknown) {
         Alert.alert(
           'Could not make this chat temporary',
-          `Messages here will NOT disappear. ${e?.message ?? 'Try again from the chat’s settings.'}`,
+          `Messages here will NOT disappear. ${errText(e, 'Try again from the chat’s settings.')}`,
         );
       }
     }
@@ -152,8 +154,8 @@ export default function NewChatScreen() {
     try {
       const res = await createDirectChat({ phone: e164 });
       await openWithTtl(res.id, true);
-    } catch (e: any) {
-      Alert.alert('Could not start chat', e?.message ?? 'The number may not be on crazzychat yet.');
+    } catch (e: unknown) {
+      Alert.alert('Could not start chat', errText(e, 'The number may not be on crazzychat yet.'));
     } finally { setAdding(false); }
   };
 

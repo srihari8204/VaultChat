@@ -19,6 +19,9 @@ import { AuroraBackground } from '../../components/ui';
 import { AppText as Text } from '../../components/ui/Text';
 import { isVaultId } from '../../lib/vaultIdLink';
 
+const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message) || fallback;
+const errStatus = (e: unknown) => (e as { status?: number } | null)?.status;
+
 function useS() {
   const { colors } = useTheme();
   return useMemo(() => makeStyles(colors), [colors]);
@@ -63,10 +66,10 @@ export default function AddByVaultIdScreen() {
       }
       const peer = await resolveVaultId(vaultId);
       set({ k: 'confirm', userId: peer.userId, name: peer.name || `@${vaultId}` });
-    } catch (e: any) {
-      if (e?.status === 404) set({ k: 'error', msg: `No crazzychat user found for @${vaultId}.`, retry: false });
-      else if (e?.status === 401) set({ k: 'error', msg: 'Sign in first, then open this link again.', retry: false });
-      else set({ k: 'error', msg: e?.message ?? 'Could not look up this contact.', retry: true });
+    } catch (e: unknown) {
+      if (errStatus(e) === 404) set({ k: 'error', msg: `No crazzychat user found for @${vaultId}.`, retry: false });
+      else if (errStatus(e) === 401) set({ k: 'error', msg: 'Sign in first, then open this link again.', retry: false });
+      else set({ k: 'error', msg: errText(e, 'Could not look up this contact.'), retry: true });
     }
   }, [vaultId]);
 
@@ -84,8 +87,8 @@ export default function AddByVaultIdScreen() {
       const { id } = await createDirectChat({ userId });
       if (!alive.current) return;
       router.replace({ pathname: '/chat', params: { id, peerUid: userId, peerName: name } });
-    } catch (e: any) {
-      if (alive.current) setPhase({ k: 'error', msg: e?.message ?? 'Could not open this chat.', retry: true });
+    } catch (e: unknown) {
+      if (alive.current) setPhase({ k: 'error', msg: errText(e, 'Could not open this chat.'), retry: true });
     }
   }, [phase, router]);
 

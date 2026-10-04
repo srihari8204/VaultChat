@@ -30,6 +30,9 @@ import { redeemInvitation } from '../../lib/chatService';
 import { AuroraBackground } from '../../components/ui';
 import { AppText as Text } from '../../components/ui/Text';
 
+const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message) || fallback;
+const errStatus = (e: unknown) => (e as { status?: number } | null)?.status;
+
 type Phase =
   | { kind: 'confirm' }
   | { kind: 'redeeming' }
@@ -58,14 +61,14 @@ export default function InviteTokenScreen() {
       if (cancelledRef.current) return;
       // Replace, so Back does not bounce the user through the redeem screen.
       router.replace({ pathname: '/chat', params: { id: res.chatId } });
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (cancelledRef.current) return;
       setPhase({
         kind: 'error',
         // The server distinguishes expired / superseded / full; surface its
         // wording rather than flattening every case to "invalid".
-        message: e?.message ?? 'This invitation is no longer valid.',
-        retry: e?.status !== 410 && e?.status !== 400,
+        message: errText(e, 'This invitation is no longer valid.'),
+        retry: errStatus(e) !== 410 && errStatus(e) !== 400,
       });
     }
   }, [token, router]);
@@ -100,7 +103,7 @@ export default function InviteTokenScreen() {
       ) : phase.kind === 'redeeming' ? (
         <>
           <ActivityIndicator color={colors.primary} size="large" />
-          <Text style={st.msg}>Joining…</Text>
+          <Text style={st.msg} accessibilityLiveRegion="polite">Joining…</Text>
           <TouchableOpacity
             onPress={() => { cancelledRef.current = true; goChats(); }}
             style={st.link}

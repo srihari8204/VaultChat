@@ -1,6 +1,8 @@
 // app/search.tsx — global search (WhatsApp-style). Filters chats by name AND
 // searches message CONTENT across all chats, entirely on-device against the
 // local plaintext cache (zero-knowledge — the server never sees the query).
+// Messages in locked chats are not searched, and view-once / Invisible Ink
+// messages are never hits (lib/localDb.searchAllMessages).
 
 import { useAuthHeader } from '../hooks/useAuthHeader';
 import { HEADER_TOP, SCREEN_BOTTOM } from '../constants/layout';
@@ -18,6 +20,7 @@ import { attachmentUrl, listChats, chatTitle as chatDisplayName, type ChatSummar
 import { searchAllMessages, getCachedChats } from '../lib/localDb';
 import { setPendingJump } from '../lib/chatJump';
 import { searchSnippet } from '../lib/searchSnippet';
+import { lockedChatIds } from '../lib/lockedChats';
 
 function useS() {
   const { colors } = useTheme();
@@ -48,6 +51,8 @@ export default function SearchScreen() {
   const [chatsOffline, setChatsOffline] = useState(false);
   // The on-device message search threw: "Nothing found" would be a lie.
   const [msgError, setMsgError] = useState(false);
+  // The lock table could not be read: no chat's messages are searched (fail closed).
+  const [locksUnreadable, setLocksUnreadable] = useState(false);
   // Bumped by the failure notice's retry, which re-runs the search below.
   const [retry, setRetry] = useState(0);
   const authHeader = useAuthHeader();
@@ -79,9 +84,14 @@ export default function SearchScreen() {
     // `stale` stops an older, slower search from overwriting a newer query's hits.
     let stale = false;
     debounce.current = setTimeout(() => {
-      searchAllMessages(q, 50)
-        .then((hits) => { if (!stale) { setFound({ q, hits }); setMsgError(false); } })
-        .catch(() => { if (!stale) { setFound({ q, hits: [] }); setMsgError(true); } });
+      (async () => {
+        // Re-read per search: a chat locked a moment ago is skipped at once.
+        const locked = await lockedChatIds();
+        if (stale) return;
+        setLocksUnreadable(locked === null);
+        const hits = locked === null ? [] : await searchAllMessages(q, 50, locked);
+        if (!stale) { setFound({ q, hits }); setMsgError(false); }
+      })().catch(() => { if (!stale) { setFound({ q, hits: [] }); setMsgError(true); } });
     }, 220);
     return () => { stale = true; clearTimeout(debounce.current); };
   }, [query, retry]);
@@ -114,7 +124,8 @@ export default function SearchScreen() {
     <View style={S.screen}>
       <AuroraBackground />
       <View style={S.header}>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} hitSlop={10} style={S.backBtn} activeOpacity={0.7}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" hitSlop={10} style={S.backBtn} activeOpacity={0.7}
+          onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/chats'))}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <TextInput
@@ -136,6 +147,12 @@ export default function SearchScreen() {
           <Text style={S.noticeTxt}>Offline: chat names are from this device.</Text>
         </View>
       )}
+      {locksUnreadable && !loading && !!query.trim() && (
+        <View style={S.notice} accessibilityLiveRegion="polite">
+          <Ionicons name="lock-closed-outline" size={16} color={colors.textDim} />
+          <Text style={S.noticeTxt}>Couldn’t read your chat locks, so messages aren’t searched. Chat names still are.</Text>
+        </View>
+      )}
       {msgError && !loading && (
         <TouchableOpacity style={S.notice} onPress={() => setRetry(n => n + 1)} accessibilityLiveRegion="polite"
           accessibilityRole="button" accessibilityLabel="Couldn't search messages. Tap to try again">
@@ -148,8 +165,8 @@ export default function SearchScreen() {
         <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
       ) : sections.length === 0 ? (
         <View style={S.empty}>
-          <Text style={S.emptyTitle}>{!query.trim() ? 'Search your chats' : msgError ? 'No chats match' : 'Nothing found'}</Text>
-          {!!query.trim() && !msgError && <Text style={S.emptySub}>Try a different name or word.</Text>}
+          <Text style={S.emptyTitle}>{!query.trim() ? 'Search your chats' : msgError || locksUnreadable ? 'No chats match' : 'Nothing found'}</Text>
+          {!!query.trim() && !msgError && !locksUnreadable && <Text style={S.emptySub}>Try a different name or word. Messages in locked chats aren’t searched.</Text>}
         </View>
       ) : (
         <SectionList<ChatSummary | MsgHit, Section>
