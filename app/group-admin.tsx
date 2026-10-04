@@ -227,22 +227,38 @@ export default function GroupAdminScreen() {
     if (saved) loadJoinReqs(chatId!); else { setJoinReqs([]); setReqsFailed(false); }
   };
 
-  const approveReq = async (uid: string) => {
-    setJoinReqs(list => list.filter(r => r.userId !== uid));
-    try { await approveJoinRequest(chatId!, uid); flash('ok', 'Approved'); load(); }
-    catch (e: any) { flash('err', e?.message ?? 'Failed'); loadJoinReqs(chatId!); }
+  // One request at a time. The row stays until the server answers, with a
+  // spinner on the button that was used and every row's buttons disabled, so a slow
+  // or failed answer is visible on the row itself. Reject takes the latch when
+  // its confirmation OPENS; Cancel or an Android outside-tap releases it.
+  const reqActing = useRef(false);
+  const [acting, setActing] = useState<{ uid: string; kind: 'approve' | 'reject' } | null>(null);
+  const settleReq = async (r: JoinRequest, kind: 'approve' | 'reject') => {
+    setActing({ uid: r.userId, kind });
+    try {
+      if (kind === 'approve') await approveJoinRequest(chatId!, r.userId);
+      else await rejectJoinRequest(chatId!, r.userId);
+      setJoinReqs(list => list.filter(x => x.userId !== r.userId));
+      flash('ok', kind === 'approve' ? 'Approved' : 'Request rejected');
+      if (kind === 'approve') load();
+    } catch (e: any) { flash('err', e?.message ?? 'Failed'); loadJoinReqs(chatId!); }
+    finally { reqActing.current = false; setActing(null); }
+  };
+  const approveReq = (r: JoinRequest) => {
+    if (reqActing.current) return;
+    reqActing.current = true;
+    void settleReq(r, 'approve');
   };
 
   const rejectReq = (r: JoinRequest) => {
+    if (reqActing.current) return;
+    reqActing.current = true;
+    const release = () => { reqActing.current = false; };
     const who = r.name || 'this person';
     Alert.alert('Reject join request?', `${who} will not join. They can ask again with the link.`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Reject', style: 'destructive', onPress: async () => {
-        setJoinReqs(list => list.filter(x => x.userId !== r.userId));
-        try { await rejectJoinRequest(chatId!, r.userId); flash('ok', 'Request rejected'); }
-        catch (e: any) { flash('err', e?.message ?? 'Failed'); loadJoinReqs(chatId!); }
-      } },
-    ]);
+      { text: 'Cancel', style: 'cancel', onPress: release },
+      { text: 'Reject', style: 'destructive', onPress: () => { void settleReq(r, 'reject'); } },
+    ], { cancelable: true, onDismiss: release });
   };
 
   const changeRole = async (m: ChatMember, role: Exclude<GroupRole, 'owner'>) => {
@@ -435,16 +451,32 @@ export default function GroupAdminScreen() {
               </TouchableOpacity>
             ) : joinReqs.length === 0 ? (
               <Text style={s.hint}>No pending requests.</Text>
-            ) : joinReqs.map(r => (
-              <View key={r.userId} style={s.memberRow}>
-                <View style={s.avatar}><Text style={s.avatarText}>{initialOf(r.name)}</Text></View>
-                <Text style={[s.memberName, { flex: 1 }]} numberOfLines={1}>{r.name || r.userId.slice(0, 8)}</Text>
-                <TouchableOpacity style={s.reqApprove} onPress={() => approveReq(r.userId)}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 0 }}
-                  accessibilityRole="button" accessibilityLabel={`Approve ${r.name || 'this person'}`}><Text style={s.reqApproveTxt}>Approve</Text></TouchableOpacity>
-                <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Reject the join request from ${r.name || r.userId.slice(0, 8)}`} style={s.reqReject} onPress={() => rejectReq(r)} hitSlop={10}><Ionicons name="close" size={18} color={colors.danger} /></TouchableOpacity>
-              </View>
-            ))}
+            ) : joinReqs.map(r => {
+              const mine = acting?.uid === r.userId;
+              const approving = mine && acting?.kind === 'approve';
+              const rejecting = mine && acting?.kind === 'reject';
+              return (
+                <View key={r.userId} style={s.memberRow}>
+                  <View style={s.avatar}><Text style={s.avatarText}>{initialOf(r.name)}</Text></View>
+                  <Text style={[s.memberName, { flex: 1 }]} numberOfLines={1}>{r.name || r.userId.slice(0, 8)}</Text>
+                  <TouchableOpacity style={s.reqApprove} onPress={() => approveReq(r)} disabled={!!acting}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 0 }}
+                    accessibilityRole="button" accessibilityLabel={`Approve ${r.name || 'this person'}`}
+                    accessibilityState={{ busy: approving, disabled: !!acting }}>
+                    {approving
+                      ? <ActivityIndicator size="small" color={colors.onPrimary} />
+                      : <Text style={s.reqApproveTxt}>Approve</Text>}
+                  </TouchableOpacity>
+                  <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Reject the join request from ${r.name || r.userId.slice(0, 8)}`}
+                    accessibilityState={{ busy: rejecting, disabled: !!acting }} disabled={!!acting}
+                    style={s.reqReject} onPress={() => rejectReq(r)} hitSlop={10}>
+                    {rejecting
+                      ? <ActivityIndicator size="small" color={colors.danger} />
+                      : <Ionicons name="close" size={18} color={colors.danger} />}
+                  </TouchableOpacity>
+                </View>
+              );
+            })}
           </View>
         )}
 
@@ -595,7 +627,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   switchLabel: { color: c.text, fontSize: 14, fontWeight: '600' },
   switchSub: { color: c.textDim, fontSize: 12, marginTop: 2, flexShrink: 1 },
   linkRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, minHeight: 44 },
-  reqApprove: { backgroundColor: c.primary, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7, marginRight: 8 },
+  reqApprove: { backgroundColor: c.primary, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7, marginRight: 8, minWidth: 74, alignItems: 'center' },
   reqApproveTxt: { color: c.onPrimary, fontSize: 12, fontWeight: '800' },
   reqReject: { padding: 6 },
   policyRow: { flexDirection: 'row', gap: 8 },

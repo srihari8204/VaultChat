@@ -20,7 +20,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { KeyboardSafe } from '../components/ui';
 import {
-  View, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
+  View, StyleSheet, TouchableOpacity, SectionList, TextInput, Alert,
   ActivityIndicator, Image,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
@@ -66,6 +66,15 @@ const CANDIDATE_NOTE: Record<InviteCandidate['state'], string> = {
 };
 
 const SEARCH_DEBOUNCE_MS = 300;
+
+/** One row of the screen's SectionList: a search result, a queue row or a sent invitation. */
+type Row =
+  | { kind: 'result'; c: InviteCandidate }
+  | { kind: 'waiting'; p: QueueRow }
+  | { kind: 'sent'; inv: Invitation };
+type Section = { key: Row['kind']; data: Row[] };
+const rowKey = (r: Row) =>
+  r.kind === 'result' ? `r:${r.c.id}` : r.kind === 'waiting' ? `w:${queueKey(r.p)}` : `s:${r.inv.id}`;
 
 export default function GroupInvitesScreen() {
   const { colors } = useTheme();
@@ -234,6 +243,20 @@ export default function GroupInvitesScreen() {
     [sent],
   );
 
+  // A SectionList, not .map in a ScrollView: the server caps each list (20
+  // search results, 200 sent, 200 + 200 waiting), but a busy group can still
+  // reach hundreds of rows, and only the visible ones should be laid out.
+  const sections = useMemo<Section[]>(() => [
+    { key: 'result', data: results.map((c) => ({ kind: 'result' as const, c })) },
+    { key: 'waiting', data: waiting.map((p) => ({ kind: 'waiting' as const, p })) },
+    { key: 'sent', data: unanswered.map((inv) => ({ kind: 'sent' as const, inv })) },
+  ], [results, waiting, unanswered]);
+  // Everything the rows, headers and footers draw besides `sections`.
+  const rowDeps = useMemo(
+    () => ({ inviting, acting, resending, withdrawing, authHeader, loading, refreshFailed, colors }),
+    [inviting, acting, resending, withdrawing, authHeader, loading, refreshFailed, colors],
+  );
+
   // photoURL is an attachment id behind auth (users.photo_url), as in app/group-info.tsx.
   const avatar = (name: string | null, photoURL: string | null, size = 36) => (
     photoURL && authHeader
@@ -256,153 +279,174 @@ export default function GroupInvitesScreen() {
         headerShown: true, title: 'Add people', headerTitleAlign: 'center',
         headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,
       }} />
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
-
-        <Text style={[st.h, { color: colors.text }]} accessibilityRole="header">Add to {groupName}</Text>
-        {params.fresh === '1' && sent.length === 0 && (
-          <Text style={{ color: colors.textDim, fontSize: 12.5, lineHeight: 17, marginBottom: 12 }}>
-            {groupName} is already created, with just you in it. If you go back without inviting
-            anyone it stays that way; you can leave it from Group info.
-          </Text>
-        )}
-
-        <View style={[st.field, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
-          <Ionicons name="search" size={17} color={colors.textDim} />
-          <TextInput
-            value={q} onChangeText={setQ}
-            placeholder="Name, phone number or email"
-            placeholderTextColor={colors.textFaint}
-            style={[st.input, { color: colors.text }]}
-            autoCapitalize="none" autoCorrect={false} returnKeyType="search"
-            accessibilityLabel="Search people to invite"
-          />
-          {searching && <ActivityIndicator size="small" color={colors.primary} />}
-          {!searching && q.length > 0 && (
-            <TouchableOpacity onPress={() => setQ('')} accessibilityRole="button" accessibilityLabel="Clear the search" hitSlop={12}>
-              <Ionicons name="close-circle" size={17} color={colors.textFaint} />
-            </TouchableOpacity>
+      <SectionList<Row, Section>
+        sections={sections}
+        keyExtractor={rowKey}
+        stickySectionHeadersEnabled={false}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
+        extraData={rowDeps}
+        ListHeaderComponent={<>
+          <Text style={[st.h, { color: colors.text }]} accessibilityRole="header">Add to {groupName}</Text>
+          {params.fresh === '1' && sent.length === 0 && (
+            <Text style={{ color: colors.textDim, fontSize: 12.5, lineHeight: 17, marginBottom: 12 }}>
+              {groupName} is already created, with just you in it. If you go back without inviting
+              anyone it stays that way; you can leave it from Group info.
+            </Text>
           )}
-        </View>
 
-        <Text style={{ color: colors.textFaint, fontSize: 11.5, marginTop: 8, lineHeight: 16 }}>
-          Search people you already chat with by name, or anyone on crazzychat by their exact
-          phone number or email.
-        </Text>
-
-        {searched && searchFailed && !searching && (
-          <View style={[st.empty, { borderColor: colors.danger }]} accessibilityLiveRegion="polite">
-            <Ionicons name="cloud-offline-outline" size={17} color={colors.danger} />
-            <Text style={{ color: colors.danger, fontSize: 12.5, flex: 1, lineHeight: 17 }}>
-              Couldn’t search right now. Check your connection and try again.
-            </Text>
-          </View>
-        )}
-
-        {searched && !searchFailed && results.length === 0 && !searching && (
-          <View style={[st.empty, { borderColor: colors.glassStroke }]}>
-            <Ionicons name="person-outline" size={17} color={colors.textDim} />
-            <Text style={{ color: colors.textDim, fontSize: 12.5, flex: 1, lineHeight: 17 }}>
-              Nobody found. They need a crazzychat account before they can be added — there is
-              no invitation to send outside the app.
-            </Text>
-          </View>
-        )}
-
-        {results.map((c) => (
-          <View key={c.id} style={[st.row, { borderColor: colors.glassStroke }]}>
-            {avatar(c.name, c.photoURL)}
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14 }} numberOfLines={1}>
-                {c.name ?? 'crazzychat user'}
-              </Text>
-              {c.state !== 'invitable' && (
-                <Text style={{ color: colors.textDim, fontSize: 11.5 }}>{CANDIDATE_NOTE[c.state]}</Text>
-              )}
-            </View>
-            {c.state === 'invitable' ? (
-              <TouchableOpacity onPress={() => invite(c)} disabled={inviting === c.id}
-                accessibilityRole="button" accessibilityLabel={`Invite ${c.name ?? 'crazzychat user'}`}
-                accessibilityState={{ disabled: inviting === c.id, busy: inviting === c.id }} hitSlop={6}
-                style={[st.pill, { backgroundColor: colors.primary }]}>
-                {inviting === c.id ? <ActivityIndicator size="small" color={colors.onPrimary} />
-                  : <Text style={[st.pillTxt, { color: colors.onPrimary }]}>Invite</Text>}
+          <View style={[st.field, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
+            <Ionicons name="search" size={17} color={colors.textDim} />
+            <TextInput
+              value={q} onChangeText={setQ}
+              placeholder="Name, phone number or email"
+              placeholderTextColor={colors.textFaint}
+              style={[st.input, { color: colors.text }]}
+              autoCapitalize="none" autoCorrect={false} returnKeyType="search"
+              accessibilityLabel="Search people to invite"
+            />
+            {searching && <ActivityIndicator size="small" color={colors.primary} />}
+            {!searching && q.length > 0 && (
+              <TouchableOpacity onPress={() => setQ('')} accessibilityRole="button" accessibilityLabel="Clear the search" hitSlop={12}>
+                <Ionicons name="close-circle" size={17} color={colors.textFaint} />
               </TouchableOpacity>
-            ) : (
-              <Ionicons
-                name={c.state === 'member' ? 'checkmark-circle' : c.state === 'invited' ? 'time' : 'lock-closed'}
-                size={19} color={colors.textFaint}
-              />
             )}
           </View>
-        ))}
 
-        {refreshFailed && !loading && (
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Couldn't refresh invitations. Retry" onPress={() => { setLoading(true); refresh(); }}
-            style={[st.empty, { borderColor: colors.danger, marginTop: 24 }]}>
-            <Ionicons name="cloud-offline-outline" size={17} color={colors.danger} />
-            <Text style={{ color: colors.danger, fontSize: 12.5, flex: 1 }}>Couldn’t refresh the lists below. Tap to retry.</Text>
-          </TouchableOpacity>
-        )}
-
-        {/* ── waiting on the owner ── */}
-        <View style={st.sechead}>
-          <Text style={[st.h, { color: colors.text, marginBottom: 0 }]} accessibilityRole="header">Waiting ({waiting.length})</Text>
-          {loading && <ActivityIndicator size="small" color={colors.primary} />}
-        </View>
-
-        {!loading && waiting.length === 0 && (
-          <Text style={{ color: colors.textDim, fontSize: 13.5 }}>
-            Nobody is waiting. People appear here once they accept an invitation or ask to join.
+          <Text style={{ color: colors.textFaint, fontSize: 11.5, marginTop: 8, lineHeight: 16 }}>
+            Search people you already chat with by name, or anyone on crazzychat by their exact
+            phone number or email.
           </Text>
-        )}
 
-        {waiting.map((p) => (
-          <View key={queueKey(p)} style={[st.row, { borderColor: colors.glassStroke }]}>
-            {avatar(p.name, p.photoURL)}
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14 }} numberOfLines={1}>
-                {p.name ?? 'crazzychat user'}
-              </Text>
-              <Text style={{ color: p.canApprove ? colors.primary : colors.textDim, fontSize: 11.5 }} numberOfLines={1}>
-                {isLinkRow(p) ? 'Opened an invite link — approve to let them in'
-                  : p.requested ? 'Asked to join'
-                  : p.canApprove ? 'Accepted — approve to let them in'
-                  : 'Invited, has not answered'}
+          {searched && searchFailed && !searching && (
+            <View style={[st.empty, { borderColor: colors.danger }]} accessibilityLiveRegion="polite">
+              <Ionicons name="cloud-offline-outline" size={17} color={colors.danger} />
+              <Text style={{ color: colors.danger, fontSize: 12.5, flex: 1, lineHeight: 17 }}>
+                Couldn’t search right now. Check your connection and try again.
               </Text>
             </View>
-            {acting === queueKey(p) ? <ActivityIndicator size="small" color={colors.primary} /> : (
-              <>
-                {p.canApprove && (
-                  <TouchableOpacity onPress={() => approve(p)} style={[st.pill, { backgroundColor: colors.success }]} hitSlop={6}
-                    accessibilityRole="button" accessibilityLabel={`Approve ${p.name ?? 'crazzychat user'}`}>
-                    <Text style={[st.pillTxt, { color: inkOn(colors.success) }]}>Approve</Text>
-                  </TouchableOpacity>
-                )}
-                {p.canReject && (
-                  <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Decline ${p.name ?? "crazzychat user"}`} onPress={() => decline(p)} style={st.rowBtn} hitSlop={8}>
-                    <Ionicons name="close-circle" size={19} color={colors.danger} />
-                  </TouchableOpacity>
-                )}
-              </>
+          )}
+
+          {searched && !searchFailed && results.length === 0 && !searching && (
+            <View style={[st.empty, { borderColor: colors.glassStroke }]}>
+              <Ionicons name="person-outline" size={17} color={colors.textDim} />
+              <Text style={{ color: colors.textDim, fontSize: 12.5, flex: 1, lineHeight: 17 }}>
+                Nobody found. They need a crazzychat account before they can be added — there is
+                no invitation to send outside the app.
+              </Text>
+            </View>
+          )}
+        </>}
+        renderSectionHeader={({ section }) => section.key === 'waiting' ? (
+          <>
+            {refreshFailed && !loading && (
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Couldn't refresh invitations. Retry" onPress={() => { setLoading(true); refresh(); }}
+                style={[st.empty, { borderColor: colors.danger, marginTop: 24 }]}>
+                <Ionicons name="cloud-offline-outline" size={17} color={colors.danger} />
+                <Text style={{ color: colors.danger, fontSize: 12.5, flex: 1 }}>Couldn’t refresh the lists below. Tap to retry.</Text>
+              </TouchableOpacity>
             )}
-          </View>
-        ))}
 
-        {/* ── sent but unanswered ── */}
-        <View style={st.sechead}>
-          <Text style={[st.h, { color: colors.text, marginBottom: 0 }]} accessibilityRole="header">Sent ({unanswered.length})</Text>
-        </View>
-
-        {!loading && unanswered.length === 0 && (
-          <Text style={{ color: colors.textDim, fontSize: 13.5 }}>
-            No invitations outstanding.
-          </Text>
-        )}
-
-        {unanswered.map((inv) => {
+            {/* ── waiting on the owner ── */}
+            <View style={st.sechead}>
+              <Text style={[st.h, { color: colors.text, marginBottom: 0 }]} accessibilityRole="header">Waiting ({waiting.length})</Text>
+              {loading && <ActivityIndicator size="small" color={colors.primary} />}
+            </View>
+          </>
+        ) : section.key === 'sent' ? (
+          <>
+            {/* ── sent but unanswered ── */}
+            <View style={st.sechead}>
+              <Text style={[st.h, { color: colors.text, marginBottom: 0 }]} accessibilityRole="header">Sent ({unanswered.length})</Text>
+            </View>
+          </>
+        ) : null}
+        renderSectionFooter={({ section }) => section.key === 'waiting' ? (
+          <>
+            {!loading && waiting.length === 0 && (
+              <Text style={{ color: colors.textDim, fontSize: 13.5 }}>
+                Nobody is waiting. People appear here once they accept an invitation or ask to join.
+              </Text>
+            )}
+          </>
+        ) : section.key === 'sent' ? (
+          <>
+            {!loading && unanswered.length === 0 && (
+              <Text style={{ color: colors.textDim, fontSize: 13.5 }}>
+                No invitations outstanding.
+              </Text>
+            )}
+          </>
+        ) : null}
+        renderItem={({ item }) => {
+          if (item.kind === 'result') {
+            const c = item.c;
+            return (
+              <View style={[st.row, { borderColor: colors.glassStroke }]}>
+                {avatar(c.name, c.photoURL)}
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14 }} numberOfLines={1}>
+                    {c.name ?? 'crazzychat user'}
+                  </Text>
+                  {c.state !== 'invitable' && (
+                    <Text style={{ color: colors.textDim, fontSize: 11.5 }}>{CANDIDATE_NOTE[c.state]}</Text>
+                  )}
+                </View>
+                {c.state === 'invitable' ? (
+                  <TouchableOpacity onPress={() => invite(c)} disabled={inviting === c.id}
+                    accessibilityRole="button" accessibilityLabel={`Invite ${c.name ?? 'crazzychat user'}`}
+                    accessibilityState={{ disabled: inviting === c.id, busy: inviting === c.id }} hitSlop={6}
+                    style={[st.pill, { backgroundColor: colors.primary }]}>
+                    {inviting === c.id ? <ActivityIndicator size="small" color={colors.onPrimary} />
+                      : <Text style={[st.pillTxt, { color: colors.onPrimary }]}>Invite</Text>}
+                  </TouchableOpacity>
+                ) : (
+                  <Ionicons
+                    name={c.state === 'member' ? 'checkmark-circle' : c.state === 'invited' ? 'time' : 'lock-closed'}
+                    size={19} color={colors.textFaint}
+                  />
+                )}
+              </View>
+            );
+          }
+          if (item.kind === 'waiting') {
+            const p = item.p;
+            return (
+              <View style={[st.row, { borderColor: colors.glassStroke }]}>
+                {avatar(p.name, p.photoURL)}
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14 }} numberOfLines={1}>
+                    {p.name ?? 'crazzychat user'}
+                  </Text>
+                  <Text style={{ color: p.canApprove ? colors.primary : colors.textDim, fontSize: 11.5 }} numberOfLines={1}>
+                    {isLinkRow(p) ? 'Opened an invite link — approve to let them in'
+                      : p.requested ? 'Asked to join'
+                      : p.canApprove ? 'Accepted — approve to let them in'
+                      : 'Invited, has not answered'}
+                  </Text>
+                </View>
+                {acting === queueKey(p) ? <ActivityIndicator size="small" color={colors.primary} /> : (
+                  <>
+                    {p.canApprove && (
+                      <TouchableOpacity onPress={() => approve(p)} style={[st.pill, { backgroundColor: colors.success }]} hitSlop={6}
+                        accessibilityRole="button" accessibilityLabel={`Approve ${p.name ?? 'crazzychat user'}`}>
+                        <Text style={[st.pillTxt, { color: inkOn(colors.success) }]}>Approve</Text>
+                      </TouchableOpacity>
+                    )}
+                    {p.canReject && (
+                      <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Decline ${p.name ?? "crazzychat user"}`} onPress={() => decline(p)} style={st.rowBtn} hitSlop={8}>
+                        <Ionicons name="close-circle" size={19} color={colors.danger} />
+                      </TouchableOpacity>
+                    )}
+                  </>
+                )}
+              </View>
+            );
+          }
+          const inv = item.inv;
           const t = tone(STATUS_TONE[inv.status]);
           return (
-            <View key={inv.id} style={[st.row, { borderColor: colors.glassStroke }]}>
+            <View style={[st.row, { borderColor: colors.glassStroke }]}>
               <View style={[st.rowIcon, { backgroundColor: tint(t, 0.13) }]}>
                 <Ionicons name={inv.status === 'expired' ? 'hourglass' : 'paper-plane'} size={16} color={t} />
               </View>
@@ -428,17 +472,18 @@ export default function GroupInvitesScreen() {
               </TouchableOpacity>
             </View>
           );
-        })}
-
-        <View style={[st.footer, { borderColor: colors.glassStroke }]}>
-          <Ionicons name="lock-closed-outline" size={15} color={colors.textDim} />
-          <Text style={{ color: colors.textDim, fontSize: 11.5, flex: 1, lineHeight: 16 }}>
-            Invitations sent here go to one account and cannot be forwarded. A group can
-            also have invite links (Group info → Invite links): anyone with a link can join,
-            or ask to, if link joins need approval.
-          </Text>
-        </View>
-      </ScrollView>
+        }}
+        ListFooterComponent={
+          <View style={[st.footer, { borderColor: colors.glassStroke }]}>
+            <Ionicons name="lock-closed-outline" size={15} color={colors.textDim} />
+            <Text style={{ color: colors.textDim, fontSize: 11.5, flex: 1, lineHeight: 16 }}>
+              Invitations sent here go to one account and cannot be forwarded. A group can
+              also have invite links (Group info → Invite links): anyone with a link can join,
+              or ask to, if link joins need approval.
+            </Text>
+          </View>
+        }
+      />
     </KeyboardSafe>
   );
 }

@@ -155,7 +155,7 @@ async function book(kind: ReminderKind, r: PlannedReminder): Promise<string> {
       trigger: {
         type: Notifications.SchedulableTriggerInputTypes.DATE,
         date: new Date(r.fireAt),
-      } as any,
+      },
     });
   } catch { return ''; }
 }

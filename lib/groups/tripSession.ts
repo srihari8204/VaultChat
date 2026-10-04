@@ -247,7 +247,7 @@ export interface TripEvent { userId: string; ping: TripPing | null }
  * presence key-harvest already fixed (see lkFromMessage in family/presence).
  */
 async function tripTextOf(groupId: string, m: Message): Promise<string | null> {
-  if (m?.type !== 'system' || !m.content || typeof m.content !== 'string' || (m as any).deletedAt) return null;
+  if (m?.type !== 'system' || !m.content || typeof m.content !== 'string' || m.deletedAt) return null;
   if (m.content.startsWith(TRIP_PREFIX) || m.content.startsWith(TRIP_END_PREFIX)) return m.content;
   if (!m.senderId) return null;
   try { return await decryptFromChat(groupId, String(m.senderId), m.content, m.id); } catch { return null; }

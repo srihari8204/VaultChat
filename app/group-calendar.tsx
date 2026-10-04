@@ -11,10 +11,8 @@
 
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
-  View, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
-  ActivityIndicator, Modal, Platform,
+  View, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator,
 } from 'react-native';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
@@ -29,41 +27,17 @@ import { getCurrentUserAsync } from './(constants)/authService';
 import {
   monthKeysInRange, monthBounds, bucketFor, occurrencesInRange,
   eventReminderItems, REMINDER_HORIZON_MS, eventActions,
-  withDayOffset, withHour, isDayOffset,
-  type GroupEvent, type Occurrence, type Recurrence,
+  type GroupEvent, type Occurrence,
 } from '../lib/groups/calendar';
 import { syncEventReminders } from '../lib/groups/taskReminders';
-import { KeyboardSafe } from '../components/ui';
-import { useDatePicker } from '../components/ui/useDatePicker';
 import { GroupNotFound } from '../components/groups/GroupNotFound';
+import {
+  GroupEventComposer, REPEATS, dayLabel, timeLabel, type EventDraft,
+} from '../components/groups/GroupEventComposer';
 import { eventWriter, writerRecorded } from '../lib/groups/serverContracts';
-
-const REPEATS: { key: Recurrence; label: string }[] = [
-  { key: 'none', label: 'Once' },
-  { key: 'daily', label: 'Daily' },
-  { key: 'weekly', label: 'Weekly' },
-  { key: 'monthly', label: 'Monthly' },
-  { key: 'yearly', label: 'Yearly' },
-];
-
-const WHEN: { label: string; addDays: number }[] = [
-  { label: 'Today', addDays: 0 },
-  { label: 'Tomorrow', addDays: 1 },
-  { label: 'Next week', addDays: 7 },
-];
-
-const HOURS = [8, 9, 10, 12, 14, 16, 18, 19, 20];
 
 const monthLabel = (ts: number) =>
   new Date(ts).toLocaleDateString([], { month: 'long', year: 'numeric' });
-const dayLabel = (ts: number) =>
-  new Date(ts).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
-const timeLabel = (ts: number) =>
-  new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-const whenLabel = (ts: number) => `${dayLabel(ts)}, ${timeLabel(ts)}`;
-
-/** A new event starts at 18:00 today unless the composer says otherwise. */
-const defaultStart = () => withHour(Date.now(), 18);
 
 /** Who I am in this group, for the edit/delete gate (lib/groups/calendar eventActions). */
 interface Access { typed: boolean; myRole: string | null; permissions: string[] }
@@ -116,7 +90,7 @@ async function syncReminders(groupId: string, me: string, memo: DecryptMemo): Pr
 }
 
 export default function GroupCalendarScreen() {
-  const { colors, scheme } = useTheme();
+  const { colors } = useTheme();
   const params = useLocalSearchParams<{ groupId?: string; name?: string }>();
   const groupId = String(params.groupId || '');
 
@@ -142,16 +116,9 @@ export default function GroupCalendarScreen() {
   const [composing, setComposing] = useState(false);
   // The event being edited, or null for a new one.
   const [editing, setEditing] = useState<GroupEvent | null>(null);
-  const [title, setTitle] = useState('');
-  const [location, setLocation] = useState('');
-  const [start, setStart] = useState(defaultStart);
-  const [repeat, setRepeat] = useState<Recurrence>('none');
+  // Bumped on every open: the composer remounts and starts its draft afresh.
+  const [composeKey, setComposeKey] = useState(0);
   const [busy, setBusy] = useState(false);
-  // Android: the native date/time dialogs (not a React Modal). iOS: the picker
-  // is drawn inline in the composer sheet, because the hook's iOS sheet is its
-  // own <Modal> and a Modal presented from inside this one is unreliable.
-  const picker = useDatePicker();
-  const [pickingIOS, setPickingIOS] = useState(false);
 
   const bounds = useMemo(() => monthBounds(cursor), [cursor]);
 
@@ -210,20 +177,13 @@ export default function GroupCalendarScreen() {
     myRole: access?.myRole ?? null, permissions: access?.permissions, writerKnown,
   });
 
-  const openNew = () => {
-    setEditing(null); setTitle(''); setLocation(''); setRepeat('none'); setStart(defaultStart());
-    setPickingIOS(false); setComposing(true);
+  const openCompose = (e: GroupEvent | null) => {
+    setEditing(e); setComposeKey((k) => k + 1); setComposing(true);
   };
+  const openNew = () => openCompose(null);
+  const openEdit = (e: GroupEvent) => openCompose(e);
 
-  // A repeating event is edited as a series: the sheet shows the series start,
-  // not the occurrence that was tapped.
-  const openEdit = (e: GroupEvent) => {
-    setEditing(e); setTitle(e.title); setLocation(e.location ?? ''); setRepeat(e.recurrence);
-    setStart(e.startsAt);
-    setPickingIOS(false); setComposing(true);
-  };
-
-  const save = async () => {
+  const save = async ({ title, location, start, repeat }: EventDraft) => {
     const t = title.trim();
     if (!t || busy || !me) return;
     const rowId = editing ? rowIds[editing.id] : undefined;
@@ -244,7 +204,6 @@ export default function GroupCalendarScreen() {
       if (editing && rowId) await updateGroupEvent(groupId, rowId, body);
       else await createGroupEvent(groupId, body);
       setComposing(false); setEditing(null);
-      setTitle(''); setLocation(''); setRepeat('none');
       // Jump the view to the month the event landed in, so it is visible.
       setCursor(event.startsAt);
       await load();
@@ -286,12 +245,6 @@ export default function GroupCalendarScreen() {
       ],
       { cancelable: true, onDismiss: release },
     );
-  };
-
-  const startLabel = whenLabel(start);
-  const pickStart = () => {
-    if (Platform.OS === 'ios') setPickingIOS((v) => !v);
-    else picker.open(new Date(start), (d) => setStart(d.getTime()), 'datetime');
   };
 
   const shiftMonth = (by: number) => {
@@ -380,115 +333,8 @@ export default function GroupCalendarScreen() {
         </ScrollView>
       )}
 
-      <Modal visible={composing} transparent animationType="slide" onRequestClose={() => setComposing(false)}>
-        {/* KeyboardSafe, not KeyboardAvoidingView (2026-09-17): a React Native
-            <Modal> is its own Android window and never receives the activity's
-            adjustResize, and KAV's 'padding' math mixes Modal-relative layout
-            coords with absolute screen coords, so the lift came up short.
-            keyboardOnly: this sheet already sets its own bottom padding. */}
-        <KeyboardSafe keyboardOnly style={st.backdrop}>
-          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setComposing(false)}
-            accessibilityRole="button" accessibilityLabel="Close without saving" />
-          {/* Scrolls when the inline iOS picker makes it taller than the screen. */}
-          <ScrollView style={[st.sheet, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}
-            contentContainerStyle={st.sheetBody} keyboardShouldPersistTaps="handled" bounces={false}>
-            <Text style={{ color: colors.text, fontWeight: '800', fontSize: 16, marginBottom: 14 }} accessibilityRole="header">
-              {editing ? 'Edit event' : 'New event'}
-            </Text>
-
-            <View style={[st.field, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
-              <Ionicons name="calendar" size={17} color={colors.textDim} />
-              <TextInput value={title} onChangeText={setTitle} placeholder="What is it?" accessibilityLabel="Event title"
-                placeholderTextColor={colors.textFaint} style={[st.input, { color: colors.text }]} maxLength={140} />
-            </View>
-            <View style={[st.field, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft, marginTop: 10 }]}>
-              <Ionicons name="location-outline" size={17} color={colors.textDim} />
-              <TextInput value={location} onChangeText={setLocation} placeholder="Where (optional)" accessibilityLabel="Where, optional"
-                placeholderTextColor={colors.textFaint} style={[st.input, { color: colors.text }]} maxLength={140} />
-            </View>
-
-            <TouchableOpacity
-              onPress={pickStart}
-              accessibilityRole="button" accessibilityLabel={`Starts ${startLabel}`}
-              accessibilityHint={pickingIOS ? 'Hides the date and time picker' : 'Opens a date and time picker'}
-              accessibilityState={Platform.OS === 'ios' ? { expanded: pickingIOS } : undefined}
-              style={[st.field, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft, marginTop: 10 }]}>
-              <Ionicons name="time-outline" size={17} color={colors.textDim} />
-              <Text style={{ color: colors.text, fontSize: 15, flex: 1 }}>{startLabel}</Text>
-              <Text style={{ color: colors.primary, fontSize: 13, fontWeight: '700' }}>{pickingIOS ? 'Done' : 'Change'}</Text>
-            </TouchableOpacity>
-            {pickingIOS && (
-              <DateTimePicker
-                value={new Date(start)}
-                mode="datetime"
-                display="inline"
-                themeVariant={scheme === 'dark' ? 'dark' : 'light'}
-                accentColor={colors.primary}
-                onChange={(_e, d) => { if (d) setStart(d.getTime()); }}
-              />
-            )}
-
-            <View style={st.chips} accessibilityRole="radiogroup" accessibilityLabel="Day">
-              {WHEN.map((wd) => {
-                const on = isDayOffset(start, wd.addDays, Date.now());
-                return (
-                  <TouchableOpacity key={wd.label} onPress={() => setStart((s0) => withDayOffset(s0, wd.addDays, Date.now()))}
-                    accessibilityRole="radio" accessibilityLabel={wd.label} accessibilityState={{ selected: on, checked: on }}
-                    style={[st.chip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? brandAlpha(0.1) : 'transparent' }]}>
-                    <Text style={{ color: on ? colors.primary : colors.text, fontSize: 12.5 }}>{wd.label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 10 }} contentContainerStyle={{ gap: 7 }}
-              accessibilityRole="radiogroup" accessibilityLabel="Time">
-              {HOURS.map((h) => {
-                const d = new Date(start);
-                const on = d.getHours() === h && d.getMinutes() === 0;
-                return (
-                  <TouchableOpacity key={h} onPress={() => setStart((s0) => withHour(s0, h))}
-                    accessibilityRole="radio" accessibilityLabel={`${String(h).padStart(2, '0')}:00`} accessibilityState={{ selected: on, checked: on }}
-                    style={[st.chip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? brandAlpha(0.1) : 'transparent' }]}>
-                    <Text style={{ color: on ? colors.primary : colors.text, fontSize: 12.5 }}>
-                      {String(h).padStart(2, '0')}:00
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-
-            <View style={st.chips} accessibilityRole="radiogroup" accessibilityLabel="Repeat">
-              {REPEATS.map((rp) => {
-                const on = repeat === rp.key;
-                return (
-                  <TouchableOpacity key={rp.key} onPress={() => setRepeat(rp.key)}
-                    accessibilityRole="radio" accessibilityLabel={`Repeat ${rp.label}`} accessibilityState={{ selected: on, checked: on }}
-                    style={[st.chip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? brandAlpha(0.1) : 'transparent' }]}>
-                    <Text style={{ color: on ? colors.primary : colors.text, fontSize: 12.5 }}>{rp.label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            {editing?.recurrence && editing.recurrence !== 'none' && (
-              <Text style={{ color: colors.textDim, fontSize: 12, marginTop: 12 }}>
-                Changes apply to every repeat of this event.
-              </Text>
-            )}
-
-            <TouchableOpacity onPress={save} disabled={!title.trim() || busy || !me}
-              accessibilityRole="button" accessibilityState={{ disabled: !title.trim() || busy || !me, busy }}
-              style={[st.btn, { backgroundColor: title.trim() && !busy && me ? colors.primary : colors.border }]}>
-              {busy ? <ActivityIndicator color={colors.onPrimary} />
-                : <><Ionicons name="checkmark" size={18} color={colors.onPrimary} /><Text style={[st.btnTxt, { color: colors.onPrimary }]}>{editing ? 'Save changes' : 'Add to calendar'}</Text></>}
-            </TouchableOpacity>
-          </ScrollView>
-        </KeyboardSafe>
-      </Modal>
-      {/* Always null today (Android uses native dialogs, iOS the inline picker);
-          kept outside the composer Modal so it can never nest inside it. */}
-      {picker.element}
+      <GroupEventComposer key={composeKey} visible={composing} editing={editing} busy={busy} canSave={!!me}
+        onClose={() => setComposing(false)} onSave={save} />
     </View>
   );
 }
@@ -499,13 +345,6 @@ const st = StyleSheet.create({
   day: { fontSize: 11.5, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 18, marginBottom: 6 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 11, borderBottomWidth: StyleSheet.hairlineWidth },
   time: { paddingHorizontal: 9, paddingVertical: 5, borderRadius: 8, minWidth: 62, alignItems: 'center' },
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' },
-  sheet: { borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, flexGrow: 0, flexShrink: 1 },
-  sheetBody: { padding: 18, paddingBottom: 32 },
-  field: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, minHeight: 48 },
-  input: { flex: 1, fontSize: 15 },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 12 },
-  chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 13, paddingVertical: 8 },
   btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 50, borderRadius: 13, marginTop: 18 },
   btnTxt: { fontSize: 15, fontWeight: '800' },
   banner: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderWidth: 1, borderRadius: 12, marginBottom: 4 },

@@ -59,7 +59,7 @@ export class NotAvailableYet extends Error {
 async function call<T>(path: string, opts: { method: string; json?: unknown }, own404s: readonly string[]): Promise<T> {
   const { api } = await import('../api');
   try {
-    return await api<T>(path, opts as any);
+    return await api<T>(path, opts);
   } catch (e: any) {
     if (routeMissing(e, own404s)) { managementKnown = false; throw new NotAvailableYet(); }
     throw e;
@@ -121,7 +121,7 @@ export async function communityManagementSupported(id: string): Promise<boolean 
   const { api } = await import('../api');
   let known: boolean | null;
   try {
-    await api(`/communities/${cid(id)}`, { method: 'PATCH', json: {} } as any);
+    await api(`/communities/${cid(id)}`, { method: 'PATCH', json: {} });
     known = true;
   } catch (e: any) {
     known = managementProbeResult(e);

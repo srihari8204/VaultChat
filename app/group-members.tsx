@@ -386,7 +386,7 @@ export default function GroupMembersScreen() {
 
       {/* ── share picker ── */}
       <Modal visible={sharing} transparent animationType="slide" onRequestClose={() => setSharing(false)}>
-        <View style={st.backdrop}>
+        <View style={[st.backdrop, { backgroundColor: colors.scrim }]}>
           <Pressable style={{ flex: 1 }} onPress={() => setSharing(false)} accessibilityRole="button" accessibilityLabel="Close" />
           <View style={[st.sheet, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke, maxHeight: '70%' }]}>
             <Text style={{ color: colors.text, fontWeight: '800', fontSize: 16, marginBottom: 4 }} accessibilityRole="header">
@@ -430,7 +430,7 @@ export default function GroupMembersScreen() {
 
       {/* ── per-member actions ── */}
       <Modal visible={!!sheet} transparent animationType="slide" onRequestClose={() => setSheet(null)}>
-        <View style={st.backdrop}>
+        <View style={[st.backdrop, { backgroundColor: colors.scrim }]}>
           <Pressable style={{ flex: 1 }} onPress={() => setSheet(null)} accessibilityRole="button" accessibilityLabel="Close" />
           <View style={[st.sheet, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
             {!!sheet && (
@@ -546,7 +546,7 @@ const st = StyleSheet.create({
   // 48 is the tap floor and the padding keeps it identical at scale 1.0.
   addBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 48, paddingVertical: 14, borderWidth: 1, borderRadius: 13, marginTop: 16 },
   mode: { flexDirection: 'row', alignItems: 'flex-start', gap: 11, padding: 13, borderWidth: 1, borderRadius: 13, marginBottom: 9 },
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' },
+  backdrop: { flex: 1 },
   sheet: { borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, padding: 20, paddingBottom: 34 },
   sheetHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   opt: { flexDirection: 'row', alignItems: 'center', gap: 11, padding: 13, borderWidth: 1, borderRadius: 12, marginBottom: 8 },

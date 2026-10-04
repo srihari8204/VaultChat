@@ -38,7 +38,7 @@ export const makeCommunityStyles = (c: Palette) => StyleSheet.create({
   ctaTxt:   { color: c.onPrimary, fontWeight: '800', fontSize: 14 },
 
   modalBackdrop: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 28 },
-  modalScrim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
+  modalScrim: { ...StyleSheet.absoluteFillObject, backgroundColor: c.scrim },
   modalCard: { width: '100%', maxWidth: 420, maxHeight: '100%', flexGrow: 0, backgroundColor: c.surfaceSolid, borderRadius: 24, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
   modalContent: { padding: 20, gap: 12 },
   modalTitle: { color: c.text, fontSize: 17, fontWeight: '800' },

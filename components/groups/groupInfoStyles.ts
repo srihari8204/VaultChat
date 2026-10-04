@@ -24,7 +24,7 @@ export const makeGroupInfoStyles = (c: Palette) => StyleSheet.create({
   hero:          { width: 112, height: 112, borderRadius: 56, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   heroImg:       { width: '100%', height: '100%' },
   heroTxt:       { color: c.onPrimary, fontSize: 48, fontWeight: '800' },
-  heroBusy:      { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.4)' },
+  heroBusy:      { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.4)' },   // fixed dark wash over the photo, under the white spinner
   heroEditPill:  { position: 'absolute', right: 0, bottom: 0, backgroundColor: c.primary, borderRadius: 16, padding: 6, borderWidth: 2, borderColor: c.bg },
   groupName:     { color: c.text, fontSize: 22, fontWeight: '700' },
   subInfo:       { color: c.textDim, fontSize: 12 },
