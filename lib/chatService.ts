@@ -1998,8 +1998,11 @@ export async function revokeAllOtherSessions(): Promise<{ revoked: number }> {
 // `reason` is the optional "why are you leaving" answer, same as WhatsApp's.
 // The server logs it as product feedback and stores nothing keyed to the
 // account it is about to erase.
-export async function deleteAccount(reason?: string): Promise<void> {
-  await api('/user/account', { method: 'DELETE', json: reason ? { reason } : undefined });
+// The server re-authenticates the delete itself: the MPIN rides in the body
+// (400 mpin_required, 403 invalid_mpin, 423 locked + retryAfter), sharing the
+// /auth/mpin/verify attempt budget.
+export async function deleteAccount(mpin: string, reason?: string): Promise<void> {
+  await api('/user/account', { method: 'DELETE', json: reason ? { mpin, reason } : { mpin } });
 }
 
 // Returns the export as a raw JSON string (consumer can write it to disk
@@ -2194,6 +2197,14 @@ export async function joinViaInvite(
   code: string,
 ): Promise<{ chatId: string; pending?: boolean; alreadyMember?: boolean }> {
   return api(`/chats/join/${encodeURIComponent(code)}`, { method: 'POST' });
+}
+
+// What an invite code points at, without joining (GET /chats/join/:code/preview).
+// Revoked, expired, used-up and unknown codes all answer 410.
+export async function previewInvite(
+  code: string,
+): Promise<{ name: string; memberCount: number; requiresApproval: boolean }> {
+  return api(`/chats/join/${encodeURIComponent(code)}/preview`);
 }
 
 // ─── Announcements (Groups & Circles) ───────────────────────────────

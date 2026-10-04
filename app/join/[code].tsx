@@ -9,8 +9,9 @@
 // Backed by POST /chats/join/:code (real redeem: atomic uses++, approval queue).
 // Opening the link does NOT join: a forwarded link must not silently make
 // someone a member, so the screen asks first (as the in-app scanner does for
-// contacts). There is no preview endpoint yet, so the group's name is not shown
-// before joining — ponytail: add it once the server offers GET /chats/join/:code.
+// contacts). The confirm step shows the group's name, size and whether an admin
+// must approve, from GET /chats/join/:code/preview (which joins nothing). A
+// server without that route falls back to the generic confirm.
 // On success we land in the chat; if the group needs admin approval we tell the
 // user their request was sent.
 
@@ -20,7 +21,7 @@ import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
-import { joinViaInvite } from '../../lib/chatService';
+import { joinViaInvite, previewInvite } from '../../lib/chatService';
 import { AuroraBackground } from '../../components/ui';
 import { AppText as Text } from '../../components/ui/Text';
 
@@ -36,6 +37,7 @@ export default function JoinScreen() {
   const router = useRouter();
   const { code } = useLocalSearchParams<{ code: string }>();
   const [phase, setPhase] = useState<Phase>({ kind: 'confirm' });
+  const [preview, setPreview] = useState<{ name: string; memberCount: number; requiresApproval: boolean } | null>(null);
   // Set by Cancel (and on unmount). The request cannot be recalled once sent,
   // but its result must not pull the user into a chat they walked away from.
   const cancelledRef = useRef(false);
@@ -61,7 +63,16 @@ export default function JoinScreen() {
 
   // A link with no code has nothing to confirm.
   useEffect(() => {
-    if (!String(code ?? '').trim()) setPhase({ kind: 'error', message: 'This invite link is missing its code.', retry: false });
+    const clean = String(code ?? '').trim();
+    if (!clean) { setPhase({ kind: 'error', message: 'This invite link is missing its code.', retry: false }); return; }
+    let dead = false;
+    previewInvite(clean).then((p) => { if (!dead) setPreview(p); }).catch((e: any) => {
+      if (dead) return;
+      // 410 = revoked, expired, used up or unknown: there is nothing to join.
+      // Anything else (offline, an older server) keeps the generic confirm.
+      if (e?.status === 410) setPhase({ kind: 'error', message: 'This invite link is invalid, expired, or revoked.', retry: false });
+    });
+    return () => { dead = true; };
   }, [code]);
 
   const goHome = () => router.replace('/(tabs)/chats' as any);
@@ -74,7 +85,15 @@ export default function JoinScreen() {
         {phase.kind === 'confirm' && (
           <>
             <Ionicons name="people-circle-outline" size={56} color={colors.primary} />
-            <Text style={s.title} accessibilityRole="header">Join this group?</Text>
+            <Text style={s.title} accessibilityRole="header">
+              {preview ? `Join ${preview.name}?` : 'Join this group?'}
+            </Text>
+            {preview && (
+              <Text style={s.sub}>
+                {preview.memberCount} {preview.memberCount === 1 ? 'member' : 'members'}
+                {preview.requiresApproval ? ' · an admin approves new members' : ''}
+              </Text>
+            )}
             <Text style={s.sub}>
               Someone shared a group invite link with you. If you join, the group&apos;s members will see you
               and your messages there.
