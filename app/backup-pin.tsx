@@ -13,7 +13,7 @@ import { ActivityIndicator, Alert, ScrollView, StyleSheet, TouchableOpacity, Vie
 import { savePIN } from "../services/securityService";
 import * as pinStore from "../services/security/pinStore";
 import { PIN_MAX, PIN_MIN } from "../services/security/pinFormat";
-import { rewrapVaultKeys } from "../lib/vaultKeyStore";
+import { changePinWithVaultKeys } from "../lib/vaultKeyStore";
 import { AppText as Text, AuthSky, KeyboardSafe } from "../components/ui";
 import { PinPad } from "../components/PinPad";
 import { type AuthPalette } from '../constants/authTheme';
@@ -54,8 +54,12 @@ export default function BackupPINScreen() {
 
   const leave = () => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)/chats"); };
 
+  // checkCurrent's latch: `busy` is state, so a completion firing twice in one
+  // frame passed it twice and spent two attempts against the PIN back-off.
+  const checking = useRef(false);
   const checkCurrent = async (val:string) => {
-    if (busy || val.length < PIN_MIN) return;
+    if (checking.current || val.length < PIN_MIN) return;
+    checking.current = true;
     setBusy(true);
     try {
       if (await pinStore.verifyPin(val)) { oldPin.current = val; setCur(""); setError(""); setStage("set"); return; }
@@ -65,7 +69,7 @@ export default function BackupPINScreen() {
     } catch {
       setError("Couldn't check your PIN. Try again.");
       setCur("");
-    } finally { setBusy(false); }
+    } finally { checking.current = false; setBusy(false); }
   };
 
   // The shared keypad (components/PinPad): typing is ignored while a check or
@@ -95,15 +99,12 @@ export default function BackupPINScreen() {
     setBusy(true);
     const prev = oldPin.current;
     try {
-      // Re-wrap the vault key FIRST: if that cannot be written, the PIN is not
-      // changed, so the vault key is never left under a PIN that no longer exists.
-      if (prev) await rewrapVaultKeys(prev, val);
-      try {
-        await savePIN(val);   // also seals the session under it (#32) — see pinStore
-      } catch (e) {
-        if (prev) await rewrapVaultKeys(val, prev).catch(() => {});
-        throw e;
-      }
+      // All or nothing (lib/vaultKeyStore): the vault keys are re-wrapped into
+      // staged copies, the PIN is saved (which also seals the session under it,
+      // #32 — see pinStore), and only then are the copies put in place. If
+      // staging or the save fails, the copies are dropped: the PIN and the vault
+      // key are exactly as they were, so the message below is true.
+      await changePinWithVaultKeys(prev, val, savePIN);
       oldPin.current = null;
       leave();
     } catch {

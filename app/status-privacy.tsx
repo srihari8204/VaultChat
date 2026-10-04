@@ -196,7 +196,7 @@ export default function StatusPrivacyScreen() {
                   included (backend stories.go audienceIDs); this list only has
                   direct-chat peers, so say what that means for the rest. */}
               {mode !== 'contacts' && (
-                <Text style={[S.modeSub, { marginHorizontal: 16, marginTop: 4 }]}>
+                <Text style={S.listNote}>
                   Only people you have a direct chat with are listed. People you share only a group with
                   {mode === 'except' ? ' cannot be excluded here and still see your status.' : ' cannot be picked here, so they do not see it.'}
                 </Text>
@@ -258,6 +258,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   modeRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 14, paddingVertical: 14, borderRadius: 16, backgroundColor: c.glass, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
   modeLabel: { color: c.text, fontSize: 16, fontWeight: '600' },
   modeSub: { color: c.textDim, fontSize: 13, marginTop: 2 },
+  listNote: { color: c.textDim, fontSize: 13, marginHorizontal: 16, marginTop: 4 },
   sectionLabel: { color: c.textDim, fontSize: 12, fontWeight: '700', letterSpacing: 1, marginHorizontal: 16, marginTop: 12, marginBottom: 4 },
   contactRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 16, backgroundColor: c.glass, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
   contactName: { flex: 1, color: c.text, fontSize: 16, fontWeight: '500' },

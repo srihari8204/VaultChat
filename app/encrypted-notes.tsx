@@ -21,11 +21,8 @@ import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, TouchableOpacity, FlatList, TextInput, Alert, ScrollView, AppState } from 'react-native';
 import { AppText as Text } from '../components/ui/Text';
-import * as ImagePicker from 'expo-image-picker';
-import * as DocumentPicker from 'expo-document-picker';
-import * as Sharing from 'expo-sharing';
 import {
-  addAttachment, deleteAttachment, isImage, listAttachmentIds, openAttachment, type NoteAttachment,
+  deleteAttachment, listAttachmentIds,
 } from '../lib/notesAttachments';
 import { useTheme } from '../lib/theme';
 import { Stack, useRouter } from 'expo-router';
@@ -42,7 +39,6 @@ import { holdAppSwitcherBlur } from '../lib/screenGuard';
 import { verifyPin } from '../lib/chatService';
 import 'react-native-get-random-values';
 import { randomBytes } from '@noble/hashes/utils.js';
-import { permissionDenied } from '../lib/permissionDenied';
 import {
   CATEGORIES, DEFAULT_TAG_COLOR, DRAFT_KEY, STORAGE_KEY, TRASH_DAYS,
   emptyFields, fieldsOf, openDraft, pinCheckError, sealDraft, snapshotOf,
@@ -50,6 +46,7 @@ import {
 } from '../components/notes/notesModel';
 import { useNotesStyles } from '../components/notes/notesStyles';
 import { useNoteEditor } from '../components/notes/useNoteEditor';
+import { useNoteAttachments } from '../components/notes/useNoteAttachments';
 import { NoteEditorModal } from '../components/notes/NoteEditorModal';
 import { NotesBackupModal } from '../components/notes/NotesBackupModal';
 import {
@@ -101,7 +98,6 @@ export default function EncryptedNotesScreen() {
   const edRef = useRef(ed);
   edRef.current = ed;
   const [hideSensitive, setHideSensitive] = useState(true);
-  const [attaching, setAttaching] = useState(false);
   const [viewerImg, setViewerImg] = useState<string | null>(null);
   const [showBackup, setShowBackup] = useState(false);
 
@@ -284,12 +280,17 @@ export default function EncryptedNotesScreen() {
   const offerDraft = async (list: Note[]) => {
     const raw = await AsyncStorage.getItem(DRAFT_KEY).catch(() => null);
     if (!raw) return;
+    let d: Draft | null;
+    // The key could not be read right now (or is missing until a restore):
+    // the draft and its attachments stay for the next open.
+    try { d = await openDraft(raw); } catch { return; }
+    // Removed only once its fate is known: opened, or known never to open.
     await AsyncStorage.removeItem(DRAFT_KEY).catch(() => {});
-    const d = await openDraft(raw);
     if (!d) {
-      // The draft cannot be opened (its key is gone), so the attachments only
-      // it pointed at can never be reached: delete every stored attachment no
-      // saved note (trash included) references. Nothing else is open now.
+      // This device's key was read and the draft was not sealed under it (or
+      // is damaged), so the attachments only it pointed at can never be
+      // reached: delete every stored attachment no saved note (trash
+      // included) references. Nothing else is open now.
       const used = new Set(list.flatMap(n => (n.attachments ?? []).map(a => a.id)));
       for (const id of await listAttachmentIds()) if (!used.has(id)) await deleteAttachment(id);
       return;
@@ -359,42 +360,9 @@ export default function EncryptedNotesScreen() {
   } : null;
 
   // ── Attachments (encrypted via lib/notesAttachments) ──────────────────────
-  const attachImage = async () => {
-    const perm = await withSystemUi(() => ImagePicker.requestMediaLibraryPermissionsAsync());
-    if (!perm.granted) { permissionDenied('Permission needed', 'Allow photo access to attach an image.', perm.canAskAgain); return; }
-    const res = await withSystemUi(() => ImagePicker.launchImageLibraryAsync({ quality: 0.9 }));
-    if (res.canceled || !res.assets?.[0]) return;
-    const a = res.assets[0];
-    setAttaching(true);
-    try {
-      const att = await addAttachment(a.uri, a.fileName ?? `image_${Date.now()}.jpg`, a.mimeType ?? 'image/jpeg');
-      ed.setAttachments(prev => [...prev, att]);
-    } catch (e: any) {
-      Alert.alert('Could not attach', e?.message ?? 'Try again');
-    } finally { setAttaching(false); }
-  };
-
-  const attachFile = async () => {
-    const res = await withSystemUi(() => DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true }));
-    if (res.canceled || !res.assets?.[0]) return;
-    const a = res.assets[0];
-    setAttaching(true);
-    try {
-      const att = await addAttachment(a.uri, a.name, a.mimeType ?? 'application/octet-stream');
-      ed.setAttachments(prev => [...prev, att]);
-    } catch (e: any) {
-      Alert.alert('Could not attach', e?.message ?? 'Try again');
-    } finally { setAttaching(false); }
-  };
-
-  const addAttachmentMenu = () => {
-    if (!loadOk.current) return;
-    Alert.alert('Add attachment', 'Encrypted with your notes key before it touches disk.', [
-      { text: 'Photo / Image', onPress: attachImage },
-      { text: 'File', onPress: attachFile },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  };
+  const { attaching, addAttachmentMenu, openAttachmentFile } = useNoteAttachments({
+    withSystemUi, setAttachments: ed.setAttachments, onImage: setViewerImg, canAttach: () => loadOk.current,
+  });
 
   // Cancel: attachments added to this draft are referenced by nothing, so
   // their encrypted files go; the saved note keeps exactly what it had.
@@ -409,18 +377,6 @@ export default function EncryptedNotesScreen() {
       { text: 'Keep editing', style: 'cancel' },
       { text: 'Discard', style: 'destructive', onPress: discardEditor },
     ]);
-  };
-
-  const openAttachmentFile = async (att: NoteAttachment) => {
-    try {
-      const uri = await openAttachment(att);
-      if (!uri) { Alert.alert('Could not open', 'This attachment is unavailable or corrupted.'); return; }
-      if (isImage(att)) { setViewerImg(uri); return; }
-      if (await Sharing.isAvailableAsync()) await withSystemUi(() => Sharing.shareAsync(uri, { mimeType: att.mime, dialogTitle: att.name }));
-      else Alert.alert('Saved', 'Opened a decrypted copy.');
-    } catch (e: any) {
-      Alert.alert('Could not open', e?.message ?? 'This attachment could not be opened. Try again.');
-    }
   };
 
   const savingNote = useRef(false);
@@ -455,8 +411,8 @@ export default function EncryptedNotesScreen() {
         if (f.reminder) await armNoteReminder(id, f.reminder, f.title.trim(), f.sensitive, f.locked);
         else await cancelNoteReminder(id);
       } catch { /* the note is saved; the alarm is best effort */ }
-    } catch (e: any) {
-      Alert.alert('Not saved', e?.message ?? 'Your note could not be saved. Try again.');
+    } catch (e: unknown) {
+      Alert.alert('Not saved', e instanceof Error && e.message ? e.message : 'Your note could not be saved. Try again.');
     } finally {
       savingNote.current = false;
     }

@@ -9,9 +9,11 @@
 // lib/vaultKeyStore; the notice and old-PIN sheet in components/vault/VaultKeyPanel.
 // Tabs: Documents / Photos / Voice / Videos
 // "Export file list" shares names/sizes/dates only — not the files, not encrypted.
-// There is no automatic or server backup of vault files.
+// There is no automatic or server backup of vault files, and on iOS the vault
+// folder is excluded from the phone's own backups (ensureVaultDir).
 // Leaving the app (background) locks the vault again, except while a system
-// picker or share sheet that this screen opened is in front.
+// picker or share sheet that this screen opened is in front. A re-lock cancels
+// a running seal or open (see `op` below).
 
 import { AppText as Text } from '../components/ui/Text';
 import { AuroraBackground } from '../components/ui';
@@ -19,28 +21,26 @@ import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   View, TouchableOpacity,
-  FlatList, Alert, Vibration, ActivityIndicator,
-  AppState,
+  FlatList, Alert, ActivityIndicator,
+  AppState, Platform,
 } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-import * as pinStore from '../services/security/pinStore';
-import { isPinFormat, PIN_MAX, PIN_MIN } from '../services/security/pinFormat';
-import { PinPad } from '../components/PinPad';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { clearVaultKeyCache, VaultCancelledError, type VaultKeys } from '../lib/vaultCrypto';
-import { replaceVaultKeys, tryOldVaultPin, unlockVaultKeys, type VaultKeyMiss, type VaultUnlock } from '../lib/vaultKeyStore';
+import { replaceVaultKeys, tryOldVaultPin, unlockVaultKeys, VaultNewKeyError, type VaultKeyMiss, type VaultUnlock } from '../lib/vaultKeyStore';
 import { holdAppSwitcherBlur } from '../lib/screenGuard';
 import { openVaultFileTo, scanVaultDir, sealFileToVault, sweepPartialSeals, type VaultDirScan } from '../components/vault/vaultFileIO';
 import { VaultKeyPanel } from '../components/vault/VaultKeyPanel';
 import { VaultExportSheet } from '../components/vault/VaultExportSheet';
-import { makePinStyles, makeStyles } from '../components/vault/vaultStyles';
+import { makeStyles } from '../components/vault/vaultStyles';
+import { PinGate } from '../components/vault/VaultPinGate';
 import { File as FsFile } from 'expo-file-system';
+import * as RNFS from '@dr.pogodin/react-native-fs';
 import { useColors } from '../lib/theme';
-import { HEADER_TOP } from '../constants/layout';
 import { permissionDenied } from '../lib/permissionDenied';
 import { parseVaultManifest } from '../lib/vaultManifestParse';
 
@@ -99,106 +99,6 @@ function formatDate(ms: number): string {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// PIN Entry Component
-// ─────────────────────────────────────────────────────────────────
-
-function PinGate({ onUnlock }: { onUnlock: (pin: string) => Promise<void> }) {
-  const c = useColors();
-  const router = useRouter();
-  const pinStyles = useMemo(() => makePinStyles(c), [c]);
-  const [pin,   setPin]   = useState('');
-  const [error, setError] = useState('');
-  const [busy,  setBusy]  = useState(false);
-  // null = not checked yet. Re-checked on focus, so returning from Device PIN
-  // setup shows the keypad without leaving the screen.
-  const [havePin, setHavePin] = useState<boolean | null>(null);
-  useFocusEffect(useCallback(() => {
-    let live = true;
-    pinStore.hasPin().then(h => { if (live) setHavePin(h); }).catch(() => { if (live) setHavePin(true); });
-    return () => { live = false; };
-  }, []));
-
-  const submit = async (v: string) => {
-    if (busy) return;
-    if (!isPinFormat(v)) { setError(`Enter your ${PIN_MIN}–${PIN_MAX} digit Device PIN.`); return; }
-    setBusy(true);
-    try {
-      // pinStore verifies against the scrypt record (and migrates a legacy value
-      // on first success) — the PIN is no longer readable to compare against.
-      if (await pinStore.verifyPin(v)) { await onUnlock(v); return; }
-      // verifyPin also answers false while a brute-force backoff is running;
-      // "Incorrect PIN" would then be a lie the user cannot act on.
-      const wait = await pinStore.pinBackoffMs();
-      Vibration.vibrate([0, 100, 100, 100]);
-      setError(wait > 0
-        ? `Too many attempts. Try again in ${Math.ceil(wait / 1000)} s.`
-        : 'Incorrect PIN. Try again.');
-      setPin('');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (havePin === false) {
-    return (
-      <View style={pinStyles.container}>
-        <AuroraBackground />
-        <BackButton onPress={() => router.back()} color={c.primary} />
-        <Ionicons name="lock-closed" size={52} color={c.primary} style={pinStyles.lockIcon} importantForAccessibility="no" accessibilityElementsHidden />
-        <Text style={pinStyles.title} accessibilityRole="header">Vault</Text>
-        <Text style={[pinStyles.sub, { textAlign: 'center', paddingHorizontal: 32 }]}>
-          The vault opens with your Device PIN, and this phone does not have one yet.
-        </Text>
-        <TouchableOpacity
-          style={pinStyles.setBtn}
-          onPress={() => router.push('/backup-pin?from=settings')}
-          accessibilityRole="button"
-          accessibilityLabel="Set a Device PIN"
-        >
-          <Text style={pinStyles.setBtnText}>Set a Device PIN</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
-  return (
-    <View style={pinStyles.container}>
-      <AuroraBackground />
-      <BackButton onPress={() => router.back()} color={c.primary} />
-      <Ionicons name="lock-closed" size={52} color={c.primary} style={pinStyles.lockIcon} importantForAccessibility="no" accessibilityElementsHidden />
-      <Text style={pinStyles.title} accessibilityRole="header">Vault</Text>
-      <Text style={pinStyles.sub} accessibilityLabel="Enter your Device PIN, then tap Done">Enter your Device PIN, then tap ✓</Text>
-
-      <PinPad
-        value={pin}
-        onChange={(v) => { setPin(v); setError(''); }}
-        length={PIN_MAX}
-        minLength={PIN_MIN}
-        onSubmit={submit}
-        onComplete={submit}
-        error={!!error}
-      />
-
-      {busy ? <ActivityIndicator color={c.primary} style={{ marginTop: 8 }} /> : null}
-      {error ? <Text style={pinStyles.error} accessibilityLiveRegion="polite">{error}</Text> : null}
-
-      <Text style={pinStyles.note}>
-        Files are AES-256-GCM encrypted
-      </Text>
-    </View>
-  );
-}
-
-function BackButton({ onPress, color }: { onPress: () => void; color: string }) {
-  return (
-    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={onPress} hitSlop={8}
-      style={{ position: 'absolute', top: HEADER_TOP, left: 12, width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
-      <Ionicons name="arrow-back" size={26} color={color} />
-    </TouchableOpacity>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────
 // Main Vault Screen
 // ─────────────────────────────────────────────────────────────────
 
@@ -218,6 +118,7 @@ export default function VaultScreen() {
   // Archived keys this PIN opens (read-only), and how many it does not.
   const [olderKeys,   setOlderKeys]   = useState<VaultKeys[]>([]);
   const [lockedArchives, setLockedArchives] = useState(0);
+  const [archiveIndexDamaged, setArchiveIndexDamaged] = useState(false);
   // What is on disk at unlock: unlisted files can be listed again, and the
   // key-dependent count is what the "lost key" notice reports.
   const [diskScan,    setDiskScan]    = useState<VaultDirScan | null>(null);
@@ -232,8 +133,11 @@ export default function VaultScreen() {
   const [loading,     setLoading]     = useState(false);
   const [loadingText, setLoadingText] = useState('Encrypting…');
   // Chunk progress (0–1) of the running seal or open, and its cancel flag. A
-  // re-lock or leaving the screen cancels it: an open stops writing plaintext,
-  // a seal deletes its partial file and never reaches the manifest.
+  // re-lock (going to the background), leaving the screen or Cancel cancels
+  // it: an open stops writing plaintext and never reaches the share sheet; a
+  // seal deletes its partial file and is not listed. Only the system pickers
+  // and share sheets are bracketed against the re-lock (`withSystemUi`), never
+  // the encrypt or decrypt itself.
   const [progress,    setProgress]    = useState<number | null>(null);
   const op = useRef<{ cancelled: boolean } | null>(null);
   const beginOp = () => {
@@ -273,6 +177,7 @@ export default function VaultScreen() {
     setKeyMiss(res.keys ? undefined : res.miss);
     setOlderKeys(res.older);
     setLockedArchives(res.lockedArchives);
+    setArchiveIndexDamaged(!!res.archiveIndexDamaged);
     setVaultPin(pin);
     setUnlocked(true);
   };
@@ -306,6 +211,7 @@ export default function VaultScreen() {
       setKeyMiss(undefined);
       setOlderKeys([]);
       setLockedArchives(0);
+      setArchiveIndexDamaged(false);
       setDiskScan(null);
       // filesRef is left alone: the next unlock re-reads the manifest, and an
       // empty ref here is what a save would build on.
@@ -320,16 +226,27 @@ export default function VaultScreen() {
   // ── Load manifest on unlock ───────────────────────────────────
   useEffect(() => {
     if (unlocked) {
-      ensureVaultDir();
+      ensureVaultDir().catch(() => { /* a seal reports its own write failure */ });
       loadManifest();
       loadLastBackupDate();
     }
   }, [unlocked]);
 
+  // iOS copies the app's Documents folder into iCloud and computer backups
+  // unless a folder is marked excluded; Android's backup is off for the whole
+  // app (plugins/withBackupLockdown). null = not known yet; false = the mark
+  // could not be set, and the export sheet then does not claim "not backed up".
+  const [backupExcluded, setBackupExcluded] = useState<boolean | null>(Platform.OS === 'ios' ? null : true);
   const ensureVaultDir = async () => {
     const info = await FileSystem.getInfoAsync(VAULT_DIR);
     if (!info.exists) {
       await FileSystem.makeDirectoryAsync(VAULT_DIR, { intermediates: true });
+    }
+    if (Platform.OS === 'ios') {
+      // expo-file-system 19 cannot set NSURLIsExcludedFromBackupKey; RNFS.mkdir
+      // can, and on an existing folder it only sets the mark (ReactNativeFs.mm).
+      await RNFS.mkdir(RNFS.DocumentDirectoryPath + '/vault', { NSURLIsExcludedFromBackupKey: true })
+        .then(() => setBackupExcluded(true), () => setBackupExcluded(false));
     }
   };
 
@@ -383,8 +300,10 @@ export default function VaultScreen() {
           try {
             await replaceVaultKeys(vaultPin);
             await unlock(vaultPin);   // picks up the new key and the archive count
-          } catch (e: any) {
-            Alert.alert('No new key', `Nothing was changed. ${e?.message ?? 'Try again.'}`);
+          } catch (e: unknown) {
+            // Fixed copy: it says whether an archive entry was written before
+            // the failure, and never shows a storage error's own text.
+            Alert.alert('No new key', e instanceof VaultNewKeyError ? e.message : 'The new key could not be started. Try again.');
           } finally { setKeyBusy(false); }
         } },
       ],
@@ -412,21 +331,40 @@ export default function VaultScreen() {
     return diskScan.ids.filter(id => !listed.has(id));
   }, [diskScan, files, manifestState]);
 
+  // Single flight, and built from the latest saved list: a second tap must
+  // not list the same file twice (deleting one entry would then delete the
+  // file the other still names).
+  const relisting = useRef(false);
+  const [relistBusy, setRelistBusy] = useState(false);
   const relistUnlisted = async () => {
-    const now = Date.now();
-    const entries: VaultFile[] = unlisted.map((id, i) => {
-      const f = new FsFile(VAULT_DIR + id + '.enc');
-      return {
-        // The size shown is the encrypted file's, a close stand-in for the original.
-        id, name: `Recovered file ${i + 1}`, size: f.size, type: 'Documents', encPath: VAULT_DIR + id + '.enc',
-        addedAt: f.modificationTime ?? now, mimeType: 'application/octet-stream',
-      };
-    });
+    if (relisting.current) return;
+    relisting.current = true;
+    setRelistBusy(true);
     try {
-      await saveManifest([...filesRef.current, ...entries]);
-      setActiveTab('Documents');
-    } catch (e) {
-      Alert.alert('Not listed', (e as Error)?.message ?? 'Try again.');
+      const now = Date.now();
+      const listed = new Set(filesRef.current.map(f => encUriOf(f).split('/').pop()!.replace(/\.enc$/, '')));
+      const entries: VaultFile[] = [];
+      for (const id of unlisted) {
+        if (listed.has(id)) continue;
+        const f = new FsFile(VAULT_DIR + id + '.enc');
+        if (!f.exists) continue;   // gone since the scan
+        entries.push({
+          // The size shown is the encrypted file's, a close stand-in for the original.
+          id, name: `Recovered file ${entries.length + 1}`, size: f.size ?? 0, type: 'Documents', encPath: VAULT_DIR + id + '.enc',
+          addedAt: f.modificationTime ?? now, mimeType: 'application/octet-stream',
+        });
+      }
+      const ids = new Set(entries.map(e => e.id));
+      setDiskScan(d => d && { ...d, ids: d.ids.filter(id => ids.has(id) || listed.has(id)) });
+      if (entries.length > 0) {
+        await saveManifest([...filesRef.current, ...entries]);
+        setActiveTab('Documents');
+      }
+    } catch (e: unknown) {
+      Alert.alert('Not listed', e instanceof Error ? e.message : 'Try again.');
+    } finally {
+      relisting.current = false;
+      setRelistBusy(false);
     }
   };
 
@@ -464,10 +402,12 @@ export default function VaultScreen() {
         throw e;
       }
 
-      Alert.alert('Added to Vault', `${name} encrypted and stored.`);
-    } catch (e: any) {
+      // Re-locked while the list was being saved: the file is kept and listed,
+      // but its name is not shown over the PIN gate.
+      if (!run.o.cancelled) Alert.alert('Added to Vault', `${name} encrypted and stored.`);
+    } catch (e: unknown) {
       if (e instanceof VaultCancelledError || run.o.cancelled) return;   // nothing was kept
-      Alert.alert('Not added', e?.message || 'The file could not be encrypted. Try again.');
+      Alert.alert('Not added', (e instanceof Error && e.message) || 'The file could not be encrypted. Try again.');
     } finally {
       if (op.current === run.o) op.current = null;
       setProgress(null);
@@ -479,9 +419,10 @@ export default function VaultScreen() {
   const handleAdd = async () => {
     if (adding.current || loading || manifestState !== 'ok' || !vaultKeys) return;
     adding.current = true;
-    // The whole add (picker, encrypt, manifest save) is one bracket, so going
-    // to the background mid-encrypt cannot lock the vault under it.
-    try { await withSystemUi(pickAndAdd); } finally { adding.current = false; }
+    // Only the permission prompt and the picker are bracketed (in pickAndAdd):
+    // going to the background mid-encrypt re-locks the vault, which cancels
+    // the seal, deletes its partial file and lists nothing.
+    try { await pickAndAdd(); } finally { adding.current = false; }
   };
 
   const pickAndAdd = async () => {
@@ -564,9 +505,9 @@ export default function VaultScreen() {
       } else {
         Alert.alert('Cannot open', 'This device has no app to open the file with.');
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (!(e instanceof VaultCancelledError) && !run.o.cancelled) {
-        Alert.alert('Could not open', e?.message || 'The file could not be decrypted.');
+        Alert.alert('Could not open', (e instanceof Error && e.message) || 'The file could not be decrypted.');
       }
     } finally {
       // ponytail: deleted as soon as the share sheet returns. Android resolves
@@ -599,8 +540,8 @@ export default function VaultScreen() {
               await FileSystem.deleteAsync(encUriOf(file), { idempotent: true }).catch(() => {});
               const gone = encUriOf(file).split('/').pop()!.replace(/\.enc$/, '');
               setDiskScan(d => d && { ...d, ids: d.ids.filter(id => id !== gone) });
-            } catch (e: any) {
-              Alert.alert('Not deleted', e?.message ?? 'The file could not be removed. Try again.');
+            } catch (e: unknown) {
+              Alert.alert('Not deleted', e instanceof Error ? e.message : 'The file could not be removed. Try again.');
             }
           },
         },
@@ -634,8 +575,8 @@ export default function VaultScreen() {
       const now = new Date().toLocaleDateString();
       setLastBackup(now);
       await SecureStore.setItemAsync('vault_last_backup', now).catch(() => {});
-    } catch (e: any) {
-      Alert.alert('Export failed', e?.message ?? 'Try again.');
+    } catch (e: unknown) {
+      Alert.alert('Export failed', e instanceof Error ? e.message : 'Try again.');
     } finally {
       if (exportPath) await FileSystem.deleteAsync(exportPath, { idempotent: true }).catch(() => {});
       setLoading(false);
@@ -706,6 +647,7 @@ export default function VaultScreen() {
         hasKeys={!!vaultKeys}
         miss={keyMiss}
         lockedArchives={lockedArchives}
+        indexDamaged={archiveIndexDamaged}
         keyedOnDisk={diskScan?.keyed ?? 0}
         busy={keyBusy}
         onRetry={retryKeys}
@@ -721,8 +663,9 @@ export default function VaultScreen() {
             in the list, so {unlisted.length === 1 ? 'it comes' : 'they come'} back as “Recovered file” under Documents.
           </Text>
           <TouchableOpacity style={styles.unlistedBtn} onPress={relistUnlisted} accessibilityRole="button"
+            disabled={relistBusy} accessibilityState={{ disabled: relistBusy, busy: relistBusy }}
             accessibilityLabel={`List ${unlisted.length} recovered file${unlisted.length === 1 ? '' : 's'} again`}>
-            <Text style={styles.unlistedBtnText}>List again</Text>
+            {relistBusy ? <ActivityIndicator color={c.primary} /> : <Text style={styles.unlistedBtnText}>List again</Text>}
           </TouchableOpacity>
         </View>
       ) : null}
@@ -864,6 +807,7 @@ export default function VaultScreen() {
         busy={loading}
         disabled={loading || manifestState !== 'ok'}
         lastExport={lastBackup}
+        backupExcluded={backupExcluded === true}
         onExport={handleBackup}
       />
     </View>

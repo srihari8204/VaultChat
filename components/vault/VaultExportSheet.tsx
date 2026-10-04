@@ -15,10 +15,13 @@ interface Props {
   busy: boolean;
   disabled: boolean;
   lastExport: string | null;
+  /** The vault folder is known to be outside the phone's own backups (always
+   *  on Android, where app backup is off; on iOS once the folder is marked). */
+  backupExcluded: boolean;
   onExport: () => void;
 }
 
-export function VaultExportSheet({ visible, onClose, count, busy, disabled, lastExport, onExport }: Props) {
+export function VaultExportSheet({ visible, onClose, count, busy, disabled, lastExport, backupExcluded, onExport }: Props) {
   const c = useColors();
   const styles = useMemo(() => makeStyles(c), [c]);
   return (
@@ -57,8 +60,9 @@ export function VaultExportSheet({ visible, onClose, count, busy, disabled, last
           {lastExport ? <Text style={styles.backupLastText}>Last export: {lastExport}</Text> : null}
 
           <Text style={styles.backupNote}>
-            Vault files are not backed up anywhere — not automatically, and not
-            with chat backup. Deleting the app deletes them.
+            {backupExcluded
+              ? 'Vault files are not backed up anywhere — not automatically, and not with chat backup. Deleting the app deletes them.'
+              : 'Vault files are not in chat backup, but this phone\'s own backup (iCloud or a computer) may include them, still encrypted. Deleting the app deletes them from this phone.'}
           </Text>
         </View>
       </View>

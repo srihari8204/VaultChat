@@ -2,7 +2,7 @@
 // (moved out of the screen file in the round-4 split; behaviour unchanged).
 
 import { BRAND_ACCENT } from '../../constants/theme';
-import { decryptStringToBytes, encryptBytesToString } from '../../lib/notesCrypto';
+import { encryptBytesToString, openSealedBytesStrict } from '../../lib/notesCrypto';
 import type { NoteAttachment } from '../../lib/notesAttachments';
 
 // Category and tag colours are NOT theme colours, so they are not tokens: a
@@ -72,8 +72,11 @@ export const emptyFields = (category: string): EditorFields => ({
 });
 
 export const sealDraft = async (d: Draft) => encryptBytesToString(new TextEncoder().encode(JSON.stringify(d)));
+/** The sealed draft, or null when it can never open on this device (the key
+ *  here did not seal it, or it is damaged). Throws when the key cannot be read
+ *  right now or is missing, so the caller keeps the draft for a later try. */
 export async function openDraft(raw: string): Promise<Draft | null> {
-  const bytes = await decryptStringToBytes(raw);
+  const bytes = await openSealedBytesStrict(raw);
   if (!bytes) return null;
   try { return JSON.parse(new TextDecoder().decode(bytes)) as Draft; } catch { return null; }
 }

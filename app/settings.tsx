@@ -17,7 +17,8 @@ import * as Sharing from 'expo-sharing';
 // should not lose the user's place in Settings.
 import * as WebBrowser from 'expo-web-browser';
 import { isMfaEnabled, enableMfa, disableMfa } from '../lib/mfa';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { makeLatestSaver } from '../lib/groups/latestSave';
 import {
   ActivityIndicator,
   Alert,
@@ -80,6 +81,9 @@ export default function SettingsScreen() {
   const [autoDl, setAutoDl] = useState<AutoDownloadPolicy>('always');
   const [picker, setPicker] = useState<Picker>(null);
   const [toGallery, setToGallery] = useState(true);
+  // Alerts and state from a save that settles after the screen closed are dropped.
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
   useEffect(() => { getAutoDownload().then(setAutoDl).catch(() => {}); }, []);
   useEffect(() => { getSaveToGallery().then(setToGallery).catch(() => {}); }, []);
   // Device-local preferences: shown at once, put back with a notice if the
@@ -87,6 +91,7 @@ export default function SettingsScreen() {
   const saveLocal = useCallback(<T,>(apply: (v: T) => void, prev: T, next: T, write: (v: T) => Promise<void>) => {
     apply(next);
     write(next).catch(() => {
+      if (!mounted.current) return;
       apply(prev);
       Alert.alert('Not saved', 'This setting could not be saved on this phone. Try again.');
     });
@@ -107,7 +112,7 @@ export default function SettingsScreen() {
     setLoading(true);
     setLoadError(null);
     getSettings()
-      .then((s) => { if (!cancel) setSettings(s); })
+      .then((s) => { if (!cancel) { savedPrefs.current = s; setSettings(s); } })
       .catch((e: unknown) => { if (!cancel) setLoadError((e as Error | undefined)?.message ?? 'Could not load settings'); })
       .finally(() => { if (!cancel) setLoading(false); });
     loadBlocks(() => cancel);
@@ -120,19 +125,28 @@ export default function SettingsScreen() {
   }, [loadTick, loadBlocks]);
   const reload = useCallback(() => setLoadTick((t) => t + 1), []);
 
-  // Non-boolean settings (group-add policy, default timer) — optimistic save,
-  // one at a time: a second pick while the first PUT is in flight could land
-  // out of order and leave the server on the older choice.
-  const [prefBusy, setPrefBusy] = useState(false);
+  // Non-boolean settings (group-add policy, default timer): the newest pick is
+  // shown at once and written after any save of the same setting that is
+  // still running, so PUTs never land out of order and no pick is dropped
+  // (lib/groups/latestSave). A failure returns the row to the last value the
+  // server accepted.
+  const savedPrefs = useRef<UserSettings | null>(null);
+  const saver = useRef(makeLatestSaver()).current;
   const savePref = useCallback(async (patch: Partial<UserSettings>) => {
-    if (!settings || prefBusy) return;
-    const prev = settings;
-    setSettings({ ...settings, ...patch });
-    setPrefBusy(true);
-    try { await updateSettings(patch); }
-    catch (e: unknown) { setSettings(prev); Alert.alert('Save failed', (e as Error | undefined)?.message ?? 'Try again'); }
-    finally { setPrefBusy(false); }
-  }, [settings, prefBusy]);
+    const base = savedPrefs.current;
+    const [key, next] = Object.entries(patch)[0] ?? [];
+    if (!base || !key) return;
+    const k = key as keyof UserSettings;
+    const r = await saver(k, base[k], next as UserSettings[typeof k],
+      (v) => updateSettings({ [k]: v } as Partial<UserSettings>),
+      (v) => { if (mounted.current) setSettings((cur) => cur && { ...cur, [k]: v }); });
+    if ((r.status === 'saved' || r.status === 'failed') && savedPrefs.current) {
+      savedPrefs.current = { ...savedPrefs.current, [k]: r.value };
+    }
+    if (r.status === 'failed' && mounted.current) {
+      Alert.alert('Save failed', r.error instanceof Error && r.error.message ? r.error.message : 'Try again');
+    }
+  }, [saver]);
 
   const groupAddLabel = (p?: string) => p === 'nobody' ? 'Nobody' : p === 'contacts' ? 'My contacts' : 'Everyone';
   const timerLabel = (s?: number) => !s ? 'Off' : s >= 7776000 ? '90 days' : s >= 604800 ? '7 days' : s >= 86400 ? '24 hours' : `${Math.round(s / 60)} min`;
@@ -350,7 +364,7 @@ export default function SettingsScreen() {
         <View style={[S.linkCard, { marginBottom: 4 }]}>
           <LinkRow icon="time-outline" title="Last seen & privacy" sub="Last seen, read receipts, profile photo, discoverable by phone" onPress={() => router.push('/last-seen-privacy')} last />
         </View>
-        <TouchableOpacity style={S.prefRow} activeOpacity={0.7} disabled={prefBusy} accessibilityRole="button" accessibilityLabel={`Add me to groups, ${groupAddLabel(settings.groupAddPolicy)}`} accessibilityState={{ disabled: prefBusy }} onPress={() => setPicker({
+        <TouchableOpacity style={S.prefRow} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`Add me to groups, ${groupAddLabel(settings.groupAddPolicy)}`} onPress={() => setPicker({
           title: 'Who can add me to groups',
           actions: [
             { label: 'Everyone', selected: settings.groupAddPolicy === 'everyone', onPress: () => savePref({ groupAddPolicy: 'everyone' }) },
@@ -364,7 +378,7 @@ export default function SettingsScreen() {
           </View>
           <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
         </TouchableOpacity>
-        <TouchableOpacity style={S.prefRow} activeOpacity={0.7} disabled={prefBusy} accessibilityRole="button" accessibilityLabel={`Default message timer, ${timerLabel(settings.defaultDisappearingSeconds)}`} accessibilityState={{ disabled: prefBusy }} onPress={() => setPicker({
+        <TouchableOpacity style={S.prefRow} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`Default message timer, ${timerLabel(settings.defaultDisappearingSeconds)}`} onPress={() => setPicker({
           title: 'Default disappearing timer',
           message: 'Applied to new chats you start.',
           actions: [

@@ -116,6 +116,26 @@ export async function decryptStringToBytes(raw: string): Promise<Uint8Array | nu
   }
 }
 
+/**
+ * Like decryptStringToBytes, but it tells "not now" from "never": resolves
+ * null only when this device's key was read and the blob does not open under
+ * it (sealed under another key, or damaged), so it can never open here.
+ * Throws when the key cannot be read right now, or is missing (a backup
+ * restore may bring it back), so the caller keeps the blob and what it names.
+ */
+export async function openSealedBytesStrict(raw: string): Promise<Uint8Array | null> {
+  const key = await getDEK(false);   // a SecureStore failure throws
+  if (!key) throw new Error('The notes key is not on this device.');
+  let parsed: any;
+  try { parsed = JSON.parse(raw); } catch { return null; }
+  if (!isCipher(parsed)) return null;
+  try {
+    return gcm(key, Buffer.from(parsed.iv, 'base64')).decrypt(Buffer.from(parsed.ct, 'base64'));
+  } catch {
+    return null;
+  }
+}
+
 export function clearNotesKeyCache(): void { dekCache = null; }
 
 // ── DEK custody (for lib/notesVault: passphrase-wrapped backup/restore) ──────
