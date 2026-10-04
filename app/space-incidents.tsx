@@ -20,6 +20,7 @@ import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Alert,
+  RefreshControl,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,6 +29,7 @@ import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import { getIncidents, setIncidentStatus, getRuns, type Incident } from '../lib/spaces/api';
 import type { Run } from '../lib/spaces/runs';
 import { AuroraBackground } from '../components/ui';
+import LoadError from '../components/spaces/LoadError';
 
 const CATEGORY: Record<string, { label: string; icon: keyof typeof Ionicons.glyphMap }> = {
   sos: { label: 'Emergency alert', icon: 'warning' },
@@ -40,13 +42,18 @@ const CATEGORY: Record<string, { label: string; icon: keyof typeof Ionicons.glyp
 };
 
 export default function SpaceIncidentsScreen() {
-  const params = useLocalSearchParams<{ spaceId?: string; name?: string; groupType?: string }>();
+  const params = useLocalSearchParams<{ spaceId?: string; name?: string; groupType?: string; perms?: string }>();
   const colors = useSpaceColors(params.groupType);
   const spaceId = String(params.spaceId || '');
+  // incidentPatch requires view_space_ops; parents and drivers reach this list
+  // from the Alerts tile and must not be shown buttons the server refuses.
+  const canAct = String(params.perms || '').split(',').includes('view_space_ops');
 
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [runs, setRuns] = useState<Run[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -57,10 +64,12 @@ export default function SpaceIncidentsScreen() {
       ]);
       setIncidents(inc);
       setRuns(rs);
+      setLoadError(null);
     } catch (e: any) {
-      Alert.alert('Could not load incidents', e?.message ?? 'Try again.');
+      setLoadError(e?.message ?? 'Could not load incidents.');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [spaceId]);
 
@@ -81,7 +90,7 @@ export default function SpaceIncidentsScreen() {
     [runs],
   );
 
-  const setStatus = useCallback(async (i: Incident, status: 'ack' | 'resolved') => {
+  const setStatusNow = useCallback(async (i: Incident, status: 'ack' | 'resolved') => {
     setBusy(i.id);
     try {
       await setIncidentStatus(spaceId, i.id, status);
@@ -92,6 +101,15 @@ export default function SpaceIncidentsScreen() {
       setBusy(null);
     }
   }, [spaceId, load]);
+
+  const setStatus = useCallback((i: Incident, status: 'ack' | 'resolved') => {
+    if (status === 'ack') { void setStatusNow(i, status); return; }
+    Alert.alert(
+      'Resolve this incident?',
+      'It moves to the resolved list for everyone watching this space.',
+      [{ text: 'Not yet', style: 'cancel' }, { text: 'Resolve', onPress: () => { void setStatusNow(i, status); } }],
+    );
+  }, [setStatusNow]);
 
   const s = styles(colors);
 
@@ -106,10 +124,16 @@ export default function SpaceIncidentsScreen() {
   }
 
   return (
-    <ScrollView style={s.screen} contentContainerStyle={s.body}>
+    <ScrollView
+      style={s.screen} contentContainerStyle={s.body}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} tintColor={colors.primary} />}
+    >
       <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · Incidents` : 'Incidents', { id: spaceId, name: params.name })} />
 
-      {ordered.length === 0 && (
+      {loadError && (
+        <LoadError colors={colors} title="Could not load incidents" message={loadError} onRetry={() => { setLoading(true); void load(); }} />
+      )}
+      {!loadError && ordered.length === 0 && (
         <View style={s.card}>
           <Text style={s.cardTitle}>Nothing reported</Text>
           <Text style={s.muted}>
@@ -150,13 +174,15 @@ export default function SpaceIncidentsScreen() {
               </Text>
             )}
 
-            {!done && (
+            {!done && canAct && (
               <View style={s.actions}>
                 {i.status !== 'ack' && (
                   <TouchableOpacity
                     style={[s.btn, s.ghost]}
                     onPress={() => setStatus(i, 'ack')}
                     disabled={busy === i.id}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Acknowledge ${meta.label}`}
                   >
                     <Text style={s.ghostText}>Acknowledge</Text>
                   </TouchableOpacity>
@@ -165,6 +191,8 @@ export default function SpaceIncidentsScreen() {
                   style={[s.btn, s.solid]}
                   onPress={() => setStatus(i, 'resolved')}
                   disabled={busy === i.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Resolve ${meta.label}`}
                 >
                   {busy === i.id
                     ? <ActivityIndicator size="small" color="#fff" />

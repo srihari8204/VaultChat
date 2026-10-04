@@ -35,15 +35,17 @@ import { publishRunPosition, endRunBroadcast } from '../lib/spaces/runSession';
 import { setBackgroundRun, hasBackgroundPermission } from '../lib/family/background';
 import { ensureKeyDeliveredForRun } from '../lib/family/presence';
 import { feed, newDetectState, detectionText } from '../lib/spaces/detect';
-import { recordAlert } from '../lib/family/alerts';
+import { recordAlert, buildFamEvent } from '../lib/family/alerts';
+import { sendMessage } from '../lib/chatService';
 import { getCurrentUserAsync } from './(constants)/authService';
 import type { LatLng } from '../lib/nav/geo';
 import {
-  nextStop, ridersAtStop, progress, newTransitionId,
+  driverView, progress, newTransitionId,
   type Run, type RunStop, type RunRider, type RiderState,
 } from '../lib/spaces/runs';
 import { AuroraBackground } from '../components/ui';
 import { KeyboardSafe } from '../components/ui/KeyboardSafe';
+import LoadError from '../components/spaces/LoadError';
 
 /** Heartbeat cadence. The server calls a run stale after 3 minutes, so a
  *  60s beat survives one lost request without raising a false GPS-offline. */
@@ -68,6 +70,10 @@ export default function SpaceRunDriverScreen() {
   const [stops, setStops] = useState<RunStop[]>([]);
   const [riders, setRiders] = useState<RunRider[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // Foreground location refused: the bus is invisible to guardians and ops,
+  // and the driver must be told rather than left believing it is tracked.
+  const [noLocation, setNoLocation] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [codeFor, setCodeFor] = useState<{ rider: RunRider; state: RiderState } | null>(null);
   const [code, setCode] = useState('');
@@ -98,8 +104,9 @@ export default function SpaceRunDriverScreen() {
       setLoadedSpaceId(spaceId);
       setStops(data.stops || []);
       setRiders(data.riders || []);
+      setLoadError(null);
     } catch (e: any) {
-      Alert.alert('Could not load the run', e?.message ?? 'Try again.');
+      setLoadError(e?.message ?? 'Could not load the run.');
     } finally {
       setLoading(false);
     }
@@ -136,7 +143,9 @@ export default function SpaceRunDriverScreen() {
     (async () => {
       const Location = await import('expo-location');
       const { status } = await Location.getForegroundPermissionsAsync();
-      if (!live || status !== 'granted') return;
+      if (!live) return;
+      setNoLocation(status !== 'granted');
+      if (status !== 'granted') return;
       willContinueInBackground = await hasBackgroundPermission();
       if (!live) return;
       sub = await Location.watchPositionAsync(
@@ -156,12 +165,24 @@ export default function SpaceRunDriverScreen() {
           // a position and is not going to be given one (S5.4). The alert that
           // leaves this device reports the FACT and never a coordinate.
           for (const d of feed(detectState.current, fix, routeStops)) {
-            recordAlert({
-              circleId: spaceId,
-              kind: d.kind === 'overspeed' ? 'overspeed' : d.kind === 'longstop' ? 'longstop' : 'deviation',
+            const alert = {
+              kind: d.kind === 'overspeed' ? 'overspeed' as const : d.kind === 'longstop' ? 'longstop' as const : 'deviation' as const,
               actorId: myId.current,
               actorName: run?.vehicleLabel || run?.name || 'Vehicle',
               text: detectionText(d, run?.vehicleLabel || run?.name || 'The vehicle'),
+            };
+            recordAlert({ circleId: spaceId, ...alert }).then((rec) => {
+              // Then to everyone in the space, sealed, on the same famEvent
+              // path geofence crossings use (S5.4): the space's E2EE thread, so
+              // the server relays it without reading it, and every member's
+              // alert inbox folds it in (app/_layout.tsx ingestFamEvent).
+              // Only when it was not a local duplicate, so one condition is one
+              // message. meta.silent: chat surfaces hide it; the inbox is its
+              // surface. Never carries a coordinate (detectionText).
+              if (rec && alert.actorId) {
+                sendMessage(spaceId, buildFamEvent({ ...alert, at: rec.at }), 'system', { meta: { silent: true } })
+                  .catch(() => { /* the local alert stands; a lost fix-time alert is not retried */ });
+              }
             }).catch(() => {});
           }
         },
@@ -208,7 +229,10 @@ export default function SpaceRunDriverScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run?.status, spaceId, runId]);
 
-  const current = useMemo(() => nextStop(stops, riders), [stops, riders]);
+  // The stop being worked and everyone markable there — including riders with
+  // no stop, who used to be routed to the first stop and then filtered out.
+  const view = useMemo(() => driverView(stops, riders), [stops, riders]);
+  const current = view?.stop ?? null;
 
   const [arriving, setArriving] = useState(false);
   const onArrive = async (stop: RunStop) => {
@@ -224,7 +248,7 @@ export default function SpaceRunDriverScreen() {
       setArriving(false);
     }
   };
-  const here = useMemo(() => ridersAtStop(riders, current?.id ?? null), [riders, current]);
+  const here = view?.riders ?? [];
   const prog = useMemo(() => progress(riders), [riders]);
   const started = run?.status === 'started';
 
@@ -258,9 +282,16 @@ export default function SpaceRunDriverScreen() {
   }, [run, apply]);
 
   const callParent = useCallback(() => {
-    // Placeholder until the roster carries a contact number: the driver needs a
-    // way to reach a guardian, and a dead button is worse than an honest one.
-    Alert.alert('Call guardian', 'Guardian phone numbers are not on the roster yet.');
+    // ponytail: honest stub. A driver is scoped to their own runs, and neither
+    // the run payload (runGet riders) nor /links visible to a driver names a
+    // rider's guardian, so there is nobody to dial. Replace with a direct call
+    // (as space-transport does for drivers) once runGet returns each rider's
+    // guardian user ids to the assigned driver.
+    Alert.alert(
+      'Call guardian',
+      'Guardian contacts are not shared with drivers yet. Call your transport office, '
+      + 'or use “Report a problem” so they can reach the family.',
+    );
   }, []);
 
   // The panic control (S5.6). Deliberately NOT one of the incident categories:
@@ -363,15 +394,19 @@ export default function SpaceRunDriverScreen() {
   }
   if (!run) {
     return (
-      <View style={[s.screen, s.centre]}>
+      <View style={[s.screen, s.centre, { padding: 16 }]}>
+        <AuroraBackground />
         <Stack.Screen options={spaceHeader(colors, 'Run')} />
-        <Text style={s.muted}>This run is not available.</Text>
+        {loadError
+          ? <LoadError colors={colors} title="Could not load the run" message={loadError} onRetry={() => { setLoading(true); void load(); }} />
+          : <Text style={s.muted}>This run is not available.</Text>}
       </View>
     );
   }
 
   return (
     <View style={s.screen}>
+      <AuroraBackground />
       <Stack.Screen options={spaceHeader(colors, run.name)} />
 
       <View style={s.header}>
@@ -385,6 +420,7 @@ export default function SpaceRunDriverScreen() {
         <TouchableOpacity
           style={[s.runBtn, started ? s.runBtnStop : s.runBtnGo]}
           onPress={onStartStop}
+          accessibilityRole="button"
           accessibilityLabel={started ? 'Finish run' : 'Start run'}
         >
           <Text style={s.runBtnText}>{started ? 'Finish' : 'Start'}</Text>
@@ -403,10 +439,30 @@ export default function SpaceRunDriverScreen() {
           </View>
         )}
 
-        {current ? (
+        {loadError && (
+          <LoadError colors={colors} title="Could not refresh the run" message={loadError} onRetry={() => { void load(); }} />
+        )}
+        {started && noLocation && (
+          <View style={s.notice}>
+            <Ionicons name="location-outline" size={18} color={colors.warning} />
+            <Text style={s.noticeText}>
+              Location is off for VaultChat, so guardians and the office cannot see this vehicle.
+              Allow location in Settings to share it.
+            </Text>
+          </View>
+        )}
+
+        {view ? (
           <>
-            <Text style={s.stopLabel}>{current.arrivedAt ? 'AT THIS STOP' : 'NEXT STOP'}</Text>
-            <Text style={s.stopName}>{current.label}</Text>
+            {current ? (
+              <>
+                <Text style={s.stopLabel}>{current.arrivedAt ? 'AT THIS STOP' : 'NEXT STOP'}</Text>
+                <Text style={s.stopName}>{current.label}</Text>
+              </>
+            ) : (
+              // No stops on this run: one list of everybody, no arrival step.
+              <Text style={s.stopLabel}>EVERYONE ON THIS RUN</Text>
+            )}
 
             {/* ARRIVED — the step before any pickup, and the one that matters to
                 a parent, because it is the moment to be at the kerb. Announcing
@@ -416,11 +472,13 @@ export default function SpaceRunDriverScreen() {
                 server keeps the first arrival time, so a second tap is harmless
                 and a driver who is unsure whether it registered can just tap
                 again. Hiding it would leave them with no way to find out. */}
-            {started && (
+            {started && current && (
               <TouchableOpacity
                 style={[s.arriveBtn, current.arrivedAt && s.arriveBtnDone]}
                 onPress={() => onArrive(current)}
                 disabled={arriving}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: arriving }}
               >
                 <Ionicons
                   name={current.arrivedAt ? 'checkmark-circle' : 'location'}
@@ -445,13 +503,15 @@ export default function SpaceRunDriverScreen() {
 
                 {r.state === 'pending' && started ? (
                   <View style={s.actions}>
-                    <TouchableOpacity style={s.iconBtn} onPress={callParent} accessibilityLabel="Call guardian">
+                    <TouchableOpacity style={s.iconBtn} onPress={callParent} accessibilityRole="button" accessibilityLabel={`Call ${r.displayName}’s guardian`}>
                       <Ionicons name="call-outline" size={20} color={colors.primary} />
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={[s.actionBtn, s.absentBtn]}
                       onPress={() => onMark(r, 'absent')}
                       disabled={busy === r.riderId}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${r.displayName} is not here`}
                     >
                       <Text style={s.absentText}>Not here</Text>
                     </TouchableOpacity>
@@ -459,6 +519,8 @@ export default function SpaceRunDriverScreen() {
                       style={[s.actionBtn, s.boardBtn]}
                       onPress={() => onMark(r, isDropRun(run) ? 'dropped' : 'boarded')}
                       disabled={busy === r.riderId}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${r.displayName} ${isDropRun(run) ? 'dropped off' : 'on board'}`}
                     >
                       {busy === r.riderId
                         ? <ActivityIndicator size="small" color="#fff" />
@@ -486,7 +548,7 @@ export default function SpaceRunDriverScreen() {
         )}
       </ScrollView>
 
-      <TouchableOpacity style={s.incidentBar} onPress={() => setIncidentOpen(true)}>
+      <TouchableOpacity style={s.incidentBar} onPress={() => setIncidentOpen(true)} accessibilityRole="button">
         <Ionicons name="alert-circle-outline" size={20} color={colors.danger} />
         <Text style={s.incidentText}>Report a problem</Text>
       </TouchableOpacity>
@@ -509,12 +571,15 @@ export default function SpaceRunDriverScreen() {
               placeholderTextColor={colors.textDim}
             />
             <View style={s.modalRow}>
-              <TouchableOpacity style={s.modalBtn} onPress={() => setCodeFor(null)}>
+              <TouchableOpacity style={s.modalBtn} onPress={() => setCodeFor(null)} accessibilityRole="button">
                 <Text style={s.muted}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[s.modalBtn, s.boardBtn]}
-                onPress={() => { const c = codeFor; setCodeFor(null); if (c) apply(c.rider, c.state, code); }}
+                style={[s.modalBtn, s.boardBtn, !code.trim() && { opacity: 0.4 }]}
+                onPress={() => { const c = codeFor; setCodeFor(null); if (c) apply(c.rider, c.state, code.trim()); }}
+                disabled={!code.trim()}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: !code.trim() }}
               >
                 <Text style={s.boardText}>Confirm</Text>
               </TouchableOpacity>
@@ -529,17 +594,17 @@ export default function SpaceRunDriverScreen() {
         <View style={s.sheetWrap}>
           <View style={s.sheet}>
             <Text style={s.modalTitle}>Report a problem</Text>
-            <TouchableOpacity style={[s.sheetRow, s.panicRow]} onPress={onPanic}>
+            <TouchableOpacity style={[s.sheetRow, s.panicRow]} onPress={onPanic} accessibilityRole="button">
               <Ionicons name="alert-circle" size={22} color="#fff" />
               <Text style={[s.sheetText, { color: '#fff', fontWeight: '700' }]}>Emergency — alert everyone now</Text>
             </TouchableOpacity>
             {INCIDENTS.map((i) => (
-              <TouchableOpacity key={i.key} style={s.sheetRow} onPress={() => onIncident(i.key)}>
+              <TouchableOpacity key={i.key} style={s.sheetRow} onPress={() => onIncident(i.key)} accessibilityRole="button">
                 <Ionicons name={i.icon} size={20} color={colors.text} />
                 <Text style={s.sheetText}>{i.label}</Text>
               </TouchableOpacity>
             ))}
-            <TouchableOpacity style={s.sheetRow} onPress={() => setIncidentOpen(false)}>
+            <TouchableOpacity style={s.sheetRow} onPress={() => setIncidentOpen(false)} accessibilityRole="button">
               <Ionicons name="close" size={20} color={colors.textDim} />
               <Text style={[s.sheetText, { color: colors.textDim }]}>Cancel</Text>
             </TouchableOpacity>

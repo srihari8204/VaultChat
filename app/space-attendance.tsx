@@ -31,6 +31,8 @@ import {
   STATE_LABELS, type AttendanceState, type DayAttendance,
 } from '../lib/spaces/attendance';
 import { AuroraBackground } from '../components/ui';
+import LoadError from '../components/spaces/LoadError';
+import { loadSavedShift } from '../lib/spaces/shift';
 
 /** How many days back the weekly view folds. */
 const DAYS = 7;
@@ -53,6 +55,10 @@ export default function SpaceAttendanceScreen() {
   const [rows, setRows] = useState<Row[]>([]);
   const [zoneName, setZoneName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // The shift actually applied: route params, else the one this device saved
+  // from Admin → Shift and lateness (the server has no read for it).
+  const [activeShift, setActiveShift] = useState<ReturnType<typeof makeShift>>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const shift = useMemo(
@@ -67,10 +73,14 @@ export default function SpaceAttendanceScreen() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [places, members] = await Promise.all([
-        getPlaces(spaceId).catch(() => []),
-        circleMembers(spaceId).catch(() => []),
+      const [places, members, saved] = await Promise.all([
+        getPlaces(spaceId),
+        circleMembers(spaceId),
+        shift ? Promise.resolve(null) : loadSavedShift(spaceId),
       ]);
+      const sh = shift ?? (saved ? makeShift(saved.shiftStart, saved.shiftEnd, saved.shiftGraceMinutes) : null);
+      setActiveShift(sh);
+      setLoadError(null);
       // The workplace is the space's first safe zone. A space with none has no
       // attendance to report, which the empty state says outright rather than
       // showing everyone as absent.
@@ -89,7 +99,7 @@ export default function SpaceAttendanceScreen() {
         const week: DayAttendance[] = [];
         for (let d = DAYS - 1; d >= 0; d--) {
           const dayMs = Date.now() - d * 24 * 3600_000;
-          week.push(projectDay(crossingsForDay(crossings, dayMs), shift, Math.min(Date.now(), endOfDay(dayMs))));
+          week.push(projectDay(crossingsForDay(crossings, dayMs), sh, Math.min(Date.now(), endOfDay(dayMs))));
         }
         built.push({
           userId: m.id,
@@ -99,6 +109,9 @@ export default function SpaceAttendanceScreen() {
         });
       }
       setRows(built);
+    } catch (e: any) {
+      // Not "No workplace set": a failed read is not an absent zone.
+      setLoadError(e?.message ?? 'Could not load attendance.');
     } finally {
       setLoading(false);
     }
@@ -131,7 +144,9 @@ export default function SpaceAttendanceScreen() {
     <ScrollView style={s.screen} contentContainerStyle={s.body}>
       <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · Attendance` : 'Attendance', { id: spaceId, name: params.name })} />
 
-      {!zoneName && (
+      {loadError && <LoadError colors={colors} message={loadError} onRetry={() => { void load(); }} />}
+
+      {!loadError && !zoneName && (
         <View style={s.card}>
           <Text style={s.cardTitle}>No workplace set</Text>
           <Text style={s.muted}>
@@ -141,12 +156,12 @@ export default function SpaceAttendanceScreen() {
         </View>
       )}
 
-      {!!zoneName && !shift && (
+      {!!zoneName && !activeShift && (
         <View style={s.card}>
           <Text style={s.cardTitle}>No shift set</Text>
           <Text style={s.muted}>
             Times are shown, but nobody is marked late or absent without a shift to
-            compare against. Set one in the space’s settings.
+            compare against. Set one under Admin → Shift and lateness.
           </Text>
         </View>
       )}

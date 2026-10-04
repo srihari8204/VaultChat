@@ -13,13 +13,14 @@ import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity,
-  RefreshControl, Alert,
+  RefreshControl,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import { getPendingPickups, type PendingPickup } from '../lib/spaces/api';
 import { AuroraBackground } from '../components/ui';
+import LoadError from '../components/spaces/LoadError';
 import { initialOf } from '../lib/format';
 
 export default function SpacePendingScreen() {
@@ -31,12 +32,22 @@ export default function SpacePendingScreen() {
   const [rows, setRows] = useState<PendingPickup[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // Re-render every 30s so "overdue" turns on without a manual refresh.
+  const [, setTick] = useState(0);
+  useFocusEffect(useCallback(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 30_000);
+    return () => clearInterval(t);
+  }, []));
 
   const load = useCallback(async () => {
     try {
       setRows(await getPendingPickups(spaceId));
+      setLoadError(null);
     } catch (e: any) {
-      Alert.alert('Could not load pending pickups', e?.message ?? 'Try again.');
+      // Never fall through to "Nobody is waiting": on the screen used when a
+      // parent rings, that would be a false all-clear.
+      setLoadError(e?.message ?? 'Could not load pending pickups.');
     } finally {
       setLoading(false); setRefreshing(false);
     }
@@ -74,9 +85,12 @@ export default function SpacePendingScreen() {
       contentContainerStyle={s.body}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
     >
-      <Stack.Screen options={spaceHeader(colors, `Pending pickups${rows.length ? ` (${rows.length})` : ''}`)} />
+      <Stack.Screen options={spaceHeader(colors, `Pending pickups${rows.length ? ` (${rows.length})` : ''}`, { id: spaceId, name: params.name })} />
 
-      {rows.length === 0 && (
+      {loadError && (
+        <LoadError colors={colors} title="Could not load pending pickups" message={loadError} onRetry={() => { setLoading(true); void load(); }} />
+      )}
+      {!loadError && rows.length === 0 && (
         <View style={s.card}>
           <Text style={s.cardTitle}>Nobody is waiting</Text>
           <Text style={s.muted}>
@@ -89,7 +103,9 @@ export default function SpacePendingScreen() {
         <View key={g.runId} style={s.card}>
           <TouchableOpacity
             style={s.rowBetween}
-            onPress={() => router.push({ pathname: '/space-run' as any, params: { spaceId, runId: g.runId, groupType: params.groupType ?? '' } })}
+            onPress={() => router.push({ pathname: '/space-run' as any, params: { spaceId, runId: g.runId, groupType: params.groupType ?? '', name: params.name ?? '' } })}
+            accessibilityRole="button"
+            accessibilityLabel={`${g.name}, ${g.items.length} waiting. Open the run`}
           >
             <Text numberOfLines={1} style={s.cardTitle}>{g.name}</Text>
             <Text style={s.link}>{g.items.length} waiting</Text>

@@ -33,6 +33,7 @@ import { tilesForType, type RunSet } from '../lib/spaces/dashboard';
 import { sendMessage } from '../lib/chatService';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { AuroraBackground } from '../components/ui';
+import LoadError from '../components/spaces/LoadError';
 
 /** A fix older than this is drawn faded — the map must not imply freshness. */
 const STALE_MS = 90_000;
@@ -49,6 +50,7 @@ export default function SpaceOpsMapScreen() {
   const [loading, setLoading] = useState(true);
   const [focus, setFocus] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -62,8 +64,11 @@ export default function SpaceOpsMapScreen() {
         catch { return [r.id, [] as RunRider[]] as const; }
       }));
       setManifests(Object.fromEntries(entries));
+      setLoadError(null);
     } catch (e: any) {
-      Alert.alert('Could not load runs', e?.message ?? 'Try again.');
+      // Not "No runs are scheduled": an empty map after a failed read is a
+      // false all-clear for an operator.
+      setLoadError(e?.message ?? 'Could not load runs.');
     } finally {
       setLoading(false);
     }
@@ -245,6 +250,9 @@ export default function SpaceOpsMapScreen() {
           <TouchableOpacity
             style={[s.emergency, emergency && s.emergencyOn]}
             onPress={() => setEmergency((v) => !v)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: emergency }}
+            accessibilityLabel="Emergency: address every run on the road at once"
           >
             <Ionicons
               name={emergency ? 'warning' : 'warning-outline'}
@@ -293,19 +301,29 @@ export default function SpaceOpsMapScreen() {
           </View>
         )}
 
-        {runs.length === 0 && (
+        {loadError && (
+          <LoadError colors={colors} title="Could not load runs" message={loadError} onRetry={() => { void load(); }} />
+        )}
+        {!loadError && runs.length === 0 && (
           <Text style={s.muted}>No runs are scheduled or in progress.</Text>
         )}
         {runs.map((r) => {
           const p = positions[r.id];
           const prog = progress(manifests[r.id] ?? []);
           const noFix = r.status === 'started' && !p;
+          const openRun = () => router.push({ pathname: '/space-run' as any, params: { spaceId, runId: r.id, groupType: params.groupType ?? '', name: params.name ?? '' } });
           return (
             <TouchableOpacity
               key={r.id}
               style={[s.row, focus === r.id && s.rowFocus]}
               onPress={() => setFocus(r.id)}
-              onLongPress={() => router.push({ pathname: '/space-run' as any, params: { spaceId, runId: r.id, groupType: params.groupType ?? '' } })}
+              onLongPress={openRun}
+              accessibilityRole="button"
+              accessibilityState={{ selected: focus === r.id }}
+              accessibilityLabel={`${r.vehicleLabel || r.name}${r.stale && r.status === 'started' ? ', not reporting' : ''}`}
+              accessibilityHint="Selects this run for a message"
+              accessibilityActions={[{ name: 'open', label: 'Open run' }]}
+              onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'open') openRun(); }}
             >
               <View style={[s.dot, { backgroundColor: dotColour(r, noFix, colors) }]} />
               <View style={{ flex: 1, minWidth: 0 }}>
@@ -325,11 +343,18 @@ export default function SpaceOpsMapScreen() {
                 {noFix && !r.stale && <Text style={s.muted}>awaiting fix</Text>}
                 {p && <Text style={s.muted}>{ago(p.at)}</Text>}
               </View>
+              {/* A visible, tappable way in — long-press alone is undiscoverable. */}
+              <TouchableOpacity
+                onPress={openRun} style={s.openBtn}
+                accessibilityRole="button" accessibilityLabel={`Open ${r.vehicleLabel || r.name}`}
+              >
+                <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
+              </TouchableOpacity>
             </TouchableOpacity>
           );
         })}
         <Text style={s.footnote}>
-          Long-press a run to open it. Vehicle positions are relayed end-to-end encrypted;
+          Tap a run to message it; tap the arrow to open it. Vehicle positions are relayed end-to-end encrypted;
           the server stores none of them, so this map shows only what has arrived while it has been open.
         </Text>
       </ScrollView>
@@ -352,6 +377,7 @@ function ago(ms: number): string {
 }
 
 const styles = (c: Palette) => StyleSheet.create({
+  openBtn: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center', marginRight: -8 },
   screen: { flex: 1, backgroundColor: 'transparent' },
   centre: { alignItems: 'center', justifyContent: 'center' },
   map: { height: '46%', width: '100%' },

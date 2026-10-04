@@ -30,6 +30,7 @@ import {
 } from '../lib/spaces/api';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { AuroraBackground } from '../components/ui';
+import LoadError from '../components/spaces/LoadError';
 import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 
 const LEAVE_KINDS: { key: string; label: string }[] = [
@@ -56,6 +57,7 @@ export default function SpaceCheckinScreen() {
   const [leave, setLeave] = useState<LeaveRequest[]>([]);
   const [me, setMe] = useState<string>('');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [asking, setAsking] = useState(false);
   const [kind, setKind] = useState('casual');
@@ -67,12 +69,17 @@ export default function SpaceCheckinScreen() {
     try {
       const [u, a, l] = await Promise.all([
         getCurrentUserAsync().catch(() => null),
-        getAttendance(spaceId).catch(() => ({ day: today(), records: [] as AttendanceRecord[] })),
-        getLeave(spaceId).catch(() => [] as LeaveRequest[]),
+        getAttendance(spaceId),
+        getLeave(spaceId),
       ]);
       setMe(String((u as any)?.id ?? ''));
       setRecords(a.records || []);
       setLeave(l || []);
+      setLoadError(null);
+    } catch (e: any) {
+      // "Not checked in" and "No leave requested" after a failed read would be
+      // statements about today that nobody made.
+      setLoadError(e?.message ?? 'Could not load today’s record.');
     } finally {
       setLoading(false);
     }
@@ -114,12 +121,26 @@ export default function SpaceCheckinScreen() {
     } finally { setBusy(false); }
   }, [spaceId, kind, from, to, reason, load]);
 
-  const decide = useCallback(async (l: LeaveRequest, status: 'approved' | 'rejected' | 'cancelled') => {
+  const decideNow = useCallback(async (l: LeaveRequest, status: 'approved' | 'rejected' | 'cancelled') => {
     setBusy(true);
     try { await decideLeave(spaceId, l.id, status); await load(); }
     catch (e: any) { Alert.alert('Could not update', e?.message ?? 'Try again.'); }
     finally { setBusy(false); }
   }, [spaceId, load]);
+
+  // Reject and withdraw are confirmed; approve is the expected tap and stays one.
+  const decide = useCallback((l: LeaveRequest, status: 'approved' | 'rejected' | 'cancelled') => {
+    if (status === 'approved') { void decideNow(l, status); return; }
+    const who = l.userId === me ? 'your' : `${l.name || 'this'}’s`;
+    Alert.alert(
+      status === 'rejected' ? `Reject ${who} leave?` : 'Withdraw your leave request?',
+      `${l.kind}, ${l.fromDay}${l.toDay !== l.fromDay ? ` to ${l.toDay}` : ''}.`,
+      [
+        { text: 'Keep', style: 'cancel' },
+        { text: status === 'rejected' ? 'Reject' : 'Withdraw', style: 'destructive', onPress: () => { void decideNow(l, status); } },
+      ],
+    );
+  }, [decideNow, me]);
 
   const s = styles(colors);
 
@@ -137,8 +158,12 @@ export default function SpaceCheckinScreen() {
     <ScrollView style={s.screen} contentContainerStyle={s.body}>
       <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · Attendance` : 'Attendance', { id: spaceId, name: params.name })} />
 
+      {loadError && (
+        <LoadError colors={colors} title="Could not load today’s record" message={loadError} onRetry={() => { setLoading(true); void load(); }} />
+      )}
+
       {/* Design screen 9: the day's own state, big. */}
-      <View style={[s.card, s.hero]}>
+      {!loadError && <View style={[s.card, s.hero]}>
         <View style={[s.ring, { borderColor: inAt && !outAt ? colors.success : colors.border }]}>
           <Ionicons
             name={inAt && !outAt ? 'checkmark' : outAt ? 'log-out-outline' : 'time-outline'}
@@ -155,11 +180,11 @@ export default function SpaceCheckinScreen() {
         </Text>
 
         {!inAt ? (
-          <TouchableOpacity style={[s.bigBtn, { backgroundColor: colors.brandOnLight }]} onPress={doCheckIn} disabled={busy}>
+          <TouchableOpacity style={[s.bigBtn, { backgroundColor: colors.brandOnLight }]} onPress={doCheckIn} disabled={busy} accessibilityRole="button" accessibilityLabel="Check in">
             {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.bigBtnText}>Check In</Text>}
           </TouchableOpacity>
         ) : !outAt ? (
-          <TouchableOpacity style={[s.bigBtn, { backgroundColor: colors.danger }]} onPress={doCheckOut} disabled={busy}>
+          <TouchableOpacity style={[s.bigBtn, { backgroundColor: colors.danger }]} onPress={doCheckOut} disabled={busy} accessibilityRole="button" accessibilityLabel="Check out now">
             {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.bigBtnText}>Check Out Now</Text>}
           </TouchableOpacity>
         ) : (
@@ -167,18 +192,18 @@ export default function SpaceCheckinScreen() {
           // gone rather than disabled-and-mysterious.
           <Text style={s.footnote}>That is today done. Tomorrow starts a new record.</Text>
         )}
-      </View>
+      </View>}
 
       {/* Leave (design screen 11) */}
       <View style={s.card}>
         <View style={s.rowBetween}>
           <Text style={s.cardTitle}>Leave</Text>
-          <TouchableOpacity onPress={() => setAsking(true)}>
+          <TouchableOpacity onPress={() => setAsking(true)} accessibilityRole="button" accessibilityLabel="Request leave">
             <Text style={s.link}>Request</Text>
           </TouchableOpacity>
         </View>
 
-        {leave.length === 0 && <Text style={s.muted}>No leave requested.</Text>}
+        {!loadError && leave.length === 0 && <Text style={s.muted}>No leave requested.</Text>}
 
         {leave.map((l) => {
           const ownPending = l.userId === me && l.status === 'pending';
@@ -194,7 +219,7 @@ export default function SpaceCheckinScreen() {
                 </Text>
               </View>
               {ownPending && (
-                <TouchableOpacity onPress={() => decide(l, 'cancelled')} disabled={busy}>
+                <TouchableOpacity onPress={() => decide(l, 'cancelled')} disabled={busy} accessibilityRole="button" accessibilityLabel="Withdraw your leave request">
                   <Text style={[s.link, { color: colors.textDim }]}>Withdraw</Text>
                 </TouchableOpacity>
               )}
@@ -203,10 +228,10 @@ export default function SpaceCheckinScreen() {
                   screen drawing an action that always fails. */}
               {canDecide && l.status === 'pending' && l.userId !== me && (
                 <View style={{ flexDirection: 'row', gap: 10 }}>
-                  <TouchableOpacity accessibilityRole="button" accessibilityLabel="Reject check-in" onPress={() => decide(l, 'rejected')} disabled={busy}>
+                  <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Reject leave for ${l.name || 'this person'}`} onPress={() => decide(l, 'rejected')} disabled={busy} style={s.iconHit}>
                     <Ionicons name="close-circle-outline" size={21} color={colors.danger} />
                   </TouchableOpacity>
-                  <TouchableOpacity accessibilityRole="button" accessibilityLabel="Approve check-in" onPress={() => decide(l, 'approved')} disabled={busy}>
+                  <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Approve leave for ${l.name || 'this person'}`} onPress={() => decide(l, 'approved')} disabled={busy} style={s.iconHit}>
                     <Ionicons name="checkmark-circle-outline" size={21} color={colors.success} />
                   </TouchableOpacity>
                 </View>
@@ -255,6 +280,7 @@ export default function SpaceCheckinScreen() {
                 <TouchableOpacity
                   key={k.key}
                   onPress={() => setKind(k.key)}
+                  accessibilityRole="radio" accessibilityState={{ checked: kind === k.key }}
                   style={[s.kind, kind === k.key && { backgroundColor: colors.brandOnLight }]}
                 >
                   <Text style={[s.kindText, kind === k.key && { color: '#fff' }]}>{k.label}</Text>
@@ -267,10 +293,10 @@ export default function SpaceCheckinScreen() {
             </View>
             <TextInput style={s.input} value={reason} onChangeText={setReason} placeholder="Reason (optional)" placeholderTextColor={colors.textDim} />
             <View style={s.modalRow}>
-              <TouchableOpacity style={s.modalBtn} onPress={() => setAsking(false)}>
+              <TouchableOpacity style={s.modalBtn} onPress={() => setAsking(false)} accessibilityRole="button">
                 <Text style={s.muted}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[s.modalBtn, { backgroundColor: colors.brandOnLight }]} onPress={submitLeave} disabled={busy}>
+              <TouchableOpacity style={[s.modalBtn, { backgroundColor: colors.brandOnLight }]} onPress={submitLeave} disabled={busy} accessibilityRole="button" accessibilityLabel="Submit leave request">
                 {busy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.bigBtnText}>Submit</Text>}
               </TouchableOpacity>
             </View>
@@ -296,6 +322,7 @@ function statusColour(st: LeaveRequest['status'], c: Palette): string {
 }
 
 const styles = (c: Palette) => StyleSheet.create({
+  iconHit: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   screen: { flex: 1, backgroundColor: 'transparent' },
   centre: { alignItems: 'center', justifyContent: 'center' },
   body: { padding: 16, gap: 10, paddingBottom: 40 },

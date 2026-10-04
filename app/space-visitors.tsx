@@ -17,7 +17,7 @@ import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity,
-  Alert, TextInput, Modal,
+  Alert, TextInput, Modal, RefreshControl,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,6 +28,9 @@ import {
 } from '../lib/spaces/api';
 import { AuroraBackground } from '../components/ui';
 import { KeyboardSafe } from '../components/ui/KeyboardSafe';
+import LoadError from '../components/spaces/LoadError';
+import { circleMembers } from '../lib/family/circle';
+import type { CircleMember } from '../lib/family/types';
 
 const HOURS = [2, 4, 8, 24];
 
@@ -38,6 +41,11 @@ export default function SpaceVisitorsScreen() {
 
   const [passes, setPasses] = useState<VisitorPass[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [members, setMembers] = useState<CircleMember[]>([]);
+  // Who the visitor is here to see. null = the issuer (the server's default).
+  const [hostId, setHostId] = useState<string | null>(null);
   const [issuing, setIssuing] = useState(false);
   const [name, setName] = useState('');
   const [hours, setHours] = useState(8);
@@ -48,11 +56,16 @@ export default function SpaceVisitorsScreen() {
   const load = useCallback(async () => {
     try {
       setPasses(await getVisitorPasses(spaceId));
+      setLoadError(null);
     } catch (e: any) {
-      Alert.alert('Could not load passes', e?.message ?? 'Try again.');
+      setLoadError(e?.message ?? 'Could not load passes.');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
+    // Hosts are optional to offer: without the member list the pass is issued
+    // with the issuer as host, exactly as before.
+    circleMembers(spaceId).then(setMembers).catch(() => {});
   }, [spaceId]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -76,8 +89,9 @@ export default function SpaceVisitorsScreen() {
       const res = await issueVisitorPass(spaceId, {
         visitorName,
         validTo: new Date(Date.now() + hours * 3600_000).toISOString(),
+        ...(hostId ? { hostId } : {}),
       });
-      setIssuing(false); setName('');
+      setIssuing(false); setName(''); setHostId(null);
       await load();
       Alert.alert(
         `Pass for ${visitorName}`,
@@ -88,7 +102,7 @@ export default function SpaceVisitorsScreen() {
     } finally {
       setBusy(false);
     }
-  }, [name, hours, spaceId, load]);
+  }, [name, hours, hostId, spaceId, load]);
 
   const onRedeem = useCallback(async (exit: boolean) => {
     const c = code.trim().toUpperCase();
@@ -134,13 +148,19 @@ export default function SpaceVisitorsScreen() {
         }}
       />
 
-      <ScrollView contentContainerStyle={s.body}>
-        <TouchableOpacity style={s.scan} onPress={() => setRedeeming(true)}>
+      <ScrollView
+        contentContainerStyle={s.body}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} tintColor={colors.primary} />}
+      >
+        <TouchableOpacity style={s.scan} onPress={() => setRedeeming(true)} accessibilityRole="button">
           <Ionicons name="qr-code-outline" size={20} color={colors.primary} />
           <Text style={s.scanText}>Admit or sign out a visitor by code</Text>
         </TouchableOpacity>
 
-        {ordered.length === 0 && (
+        {loadError && (
+          <LoadError colors={colors} title="Could not load passes" message={loadError} onRetry={() => { setLoading(true); void load(); }} />
+        )}
+        {!loadError && ordered.length === 0 && (
           <View style={s.card}>
             <Text style={s.cardTitle}>No passes yet</Text>
             <Text style={s.muted}>
@@ -198,19 +218,39 @@ export default function SpaceVisitorsScreen() {
               {HOURS.map((h) => (
                 <TouchableOpacity
                   key={h} onPress={() => setHours(h)}
+                  accessibilityRole="radio" accessibilityState={{ checked: hours === h }}
+                  accessibilityLabel={`Valid for ${h} hours`}
                   style={[s.hour, hours === h && { backgroundColor: colors.brandOnLight }]}
                 >
                   <Text style={[s.hourText, hours === h && { color: '#fff' }]}>{h}h</Text>
                 </TouchableOpacity>
               ))}
             </View>
+            {members.length > 0 && (
+              <>
+                <Text style={s.muted}>Host — who they are here to see</Text>
+                <ScrollView style={{ maxHeight: 132 }} contentContainerStyle={s.hours}>
+                  {[{ id: null as string | null, name: 'Me' }, ...members.map((m) => ({ id: m.id as string | null, name: m.name }))].map((m) => (
+                    <TouchableOpacity
+                      key={m.id ?? 'me'} onPress={() => setHostId(m.id)}
+                      accessibilityRole="radio" accessibilityState={{ checked: hostId === m.id }}
+                      accessibilityLabel={`Host: ${m.name}`}
+                      style={[s.hour, hostId === m.id && { backgroundColor: colors.brandOnLight }]}
+                    >
+                      <Text numberOfLines={1} style={[s.hourText, hostId === m.id && { color: '#fff' }]}>{m.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </>
+            )}
             <View style={s.modalRow}>
-              <TouchableOpacity style={s.modalBtn} onPress={() => setIssuing(false)}>
+              <TouchableOpacity style={s.modalBtn} onPress={() => setIssuing(false)} accessibilityRole="button">
                 <Text style={s.muted}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[s.modalBtn, s.solid, (!name.trim() || busy) && s.off]}
                 onPress={onIssue} disabled={!name.trim() || busy}
+                accessibilityRole="button" accessibilityLabel="Issue pass"
               >
                 {busy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.solidText}>Issue</Text>}
               </TouchableOpacity>
@@ -232,18 +272,20 @@ export default function SpaceVisitorsScreen() {
               autoCapitalize="characters" maxLength={8}
             />
             <View style={s.modalRow}>
-              <TouchableOpacity style={s.modalBtn} onPress={() => setRedeeming(false)}>
+              <TouchableOpacity style={s.modalBtn} onPress={() => setRedeeming(false)} accessibilityRole="button">
                 <Text style={s.muted}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[s.modalBtn, s.ghost, (!code.trim() || busy) && s.off]}
                 onPress={() => onRedeem(true)} disabled={!code.trim() || busy}
+                accessibilityRole="button" accessibilityLabel="Sign visitor out"
               >
                 <Text style={s.ghostText}>Sign out</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[s.modalBtn, s.solid, (!code.trim() || busy) && s.off]}
                 onPress={() => onRedeem(false)} disabled={!code.trim() || busy}
+                accessibilityRole="button" accessibilityLabel="Admit visitor"
               >
                 {busy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.solidText}>Admit</Text>}
               </TouchableOpacity>

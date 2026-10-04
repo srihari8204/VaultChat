@@ -184,7 +184,7 @@ export default function SpaceTransportScreen() {
         <View style={[s.card, { borderColor: colors.danger, borderWidth: 1 }]}>
           <Text style={s.cardTitle}>Could not load transport</Text>
           <Text style={s.muted}>{err}</Text>
-          <TouchableOpacity onPress={load} style={[s.btn, { backgroundColor: colors.brandOnLight }]}>
+          <TouchableOpacity onPress={load} style={[s.btn, { backgroundColor: colors.brandOnLight }]} accessibilityRole="button">
             <Text style={s.btnText}>Try again</Text>
           </TouchableOpacity>
         </View>
@@ -278,13 +278,17 @@ export default function SpaceTransportScreen() {
             )}
 
             <View style={s.actions}>
-              {/* The live map reads the same sealed stream everyone else does. */}
+              {/* The run view reads the same sealed stream everyone else does.
+                  It shows status, arrival window and position freshness — not a
+                  map — so the label says "Track", not "Live … map". */}
               <TouchableOpacity
                 onPress={() => router.push({ pathname: '/space-run' as any, params: { spaceId, runId: run.id, name: spaceName, groupType: params.groupType ?? '' } })}
                 style={[s.btn, { backgroundColor: colors.brandOnLight, flex: 1 }]}
+                accessibilityRole="button"
+                accessibilityLabel={`Track ${kindWord}: ${run.vehicleLabel || run.name}`}
               >
-                <Ionicons name="map-outline" size={16} color="#fff" />
-                <Text style={s.btnText}>Live {kindWord}</Text>
+                <Ionicons name="navigate-outline" size={16} color="#fff" />
+                <Text style={s.btnText}>Track {kindWord}</Text>
               </TouchableOpacity>
               {/* Calling goes through crazzychat's existing call stack, and only
                   when the server actually named a driver. */}
@@ -292,6 +296,8 @@ export default function SpaceTransportScreen() {
                 <TouchableOpacity
                   onPress={() => callDriver(run.driverId!)}
                   disabled={callingDriver === run.driverId}
+                  accessibilityRole="button"
+                  accessibilityLabel="Call the driver"
                   style={[s.btn, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke, borderWidth: 1 },
                           callingDriver === run.driverId && { opacity: 0.6 }]}
                 >

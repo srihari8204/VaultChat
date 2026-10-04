@@ -342,6 +342,19 @@ export const issueDeviceCommand = (
   `/chats/${spaceId}/devices/${deviceId}/commands`, { method: 'POST', json: { action, payload } },
 );
 
+/** Written by the DEVICE itself (lib/spaces/deviceAgent.ts) — the server
+ *  never marks a command executed on its own. Only the owner may ack. */
+export const ackDeviceCommand = (
+  spaceId: string, deviceId: string, cmdId: number,
+  result: 'delivered' | 'executed' | 'failed' | 'cancelled',
+) => api(`/chats/${spaceId}/devices/${deviceId}/commands/${cmdId}`, { method: 'PATCH', json: { result } });
+
+/** Proof of life from the handset that IS the device. No position, by design. */
+export const deviceHeartbeat = (spaceId: string, deviceId: string, battery?: number) =>
+  api(`/chats/${spaceId}/devices/${deviceId}/heartbeat`, {
+    method: 'POST', json: battery == null ? {} : { battery },
+  });
+
 export const setShift = (
   spaceId: string, body: {
     shiftStart?: string; shiftEnd?: string; shiftGraceMinutes?: number;

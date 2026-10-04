@@ -25,6 +25,7 @@ import {
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import {
@@ -36,6 +37,18 @@ import { circleMembers } from '../lib/family/circle';
 import type { CircleMember } from '../lib/family/types';
 import { AuroraBackground } from '../components/ui';
 import { KeyboardSafe } from '../components/ui/KeyboardSafe';
+import LoadError from '../components/spaces/LoadError';
+import {
+  parseCoords, parseClock, plannedAtOn, clockOf, stopPayload, remapRiders,
+} from '../lib/spaces/runPlan';
+import { geocodeSearch } from '../lib/nav/geocode';
+import { permissionDenied } from '../lib/permissionDenied';
+
+/** One stop as the editor holds it: its OLD server id (null when new) plus the
+ *  fields the server stores. See lib/spaces/runPlan.ts for why the old id matters. */
+type StopDraft = { prevId: string | null; label: string; lat: number | null; lng: number | null; plannedAt: string | null };
+const draftOf = (st: RunStop): StopDraft =>
+  ({ prevId: st.id, label: st.label, lat: st.lat, lng: st.lng, plannedAt: st.plannedAt });
 
 const KINDS: { key: string; label: string }[] = [
   { key: 'school_pickup', label: 'Morning pickup' },
@@ -48,12 +61,14 @@ const KINDS: { key: string; label: string }[] = [
 export default function SpaceRunsAdminScreen() {
   const params = useLocalSearchParams<{ spaceId?: string; name?: string; groupType?: string }>();
   const colors = useSpaceColors(params.groupType);
+  const insets = useSafeAreaInsets();
   const spaceId = String(params.spaceId || '');
 
   const [runs, setRuns] = useState<Run[]>([]);
   const [members, setMembers] = useState<CircleMember[]>([]);
   const [roster, setRoster] = useState<RosterEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
   const [newKind, setNewKind] = useState('school_pickup');
@@ -62,18 +77,24 @@ export default function SpaceRunsAdminScreen() {
 
   // The run being edited, with its stops and manifest.
   const [editing, setEditing] = useState<{ run: Run; stops: RunStop[]; riders: RunRider[] } | null>(null);
-  const [stopDraft, setStopDraft] = useState('');
+  // The stop form: index into the ordered stops, or null for a new stop.
+  const [stopForm, setStopForm] = useState<{ index: number | null; label: string; where: string; time: string } | null>(null);
+  // The rider whose stop is being picked.
+  const [stopFor, setStopFor] = useState<RunRider | null>(null);
 
   const load = useCallback(async () => {
     try {
+      // Any of the three failing is an error, not an empty list: "No runs yet"
+      // after a timeout invites an administrator to build a second copy.
       const [rs, mem, ros] = await Promise.all([
-        getRuns(spaceId).catch(() => [] as Run[]),
-        circleMembers(spaceId).catch(() => [] as CircleMember[]),
-        getRoster(spaceId).catch(() => ({ roster: [] as RosterEntry[], truncated: false, scoped: false })),
+        getRuns(spaceId), circleMembers(spaceId), getRoster(spaceId),
       ]);
       setRuns(rs);
       setMembers(mem);
       setRoster(ros.roster);
+      setLoadError(null);
+    } catch (e: any) {
+      setLoadError(e?.message ?? 'Could not load the runs.');
     } finally {
       setLoading(false);
     }
@@ -108,52 +129,167 @@ export default function SpaceRunsAdminScreen() {
     }
   }, [newName, newKind, newVehicle, spaceId, load]);
 
-  const addStop = useCallback(async () => {
-    if (!editing || !stopDraft.trim()) return;
-    const next = [...editing.stops, {
-      id: `tmp_${Date.now()}`, seq: editing.stops.length, label: stopDraft.trim(),
-      lat: null, lng: null, plannedAt: null, arrivedAt: null,
-    }];
-    setStopDraft('');
+  const orderedStops = useMemo(
+    () => [...(editing?.stops ?? [])].sort((a, b) => a.seq - b.seq),
+    [editing?.stops],
+  );
+
+  /**
+   * Save the whole stop list, then put every rider back on their stop.
+   *
+   * The server re-creates the stops with new ids and its foreign key nulls
+   * every rider's stop, so the manifest has to be re-sent against the new ids
+   * in the same gesture — otherwise one stop edit quietly unassigns the run.
+   */
+  const saveStops = useCallback(async (drafts: StopDraft[]) => {
+    if (!editing) return false;
     setBusy(true);
     try {
-      // The whole list, every time. See the header note on ordered lists.
-      await setRunStops(spaceId, editing.run.id, next.map((st) => ({ label: st.label })));
+      await setRunStops(spaceId, editing.run.id, stopPayload(drafts));
+      const saved = await getRun(spaceId, editing.run.id);
+      if (editing.riders.some((r) => r.stopId)) {
+        try {
+          await setRunRiders(spaceId, editing.run.id,
+            remapRiders(editing.riders, drafts.map((d) => d.prevId), saved.stops));
+        } catch (e: any) {
+          Alert.alert('Stops saved, rider stops were not',
+            `${e?.message ?? 'The manifest could not be saved.'} Check each rider’s stop below.`);
+        }
+      }
       setEditing(await getRun(spaceId, editing.run.id));
+      return true;
     } catch (e: any) {
       Alert.alert('Could not save the stops', e?.message ?? 'Try again.');
+      return false;
     } finally {
       setBusy(false);
     }
-  }, [editing, stopDraft, spaceId]);
-
-  const removeStop = useCallback(async (stopId: string) => {
-    if (!editing) return;
-    setBusy(true);
-    try {
-      const kept = editing.stops.filter((st) => st.id !== stopId);
-      await setRunStops(spaceId, editing.run.id, kept.map((st) => ({ label: st.label })));
-      setEditing(await getRun(spaceId, editing.run.id));
-    } catch (e: any) {
-      Alert.alert('Could not save the stops', e?.message ?? 'Try again.');
-    } finally { setBusy(false); }
   }, [editing, spaceId]);
 
-  const toggleRider = useCallback(async (entry: RosterEntry) => {
+  /** Stop edits re-create the stops, which clears arrival marks already made. */
+  const confirmStopEdit = useCallback((go: () => void) => {
+    if (editing?.run.status !== 'started') { go(); return; }
+    Alert.alert(
+      'Change stops on a run in progress?',
+      'Arrival marks already recorded for this run’s stops will be cleared. Riders keep their state.',
+      [{ text: 'Keep as is', style: 'cancel' }, { text: 'Change stops', style: 'destructive', onPress: go }],
+    );
+  }, [editing?.run.status]);
+
+  const fillHere = useCallback(async () => {
+    try {
+      const Location = await import('expo-location');
+      const perm = await Location.requestForegroundPermissionsAsync();
+      if (perm.status !== 'granted') {
+        permissionDenied('Location needed', 'Allow location to place this stop where you are standing, or type an address or "lat, lng".', perm.canAskAgain);
+        return;
+      }
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      setStopForm((f) => f && { ...f, where: `${loc.coords.latitude.toFixed(6)}, ${loc.coords.longitude.toFixed(6)}` });
+    } catch (e: any) {
+      Alert.alert('Could not read your location', e?.message ?? 'Try again.');
+    }
+  }, []);
+
+  const submitStop = useCallback(async () => {
+    if (!editing || !stopForm || !stopForm.label.trim()) return;
+    const where = stopForm.where.trim();
+    const time = stopForm.time.trim();
+    const minutes = time ? parseClock(time) : null;
+    if (time && minutes == null) {
+      Alert.alert('Planned time', 'Use a 24-hour time such as 07:45, or leave it blank.');
+      return;
+    }
+    let place: { lat: number; lng: number } | null = null;
+    if (where) {
+      place = parseCoords(where);
+      if (!place) {
+        setBusy(true);
+        const hits = await geocodeSearch(where).catch(() => []);
+        setBusy(false);
+        if (!hits[0]) {
+          Alert.alert('Place not found', `Could not find "${where}". Try an address, "lat, lng", or use your current location.`);
+          return;
+        }
+        place = { lat: hits[0].lat, lng: hits[0].lng };
+      }
+    }
+    const base = editing.run.scheduledAt ? Date.parse(editing.run.scheduledAt) : Date.now();
+    const draft: StopDraft = {
+      prevId: stopForm.index == null ? null : orderedStops[stopForm.index].id,
+      label: stopForm.label.trim(),
+      lat: place?.lat ?? null,
+      lng: place?.lng ?? null,
+      plannedAt: minutes == null ? null : plannedAtOn(Number.isFinite(base) ? base : Date.now(), minutes),
+    };
+    const drafts = orderedStops.map(draftOf);
+    if (stopForm.index == null) drafts.push(draft); else drafts[stopForm.index] = draft;
+    confirmStopEdit(async () => { if (await saveStops(drafts)) setStopForm(null); });
+  }, [editing, stopForm, orderedStops, saveStops, confirmStopEdit]);
+
+  const editStop = useCallback((index: number | null) => {
+    const st = index == null ? null : orderedStops[index];
+    setStopForm({
+      index,
+      label: st?.label ?? '',
+      where: st && st.lat != null && st.lng != null ? `${st.lat.toFixed(6)}, ${st.lng.toFixed(6)}` : '',
+      time: clockOf(st?.plannedAt ?? null),
+    });
+  }, [orderedStops]);
+
+  const removeStop = useCallback((st: RunStop) => {
+    const riding = editing?.riders.filter((r) => r.stopId === st.id).length ?? 0;
+    Alert.alert(
+      `Remove ${st.label}?`,
+      riding > 0
+        ? `${riding} ${riding === 1 ? 'rider is' : 'riders are'} assigned to it and will have no stop until you pick a new one.`
+        : 'The stop is removed from this run.',
+      [
+        { text: 'Keep it', style: 'cancel' },
+        {
+          text: 'Remove', style: 'destructive',
+          onPress: () => confirmStopEdit(() => {
+            void saveStops(orderedStops.filter((x) => x.id !== st.id).map(draftOf));
+          }),
+        },
+      ],
+    );
+  }, [editing?.riders, orderedStops, saveStops, confirmStopEdit]);
+
+  const moveStopUp = useCallback((index: number) => {
+    if (index <= 0) return;
+    const drafts = orderedStops.map(draftOf);
+    [drafts[index - 1], drafts[index]] = [drafts[index], drafts[index - 1]];
+    confirmStopEdit(() => { void saveStops(drafts); });
+  }, [orderedStops, saveStops, confirmStopEdit]);
+
+  const saveRiders = useCallback(async (next: { riderId: string; stopId: string | null }[]) => {
     if (!editing) return;
-    const on = editing.riders.some((r) => r.riderId === entry.id);
-    const next = on
-      ? editing.riders.filter((r) => r.riderId !== entry.id)
-      : [...editing.riders, { riderId: entry.id } as any];
     setBusy(true);
     try {
-      await setRunRiders(spaceId, editing.run.id,
-        next.map((r: any) => ({ riderId: r.riderId, stopId: r.stopId ?? null })));
+      await setRunRiders(spaceId, editing.run.id, next);
       setEditing(await getRun(spaceId, editing.run.id));
     } catch (e: any) {
       Alert.alert('Could not save the manifest', e?.message ?? 'Try again.');
     } finally { setBusy(false); }
   }, [editing, spaceId]);
+
+  const toggleRider = useCallback((entry: RosterEntry) => {
+    if (!editing) return;
+    const current = editing.riders.map((r) => ({ riderId: r.riderId, stopId: r.stopId ?? null }));
+    const on = current.some((r) => r.riderId === entry.id);
+    void saveRiders(on
+      ? current.filter((r) => r.riderId !== entry.id)
+      : [...current, { riderId: entry.id, stopId: null }]);
+  }, [editing, saveRiders]);
+
+  const assignStop = useCallback((rider: RunRider, stopId: string | null) => {
+    if (!editing) return;
+    setStopFor(null);
+    void saveRiders(editing.riders.map((r) => ({
+      riderId: r.riderId, stopId: r.riderId === rider.riderId ? stopId : (r.stopId ?? null),
+    })));
+  }, [editing, saveRiders]);
 
   const assignDriver = useCallback(async (userId: string | null) => {
     if (!editing) return;
@@ -168,6 +304,16 @@ export default function SpaceRunsAdminScreen() {
       Alert.alert('Could not assign', e?.message ?? 'Try again.');
     } finally { setBusy(false); }
   }, [editing, spaceId, load]);
+
+  const pickDriver = useCallback((userId: string | null) => {
+    if (editing?.run.status !== 'started') { void assignDriver(userId); return; }
+    // Mid-run, the current driver's screen stops being theirs.
+    Alert.alert(
+      'Change the driver of a run in progress?',
+      'The current driver will no longer be able to mark riders on this run.',
+      [{ text: 'Keep driver', style: 'cancel' }, { text: 'Change', style: 'destructive', onPress: () => { void assignDriver(userId); } }],
+    );
+  }, [editing?.run.status, assignDriver]);
 
   const cancelRun = useCallback((r: Run) => {
     Alert.alert(
@@ -192,6 +338,8 @@ export default function SpaceRunsAdminScreen() {
     () => (id: string | null) => id ? (members.find((m) => m.id === id)?.name ?? 'Assigned') : 'No driver',
     [members],
   );
+  const stopLabel = (stopId: string | null) =>
+    orderedStops.find((x) => x.id === stopId)?.label ?? (orderedStops.length ? 'No stop · first stop' : 'No stop');
 
   if (loading) {
     return (
@@ -205,6 +353,7 @@ export default function SpaceRunsAdminScreen() {
 
   return (
     <View style={s.screen}>
+      <AuroraBackground />
       <Stack.Screen
         options={{
           ...spaceHeader(colors, params.name ? `${params.name} · Runs` : 'Runs'),
@@ -217,7 +366,10 @@ export default function SpaceRunsAdminScreen() {
       />
 
       <ScrollView contentContainerStyle={s.body}>
-        {runs.length === 0 && (
+        {loadError && (
+          <LoadError colors={colors} title="Could not load the runs" message={loadError} onRetry={() => { setLoading(true); void load(); }} />
+        )}
+        {!loadError && runs.length === 0 && (
           <View style={s.card}>
             <Text style={s.cardTitle}>No runs yet</Text>
             <Text style={s.muted}>
@@ -231,7 +383,12 @@ export default function SpaceRunsAdminScreen() {
             counts would mean a fetch per run to render a screen whose job is to
             get you into one. */}
         {runs.map((r) => (
-          <TouchableOpacity key={r.id} style={s.card} onPress={() => openRun(r)}>
+          <TouchableOpacity
+            key={r.id} style={s.card} onPress={() => openRun(r)}
+            accessibilityRole="button"
+            accessibilityLabel={`${r.vehicleLabel || r.name}, ${statusLabel(r)}, ${driverName(r.driverId)}`}
+            accessibilityHint="Opens the run to edit its driver, stops and riders"
+          >
             <View style={s.row}>
               <View style={[s.dot, { backgroundColor: statusColour(r, colors) }]} />
               <View style={{ flex: 1, minWidth: 0 }}>
@@ -255,16 +412,20 @@ export default function SpaceRunsAdminScreen() {
             <TextInput
               style={s.input} value={newName} onChangeText={setNewName}
               placeholder="Name, e.g. Route 1 morning" placeholderTextColor={colors.textDim} autoFocus
+              accessibilityLabel="Run name"
             />
             <TextInput
               style={s.input} value={newVehicle} onChangeText={setNewVehicle}
               placeholder="Vehicle, e.g. Bus 01" placeholderTextColor={colors.textDim}
+              accessibilityLabel="Vehicle"
             />
             <View style={s.kinds}>
               {KINDS.map((k) => (
                 <TouchableOpacity
                   key={k.key}
                   onPress={() => setNewKind(k.key)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: newKind === k.key }}
                   style={[s.kind, newKind === k.key && { backgroundColor: colors.brandOnLight }]}
                 >
                   <Text style={[s.kindText, newKind === k.key && { color: '#fff' }]}>{k.label}</Text>
@@ -272,12 +433,14 @@ export default function SpaceRunsAdminScreen() {
               ))}
             </View>
             <View style={s.modalRow}>
-              <TouchableOpacity style={s.modalBtn} onPress={() => setCreating(false)}>
+              <TouchableOpacity style={s.modalBtn} onPress={() => setCreating(false)} accessibilityRole="button">
                 <Text style={s.muted}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[s.modalBtn, s.primaryBtn, (!newName.trim() || busy) && s.off]}
                 onPress={onCreate} disabled={!newName.trim() || busy}
+                accessibilityRole="button" accessibilityLabel="Create run"
+                accessibilityState={{ disabled: !newName.trim() || busy }}
               >
                 {busy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.primaryText}>Create</Text>}
               </TouchableOpacity>
@@ -290,20 +453,21 @@ export default function SpaceRunsAdminScreen() {
       {/* ── edit ── */}
       <Modal visible={!!editing} animationType="slide" onRequestClose={() => setEditing(null)}>
         <KeyboardSafe keyboardOnly>
-        <View style={s.screen}>
-          <View style={s.sheetHeader}>
+        <View style={[s.screen, { backgroundColor: colors.bg }]}>
+          <View style={[s.sheetHeader, { paddingTop: insets.top + 12 }]}>
             <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close" onPress={() => setEditing(null)}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
             <Text style={s.sheetTitle} numberOfLines={1}>
               {editing?.run.vehicleLabel || editing?.run.name}
             </Text>
+            {busy && <ActivityIndicator size="small" color={colors.primary} />}
             {editing && editing.run.status !== 'completed' && editing.run.status !== 'cancelled' && (
-              <TouchableOpacity onPress={() => cancelRun(editing.run)}>
+              <TouchableOpacity onPress={() => cancelRun(editing.run)} accessibilityRole="button">
                 <Text style={{ color: colors.danger, fontWeight: '600' }}>Cancel run</Text>
               </TouchableOpacity>
             )}
           </View>
 
-          <ScrollView contentContainerStyle={s.body}>
+          <ScrollView contentContainerStyle={[s.body, { paddingBottom: 40 + insets.bottom }]}>
             {/* driver */}
             <Text style={s.section}>DRIVER</Text>
             <View style={s.card}>
@@ -311,7 +475,12 @@ export default function SpaceRunsAdminScreen() {
               {members.map((m) => {
                 const on = editing?.run.driverId === m.id;
                 return (
-                  <TouchableOpacity key={m.id} style={s.pickRow} onPress={() => assignDriver(on ? null : m.id)}>
+                  <TouchableOpacity
+                    key={m.id} style={[s.pickRow, busy && s.off]} onPress={() => pickDriver(on ? null : m.id)}
+                    disabled={busy}
+                    accessibilityRole="radio" accessibilityLabel={m.name}
+                    accessibilityState={{ checked: on, disabled: busy }}
+                  >
                     <Ionicons
                       name={on ? 'radio-button-on' : 'radio-button-off'}
                       size={19} color={on ? colors.primary : colors.textDim}
@@ -325,26 +494,43 @@ export default function SpaceRunsAdminScreen() {
             {/* stops */}
             <Text style={s.section}>STOPS, IN ORDER</Text>
             <View style={s.card}>
-              {editing?.stops.length === 0 && <Text style={s.muted}>No stops yet.</Text>}
-              {editing?.stops.map((st, i) => (
+              {orderedStops.length === 0 && (
+                <Text style={s.muted}>
+                  No stops yet. Without stops the driver sees everyone on one list, and
+                  guardians get no arrival estimate or late warning.
+                </Text>
+              )}
+              {orderedStops.map((st, i) => (
                 <View key={st.id} style={s.pickRow}>
                   <Text style={s.seq}>{i + 1}</Text>
-                  <Text style={[s.pickText, { color: colors.text }]}>{st.label}</Text>
-                  <TouchableOpacity accessibilityRole="button" accessibilityLabel="Remove this stop" onPress={() => removeStop(st.id)}>
+                  <TouchableOpacity
+                    style={{ flex: 1 }} onPress={() => editStop(i)} disabled={busy}
+                    accessibilityRole="button" accessibilityLabel={`Edit stop ${st.label}`}
+                  >
+                    <Text style={[s.pickText, { color: colors.text }]}>{st.label}</Text>
+                    <Text style={s.muted}>
+                      {st.plannedAt ? clockOf(st.plannedAt) : 'No planned time'}
+                      {' · '}
+                      {st.lat != null && st.lng != null ? 'Location set' : 'No location'}
+                    </Text>
+                  </TouchableOpacity>
+                  {i > 0 && (
+                    <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Move ${st.label} earlier`} onPress={() => moveStopUp(i)} disabled={busy} style={s.iconHit}>
+                      <Ionicons name="arrow-up" size={18} color={colors.textDim} />
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Remove ${st.label}`} onPress={() => removeStop(st)} disabled={busy} style={s.iconHit}>
                     <Ionicons name="close-circle-outline" size={19} color={colors.textDim} />
                   </TouchableOpacity>
                 </View>
               ))}
-              <View style={s.addRow}>
-                <TextInput
-                  style={[s.input, { flex: 1 }]} value={stopDraft} onChangeText={setStopDraft}
-                  placeholder="Add a stop" placeholderTextColor={colors.textDim}
-                  onSubmitEditing={addStop}
-                />
-                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Add stop" style={[s.addBtn, (!stopDraft.trim() || busy) && s.off]} onPress={addStop} disabled={!stopDraft.trim() || busy}>
-                  <Ionicons name="add" size={20} color="#fff" />
-                </TouchableOpacity>
-              </View>
+              <TouchableOpacity
+                style={[s.addStop, busy && s.off]} onPress={() => editStop(null)} disabled={busy}
+                accessibilityRole="button" accessibilityLabel="Add a stop"
+              >
+                <Ionicons name="add-circle-outline" size={19} color={colors.primary} />
+                <Text style={{ color: colors.primary, fontWeight: '600' }}>Add a stop</Text>
+              </TouchableOpacity>
             </View>
 
             {/* manifest */}
@@ -357,27 +543,125 @@ export default function SpaceRunsAdminScreen() {
                 </Text>
               )}
               {roster.map((entry) => {
-                const on = !!editing?.riders.some((r) => r.riderId === entry.id);
+                const rider = editing?.riders.find((r) => r.riderId === entry.id);
+                const on = !!rider;
                 return (
-                  <TouchableOpacity key={entry.id} style={s.pickRow} onPress={() => toggleRider(entry)}>
-                    <Ionicons
-                      name={on ? 'checkbox' : 'square-outline'}
-                      size={19} color={on ? colors.primary : colors.textDim}
-                    />
-                    <Text numberOfLines={1} style={[s.pickText, on && { color: colors.text }]}>{entry.displayName}</Text>
-                  </TouchableOpacity>
+                  <View key={entry.id} style={s.pickRow}>
+                    <TouchableOpacity
+                      style={[s.riderToggle, busy && s.off]} onPress={() => toggleRider(entry)} disabled={busy}
+                      accessibilityRole="checkbox" accessibilityLabel={entry.displayName}
+                      accessibilityState={{ checked: on, disabled: busy }}
+                    >
+                      <Ionicons
+                        name={on ? 'checkbox' : 'square-outline'}
+                        size={19} color={on ? colors.primary : colors.textDim}
+                      />
+                      <Text numberOfLines={1} style={[s.pickText, on && { color: colors.text }]}>{entry.displayName}</Text>
+                    </TouchableOpacity>
+                    {rider && orderedStops.length > 0 && (
+                      <TouchableOpacity
+                        style={s.stopChip} onPress={() => setStopFor(rider)} disabled={busy}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Stop for ${entry.displayName}: ${stopLabel(rider.stopId)}. Change`}
+                      >
+                        <Text numberOfLines={1} style={[s.stopChipText, !rider.stopId && { color: colors.warning }]}>
+                          {stopLabel(rider.stopId)}
+                        </Text>
+                        <Ionicons name="chevron-down" size={14} color={colors.textDim} />
+                      </TouchableOpacity>
+                    )}
+                  </View>
                 );
               })}
             </View>
 
             <Text style={s.footnote}>
               Stops and the manifest are saved as a whole list each time, so what you see
-              here is what the run is. Guardians are notified as riders are marked on the
-              road, never from this screen.
+              here is what the run is. A rider with no stop is shown to the driver at the
+              first stop. Guardians are notified as riders are marked on the road, never
+              from this screen.
             </Text>
           </ScrollView>
         </View>
         </KeyboardSafe>
+
+        {/* ── stop form (inside the edit modal so it stacks above it) ── */}
+        <Modal visible={!!stopForm} transparent animationType="fade" onRequestClose={() => setStopForm(null)}>
+          <KeyboardSafe keyboardOnly>
+          <View style={s.modalWrap}>
+            <View style={s.modal}>
+              <Text style={s.modalTitle}>{stopForm?.index == null ? 'New stop' : 'Edit stop'}</Text>
+              <TextInput
+                style={s.input} value={stopForm?.label ?? ''} autoFocus
+                onChangeText={(t) => setStopForm((f) => f && { ...f, label: t })}
+                placeholder="Name, e.g. Green Lane" placeholderTextColor={colors.textDim}
+                accessibilityLabel="Stop name" maxLength={120}
+              />
+              <TextInput
+                style={s.input} value={stopForm?.where ?? ''}
+                onChangeText={(t) => setStopForm((f) => f && { ...f, where: t })}
+                placeholder='Address or "lat, lng" (optional)' placeholderTextColor={colors.textDim}
+                accessibilityLabel="Stop location: an address or latitude, longitude"
+              />
+              <TouchableOpacity style={s.addStop} onPress={fillHere} accessibilityRole="button" accessibilityLabel="Use my current location">
+                <Ionicons name="locate-outline" size={18} color={colors.primary} />
+                <Text style={{ color: colors.primary, fontWeight: '600' }}>Use my current location</Text>
+              </TouchableOpacity>
+              <TextInput
+                style={s.input} value={stopForm?.time ?? ''}
+                onChangeText={(t) => setStopForm((f) => f && { ...f, time: t })}
+                placeholder="Planned time, e.g. 07:45 (optional)" placeholderTextColor={colors.textDim}
+                accessibilityLabel="Planned time, 24-hour" keyboardType="numbers-and-punctuation" maxLength={5}
+              />
+              <Text style={s.muted}>
+                The location gives guardians an arrival estimate and lets the driver’s phone
+                notice a route deviation. The planned time is what “running late” is measured against.
+              </Text>
+              <View style={s.modalRow}>
+                <TouchableOpacity style={s.modalBtn} onPress={() => setStopForm(null)} accessibilityRole="button">
+                  <Text style={s.muted}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[s.modalBtn, s.primaryBtn, (!stopForm?.label.trim() || busy) && s.off]}
+                  onPress={submitStop} disabled={!stopForm?.label.trim() || busy}
+                  accessibilityRole="button" accessibilityLabel="Save stop"
+                  accessibilityState={{ disabled: !stopForm?.label.trim() || busy }}
+                >
+                  {busy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.primaryText}>Save</Text>}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+          </KeyboardSafe>
+        </Modal>
+
+        {/* ── rider stop picker ── */}
+        <Modal visible={!!stopFor} transparent animationType="fade" onRequestClose={() => setStopFor(null)}>
+          <View style={s.modalWrap}>
+            <View style={s.modal}>
+              <Text style={s.modalTitle}>Stop for {stopFor?.displayName}</Text>
+              {[{ id: null as string | null, label: 'No stop (shown at the first stop)' },
+                ...orderedStops.map((st, i) => ({ id: st.id as string | null, label: `${i + 1}. ${st.label}` }))].map((o) => {
+                const on = (stopFor?.stopId ?? null) === o.id;
+                return (
+                  <TouchableOpacity
+                    key={o.id ?? 'none'} style={s.pickRow}
+                    onPress={() => stopFor && assignStop(stopFor, o.id)}
+                    accessibilityRole="radio" accessibilityLabel={o.label} accessibilityState={{ checked: on }}
+                  >
+                    <Ionicons name={on ? 'radio-button-on' : 'radio-button-off'} size={19} color={on ? colors.primary : colors.textDim} />
+                    <Text numberOfLines={1} style={[s.pickText, on && { color: colors.text, fontWeight: '600' }]}>{o.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+              <View style={s.modalRow}>
+                <TouchableOpacity style={s.modalBtn} onPress={() => setStopFor(null)} accessibilityRole="button">
+                  <Text style={s.muted}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </Modal>
     </View>
   );
@@ -410,8 +694,14 @@ const styles = (c: Palette) => StyleSheet.create({
   pickRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9 },
   pickText: { color: c.textDim, flex: 1, fontSize: 14.5 },
   seq: { color: c.textDim, width: 20, fontVariant: ['tabular-nums'] },
-  addRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
-  addBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: c.brandOnLight, alignItems: 'center', justifyContent: 'center' },
+  addStop: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44 },
+  iconHit: { minWidth: 36, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  riderToggle: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, minHeight: 36 },
+  stopChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 160, minHeight: 36,
+    borderWidth: 1, borderColor: c.glassStroke, borderRadius: 16, paddingHorizontal: 10,
+  },
+  stopChipText: { color: c.textDim, fontSize: 12.5, flexShrink: 1 },
   input: {
     borderWidth: 1, borderColor: c.glassStroke, borderRadius: 10, padding: 12,
     color: c.text, fontSize: 15,
@@ -429,7 +719,7 @@ const styles = (c: Palette) => StyleSheet.create({
   off: { opacity: 0.4 },
   sheetHeader: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 16, paddingTop: 54, paddingBottom: 14,
+    paddingHorizontal: 16, paddingBottom: 14,
     borderBottomWidth: 1, borderBottomColor: c.glassStroke,
   },
   sheetTitle: { color: c.text, fontSize: 17, fontWeight: '700', flex: 1 },

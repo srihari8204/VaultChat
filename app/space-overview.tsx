@@ -32,6 +32,7 @@ import { getOpsSummary, type OpsSummary } from '../lib/spaces/api';
 import Donut from '../components/spaces/Donut';
 import { useTheme } from '../lib/theme';
 import { AuroraBackground } from '../components/ui';
+import LoadError from '../components/spaces/LoadError';
 
 interface Tile {
   key: string;
@@ -106,6 +107,8 @@ export default function SpaceOverviewScreen() {
     params: {
       spaceId, name: params.name ?? '', groupType: params.groupType ?? '',
       perms: params.perms ?? '',
+      // Roster reads this (it also derives it from perms).
+      canManage: String(params.perms || '').split(',').includes('manage_roster') ? '1' : '0',
     },
   });
 
@@ -134,17 +137,14 @@ export default function SpaceOverviewScreen() {
       <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · Overview` : 'Overview', { id: spaceId, name: params.name })} />
 
       {error && (
-        <View style={[s.card, { borderColor: colors.danger, borderWidth: 1 }]}>
-          <Text style={s.cardTitle}>Not available</Text>
-          <Text style={s.muted}>{error}</Text>
-        </View>
+        <LoadError colors={colors} title="Not available" message={error} onRetry={() => { setRefreshing(true); void load(); }} />
       )}
 
       {sum && (
         <>
           {/* An open emergency outranks every number on the screen. */}
           {sum.open.sos > 0 && (
-            <TouchableOpacity style={s.sos} onPress={() => go('/space-incidents')}>
+            <TouchableOpacity accessibilityRole="button" style={s.sos} onPress={() => go('/space-incidents')}>
               <Ionicons name="warning" size={20} color="#fff" />
               <Text style={s.sosText}>
                 {sum.open.sos === 1 ? 'An emergency alert is open' : `${sum.open.sos} emergency alerts are open`}
@@ -228,7 +228,7 @@ export default function SpaceOverviewScreen() {
                       <Legend c={colors} color={BIZ_GRAY} label="No check-in" value={noCheckIn} />
                     </View>
                   </View>
-                  <TouchableOpacity style={s.viewRow} onPress={() => go('/space-people')}>
+                  <TouchableOpacity accessibilityRole="button" style={s.viewRow} onPress={() => go('/space-people')}>
                     <Text style={s.link}>View All Employees</Text>
                     <Ionicons name="arrow-forward" size={14} color={colors.primary} />
                   </TouchableOpacity>
@@ -245,7 +245,7 @@ export default function SpaceOverviewScreen() {
                     <View style={[s.barFill, { width: `${Math.min(100, attendancePct)}%` }]} />
                   </View>
                   <Text style={s.muted}>{attendancePct}%</Text>
-                  <TouchableOpacity style={s.viewRow} onPress={() => go('/space-checkin')}>
+                  <TouchableOpacity accessibilityRole="button" style={s.viewRow} onPress={() => go('/space-checkin')}>
                     <Text style={s.link}>View Attendance</Text>
                     <Ionicons name="arrow-forward" size={14} color={colors.primary} />
                   </TouchableOpacity>
@@ -277,7 +277,7 @@ export default function SpaceOverviewScreen() {
                         <Legend c={colors} color={colors.success} label="Done today" value={sum.tasks.doneToday} />
                       </View>
                     </View>
-                    <TouchableOpacity style={s.viewRow} onPress={() => go('/space-tasks')}>
+                    <TouchableOpacity accessibilityRole="button" style={s.viewRow} onPress={() => go('/space-tasks')}>
                       <Text style={s.link}>View Tasks</Text>
                       <Ionicons name="arrow-forward" size={14} color={colors.primary} />
                     </TouchableOpacity>
@@ -294,7 +294,7 @@ export default function SpaceOverviewScreen() {
                       <Text style={s.bigValue}>{sum.open.tasks}</Text>
                       <Text style={[s.muted, { marginBottom: 6 }]}>open</Text>
                     </View>
-                    <TouchableOpacity style={s.viewRow} onPress={() => go('/space-tasks')}>
+                    <TouchableOpacity accessibilityRole="button" style={s.viewRow} onPress={() => go('/space-tasks')}>
                       <Text style={s.link}>View Tasks</Text>
                       <Ionicons name="arrow-forward" size={14} color={colors.primary} />
                     </TouchableOpacity>
@@ -312,7 +312,7 @@ export default function SpaceOverviewScreen() {
                       <Chip c={colors} tint={colors.success} value={sum.leaveMonth.approved} label="Approved" />
                       <Chip c={colors} tint={colors.danger} value={sum.leaveMonth.declined} label="Declined" />
                     </View>
-                    <TouchableOpacity style={s.viewRow} onPress={() => go('/space-leave')}>
+                    <TouchableOpacity accessibilityRole="button" style={s.viewRow} onPress={() => go('/space-leave')}>
                       <Text style={s.link}>View Leave</Text>
                       <Ionicons name="arrow-forward" size={14} color={colors.primary} />
                     </TouchableOpacity>
@@ -327,12 +327,12 @@ export default function SpaceOverviewScreen() {
             <View style={s.card}>
               <View style={s.rowBetween}>
                 <Text style={s.cardTitle}>{isSchool ? 'Live Buses' : 'Live Runs'}</Text>
-                <TouchableOpacity onPress={() => go('/space-ops-map')}>
+                <TouchableOpacity accessibilityRole="button" onPress={() => go('/space-ops-map')}>
                   <Text style={s.link}>Map</Text>
                 </TouchableOpacity>
               </View>
               {sum.runs.map((r) => (
-                <TouchableOpacity
+                <TouchableOpacity accessibilityRole="button"
                   key={r.id}
                   style={s.runRow}
                   onPress={() => router.push({ pathname: '/space-run' as any, params: { spaceId, runId: r.id, groupType: params.groupType ?? '' } })}
@@ -368,7 +368,7 @@ export default function SpaceOverviewScreen() {
                     <Ionicons name="location" size={18} color={BIZ_TEAL} />
                     <Text style={s.cardTitle}>Live Locations</Text>
                   </View>
-                  <TouchableOpacity onPress={() => go('/space-ops-map')}>
+                  <TouchableOpacity accessibilityRole="button" onPress={() => go('/space-ops-map')}>
                     <Text style={s.link}>View Full Map</Text>
                   </TouchableOpacity>
                 </View>
@@ -404,7 +404,7 @@ export default function SpaceOverviewScreen() {
               ['Visitors', 'qr-code-outline', '/space-visitors'],
               ['Settings', 'settings-outline', '/space-admin'],
             ] as const)).map(([label, icon, path]) => (
-              <TouchableOpacity key={label} style={s.linkRow} onPress={() => go(path)}>
+              <TouchableOpacity accessibilityRole="button" key={label} style={s.linkRow} onPress={() => go(path)}>
                 <Ionicons name={icon} size={18} color={colors.primary} />
                 <Text style={s.linkRowText}>{label}</Text>
                 <Ionicons name="chevron-forward" size={16} color={colors.textDim} />
@@ -466,7 +466,7 @@ function Action({ c, icon, tint, label, onPress }: {
 }) {
   const s = styles(c);
   return (
-    <TouchableOpacity style={[s.action, { backgroundColor: tint + '1C', borderColor: tint + '40' }]} onPress={onPress}>
+    <TouchableOpacity accessibilityRole="button" style={[s.action, { backgroundColor: tint + '1C', borderColor: tint + '40' }]} onPress={onPress}>
       <Ionicons name={icon} size={20} color={tint} />
       <Text style={s.actionLabel}>{label}</Text>
     </TouchableOpacity>

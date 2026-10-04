@@ -85,14 +85,42 @@ export function nextStop(stops: RunStop[], riders: RunRider[]): RunStop | null {
   // Riders with no stop assigned still have to be dealt with; put them at the
   // first stop rather than stranding them off the end of the list where the
   // driver never sees them.
-  if (riders.some((r) => !r.stopId && isPending(r))) return ordered[0] ?? null;
+  if (riders.some((r) => isUnassigned(r, stops) && isPending(r))) return ordered[0] ?? null;
   return null;
+}
+
+/** No stop, or a stop id this run no longer has — either way, no stop to wait at. */
+function isUnassigned(r: RunRider, stops: RunStop[]): boolean {
+  return !r.stopId || !stops.some((s) => s.id === r.stopId);
+}
+
+/**
+ * What the driver's screen shows: the stop being worked and EVERY rider the
+ * driver can mark there. Null when nothing is left to mark.
+ *
+ * nextStop() sends unassigned riders to the first stop, so the first stop's
+ * list must include them — filtering on stopId alone left them unmarkable. A
+ * run with no stops at all is one list of everybody (stop: null).
+ */
+export function driverView(
+  stops: RunStop[], riders: RunRider[],
+): { stop: RunStop | null; riders: RunRider[] } | null {
+  if (!riders.some(isPending)) return null;
+  if (stops.length === 0) return { stop: null, riders: sortManifest(riders) };
+  const stop = nextStop(stops, riders);
+  if (!stop) return null;
+  const first = [...stops].sort((a, b) => a.seq - b.seq)[0];
+  const here = riders.filter((r) => r.stopId === stop.id || (stop.id === first.id && isUnassigned(r, stops)));
+  return { stop, riders: sortManifest(here) };
 }
 
 /** Riders expected at one stop, settled ones last, then by name. */
 export function ridersAtStop(riders: RunRider[], stopId: string | null): RunRider[] {
-  const at = riders.filter((r) => (r.stopId ?? null) === (stopId ?? null));
-  return at.sort((a, b) => {
+  return sortManifest(riders.filter((r) => (r.stopId ?? null) === (stopId ?? null)));
+}
+
+function sortManifest(riders: RunRider[]): RunRider[] {
+  return [...riders].sort((a, b) => {
     if (isPending(a) !== isPending(b)) return isPending(a) ? -1 : 1;
     return a.displayName.localeCompare(b.displayName);
   });

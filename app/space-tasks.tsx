@@ -29,6 +29,23 @@ import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import { getWorkTasks, createWorkTask, setWorkTaskDone, type WorkTask } from '../lib/spaces/api';
 import { AuroraBackground } from '../components/ui';
 import { KeyboardSafe } from '../components/ui/KeyboardSafe';
+import { circleMembers } from '../lib/family/circle';
+import type { CircleMember } from '../lib/family/types';
+
+/** Due choices, as whole local days from today. The due instant is the END of
+ *  that local day, so "Today" is not overdue until tonight. */
+const DUE: { days: number | null; label: string }[] = [
+  { days: null, label: 'No due date' },
+  { days: 0, label: 'Today' },
+  { days: 1, label: 'Tomorrow' },
+  { days: 7, label: 'In a week' },
+];
+function dueAtFor(days: number, nowMs = Date.now()): string {
+  const d = new Date(nowMs);
+  d.setDate(d.getDate() + days);
+  d.setHours(23, 59, 0, 0);
+  return d.toISOString();
+}
 
 
 const PRIORITIES: { key: 'low' | 'medium' | 'high'; label: string }[] = [
@@ -70,6 +87,9 @@ export default function SpaceTasksScreen() {
   const [compose, setCompose] = useState(false);
   const [title, setTitle] = useState('');
   const [priority, setPriority] = useState<'low' | 'medium' | 'high'>('medium');
+  const [assignee, setAssignee] = useState<string | null>(null);
+  const [dueDays, setDueDays] = useState<number | null>(null);
+  const [members, setMembers] = useState<CircleMember[]>([]);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
@@ -113,8 +133,12 @@ export default function SpaceTasksScreen() {
     if (!t) return;
     setSaving(true);
     try {
-      await createWorkTask(spaceId, { title: t, priority });
-      setTitle(''); setPriority('medium'); setCompose(false);
+      await createWorkTask(spaceId, {
+        title: t, priority,
+        ...(assignee ? { assigneeId: assignee } : {}),
+        ...(dueDays != null ? { dueAt: dueAtFor(dueDays) } : {}),
+      });
+      setTitle(''); setPriority('medium'); setAssignee(null); setDueDays(null); setCompose(false);
       await load();
     } catch (e: any) {
       Alert.alert('Could not create the task', e?.message ?? 'Please try again.');
@@ -139,7 +163,12 @@ export default function SpaceTasksScreen() {
   const row = (t: WorkTask) => {
     const due = dueWords(t.dueAt);
     return (
-      <TouchableOpacity key={t.id} style={s.row} onPress={() => toggle(t)} disabled={busy === t.id}>
+      <TouchableOpacity
+        key={t.id} style={s.row} onPress={() => toggle(t)} disabled={busy === t.id}
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: !!t.doneAt, disabled: busy === t.id }}
+        accessibilityLabel={`${t.title}, ${t.assigneeName || 'Unassigned'}${due.text ? `, ${due.text}` : ''}`}
+      >
         <Ionicons
           name={t.doneAt ? 'checkmark-circle' : 'ellipse-outline'}
           size={24}
@@ -229,7 +258,14 @@ export default function SpaceTasksScreen() {
       </ScrollView>
 
       {canAssign && (
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="New task" style={[s.fab, { backgroundColor: colors.brandOnLight }]} onPress={() => setCompose(true)}>
+        <TouchableOpacity
+          accessibilityRole="button" accessibilityLabel="New task" style={[s.fab, { backgroundColor: colors.brandOnLight }]}
+          onPress={() => {
+            setCompose(true);
+            // Assignable people; without the list a task is created unassigned, as before.
+            circleMembers(spaceId).then(setMembers).catch(() => {});
+          }}
+        >
           <Ionicons name="add" size={26} color="#fff" />
         </TouchableOpacity>
       )}
@@ -253,19 +289,50 @@ export default function SpaceTasksScreen() {
                 <TouchableOpacity
                   key={p.key}
                   onPress={() => setPriority(p.key)}
+                  accessibilityRole="radio" accessibilityState={{ checked: priority === p.key }}
+                  accessibilityLabel={`${p.label} priority`}
                   style={[s.prio, priority === p.key && { backgroundColor: colors.brandOnLight }]}
                 >
                   <Text style={[s.prioText, priority === p.key && { color: '#fff' }]}>{p.label}</Text>
                 </TouchableOpacity>
               ))}
             </View>
+            <View style={s.prioRow}>
+              {DUE.map((d) => (
+                <TouchableOpacity
+                  key={String(d.days)}
+                  onPress={() => setDueDays(d.days)}
+                  accessibilityRole="radio" accessibilityState={{ checked: dueDays === d.days }}
+                  accessibilityLabel={`Due: ${d.label}`}
+                  style={[s.prio, dueDays === d.days && { backgroundColor: colors.brandOnLight }]}
+                >
+                  <Text style={[s.prioText, dueDays === d.days && { color: '#fff' }]}>{d.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            {members.length > 0 && (
+              <ScrollView style={{ maxHeight: 132 }} contentContainerStyle={[s.prioRow, { flexWrap: 'wrap' }]}>
+                {[{ id: null as string | null, name: 'Unassigned' }, ...members.map((m) => ({ id: m.id as string | null, name: m.name }))].map((m) => (
+                  <TouchableOpacity
+                    key={m.id ?? 'none'}
+                    onPress={() => setAssignee(m.id)}
+                    accessibilityRole="radio" accessibilityState={{ checked: assignee === m.id }}
+                    accessibilityLabel={`Assign to ${m.name}`}
+                    style={[s.prio, { flex: 0, paddingHorizontal: 12 }, assignee === m.id && { backgroundColor: colors.brandOnLight }]}
+                  >
+                    <Text numberOfLines={1} style={[s.prioText, assignee === m.id && { color: '#fff' }]}>{m.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
             <View style={{ flexDirection: 'row', gap: 8 }}>
-              <TouchableOpacity onPress={() => setCompose(false)} style={[s.btn, s.btnGhost, { flex: 1 }]}>
+              <TouchableOpacity onPress={() => setCompose(false)} style={[s.btn, s.btnGhost, { flex: 1 }]} accessibilityRole="button">
                 <Text style={[s.btnText, { color: colors.text }]}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={submit}
                 disabled={!title.trim() || saving}
+                accessibilityRole="button" accessibilityLabel="Create task"
                 style={[s.btn, { backgroundColor: colors.brandOnLight, flex: 1, opacity: !title.trim() || saving ? 0.5 : 1 }]}
               >
                 <Text style={s.btnText}>{saving ? 'Creating…' : 'Create'}</Text>

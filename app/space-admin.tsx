@@ -24,13 +24,19 @@ import { AuroraBackground } from '../components/ui/AuroraBackground';
 import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator,
+  View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { SpacePalette as Palette } from '../lib/spaces/theme';
-import { getRuns, getRun, getRoster, getIncidents, type Incident } from '../lib/spaces/api';
+import {
+  getRuns, getRun, getRoster, getIncidents, getLinks,
+  type Incident, type RosterEntry, type SpaceLink,
+} from '../lib/spaces/api';
+import LoadError from '../components/spaces/LoadError';
+import ShiftSheet from '../components/spaces/ShiftSheet';
+import SpaceLinksSheet from '../components/spaces/SpaceLinksSheet';
 import { tilesForType, type RunSet } from '../lib/spaces/dashboard';
 import type { Run } from '../lib/spaces/runs';
 
@@ -39,9 +45,11 @@ interface Entry {
   label: string;
   hint: string;
   icon: keyof typeof Ionicons.glyphMap;
-  route: string;
+  /** A screen to open, or a setup sheet drawn on top of this console. */
+  route?: string;
+  sheet?: 'shift' | 'links';
   /** Permission the caller needs. Presentation only — the server re-checks. */
-  needs?: 'manage_runs' | 'manage_roster' | 'view_space_ops';
+  needs?: 'manage_runs' | 'manage_roster' | 'view_space_ops' | 'edit_settings';
 }
 
 const ENTRIES: Entry[] = [
@@ -51,6 +59,8 @@ const ENTRIES: Entry[] = [
   { key: 'pending', label: 'Pending pickups', hint: 'Who is still waiting, oldest first', icon: 'hourglass-outline', route: '/space-pending' },
   { key: 'people', label: 'People', hint: 'Who is in, on leave, or unaccounted', icon: 'id-card-outline', route: '/space-people', needs: 'view_space_ops' },
   { key: 'roster', label: 'Roster & links', hint: 'People, and who is responsible for whom', icon: 'people-outline', route: '/space-roster', needs: 'manage_roster' },
+  { key: 'links', label: 'Links', hint: 'Who is guardian of, supervises or teaches whom', icon: 'git-network-outline', sheet: 'links', needs: 'manage_roster' },
+  { key: 'shift', label: 'Shift and lateness', hint: 'When the day starts, and when a run counts as late', icon: 'time-outline', sheet: 'shift', needs: 'edit_settings' },
   { key: 'checkin', label: 'Check in & leave', hint: 'Declared arrivals, and time off', icon: 'log-in-outline', route: '/space-checkin' },
   { key: 'attendance', label: 'Attendance from location', hint: 'Worked out on this device', icon: 'calendar-number-outline', route: '/space-attendance', needs: 'view_space_ops' },
   { key: 'incidents', label: 'Incidents', hint: 'Breakdowns, emergencies, road problems', icon: 'alert-circle-outline', route: '/space-incidents', needs: 'view_space_ops' },
@@ -81,17 +91,27 @@ export default function SpaceAdminScreen() {
   const [manifests, setManifests] = useState<Record<string, RunSet['riders']>>({});
   const [rosterCount, setRosterCount] = useState<number | null>(null);
   const [openIncidents, setOpenIncidents] = useState<Incident[]>([]);
+  const [roster, setRoster] = useState<RosterEntry[]>([]);
+  const [links, setLinks] = useState<SpaceLink[]>([]);
+  const [sheet, setSheet] = useState<'shift' | 'links' | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const [rs, roster, incidents] = await Promise.all([
-        getRuns(spaceId, true).catch(() => [] as Run[]),
-        getRoster(spaceId).catch(() => ({ roster: [], truncated: false, scoped: true })),
-        getIncidents(spaceId).catch(() => [] as Incident[]),
+      // Each part still fails on its own, but a failure is SAID rather than
+      // drawn as "Nothing running yet" or a missing SOS banner.
+      const failed: string[] = [];
+      const [rs, ros, incidents] = await Promise.all([
+        getRuns(spaceId, true).catch(() => { failed.push('runs'); return [] as Run[]; }),
+        getRoster(spaceId).catch(() => { failed.push('roster'); return null; }),
+        getIncidents(spaceId).catch(() => { failed.push('incidents'); return [] as Incident[]; }),
       ]);
+      setLoadError(failed.length ? `Could not load ${failed.join(', ')}.` : null);
       setRuns(rs);
-      setRosterCount(roster.roster.length);
+      setRosterCount(ros ? ros.roster.length : null);
+      setRoster(ros?.roster ?? []);
       setOpenIncidents(incidents.filter((i) => i.status !== 'resolved'));
       const entries = await Promise.all(rs.map(async (r) => {
         try { return [r.id, (await getRun(spaceId, r.id)).riders] as const; }
@@ -100,8 +120,18 @@ export default function SpaceAdminScreen() {
       setManifests(Object.fromEntries(entries));
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [spaceId]);
+
+  const loadLinks = useCallback(async () => {
+    try { setLinks(await getLinks(spaceId)); }
+    catch (e: any) { setLinks([]); setLoadError(e?.message ?? 'Could not load links.'); }
+  }, [spaceId]);
+  const openSheet = useCallback((which: 'shift' | 'links') => {
+    if (which === 'links') void loadLinks();
+    setSheet(which);
+  }, [loadLinks]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -118,7 +148,10 @@ export default function SpaceAdminScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
       <AuroraBackground variant="profile" />
-    <ScrollView style={s.screen} contentContainerStyle={s.body}>
+    <ScrollView
+      style={s.screen} contentContainerStyle={s.body}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} tintColor={colors.primary} />}
+    >
       <Stack.Screen options={spaceHeader(colors, `${spaceName} · Admin`, { id: spaceId, name: params.name })} />
 
       {/* The scope statement. An administrator should be able to SEE the limit
@@ -143,13 +176,19 @@ export default function SpaceAdminScreen() {
       {openIncidents.some((i) => i.category === 'sos') && (
         <TouchableOpacity
           style={s.sos}
-          onPress={() => router.push({ pathname: '/space-incidents' as any, params: { spaceId, name: spaceName, groupType: params.groupType ?? '' } })}
+          onPress={() => router.push({ pathname: '/space-incidents' as any, params: { spaceId, name: spaceName, groupType: params.groupType ?? '', perms: params.perms ?? '' } })}
+          accessibilityRole="button"
+          accessibilityLabel="An emergency alert is open. Open incidents"
         >
           <Ionicons name="warning" size={20} color="#fff" />
           <Text style={s.sosText}>
             An emergency alert is open. Tap to see it.
           </Text>
         </TouchableOpacity>
+      )}
+
+      {loadError && !loading && (
+        <LoadError colors={colors} message={loadError} onRetry={() => { setLoading(true); void load(); }} />
       )}
 
       {loading ? (
@@ -167,7 +206,7 @@ export default function SpaceAdminScreen() {
             </View>
           )}
 
-          {tiles.length === 0 && (
+          {tiles.length === 0 && !loadError && (
             <View style={s.card}>
               <Text style={s.cardTitle}>Nothing running yet</Text>
               <Text style={s.muted}>
@@ -191,7 +230,9 @@ export default function SpaceAdminScreen() {
           <TouchableOpacity
             key={e.key}
             style={s.row}
-            onPress={() => router.push({
+            accessibilityRole="button"
+            accessibilityLabel={`${e.label}${badge != null ? `, ${badge}` : ''}. ${e.hint}`}
+            onPress={() => e.sheet ? openSheet(e.sheet) : router.push({
               pathname: e.route as any,
               params: {
                 spaceId, name: spaceName,
@@ -229,6 +270,11 @@ export default function SpaceAdminScreen() {
         does, and the server holds no copy of them.
       </Text>
     </ScrollView>
+      <ShiftSheet visible={sheet === 'shift'} onClose={() => setSheet(null)} colors={colors} spaceId={spaceId} />
+      <SpaceLinksSheet
+        visible={sheet === 'links'} onClose={() => setSheet(null)} colors={colors}
+        spaceId={spaceId} roster={roster} links={links} onChanged={loadLinks}
+      />
     </View>
   );
 }

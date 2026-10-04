@@ -22,7 +22,7 @@
 import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Alert,
+  View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Alert, RefreshControl,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -38,6 +38,13 @@ import {
   type Run, type RunStop, type RunRider, type RunEvent, type RiderState, type ReplayEntry,
 } from '../lib/spaces/runs';
 import { AuroraBackground } from '../components/ui';
+import LoadError from '../components/spaces/LoadError';
+
+/** How often rider and stop states are re-read while a started run is open.
+ *  The vehicle's position arrives live on the socket; boarded/dropped marks
+ *  and stop arrivals do not, so without this a waiting parent never saw
+ *  "On board" until they left the screen and came back. */
+const REFRESH_MS = 30_000;
 
 /**
  * Drive time per stop, used only when no live position has arrived yet.
@@ -60,7 +67,7 @@ const FALLBACK_SECONDS_PER_STOP = 180;
 const ASSUMED_SPEED_MPS = 7;
 
 export default function SpaceRunScreen() {
-  const params = useLocalSearchParams<{ spaceId?: string; runId?: string; groupType?: string }>();
+  const params = useLocalSearchParams<{ spaceId?: string; runId?: string; groupType?: string; name?: string }>();
   const colors = useSpaceColors(params.groupType);
   const spaceId = String(params.spaceId || '');
   const runId = String(params.runId || '');
@@ -75,6 +82,8 @@ export default function SpaceRunScreen() {
   const [riders, setRiders] = useState<RunRider[]>([]);
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   // The vehicle's latest sealed position, and the trail this device has actually
   // received. The trail is what makes a path drawable — there is no server-side
@@ -91,14 +100,24 @@ export default function SpaceRunScreen() {
       setStops(data.stops || []);
       setRiders(data.riders || []);
       setDelayThresholdMin(data.delayThresholdMinutes);
+      setLoadError(null);
     } catch (e: any) {
-      Alert.alert('Could not load the run', e?.message ?? 'Try again.');
+      setLoadError(e?.message ?? 'Could not load the run.');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [spaceId, runId]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  // Re-read while the run is out. Each answer re-renders the rider cards, which
+  // also moves their arrival window on (it is computed from "now" at render).
+  useFocusEffect(useCallback(() => {
+    if (run?.status !== 'started') return;
+    const timer = setInterval(() => { void load(); }, REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [run?.status, load]));
 
   // Watch the vehicle (S2.8). The subscription is a REQUEST: the server admits
   // this socket to the run's room only if this user may see the run. So "no
@@ -161,9 +180,12 @@ export default function SpaceRunScreen() {
   }
   if (!run) {
     return (
-      <View style={[s.screen, s.centre]}>
+      <View style={[s.screen, s.centre, { padding: 16 }]}>
+        <AuroraBackground />
         <Stack.Screen options={spaceHeader(colors, 'Run')} />
-        <Text style={s.muted}>This run is not available.</Text>
+        {loadError
+          ? <LoadError colors={colors} title="Could not load the run" message={loadError} onRetry={() => { setLoading(true); void load(); }} />
+          : <Text style={s.muted}>This run is not available.</Text>}
       </View>
     );
   }
@@ -171,8 +193,17 @@ export default function SpaceRunScreen() {
   const active = run.status === 'started';
 
   return (
-    <ScrollView style={s.screen} contentContainerStyle={s.body}>
-      <Stack.Screen options={spaceHeader(colors, run.name)} />
+    <ScrollView
+      style={s.screen}
+      contentContainerStyle={s.body}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} tintColor={colors.primary} />}
+    >
+      <Stack.Screen options={spaceHeader(colors, run.name, { id: spaceId, name: params.name })} />
+
+      {/* A failed refresh keeps the last answer on screen, and says it may be old. */}
+      {loadError && (
+        <LoadError colors={colors} title="Could not refresh" message={loadError} onRetry={() => { void load(); }} />
+      )}
 
       {/* the answer to the only question that matters, first */}
       {riders.map((r) => (
@@ -259,7 +290,11 @@ export default function SpaceRunScreen() {
       </View>
 
       {/* history */}
-      <TouchableOpacity style={s.card} onPress={openHistory} disabled={showHistory}>
+      <TouchableOpacity
+        style={s.card} onPress={openHistory} disabled={showHistory}
+        accessibilityRole="button" accessibilityState={{ expanded: showHistory }}
+        accessibilityLabel="What happened on this run"
+      >
         <View style={s.row}>
           <Ionicons name="time-outline" size={18} color={colors.text} />
           <Text style={s.cardTitle}>What happened</Text>
@@ -346,7 +381,7 @@ function RiderCard({ rider, run, stops, reachedStopId, vehicle, colors, delayThr
           </Text>
           {late && (
             <View style={s.warn}>
-              <Ionicons name="alert-circle-outline" size={16} color="#F59E0B" />
+              <Ionicons name="alert-circle-outline" size={16} color={colors.warning} />
               <Text style={s.warnText}>Running behind the scheduled time.</Text>
             </View>
           )}
@@ -424,7 +459,7 @@ const styles = (c: Palette) => StyleSheet.create({
   timeCell: { color: c.textDim, width: 54, fontVariant: ['tabular-nums'] },
   warn: {
     flexDirection: 'row', gap: 8, alignItems: 'flex-start',
-    backgroundColor: '#F59E0B18', borderRadius: 10, padding: 10, marginTop: 4,
+    backgroundColor: c.warning + '18', borderRadius: 10, padding: 10, marginTop: 4,
   },
   warnText: { color: c.text, flex: 1, fontSize: 13 },
   footnote: { color: c.textFaint, fontSize: 12, marginTop: 8, lineHeight: 17 },

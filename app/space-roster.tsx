@@ -16,7 +16,7 @@ import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Alert,
-  TextInput, Modal,
+  TextInput, Modal, RefreshControl,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,20 +28,28 @@ import {
 } from '../lib/spaces/api';
 import { AuroraBackground } from '../components/ui';
 import { KeyboardSafe } from '../components/ui/KeyboardSafe';
+import LoadError from '../components/spaces/LoadError';
+import SpaceLinksSheet from '../components/spaces/SpaceLinksSheet';
 
 export default function SpaceRosterScreen() {
-  const params = useLocalSearchParams<{ spaceId?: string; name?: string; canManage?: string; groupType?: string }>();
+  const params = useLocalSearchParams<{ spaceId?: string; name?: string; canManage?: string; groupType?: string; perms?: string }>();
   const colors = useSpaceColors(params.groupType);
   const spaceId = String(params.spaceId || '');
   // Presentation only. Every write below is re-checked server-side against
   // manage_roster; this just decides whether to draw the button.
-  const canManage = String(params.canManage || '') === '1';
+  // Section tiles and the overview pass `perms` rather than `canManage`, so
+  // read either: opening the roster from a tile used to drop the controls.
+  const canManage = String(params.canManage || '') === '1'
+    || String(params.perms || '').split(',').includes('manage_roster');
 
   const [roster, setRoster] = useState<RosterEntry[]>([]);
   const [links, setLinks] = useState<SpaceLink[]>([]);
   const [truncated, setTruncated] = useState(false);
   const [scoped, setScoped] = useState(true);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [linksOpen, setLinksOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -58,10 +66,12 @@ export default function SpaceRosterScreen() {
       setTruncated(!!r.truncated);
       setScoped(!!r.scoped);
       setLinks(l || []);
+      setLoadError(null);
     } catch (e: any) {
-      Alert.alert('Could not load the roster', e?.message ?? 'Try again.');
+      setLoadError(e?.message ?? 'Could not load the roster.');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [spaceId]);
 
@@ -135,7 +145,26 @@ export default function SpaceRosterScreen() {
         }}
       />
 
-      <ScrollView contentContainerStyle={s.body}>
+      <ScrollView
+        contentContainerStyle={s.body}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} tintColor={colors.primary} />}
+      >
+        {loadError && (
+          <LoadError colors={colors} title="Could not load the roster" message={loadError} onRetry={() => { setLoading(true); void load(); }} />
+        )}
+        {canManage && !loadError && (
+          <TouchableOpacity
+            style={[s.card, s.row]} onPress={() => setLinksOpen(true)}
+            accessibilityRole="button" accessibilityLabel="Manage links: who is guardian of, supervises or teaches whom"
+          >
+            <Ionicons name="git-network-outline" size={18} color={colors.primary} />
+            <View style={{ flex: 1 }}>
+              <Text style={s.name}>Links</Text>
+              <Text style={s.muted}>Who is guardian of, supervises or teaches whom. This decides what each person can see.</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
+          </TouchableOpacity>
+        )}
         {truncated && (
           <View style={s.warn}>
             <Ionicons name="git-branch-outline" size={16} color={colors.warning} />
@@ -146,7 +175,7 @@ export default function SpaceRosterScreen() {
           </View>
         )}
 
-        {roster.length === 0 && (
+        {!loadError && roster.length === 0 && (
           <View style={s.card}>
             <Text style={s.muted}>
               {scoped
@@ -227,6 +256,10 @@ export default function SpaceRosterScreen() {
         </View>
         </KeyboardSafe>
       </Modal>
+      <SpaceLinksSheet
+        visible={linksOpen} onClose={() => setLinksOpen(false)} colors={colors}
+        spaceId={spaceId} roster={roster} links={links} onChanged={load}
+      />
     </View>
   );
 }

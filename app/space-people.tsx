@@ -29,6 +29,7 @@ import {
 import type { RoleDef } from '../lib/groups/permissions';
 import PermissionMatrix from '../components/spaces/PermissionMatrix';
 import { AuroraBackground } from '../components/ui';
+import LoadError from '../components/spaces/LoadError';
 import { initialOf } from '../lib/format';
 
 const LABEL: Record<Person['status'], string> = {
@@ -63,11 +64,14 @@ export default function SpacePeopleScreen() {
   const [roleErr, setRoleErr] = useState<string | null>(null);
   const [catalogErr, setCatalogErr] = useState<string | null>(null);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     try {
       setPeople(await getPeople(spaceId));
+      setLoadError(null);
     } catch (e: any) {
-      Alert.alert('Could not load people', e?.message ?? 'Try again.');
+      setLoadError(e?.message ?? 'Could not load people.');
     } finally {
       setLoading(false); setRefreshing(false);
     }
@@ -183,7 +187,12 @@ export default function SpacePeopleScreen() {
         contentContainerStyle={s.body}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
       >
-        {filtered.length === 0 && <Text style={s.muted}>Nobody matches.</Text>}
+        {loadError && (
+          <LoadError colors={colors} title="Could not load people" message={loadError} onRetry={() => { setLoading(true); void load(); }} />
+        )}
+        {!loadError && filtered.length === 0 && (
+          <Text style={s.muted}>{q.trim() ? 'Nobody matches.' : 'Nobody is in this space yet.'}</Text>
+        )}
 
         {filtered.map((p) => {
           const canEdit = !!viewer && canChangeRole(viewer.role, viewer.id, p.role, p.userId)
@@ -194,6 +203,10 @@ export default function SpacePeopleScreen() {
             style={s.row}
             activeOpacity={canEdit ? 0.6 : 1}
             onPress={() => canEdit && openPicker(p)}
+            disabled={!canEdit}
+            accessibilityRole={canEdit ? 'button' : undefined}
+            accessibilityLabel={`${p.name || 'Member'}, ${labelFor(p)}, ${LABEL[p.status]}`}
+            accessibilityHint={canEdit ? 'Change role' : undefined}
           >
             <View style={[s.avatar, { backgroundColor: colors.primary + '22' }]}>
               <Text style={{ color: colors.primary, fontWeight: '800' }}>
@@ -273,6 +286,9 @@ export default function SpacePeopleScreen() {
                 <TouchableOpacity
                   key={o.key}
                   onPress={() => { setChosen(o); setRoleErr(null); }}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: chosen?.key === o.key }}
+                  accessibilityLabel={o.label}
                   style={[s.roleCard, chosen?.key === o.key && { borderColor: colors.primary }]}
                 >
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>

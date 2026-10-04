@@ -8,8 +8,11 @@
 //
 // Device-local by construction. Alerts are DERIVED from things this device
 // already knows (its own geofence evaluation, already-decrypted pings, messages
-// already decrypted for the thread). Nothing here is uploaded, and the store
-// stays readable only on this device — same DEK as the message cache.
+// already decrypted for the thread). This store is never uploaded, and stays
+// readable only on this device — same DEK as the message cache. Alerts that
+// other members must see travel separately, as sealed famEvent messages in the
+// space's E2EE thread (see the envelope section below); receivers fold them in
+// via ingestFamEvent.
 //
 // A tiny external store (useSyncExternalStore, matching lib/nav/navSettings.ts)
 // so the tab badge and the alerts screen read one source of truth.
@@ -236,8 +239,11 @@ export function useUnreadCount(circleId: string | null): number {
 // they cannot drift.
 
 /** Envelope kinds — the events the owner moved out of chat. SOS is deliberately
- *  absent: a human emergency IS conversation and stays a visible message. */
-export type FamEventKind = 'enter' | 'leave' | 'overspeed';
+ *  absent: a human emergency IS conversation and stays a visible message.
+ *  deviation/longstop are a run vehicle's on-device detections (S5.4), sent
+ *  from the driver screen so ops see them, not just the driver's own phone. */
+export type FamEventKind = 'enter' | 'leave' | 'overspeed' | 'deviation' | 'longstop';
+const FAM_EVENT_KINDS: readonly FamEventKind[] = ['enter', 'leave', 'overspeed', 'deviation', 'longstop'];
 
 export interface FamEvent {
   v: 1;
@@ -272,7 +278,7 @@ export function parseFamEvent(content: unknown): FamEvent | null {
   try {
     const o = JSON.parse(content)?.famEvent;
     if (!o || o.v !== 1) return null;
-    if (o.kind !== 'enter' && o.kind !== 'leave' && o.kind !== 'overspeed') return null;
+    if (!FAM_EVENT_KINDS.includes(o.kind)) return null;
     if (typeof o.actorId !== 'string' || !o.actorId) return null;
     if (typeof o.text !== 'string' || !o.text) return null;
     return {
@@ -357,6 +363,14 @@ if (require.main === module) {
   ];
   for (const h of hostile) {
     if (parseFamEvent(h) !== null) throw new Error('hostile content parsed: ' + String(h).slice(0, 60));
+  }
+  // A run vehicle's detections ride the same envelope so ops receive them.
+  for (const kind of ['deviation', 'longstop'] as const) {
+    const ev = parseFamEvent(buildFamEvent({ kind, actorId: 'd1', actorName: 'Bus 01', text: 'Bus 01 left its route', at: 7 }));
+    if (!ev || ev.kind !== kind || SEVERITY_OF[ev.kind] !== 'important') throw new Error(`${kind} famEvent must round-trip`);
+  }
+  if (parseFamEvent('{"famEvent":{"v":1,"kind":"battery","actorId":"u","text":"x"}}') !== null) {
+    throw new Error('kinds outside the envelope list must not parse');
   }
   // Missing name falls back rather than failing — the alert still renders.
   const anon = parseFamEvent('{"famEvent":{"v":1,"kind":"leave","actorId":"u9","text":"left Work","at":9}}');
