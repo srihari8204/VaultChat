@@ -8,7 +8,9 @@ Levels, as elsewhere in this repo:
 - **device-verified**: proven on a physical phone, not inferred from a log.
 
 Per-item detail, with file:line evidence, lives in `2026-10-04_fix_status.md` and the
-updated ratings it links. No backend file is changed by this change.
+updated ratings it links. Rounds 1–2 changed no backend file. Round 3 wrote the server
+changes the app was blocked on (commit `3353236`, `vaultchat-backend-go` plus migrations
+140 and 141); they are **written, not deployed**.
 
 ## 0. Baseline
 
@@ -44,8 +46,9 @@ updated ratings it links. No backend file is changed by this change.
 - [x] 2.3 Chat-lock PIN moves to salted scrypt, upgrading on the next correct unlock, with
       persisted backoff. A locked chat sends no receipts and clears no notifications;
       in-chat search is gated by the lock; Chat lock entry points exist — **written**
-- [x] 2.4 backup-pin asks for the current PIN. Delete account checks the MPIN (client-side
-      only — server check **blocked: needs backend**). Scan device confirms before it can wipe
+- [x] 2.4 backup-pin asks for the current PIN. Delete account checks the MPIN on the phone and
+      sends it to the server; the server check is **written, not deployed** (round 3). Remove
+      the phone pre-check once it is deployed. Scan device confirms before it can wipe
       keys — **written**
 - [x] 2.5 No plaintext copies in AsyncStorage for bookmarks, scheduled messages, the ghost
       list and session IPs. Reminders honour tray privacy. Decrypted temp files are cleaned
@@ -67,14 +70,16 @@ updated ratings it links. No backend file is changed by this change.
 - [x] 3.2 Spaces runs: stops carry place and time, riders are assigned to stops, and drivers can
       mark unassigned riders. Driver alerts are sealed space alerts. The device agent rings
       and shows messages — **written**. Guardian calls, a shift read-back and in-place stop
-      updates are **blocked: needs backend**
+      updates are wired in the app and the server; the server side is **written, not deployed**,
+      and the app falls back against today's server
 - [x] 3.3 Chat: link previews are sent, failed edits roll back, the dead quick-react modal is
       removed, no Back in split view, search counts visible rows — **written**
 - [x] 3.4 Media: video seek, load errors, player remounts, image-editor output — **written**;
       **device-verified: no**
 - [x] 3.5 Shop Book: per-shop carts, honest Pro, verification upload, bill retry, product delete
-      confirm, shop currency — **written**. The "other" reject note and the admin returns
-      filter are **blocked: needs backend**
+      confirm, shop currency — **written**. The "other" reject note, the admin returns
+      filter and Request Pro are wired in the app and the server; the server side is
+      **written, not deployed** (migrations 140 and 141 first)
 - [x] 3.6 Finance: iOS date picker, chitti numbering, snooze recurrence, honest PDFs, error
       states — **written**; iOS picker **device-verified: no**
 - [x] 3.7 Groups: communities keep their cache, shared permission check, author checks on
@@ -84,13 +89,39 @@ updated ratings it links. No backend file is changed by this change.
       state; units in lock history; live-sharing double tap — **written**
 - [x] 3.9 Calls and games: back declines an incoming call; the live host can end; call buttons
       expose state; join-by-code asks which game; confirmations; ringtone choice — **written**
+- [x] 3.10 Round 3: every remaining screen's "Still needed for 10/10" list, plus a per-file pass
+      for roles, labels and state, theme tokens, error states and confirmations, in 16
+      packages (launch and auth, tabs and links, chat, chat tools, groups, calls and live,
+      media, family, location and safety, spaces, finance, Shop Book and admin, settings and
+      vault, utilities and games) — **written**; items marked 📱 in `2026-10-04_fix_status.md`
+      **device-verified: no**
+- [x] 3.11 Round 3 security and data-loss items: background family-alert taps routed through the
+      lock; resume relock for Device-PIN users; Doc Scanner scans encrypted at rest without
+      losing a key on migration; hidden-chats attempt counter persisted; finance full backup
+      sealed with a password; Invisible Ink kept out of the reply bar, quotes, Memory banner and
+      search — **written**
+- [x] 3.12 Fixes for regressions the round-3 re-raters found (delete-account MPIN pre-check
+      restored, yearly finance reminders, status lock answer reveal, Location Lock save copy,
+      reminder list reset, battery-exemption "can't tell", Khata share reachability, one status
+      history row per transition, and others listed in the fix-status §3) — **written**, not
+      re-scored
 
 ## 4. Phase 3–4 — partially in scope
 
 - [x] 4.1 Errors with retry instead of false empty states, and confirmations, on every screen
       touched above — **written**
-- [ ] 4.2 App-wide accessibility ratchet over every touchable — deferred to `interaction-integrity`
-- [ ] 4.3 Split `app/chat.tsx` and `app/shop-book.tsx` — deferred
+- [ ] 4.2 App-wide accessibility ratchet over every touchable. `lib/uiDebtRatchet.selftest.ts`
+      exists and runs in `npm test`: for each `.tsx` under `app/` and `components/` it counts
+      touchables with no `accessibilityRole` and hex colour literals, and fails when a file's
+      count goes up against `lib/uiDebtRatchet.baseline.json` (now 37 and 954). It only stops
+      new debt; it does not require roles everywhere. The app-wide pass is not complete (37
+      unroled touchables remain, and the games boards have had no full screen-reader pass), so
+      this stays open for `interaction-integrity` — ratchet **written**
+- [x] 4.3 Split `app/chat.tsx` and `app/shop-book.tsx`. `app/chat.tsx` went from 4,674 to 2,500
+      lines, with the moved parts in `components/chat/` (header, search bar, banners, rows,
+      composer, modals, lock gate and six hooks). `app/shop-book.tsx` went from about 5,800 lines
+      to a 344-line shell plus 12 files in `components/shopbook/`. The round-3 re-raters found
+      no behaviour lost in either split — **written**
 - [ ] 4.4 Remove the legacy call bodies behind `CALL_ENGINE_V2` — deferred: `constants/flags.ts`
       keeps them as the rollback until the hardware test pass in `CALLS_README.md`
 - [x] 4.5 https intent filter for `vaultchat.app/add` and `/join` (`autoVerify: false`) — **written**;
@@ -98,10 +129,14 @@ updated ratings it links. No backend file is changed by this change.
 
 ## 5. Validation
 
-- [x] 5.1 `tsc` 0 errors; `expo lint` 0 errors / 158 warnings; `npm test` 386/390, where the four
-      failures are the environmental baseline; 35 new selftest suites — **written**
-- [x] 5.2 Independent re-rating of every changed screen, in two rounds (147, then 36 screens).
-      Regressions found in round 1 were fixed in round 2. Mean of the 174 remaining screens:
-      6.2 → 7.1; 132 up, 42 unchanged, 0 down. Results in `2026-10-04_fix_status.md` — **written**
+- [x] 5.1 At `a72296b`: `tsc` 0 errors; `expo lint` 0 errors / 55 warnings; `npm test` 413/417,
+      where the four failures are the environmental baseline (`lib/call/minimize`,
+      `lib/layoutMetrics`, `services/securityEmulatorFlag`, `utils/moneySeam`). After round 2 it
+      was 158 warnings and 386/390 — **written**
+- [x] 5.2 Independent re-rating, in three rounds: 147 screens, then 36, then all 174 remaining
+      screens in 13 batches. Mean of the 174 remaining screens: 6.2 → 7.1 after round 2 →
+      7.8 after round 3. Against the baseline: 173 up, 1 unchanged, 0 down; 98 screens at 8 or
+      above; none below 5. Fixes made after the round-3 re-rating are not re-scored. Results in
+      `2026-10-04_fix_status.md` — **written**
 - [ ] 5.3 Device pass on Android and iOS for the items marked above
 - [ ] 5.4 Ship in an app release; sync `screen-integrity` to `openspec/specs` only after 5.3

@@ -25,11 +25,11 @@ failures shown as empty lists. `2026-10-04_screen_remediation_plan.md` orders th
 
 ## Not building
 
-- No backend changes are deployed from this change. Fixes that need a server change are logged
-  as blocked in `2026-10-04_fix_status.md`.
-- No splitting of `app/chat.tsx` or `app/shop-book.tsx`, and no app-wide a11y ratchet over
-  every touchable (plan Phase 3 items 3–5); those stay with `interaction-integrity` and
-  `glass-screen-polish`.
+- No backend changes are deployed from this change. Round 3 wrote the server changes some
+  fixes needed (not deployed); the deploy order and the rest are in `2026-10-04_fix_status.md` §4.
+- No app-wide a11y requirement over every touchable (plan Phase 3); a per-file ratchet
+  (`lib/uiDebtRatchet`) only stops new debt. The full pass stays with `interaction-integrity`
+  and `glass-screen-polish`. (Round 3 did split `app/chat.tsx` and `app/shop-book.tsx`.)
 - No new dependencies.
 
 ## Capabilities
