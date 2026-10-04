@@ -22,7 +22,8 @@ import { SPACE_SHADOW } from '../constants/spaceTheme';
 import { getTrack, summarize, type TrackSample, timeAtPlace } from '../lib/family/history';
 import { useFamilyAlerts, loadAlerts, type FamilyAlert } from '../lib/family/alerts';
 import { getPlaces } from '../lib/family/store';
-import { getGroup, historyAccess } from '../lib/groups/store';
+import { historyAccess } from '../lib/groups/store';
+import { groupWithHistoryAccess } from '../lib/family/historyGate';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { type Geofence } from '../lib/family/geofence';
 import { createDirectChat } from '../lib/chatService';
@@ -34,22 +35,18 @@ import { getRelations, setRelation, RELATION_PRESETS } from '../lib/family/relat
 import { classifyDistance, zoneColor } from '../lib/lock/zoneMachine';
 import { fmtSpeed, gpsQuality, QUALITY_LABEL, QUALITY_COLOR } from '../lib/lock/format';
 import { initialOf } from '../lib/format';
+import { colorFor, ago } from '../lib/family/memberFormat';
+import { formatMetres as dist } from '../lib/family/distance';
 
 const REFRESH_MS = 15_000;
-const AVATAR_COLORS = ['#4A9FFF', '#EC4899', '#22C55E', '#F59E0B', '#A855F7', '#EF4444', '#14B8A6', '#F97316'];
-const colorFor = (id: string) => AVATAR_COLORS[[...id].reduce((a, c) => a + c.charCodeAt(0), 0) % AVATAR_COLORS.length];
+/** At most one /nav/trace map-matching upload per this much track time. The
+ *  screen polls every 15 s and each poll can add a sample; re-sending the whole
+ *  day's polyline on every one of them was a steady stream of the member's
+ *  track to the routing server for a number that barely moves. */
+const TRACE_EVERY_MS = 60_000;
 
 const startOfToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); };
 const clock = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-function ago(ts: number): string {
-  const s = Math.max(0, (Date.now() - ts) / 1000);
-  if (s < 45) return 'just now';
-  if (s < 3600) return `${Math.round(s / 60)}m ago`;
-  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
-  return `${Math.round(s / 86400)}d ago`;
-}
-const dist = (m: number) => (m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1)} km`);
 
 const ICON_FOR: Record<string, keyof typeof Ionicons.glyphMap> = {
   enter: 'enter-outline', leave: 'exit-outline', sos: 'alert-circle',
@@ -114,13 +111,18 @@ export default function FamilyMemberScreen() {
 
   /** The last pull threw — shown, and the 15 s poll keeps retrying. */
   const [pullFailed, setPullFailed] = useState(false);
+  /** A Retry tap is in flight — the button shows it and ignores repeats. */
+  const [retrying, setRetrying] = useState(false);
+  /** One identity lookup per screen, shared by the effect below and every
+   *  pull (each pull used to ask again). A failed lookup resolves to null. */
+  const meP = useRef<Promise<{ id: string | number } | null> | null>(null);
+  const getMe = () => (meP.current ??= getCurrentUserAsync().catch(() => null));
   /** undefined = not resolved yet; null = lookup failed. Resolved on its own,
    *  so a failed pull cannot bring Message/Call back onto your own row. */
   const [selfId, setSelfId] = useState<string | null | undefined>(undefined);
   useEffect(() => {
     let live = true;
-    getCurrentUserAsync().then((me) => { if (live) setSelfId(me ? String(me.id) : null); })
-      .catch(() => { if (live) setSelfId(null); });
+    getMe().then((me) => { if (live) setSelfId(me ? String(me.id) : null); });
     return () => { live = false; };
   }, []);
 
@@ -138,20 +140,22 @@ export default function FamilyMemberScreen() {
   const pullOnce = async () => {
     const [ps, g, me] = await Promise.all([
       getPlaces(circleId),
-      getGroup(circleId),
-      getCurrentUserAsync().catch(() => null),
+      // UNKNOWN IS ASKED, not assumed: a missing cached permission is resolved
+      // against the server first, and if that cannot be reached this throws —
+      // the screen then says "not loaded" rather than allowing or denying.
+      groupWithHistoryAccess(circleId),
+      getMe(),
     ]);
     // Untyped legacy groups keep their previous behaviour: any member could see
     // the circle's history, so do not start withholding it from them now.
     //
-    // UNKNOWN IS NOT DENIED (2026-09-17). `g.permissions` is a cache of server
-    // truth and it is absent until a getChat has landed — a migrated circle
-    // never had one, nor does a space you have not made active, nor does
-    // anything at all when you are offline. Reading that absence as an empty
-    // permission set denied every member of every such circle, its OWNER
-    // included, and the screen then reported the withheld track as facts about
-    // the person. historyAccess() keeps the three cases apart; only a cached
-    // answer that really lacks view_history withholds anything.
+    // UNKNOWN IS NOT DENIED (2026-09-17) — and no longer allowed either.
+    // `g.permissions` is a cache of server truth and it is absent until a
+    // getChat has landed — a migrated circle never had one, nor does a space
+    // you have not made active. Reading that absence as an empty set denied
+    // every member, its OWNER included; reading it as allowed loaded other
+    // people's tracks on a guess. groupWithHistoryAccess() asks the server
+    // when the cache is silent, so by here the answer is a real one.
     const allowed = historyAccess(g) !== 'denied';
     // Withhold the LOAD, not just the render (2026-09-17) — the same fix
     // family-history.tsx already carries. `mayViewHistory` only hid the History
@@ -221,8 +225,11 @@ export default function FamilyMemberScreen() {
    * would read as "went nowhere".
    */
   const [roadTravelledM, setRoadTravelledM] = useState<number | null>(null);
+  // Keyed on the track's start and the MINUTE of its newest sample, not on
+  // every sample: the figure re-matches at most once per TRACE_EVERY_MS of
+  // track (it may trail the newest fixes by that long).
   const trackKey = useMemo(
-    () => (today.length < 2 ? '' : `${today.length}:${today[0]?.ts}:${today[today.length - 1]?.ts}`),
+    () => (today.length < 2 ? '' : `${today[0]?.ts}:${Math.floor(today[today.length - 1].ts / TRACE_EVERY_MS)}`),
     [today]);
 
   useEffect(() => {
@@ -231,7 +238,7 @@ export default function FamilyMemberScreen() {
     (async () => {
       try {
         const { fetchTraceDistance } = require('../lib/nav/routing');
-        const r = await fetchTraceDistance(today.map((s2: any) => ({ lat: s2.lat, lng: s2.lng })));
+        const r = await fetchTraceDistance(today.map((s2: TrackSample) => ({ lat: s2.lat, lng: s2.lng })));
         if (!cancel) setRoadTravelledM(r?.distanceM ?? null);
       } catch {
         if (!cancel) setRoadTravelledM(null);
@@ -300,8 +307,8 @@ export default function FamilyMemberScreen() {
     try {
       const chat = await createDirectChat({ userId });
       router.push(target === 'chat'
-        ? { pathname: '/chat' as any, params: { id: chat.id } }
-        : { pathname: '/voicecall' as any, params: { chatId: chat.id, peerUid: userId, peerName: name } });
+        ? { pathname: '/chat', params: { id: chat.id } }
+        : { pathname: '/voicecall', params: { chatId: chat.id, peerUid: userId, peerName: name } });
     } catch (e: any) {
       Alert.alert(target === 'chat' ? 'Message' : 'Call', e?.message ?? 'Could not open a direct chat.');
     } finally { setOpening(false); }
@@ -346,7 +353,7 @@ export default function FamilyMemberScreen() {
       return;
     }
     router.push({
-      pathname: '/family-map' as any,
+      pathname: '/family-map',
       params: { circleId, circleName: params.circleName ?? '', followId: userId },
     });
   };
@@ -391,7 +398,7 @@ export default function FamilyMemberScreen() {
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <Text style={{ color: colors.text, fontSize: 17, fontWeight: '800' }} numberOfLines={1}>{name}</Text>
-              {isGuardian && <Ionicons name="star" size={13} color={colors.primary} />}
+              {isGuardian && <Ionicons name="star" size={13} color={colors.primary} accessible accessibilityLabel="Guardian" />}
             </View>
             <Text style={{ color: fresh ? G.goodText : colors.textDim, fontSize: 12.5, marginTop: 2 }}>
               {withheld ? 'Location not shared with you'
@@ -429,8 +436,15 @@ export default function FamilyMemberScreen() {
             <Text style={{ color: colors.textDim, fontSize: 12.5, flex: 1 }}>
               Couldn&apos;t load {name}&apos;s location and places. Check your connection.
             </Text>
-            <TouchableOpacity onPress={pull} accessibilityRole="button" accessibilityLabel={`Retry loading ${name}'s details`} hitSlop={10}>
-              <Text style={{ color: G.accentText, fontSize: 12.5, fontWeight: '800' }}>Retry</Text>
+            <TouchableOpacity
+              onPress={async () => { if (retrying) return; setRetrying(true); await pull(); setRetrying(false); }}
+              disabled={retrying}
+              accessibilityRole="button" accessibilityLabel={`Retry loading ${name}'s details`}
+              accessibilityState={{ busy: retrying, disabled: retrying }} hitSlop={10}
+            >
+              {retrying
+                ? <ActivityIndicator size="small" color={colors.primary} />
+                : <Text style={{ color: G.accentText, fontSize: 12.5, fontWeight: '800' }}>Retry</Text>}
             </TouchableOpacity>
           </View>
         )}
@@ -447,13 +461,15 @@ export default function FamilyMemberScreen() {
 
         {/* actions */}
         <View style={st.actions}>
-          {/* Not on your own row: these opened a "direct chat" with yourself. */}
-          {selfId !== undefined && userId !== selfId && action('chatbubble-ellipses', 'Message', () => openDirect('chat'))}
-          {selfId !== undefined && userId !== selfId && action('call', 'Call', () => openDirect('voicecall'))}
+          {/* Not on your own row: these opened a "direct chat" with yourself.
+              Shown only once WHO YOU ARE is known — a failed lookup (null)
+              cannot tell your row from anyone else's, so it hides them too. */}
+          {!!selfId && userId !== selfId && action('chatbubble-ellipses', 'Message', () => openDirect('chat'))}
+          {!!selfId && userId !== selfId && action('call', 'Call', () => openDirect('voicecall'))}
           {action('navigate-circle', 'Route', route)}
           {action('locate', 'Follow', follow)}
           {mayViewHistory && action('time', 'History', () => router.push({
-            pathname: '/family-history' as any,
+            pathname: '/family-history',
             params: { circleId, name, userId, circleName: params.circleName ?? '' },
           }))}
         </View>

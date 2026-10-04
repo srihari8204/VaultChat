@@ -8,6 +8,11 @@
 // READ-ONLY BY DESIGN: this screen never starts publishing our own location.
 // Sharing stays a deliberate switch on the hub (and is off by default), so
 // opening a map must not prompt for a permission or broadcast anything.
+//
+// WHAT REACHES THE ROUTING SERVER: one /nav/matrix call for the distance
+// figures on the connectors, with every position rounded to ~110 m; a full
+// route only for what the user asks for (a member's Route, the From-Home
+// route, a Meet Here / trip destination).
 
 import { AppText as Text } from '../components/ui/Text';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -30,7 +35,7 @@ import { useVisibleTick } from '../lib/family/useVisibleTick';
 import { type CircleMember, type MemberPresence } from '../lib/family/types';
 import { getPlaces, getDefaultRef } from '../lib/family/store';
 import { type Geofence } from '../lib/family/geofence';
-import { fetchRoute, nextTurnAlong, type Maneuver } from '../lib/nav/routing';
+import { fetchRoute, fetchMatrix, nextTurnAlong, type Maneuver } from '../lib/nav/routing';
 import { haversine } from '../lib/nav/geo';
 import { startNavigation, stopNavigation, forceReroute, useNavBanner } from '../lib/nav/navigationService';
 import { loadNavSettings, getNavSettings } from '../lib/nav/navSettings';
@@ -246,12 +251,15 @@ export default function FamilyMapScreen() {
   useEffect(() => {
     if (!circleId) return;
     let live = true;
-    (async () => {
-      const [ps, ref] = await Promise.all([getPlaces(circleId), getDefaultRef(circleId)]);
-      if (!live) return;
-      setMyPlaces(ps);
-      setHomeName(ref ?? ps[0]?.name ?? null);
-    })();
+    // A failed read leaves the place chips and From-Home off — nothing on
+    // this map depends on them, and there is no list here to show as empty.
+    Promise.all([getPlaces(circleId), getDefaultRef(circleId)])
+      .then(([ps, ref]) => {
+        if (!live) return;
+        setMyPlaces(ps);
+        setHomeName(ref ?? ps[0]?.name ?? null);
+      })
+      .catch(() => {});
     return () => { live = false; };
   }, [circleId]);
   const homePlace = homeName ? myPlaces.find((p) => p.name === homeName) ?? null : null;
@@ -360,45 +368,50 @@ export default function FamilyMapScreen() {
   }, [showHomeRoute, homePlace?.center.lat, homePlace?.center.lng, mine?.pos.lat, mine?.pos.lng]);
 
   /**
-   * ALWAYS-ON member road routes (owner, 2026-08-21): the road from me to EVERY
-   * member, with "2.4 km · 6 min" on the line — visible without any tap.
+   * ROAD FIGURES ON THE ALWAYS-ON CONNECTORS — one call, coarse positions.
    *
-   * One Valhalla call per member, but re-fetched only when either endpoint has
-   * moved ≥250 m — a stationary family costs one call each and then nothing.
-   * A failed routing falls back to the straight line, drawn dashed and
-   * labelled with the straight-line figure so a fallback never reads as road.
+   * This used to fetch a full Valhalla ROUTE from me to every member, each at
+   * full GPS precision, again whenever anyone moved 250 m: every member's
+   * decrypted position went to the routing server, one request per member,
+   * for lines nobody asked to see in detail. The connectors only need a
+   * distance and a time, so now ONE /nav/matrix call answers the whole family
+   * (as the hub already does), with every position rounded to ~110 m first —
+   * the precision those figures can show. A road SHAPE is fetched only when a
+   * member's Route is tapped (routeTo, above).
+   *
+   * Keyed on the rounded positions, so jitter and small moves cost nothing. A
+   * failed call leaves the straight-line figures, which never claim a road.
    */
-  const MR_MOVE_M = 250;
-  const mrCache = useRef<Record<string, {
-    from: { lat: number; lng: number }; to: { lat: number; lng: number };
-    pts: { lat: number; lng: number }[]; label: string; road: boolean;
-  }>>({});
-  const mrInflight = useRef<Set<string>>(new Set());
-  const [mrVersion, setMrVersion] = useState(0);
+  const [roadLabel, setRoadLabel] = useState<Record<string, string>>({});
+  const linkTargets = useMemo(() => {
+    if (!showLinks || !mine) return null;
+    const q = (n: number) => Math.round(n * 1000) / 1000;
+    const rows = Object.entries(presences)
+      .filter(([uid, p]) => uid !== me && freshnessOf(p.ts, now) !== 'unavailable')
+      .map(([uid, p]) => ({ id: uid, pos: { lat: q(p.pos.lat), lng: q(p.pos.lng) } }))
+      .sort((a, b) => (a.id < b.id ? -1 : 1));
+    if (!rows.length) return null;
+    const origin = { lat: q(mine.pos.lat), lng: q(mine.pos.lng) };
+    return { key: JSON.stringify([origin, rows]), origin, rows };
+  }, [showLinks, mine, presences, me, now]);
   useEffect(() => {
-    if (!showLinks || !mine) return;
-    for (const [uid, p] of Object.entries(presences)) {
-      if (uid === me || freshnessOf(p.ts, now) === 'unavailable') continue;
-      const c = mrCache.current[uid];
-      if (c && haversine(c.from, mine.pos) < MR_MOVE_M && haversine(c.to, p.pos) < MR_MOVE_M) continue;
-      if (mrInflight.current.has(uid)) continue;
-      mrInflight.current.add(uid);
-      const from = mine.pos, to = p.pos;
-      fetchRoute(from, to, 'auto')
-        .then((r) => { mrCache.current[uid] = { from, to, pts: r.shape, label: formatRoute(r.lengthM, r.timeS), road: true }; })
-        .catch(() => { mrCache.current[uid] = { from, to, pts: [from, to], label: formatMetres(haversine(from, to)), road: false }; })
-        .finally(() => { mrInflight.current.delete(uid); setMrVersion((v) => v + 1); });
-    }
+    if (!linkTargets) { setRoadLabel({}); return; }
+    const { origin, rows } = linkTargets;
+    let live = true;
+    fetchMatrix(rows.map((r) => r.pos), origin, 'auto')
+      .then((res) => {
+        if (!live) return;
+        const next: Record<string, string> = {};
+        for (const r of res) {
+          const t = rows[r.index];
+          if (t) next[t.id] = `${formatRoute(r.distanceM, r.durationS)} by road`;
+        }
+        setRoadLabel(next);
+      })
+      .catch(() => { if (live) setRoadLabel({}); });
+    return () => { live = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [presences, mine?.pos.lat, mine?.pos.lng, showLinks, me, now]);
-
-  const memberRoutes = useMemo(() => {
-    if (!showLinks || !mine) return [];
-    return Object.entries(mrCache.current)
-      .filter(([uid]) => uid !== me && presences[uid] && freshnessOf(presences[uid].ts, now) !== 'unavailable')
-      .map(([uid, c]) => ({ id: uid, pts: c.pts, label: c.label, road: c.road }));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mrVersion, showLinks, me, presences, now, mine]);
+  }, [linkTargets?.key]);
 
   /**
    * NEXT TURN of the member whose route is on screen — the watcher's
@@ -511,7 +524,7 @@ export default function FamilyMapScreen() {
     setChatBusy(true);
     try {
       const chat = await createDirectChat({ userId });
-      router.push({ pathname: '/chat' as any, params: { id: chat.id } });
+      router.push({ pathname: '/chat', params: { id: chat.id } });
     } catch (e: any) { Alert.alert('Message', e?.message ?? 'Could not open a direct chat.'); }
     finally { setChatBusy(false); }
   };
@@ -605,10 +618,11 @@ export default function FamilyMapScreen() {
       lat: p.pos.lat, lng: p.pos.lng, battery: p.battery,
       self: uid === me,
       stale: freshnessOf(p.ts, now) !== 'live' || !!p.sharingOff,
-      // Drawn on this member's connector. Straight-line, computed here from
-      // positions already decrypted — the map itself measures nothing.
-      label: mine && uid !== me ? formatMetres(haversine(mine.pos, p.pos)) : '',
-    })), [presences, nameOf, me, now, mine]);
+      // Drawn on this member's connector: the road figure once the matrix has
+      // answered (it says "by road"), the straight line until then — computed
+      // here from positions already decrypted; the map itself measures nothing.
+      label: mine && uid !== me ? (roadLabel[uid] ?? formatMetres(haversine(mine.pos, p.pos))) : '',
+    })), [presences, nameOf, me, now, mine, roadLabel]);
 
   /**
    * The same never-frozen watchdog the hub runs (§59/§60). This screen is the
@@ -734,12 +748,10 @@ export default function FamilyMapScreen() {
           // followed member's live speed (highway = wide, parked = close).
           followZoom={followId ? zoomForSpeed(presences[followId]?.speed) : null}
           destination={destination}
-          // ROAD ROUTES to every member are the default picture now; the
-          // dashed straight-line connectors only stand in until the first
-          // routes arrive (memberRoutes empty), and per member on a routing
-          // failure (road:false entries, drawn dashed).
-          linkFrom={showLinks && !routeShape && !homeRoute && !memberRoutes.length && mine ? mine.pos : null}
-          memberRoutes={memberRoutes}
+          // Dashed connectors to every member, labelled with the road figure
+          // from the one matrix call (straight-line until it answers). A road
+          // SHAPE is drawn only for the member whose Route was tapped.
+          linkFrom={showLinks && !routeShape && !homeRoute && mine ? mine.pos : null}
           // One highlighted-route channel, by priority: an explicitly
           // requested member route beats the From-Home route beats my
           // automatic route to the destination.
@@ -973,12 +985,12 @@ export default function FamilyMapScreen() {
             onPress={() => setShowLinks((v) => !v)}
             accessibilityRole="button"
             accessibilityState={{ selected: showLinks }}
-            accessibilityLabel={showLinks ? 'Hide member routes' : 'Show road routes to every member'}
+            accessibilityLabel={showLinks ? 'Hide the distance lines' : 'Show a distance line to every member'}
             style={[st.linkFab, { bottom: chipsBottom, backgroundColor: G.sheet, borderColor: showLinks ? colors.primary : G.edge }]}
           >
             <Ionicons name="git-network" size={17} color={showLinks ? colors.primary : colors.textDim} />
             <Text style={{ color: showLinks ? G.accentText : colors.textDim, fontSize: 11, fontWeight: '800' }}>
-              Routes
+              Lines
             </Text>
           </TouchableOpacity>
         )}
@@ -1063,7 +1075,9 @@ export default function FamilyMapScreen() {
         {/* Following banner (spec: "Following X" + "Stop following"). Only
             shown while a follow is active, and it is the way OUT — a map that
             keeps recentring with no visible reason feels broken. */}
-        {followId && (
+        {/* Only where its slot exists: with Meet Here open no slot is
+            allocated, and the bar used to render at top 0 over the header. */}
+        {showFollowBar && (
           <View style={[st.followBar, { top: slots.followTop, backgroundColor: G.sheet, borderColor: colors.primary }]}>
             <Ionicons name="navigate-circle" size={16} color={colors.primary} />
             <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, flex: 1 }} numberOfLines={1}>

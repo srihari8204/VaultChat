@@ -55,6 +55,8 @@ export default function MeetHereSheet({ members, myPos, destination, onDestinati
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<GeoHit[]>([]);
   const [searching, setSearching] = useState(false);
+  /** The last search request failed — said as such, never as "nothing found". */
+  const [searchFailed, setSearchFailed] = useState(false);
   const [matrix, setMatrix] = useState<MatrixResult[] | null>(null);
   const [routing, setRouting] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
@@ -64,15 +66,15 @@ export default function MeetHereSheet({ members, myPos, destination, onDestinati
   const seq = useRef(0);
   useEffect(() => {
     const term = q.trim();
-    if (term.length < 2) { setHits([]); setSearching(false); return; }
+    if (term.length < 2) { setHits([]); setSearching(false); setSearchFailed(false); return; }
     setSearching(true);
     const mine = ++seq.current;
     const t = setTimeout(async () => {
       try {
         const r = await geocodeSearch(term, myPos ?? null);
-        if (seq.current === mine) setHits(r);
+        if (seq.current === mine) { setHits(r); setSearchFailed(false); }
       } catch {
-        if (seq.current === mine) setHits([]);
+        if (seq.current === mine) { setHits([]); setSearchFailed(true); }
       } finally {
         if (seq.current === mine) setSearching(false);
       }
@@ -136,7 +138,8 @@ export default function MeetHereSheet({ members, myPos, destination, onDestinati
         <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15, flex: 1 }} numberOfLines={1}>
           {destination ? destination.name : 'Meet here'}
         </Text>
-        <TouchableOpacity onPress={onClose} accessibilityRole="button" accessibilityLabel="Close meet here" style={{ padding: 4 }}>
+        <TouchableOpacity onPress={onClose} accessibilityRole="button" accessibilityLabel="Close meet here" style={{ padding: 4 }}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="close" size={20} color={colors.textDim} />
         </TouchableOpacity>
       </View>
@@ -149,6 +152,7 @@ export default function MeetHereSheet({ members, myPos, destination, onDestinati
               value={q}
               onChangeText={setQ}
               placeholder="Search a place to meet"
+              accessibilityLabel="Search a place to meet"
               placeholderTextColor={colors.textFaint}
               style={[st.input, { color: colors.text }]}
               autoCorrect={false}
@@ -156,7 +160,8 @@ export default function MeetHereSheet({ members, myPos, destination, onDestinati
             />
             {searching && <ActivityIndicator size="small" color={colors.primary} />}
             {!!q && !searching && (
-              <TouchableOpacity onPress={() => setQ('')} accessibilityLabel="Clear search">
+              <TouchableOpacity onPress={() => setQ('')} accessibilityRole="button" accessibilityLabel="Clear search"
+                hitSlop={{ top: 13, bottom: 13, left: 10, right: 10 }}>
                 <Ionicons name="close-circle" size={17} color={colors.textFaint} />
               </TouchableOpacity>
             )}
@@ -170,6 +175,8 @@ export default function MeetHereSheet({ members, myPos, destination, onDestinati
                     key={c}
                     onPress={() => setQ(c)}
                     accessibilityRole="button"
+                    accessibilityLabel={`Search for ${c}`}
+                    hitSlop={{ top: 7, bottom: 7 }}
                     style={[st.cat, { borderColor: G.chipEdge, backgroundColor: G.paneFaint }]}
                   >
                     <Text style={{ color: colors.text, fontSize: 12.5 }}>{c}</Text>
@@ -204,6 +211,8 @@ export default function MeetHereSheet({ members, myPos, destination, onDestinati
               <TouchableOpacity
                 key={`${h.lat},${h.lng},${i}`}
                 onPress={() => pick(h.name || h.label, h.lat, h.lng)}
+                accessibilityRole="button"
+                accessibilityLabel={`Meet at ${h.name || h.label}${h.name && h.label !== h.name ? `, ${h.label}` : ''}`}
                 style={[st.hit, { borderTopColor: G.line }]}
               >
                 <Ionicons name="location-outline" size={16} color={colors.textDim} />
@@ -214,8 +223,10 @@ export default function MeetHereSheet({ members, myPos, destination, onDestinati
               </TouchableOpacity>
             ))}
             {!!q.trim() && !searching && hits.length === 0 && (
-              <Text style={{ color: colors.textDim, fontSize: 13, padding: 12, textAlign: 'center' }}>
-                Nothing found for “{q.trim()}”.
+              <Text accessibilityLiveRegion="polite" style={{ color: colors.textDim, fontSize: 13, padding: 12, textAlign: 'center' }}>
+                {searchFailed
+                  ? 'Search is unavailable right now. Check your connection and try again.'
+                  : `Nothing found for “${q.trim()}”.`}
               </Text>
             )}
           </ScrollView>

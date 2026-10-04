@@ -32,7 +32,6 @@ import { STREETVIEW_API_KEY, FAMILY_MAP_3D } from '../../constants/flags';
 import { clusterForZoom } from '../../lib/groups/clustering';
 import { fetchRoute } from '../../lib/nav/routing';
 import { mapStyleUrl, buildings3DLayer, RASTER_FALLBACK_URL, ATTRIBUTION } from '../../lib/map/tileProvider';
-import { initialOf } from '../../lib/format';
 
 export interface FamilyMarker {
   id: string;
@@ -777,6 +776,9 @@ export default function FamilyMap({
     ref.current.injectJavaScript(`setHeading(${Math.round(headingDeg)});true;`);
   }, [ready, engine, headingDeg]);
 
+  // Light in BOTH app themes, deliberately: lib/map/tileProvider maps both
+  // schemes to the full-colour style because the dark one hides road and
+  // landmark detail at phone brightness. A map style, not app chrome.
   const mapScheme = 'light' as const;
   // Memoized: mlHtml concatenates the embedded MapLibre bundle (~1.1MB) into a
   // fresh string on every call, and this component re-renders on every 15s
@@ -791,13 +793,24 @@ export default function FamilyMap({
 
   // Heading-up → north-up → overview, the three modes §46–48 name.
   const cycleCam = () => setCam(cam === 'follow' ? 'north' : cam === 'north' ? 'overview' : 'follow');
-  const camIcon = cam === 'follow' ? 'navigate' : cam === 'north' ? 'compass' : 'scan';
+  const camIcon: keyof typeof Ionicons.glyphMap = cam === 'follow' ? 'navigate' : cam === 'north' ? 'compass' : 'scan';
   const camLabel = cam === 'follow' ? 'Heading-up' : cam === 'north' ? 'North-up' : 'Overview';
+
+  // The WebView's markers are canvas/divs a screen reader cannot reach, so the
+  // map announces what it shows as one element: who is on it, and whose dot
+  // is an old (last-known) position rather than a live one.
+  const a11ySummary = useMemo(() => {
+    if (!members.length) return path?.length ? 'Map of the track' : 'Map, no one located yet';
+    const who = members.map((m) => `${m.self ? 'You' : m.name}${m.stale ? ', last known position' : ''}${m.label ? `, ${m.label}` : ''}`);
+    return `Map showing ${members.length} ${members.length === 1 ? 'person' : 'people'}: ${who.join('; ')}`;
+  }, [members, path?.length]);
 
   return (
     <View style={[styles.wrap, style]}>
       <WebView
         ref={ref}
+        accessible
+        accessibilityLabel={a11ySummary}
         source={source}
         originWhitelist={['*']}
         javaScriptEnabled
@@ -863,7 +876,7 @@ export default function FamilyMap({
           accessibilityLabel={`Camera: ${camLabel}. Tap to change.`}
           style={[styles.camFab, { bottom: controlsBottom + 54, backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}
         >
-          <Ionicons name={camIcon as any} size={17} color={colors.primary} />
+          <Ionicons name={camIcon} size={17} color={colors.primary} />
           <Text style={{ color: colors.primary, fontSize: 10, fontWeight: '800' }}>{camLabel}</Text>
         </TouchableOpacity>
       )}

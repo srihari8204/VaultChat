@@ -92,7 +92,9 @@ export default function FamilyAlertsScreen() {
     if (!circleId) return;
     Alert.alert('Clear alerts?', 'This removes the alert history on this device only.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Clear', style: 'destructive', onPress: () => { clearCircleAlerts(circleId); } },
+      { text: 'Clear', style: 'destructive', onPress: () => {
+        clearCircleAlerts(circleId).catch(() => Alert.alert('Not cleared', 'The alert history could not be cleared. Try again.'));
+      } },
     ]);
   };
 
@@ -160,7 +162,7 @@ export default function FamilyAlertsScreen() {
             accessibilityLabel={`${item.read ? '' : 'Unread. '}${item.text}. ${when(item.at)}`}
             accessibilityHint={hasMember ? `Opens ${item.actorName}` : undefined}
             onPress={() => hasMember && router.push({
-              pathname: '/family-member' as any,
+              pathname: '/family-member',
               params: { circleId: circleId!, userId: item.actorId, name: item.actorName, circleName: params.circleName ?? '' },
             })}
             style={[st.row, { borderColor: G.line, backgroundColor: item.read ? 'transparent' : brandAlpha(0.07) }]}

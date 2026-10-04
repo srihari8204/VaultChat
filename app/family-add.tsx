@@ -35,13 +35,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { Avatar, AuroraBackground } from '../components/ui';
+import SpaceGround, { useSpaceGlass } from '../components/spaces/SpaceGround';
 import { listChats, createInvitation, attachmentUrl } from '../lib/chatService';
-import { circleInviteCode, circleMembers } from '../lib/family/circle';
+import { circleInviteCode, circleMembers, INVITE_CODE_HOURS } from '../lib/family/circle';
 
 interface Pick { userId: string; name: string; photoURL: string | null }
 
 export default function FamilyAddScreen() {
   const { colors } = useTheme();
+  const G = useSpaceGlass();
   const s = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
   // Family Space passes circleId/circleName; group-info passes chatId/name.
@@ -58,9 +60,13 @@ export default function FamilyAddScreen() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Bumped by Retry on the error bar; re-runs the load below. */
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let live = true;
+    setError(null);
+    setLoading(true);
     (async () => {
       try {
         const [chats, members] = await Promise.all([
@@ -90,7 +96,7 @@ export default function FamilyAddScreen() {
       }
     })();
     return () => { live = false; };
-  }, [circleId]);
+  }, [circleId, attempt]);
 
   const toggle = useCallback((id: string) => {
     if (already.has(id)) return;
@@ -140,16 +146,29 @@ export default function FamilyAddScreen() {
     }
   };
 
-  const shareCode = async () => {
+  // Confirmed first: whoever ends up holding the code can join, and joining
+  // a space means seeing its members' shared locations.
+  const shareCode = () => {
     if (!circleId) return;
-    try {
-      const code = await circleInviteCode(String(circleId));
-      await Share.share({
-        message: `Join "${circleName || 'my space'}" on crazzychat.\nCode: ${code}`,
-      });
-    } catch (e: any) {
-      Alert.alert('Invite', e?.message ?? 'Could not create an invite.');
-    }
+    const where = circleName ? `"${circleName}"` : (isFamily ? 'this space' : 'this group');
+    Alert.alert(
+      'Share a one-time code?',
+      `Anyone who has this code can join ${where}${isFamily ? ' and see the locations members share there' : ''}. `
+      + `It works for one person and expires in ${INVITE_CODE_HOURS} hours.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Share code', onPress: async () => {
+          try {
+            const code = await circleInviteCode(String(circleId));
+            await Share.share({
+              message: `Join ${circleName ? `"${circleName}"` : 'my space'} on crazzychat.\nCode: ${code}\n(One use, expires in ${INVITE_CODE_HOURS} hours.)`,
+            });
+          } catch (e: any) {
+            Alert.alert('Invite', e?.message ?? 'Could not create an invite.');
+          }
+        } },
+      ],
+    );
   };
 
   const renderItem = ({ item }: { item: Pick }) => {
@@ -185,11 +204,13 @@ export default function FamilyAddScreen() {
   };
 
   return (
-    <View style={s.screen}>
-      <AuroraBackground />
+    // A space invite sits on the same dusk ground as the rest of the space
+    // screens; group-info's "Add member" keeps the messenger's aurora.
+    <View style={[s.screen, isFamily && { backgroundColor: G.bgMid }]}>
+      {isFamily ? <SpaceGround /> : <AuroraBackground />}
       <Stack.Screen options={{
         headerShown: true, title: isFamily ? 'Invite to space' : 'Invite to group', headerTitleAlign: 'center',
-        headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,
+        headerStyle: { backgroundColor: isFamily ? G.bgTop : colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,
       }} />
 
       <View style={s.search}>
@@ -199,6 +220,7 @@ export default function FamilyAddScreen() {
           value={query}
           onChangeText={setQuery}
           placeholder="Search your contacts"
+          accessibilityLabel="Search your contacts"
           placeholderTextColor={colors.textDim}
           autoCorrect={false}
         />
@@ -207,16 +229,31 @@ export default function FamilyAddScreen() {
       {/* The list below only shows people you already have a DM with (same
           source as new-chat). Address-book discovery lives on /contacts —
           without this row a fresh user sees an empty list and a dead end. */}
-      <TouchableOpacity onPress={() => router.push('/contacts' as any)} style={s.abRow} accessibilityRole="button">
+      <TouchableOpacity onPress={() => router.push('/contacts')} style={s.abRow} accessibilityRole="button">
         <Ionicons name="book-outline" size={18} color={colors.primary} />
         <Text style={[s.abTxt, { color: colors.primary }]}>Find contacts from address book</Text>
         <Ionicons name="chevron-forward" size={16} color={colors.textDim} />
       </TouchableOpacity>
 
-      {!!error && <View style={s.errorBar}><Text style={s.errorTxt}>{error}</Text></View>}
+      {!!error && (
+        <View style={s.errorBar} accessibilityLiveRegion="polite">
+          <Text style={[s.errorTxt, { flex: 1 }]}>{error}</Text>
+          <TouchableOpacity
+            onPress={() => setAttempt((n) => n + 1)}
+            accessibilityRole="button" accessibilityLabel="Retry loading contacts"
+            hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+          >
+            <Text style={[s.errorTxt, { fontWeight: '800' }]}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {loading ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
+      ) : error && people.length === 0 ? (
+        // A failed load is not "no contacts" — the error bar above says what
+        // happened and offers the retry.
+        null
       ) : people.length === 0 ? (
         <View style={s.empty}>
           <Ionicons name="people-outline" size={40} color={colors.textDim} />
@@ -287,7 +324,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   checkSel: { backgroundColor: c.brandOnLight, borderColor: c.primary },
   empty: { alignItems: 'center', padding: 32, gap: 10 },
   emptyTxt: { color: c.textDim, fontSize: 13.5, textAlign: 'center', lineHeight: 19 },
-  errorBar: { backgroundColor: c.danger + '22', padding: 10, marginHorizontal: 14, borderRadius: 10 },
+  errorBar: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: c.danger + '22', padding: 10, marginHorizontal: 14, borderRadius: 10 },
   errorTxt: { color: c.danger, fontSize: 12.5 },
   codeRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,

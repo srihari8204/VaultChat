@@ -54,9 +54,19 @@ export async function joinCircle(code: string): Promise<JoinResult> {
   return { ...ref, pending, alreadyMember };
 }
 
-/** A shareable join code for the circle (never expires, unlimited uses by default). */
+/**
+ * How long a shared join code works and how many people it admits. A code is
+ * pasted into other apps and can be forwarded, and redeeming it puts someone
+ * in a group that shares live locations — so it is single-use and short-lived.
+ * The server enforces both (POST /chats/:id/invite-links; join checks
+ * expires_at and max_uses). Need another? Share again — each share mints one.
+ */
+export const INVITE_CODE_HOURS = 24;
+export const INVITE_CODE_USES = 1;
+
+/** A shareable join code for the circle: one use, expires in INVITE_CODE_HOURS. */
 export async function circleInviteCode(circleId: string): Promise<string> {
-  const link = await createInviteLink(circleId, { expiresInHours: 0, maxUses: 0 });
+  const link = await createInviteLink(circleId, { expiresInHours: INVITE_CODE_HOURS, maxUses: INVITE_CODE_USES });
   return link.code;
 }
 

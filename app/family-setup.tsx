@@ -23,7 +23,7 @@ export default function FamilySetupScreen() {
   const { from } = useLocalSearchParams<{ from?: string }>();
   // Both carry ?groupId= so the hub opens on the circle just created/joined.
   const done = (groupId: string) => {
-    const href = { pathname: '/family' as any, params: { groupId } };
+    const href = { pathname: '/family' as const, params: { groupId } };
     if (from === 'family' && router.canGoBack()) router.dismissTo(href);
     else router.replace(href);
   };
@@ -73,7 +73,7 @@ export default function FamilySetupScreen() {
         <View style={[st.field, { borderColor: G.edge, backgroundColor: G.pane }]}>
           <Ionicons name="home" size={18} color={colors.textDim} />
           <TextInput value={name} onChangeText={setName} placeholder="Circle name (e.g. Family)" placeholderTextColor={colors.textFaint}
-            accessibilityLabel="Circle name"
+            accessibilityLabel="Circle name" maxLength={100}
             style={[st.input, { color: colors.text }]} returnKeyType="done" onSubmitEditing={create} />
         </View>
         <TouchableOpacity onPress={create} disabled={!name.trim() || !!busy} accessibilityRole="button" accessibilityLabel="Create circle" accessibilityState={{ disabled: !name.trim() || !!busy, busy: busy === 'create' }} style={[st.btn, { backgroundColor: name.trim() ? colors.primary : colors.border }]}>
@@ -83,7 +83,7 @@ export default function FamilySetupScreen() {
         {/* Groups & Circles: the same flow, but typed — friends, office, riders,
             travel and the rest, each with its own icon, colour and permissions. */}
         <TouchableOpacity
-          onPress={() => router.push('/group-create' as any)}
+          onPress={() => router.push('/group-create')}
           accessibilityRole="button"
           style={[st.btn, { backgroundColor: G.paneFaint, borderWidth: 1, borderColor: G.chipEdge }]}
         >
@@ -97,7 +97,7 @@ export default function FamilySetupScreen() {
         <View style={[st.field, { borderColor: G.edge, backgroundColor: G.pane }]}>
           <Ionicons name="key" size={18} color={colors.textDim} />
           <TextInput value={code} onChangeText={setCode} placeholder="Invite code" placeholderTextColor={colors.textFaint}
-            accessibilityLabel="Invite code"
+            accessibilityLabel="Invite code" maxLength={64}
             autoCapitalize="none" autoCorrect={false} style={[st.input, { color: colors.text }]} returnKeyType="go" onSubmitEditing={join} />
         </View>
         <TouchableOpacity onPress={join} disabled={!code.trim() || !!busy} accessibilityRole="button" accessibilityLabel="Join circle" accessibilityState={{ disabled: !code.trim() || !!busy, busy: busy === 'join' }} style={[st.btn, { backgroundColor: code.trim() ? colors.primary : colors.border }]}>

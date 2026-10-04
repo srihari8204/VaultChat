@@ -40,9 +40,10 @@ export interface NavigationLayerProps {
   instruction: string;
   roadName: string;
   distanceToManeuverM: number;
-  /** The maneuver AFTER the next one, drawn small and secondary (spec §17). */
-  thenEvent?: HapticEvent | null;
-  thenRoadName?: string;
+  // ponytail: no "then" (maneuver-after-next, spec §17) chip. The nav banner
+  // (lib/nav/navigationService NavBanner) does not expose that maneuver, so
+  // the prop was never passed and its chip never drew. Re-add it here once
+  // the banner carries the following maneuver.
   /** Journey totals. */
   remainingM: number;
   etaSeconds: number;
@@ -149,7 +150,7 @@ export default function NavigationLayer(p: NavigationLayerProps) {
             accessibilityLabel={`${p.instruction} in ${formatDistance(p.distanceToManeuverM)}${p.roadName ? `, ${p.roadName}` : ''}`}
           >
             <View style={[st.capsuleIcon, { backgroundColor: colors.primary + '22' }]}>
-              <Ionicons name={iconFor(p.event) as any} size={26} color={colors.primary} />
+              <Ionicons name={iconFor(p.event)} size={26} color={colors.primary} />
             </View>
             <View style={{ flex: 1, minWidth: 0 }}>
               {/* Distance leads: at 40 km/h the number changes every second and
@@ -161,15 +162,6 @@ export default function NavigationLayer(p: NavigationLayerProps) {
                 {p.roadName || p.instruction}
               </Text>
             </View>
-            {/* The maneuver AFTER this one, deliberately small and low-contrast:
-                it is context, and giving it equal weight is how a nav UI starts
-                asking the driver to read instead of drive. */}
-            {!!p.thenEvent && (
-              <View style={[st.then, { borderColor: G.line }]}>
-                <Text style={[st.thenLabel, { color: colors.textFaint }]}>THEN</Text>
-                <Ionicons name={iconFor(p.thenEvent) as any} size={16} color={colors.textDim} />
-              </View>
-            )}
           </View>
         )}
 
@@ -286,8 +278,6 @@ const st = StyleSheet.create({
   // viewing distance this line is designed for.
   capsuleDist: { fontSize: 26, lineHeight: 30, fontWeight: '800', fontVariant: ['tabular-nums'], letterSpacing: -0.5 },
   capsuleRoad: { fontSize: 13.5, marginTop: 1 },
-  then: { alignItems: 'center', gap: 2, paddingLeft: 10, borderLeftWidth: StyleSheet.hairlineWidth },
-  thenLabel: { fontSize: 9, fontWeight: '800', letterSpacing: 0.6 },
 
   offRoute: {
     flexDirection: 'row', alignItems: 'center', gap: 8,

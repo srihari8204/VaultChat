@@ -25,9 +25,9 @@ import { formatMetres } from '../lib/family/distance';
 import { circleMembers } from '../lib/family/circle';
 import { segmentTrips } from '../lib/family/status';
 import { useFamilyAlerts, loadAlerts, type FamilyAlert } from '../lib/family/alerts';
-import { getGroup, historyAccess } from '../lib/groups/store';
+import { historyAccess } from '../lib/groups/store';
+import { groupWithHistoryAccess } from '../lib/family/historyGate';
 import { getCurrentUserAsync } from './(constants)/authService';
-import { can as hasPerm, type Permission } from '../lib/groups/permissions';
 
 type Range = 'day' | 'week' | 'month';
 
@@ -96,14 +96,15 @@ export default function FamilyHistoryScreen() {
       setLoadFailed(false);
       const me = await getCurrentUserAsync().catch(() => null);
       if (live) setSelfId(me ? String(me.id) : null);
-      const g = await getGroup(circleId);
-      // ABSENT PERMISSIONS ARE UNKNOWN, NOT DENIED (2026-09-17).
+      // ABSENT PERMISSIONS ARE UNKNOWN — neither denied nor allowed.
       //
-      // `permissions ?? []` collapsed "never cached" into "cached and empty",
-      // so every migrated or adopted circle denied its OWN OWNER - and once the
-      // gate below started withholding the load rather than just the button,
-      // this screen showed the locked view to people who are not locked out.
-      // historyAccess keeps the three cases apart; the gate itself is unchanged.
+      // `permissions ?? []` once collapsed "never cached" into "cached and
+      // empty", so every migrated or adopted circle denied its OWN OWNER; the
+      // fix for that then let unknown through as allowed, loading everyone's
+      // track on a guess. groupWithHistoryAccess asks the server when the
+      // cache is silent and throws when it cannot — the Retry state below —
+      // so the gate only ever sees a real answer.
+      const g = await groupWithHistoryAccess(circleId);
       const allowed = historyAccess(g) !== 'denied';
       // Withhold the LOAD, not just the render (2026-09-17).
       //
@@ -180,9 +181,11 @@ export default function FamilyHistoryScreen() {
     return src.map((s) => ({ lat: s.lat, lng: s.lng }));
   }, [samples, trips, tripSel]);
 
-  // Timeline = the member's events in range, newest first, grouped by day.
+  // Timeline = the SHOWN member's events in range, newest first, grouped by
+  // day — circle-wide it follows the picker, so the events always belong to
+  // the track on the map above them.
   const timeline = useMemo(() => {
-    const rows = alerts.filter((a: FamilyAlert) => a.at >= from && (!userId || a.actorId === userId));
+    const rows = alerts.filter((a: FamilyAlert) => a.at >= from && (!shownId || a.actorId === shownId));
     const groups: { day: string; items: FamilyAlert[] }[] = [];
     for (const a of rows) {
       const label = dayLabel(a.at);
@@ -190,7 +193,7 @@ export default function FamilyHistoryScreen() {
       if (g) g.items.push(a); else groups.push({ day: label, items: [a] });
     }
     return groups;
-  }, [alerts, from, userId]);
+  }, [alerts, from, shownId]);
 
   return (
     <View style={{ flex: 1, backgroundColor: G.bgMid }}>
@@ -296,6 +299,15 @@ export default function FamilyHistoryScreen() {
               <Text style={[st.statLbl, { color: colors.textDim }]}>Points</Text>
             </View>
           </View>
+          {/* Said where it happens, not only in a code comment: the one part
+              of this screen that leaves the phone. */}
+          {!!trackKey && (
+            <Text style={{ color: colors.textDim, fontSize: 11.5, marginTop: 6, lineHeight: 16 }}>
+              {roadTravelledM != null
+                ? 'Distance is matched to roads by crazzychat’s routing server, which receives this track and does not store it.'
+                : 'Distance is summed from the track points. Road matching uses crazzychat’s routing server, which does not store the track.'}
+            </Text>
+          )}
 
           {/* trips — segmented from the same on-device samples (spec: travel
               route history). Speeds show only when the trip actually carried

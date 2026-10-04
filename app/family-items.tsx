@@ -6,13 +6,17 @@
 //   3. RECALL — where and when the phone last heard it, named by saved Place.
 //
 // Vendor-neutral: anything that advertises over BLE works. The reasoning lives
-// in lib/items/proximity + leftBehind (pure, self-checked); this file is
-// permission, scan lifecycle and layout.
+// in lib/items/proximity + leftBehind + crowd (pure, self-checked); this file
+// is permission, scan lifecycle and layout.
+//
+// CROWD-FIND. While searching, this phone also reports the OTHER members' tags
+// it hears (the space registry lists them; any member may report a sighting),
+// and lists them under "Family's things". Only the place NAME travels.
 
 import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, TextInput,
+  View, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, TextInput, Modal, Pressable,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams } from 'expo-router';
@@ -21,6 +25,8 @@ import { useTheme } from '../lib/theme';
 import { brandAlpha } from '../constants/theme';
 import SpaceGround, { useSpaceGlass } from '../components/spaces/SpaceGround';
 import { SPACE_SHADOW } from '../constants/spaceTheme';
+import { KeyboardSafe } from '../components/ui';
+import { familyTags, dueSightings } from '../lib/items/crowd';
 import {
   smoothRssi, bandOf, rssiToMetres, trend, BAND_LABEL, type ProximityBand,
 } from '../lib/items/proximity';
@@ -47,9 +53,10 @@ function placeAt(places: Geofence[], pos: { lat: number; lng: number }): Geofenc
   return null;
 }
 
-const ICONS = ['key', 'wallet', 'briefcase', 'bag-handle', 'bicycle', 'car', 'headset', 'laptop'];
+type IconName = keyof typeof Ionicons.glyphMap;
+const ICONS: IconName[] = ['key', 'wallet', 'briefcase', 'bag-handle', 'bicycle', 'car', 'headset', 'laptop'];
 
-const BAND_COLOR = (b: ProximityBand, c: any) =>
+const BAND_COLOR = (b: ProximityBand, c: { success: string; primary: string; warning?: string; textDim: string }) =>
   b === 'immediate' ? c.success : b === 'near' ? c.primary : b === 'far' ? c.warning ?? c.primary : c.textDim;
 
 export default function FamilyItemsScreen() {
@@ -72,7 +79,9 @@ export default function FamilyItemsScreen() {
   const [me, setMe] = useState<string | null>(null);
   const [pairing, setPairing] = useState<Seen | null>(null);
   const [pairName, setPairName] = useState('');
-  const [pairIcon, setPairIcon] = useState(ICONS[0]);
+  const [pairIcon, setPairIcon] = useState<IconName>(ICONS[0]);
+  /** A pairing save is in flight — Save ignores repeat taps until it lands. */
+  const [saving, setSaving] = useState(false);
   const stopRef = useRef<null | (() => void)>(null);
 
   useEffect(() => {
@@ -159,6 +168,14 @@ export default function FamilyItemsScreen() {
 
   useEffect(() => () => { stopRef.current?.(); destroyScanner(); }, []);
 
+  /** Where this phone is, from the OS cache (never a fresh GPS fix, no
+   *  permission prompt), and the saved Place that contains it, if any. */
+  const whereNow = useCallback(async () => {
+    const loc = await Location.getLastKnownPositionAsync().catch(() => null);
+    const pos = loc ? { lat: loc.coords.latitude, lng: loc.coords.longitude } : null;
+    return { pos, place: pos ? (placeAt(places, pos)?.name ?? null) : null };
+  }, [places]);
+
   /**
    * Record a sighting: WHERE the phone was when it heard the tag. This is the
    * answer to "where did I leave it", and it costs no extra permission — the
@@ -166,9 +183,7 @@ export default function FamilyItemsScreen() {
    */
   const rememberSighting = useCallback(async (item: TrackedItem) => {
     try {
-      const loc = await Location.getLastKnownPositionAsync();
-      const pos = loc ? { lat: loc.coords.latitude, lng: loc.coords.longitude } : null;
-      const place = pos ? (placeAt(places, pos)?.name ?? null) : null;
+      const { pos, place } = await whereNow();
       const next = await patchItem(item.id, {
         lastSeenAt: Date.now(),
         ...(pos ? { lastSeenLat: pos.lat, lastSeenLng: pos.lng } : {}),
@@ -181,45 +196,64 @@ export default function FamilyItemsScreen() {
       // Only the place NAME is shared — never this phone's coordinates.
       if (circleId) reportSighting(circleId, item.id, place).catch(() => {});
     } catch { /* a sighting we could not stamp is still a sighting */ }
-  }, [places, circleId]);
+  }, [whereNow, circleId]);
 
-  // Stamp a sighting at most once a minute per item while scanning.
+  /** Another member's tag heard by this phone: tell the space where (place
+   *  name only), and show it here as heard by you. */
+  const reportFamilySighting = useCallback(async (bleId: string) => {
+    if (!circleId) return;
+    const { place } = await whereNow();
+    const at = Date.now();
+    await reportSighting(circleId, bleId, place, at).catch(() => {});
+    setShared((list) => list.map((x) => (x.bleId === bleId
+      ? { ...x, lastSeenAt: at, lastSeenBy: me, placeName: place } : x)));
+  }, [circleId, whereNow, me]);
+
+  const pairedIds = useMemo(() => new Set(items.map((i) => i.id)), [items]);
+  /** Other members' tags: this phone can only help find them. */
+  const family = useMemo(() => familyTags(shared, pairedIds, me), [shared, pairedIds, me]);
+
+  // Stamp a sighting at most once a minute per tag while scanning — my own
+  // paired tags AND the family's.
   const lastStamp = useRef<Map<string, number>>(new Map());
   useEffect(() => {
     if (!scanning) return;
     const now = Date.now();
-    for (const it of items) {
-      const seen = nearby.get(it.id);
-      if (!seen) continue;
-      if ((lastStamp.current.get(it.id) ?? 0) > now - 60_000) continue;
-      lastStamp.current.set(it.id, now);
-      rememberSighting(it);
+    const due = dueSightings(
+      [...items.map((it) => it.id), ...family.map((f) => f.bleId)],
+      (id) => nearby.has(id), lastStamp.current, now,
+    );
+    for (const id of due) {
+      lastStamp.current.set(id, now);
+      const it = items.find((x) => x.id === id);
+      if (it) rememberSighting(it); else reportFamilySighting(id);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tick, scanning, items, nearby]);
+  }, [tick, scanning, items, family, nearby]);
 
-  const pairedIds = useMemo(() => new Set(items.map((i) => i.id)), [items]);
+  const familyIds = useMemo(() => new Set(family.map((f) => f.bleId)), [family]);
   const discoverable = useMemo(
     () => [...nearby.values()]
-      .filter((s) => !pairedIds.has(s.id))
+      // Another member's tag is not offered for pairing: pairing it here would
+      // rename THEIR shared entry (the server upserts by tag id).
+      .filter((s) => !pairedIds.has(s.id) && !familyIds.has(s.id))
       .sort((a, b) => (rssiRef.current.get(b.id) ?? -999) - (rssiRef.current.get(a.id) ?? -999))
       .slice(0, 12),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [nearby, pairedIds, tick],
+    [nearby, pairedIds, familyIds, tick],
   );
 
   const doPair = async () => {
-    if (!pairing) return;
+    if (!pairing || saving) return;
     const name = pairName.trim() || pairing.name || 'Item';
     let next: TrackedItem[];
+    setSaving(true);
     try {
-      next = await addItem({
-        id: pairing.id, name, icon: pairIcon, addedAt: Date.now(), leftBehindAlerts: true,
-      });
+      next = await addItem({ id: pairing.id, name, icon: pairIcon, addedAt: Date.now() });
     } catch {
       Alert.alert('Could not save', `"${name}" was not saved. Try again.`);
       return;
-    }
+    } finally { setSaving(false); }
     setItems(next);
     if (circleId) {
       // Crowd-find is the whole point of sharing a tag: without this call no
@@ -279,7 +313,7 @@ export default function FamilyItemsScreen() {
           return (
             <View key={it.id} style={[st.card, { backgroundColor: G.pane, borderColor: band === 'immediate' ? colors.success : G.edge }]}>
               <View style={[st.icon, { backgroundColor: G.paneFaint }]}>
-                <Ionicons name={it.icon as any} size={20} color={BAND_COLOR(band, colors)} />
+                <Ionicons name={it.icon as IconName} size={20} color={BAND_COLOR(band, colors)} />
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={{ color: colors.text, fontWeight: '700', fontSize: 15 }} numberOfLines={1}>{it.name}</Text>
@@ -314,7 +348,11 @@ export default function FamilyItemsScreen() {
                 onPress={() => Alert.alert(it.name, 'Remove this item?', [
                   { text: 'Cancel', style: 'cancel' },
                   { text: 'Remove', style: 'destructive', onPress: async () => {
-                    setItems(await removeItem(it.id));
+                    try { setItems(await removeItem(it.id)); }
+                    catch {
+                      Alert.alert('Not removed', `"${it.name}" could not be removed from this phone. Try again.`);
+                      return;
+                    }
                     // A removal that only happened locally is the worst
                     // outcome: the owner believes the tag is forgotten while
                     // the space still lists it and members still report
@@ -345,6 +383,31 @@ export default function FamilyItemsScreen() {
             to pair it, and this phone will remember where it last heard it.
           </Text>
         )}
+
+        {/* ── FAMILY'S THINGS: other members' tags this phone helps find ── */}
+        {family.length > 0 && (
+          <Text style={[st.h, { color: colors.textDim, marginTop: 18 }]}>FAMILY&apos;S THINGS</Text>
+        )}
+        {family.map((f) => {
+          const heardNow = scanning && nearby.has(f.bleId);
+          const by = !f.lastSeenBy ? '' : f.lastSeenBy === me ? ' · by you' : ' · by family';
+          return (
+            <View key={f.bleId} style={[st.card, { backgroundColor: G.pane, borderColor: heardNow ? colors.success : G.edge }]}>
+              <View style={[st.icon, { backgroundColor: G.paneFaint }]}>
+                <Ionicons name={(ICONS as string[]).includes(f.icon) ? (f.icon as IconName) : 'pricetag'} size={20}
+                  color={heardNow ? colors.success : colors.textDim} />
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={{ color: colors.text, fontWeight: '700', fontSize: 15 }} numberOfLines={1}>{f.name}</Text>
+                <Text style={{ color: heardNow ? G.goodText : colors.textDim, fontSize: 12.5 }} numberOfLines={1}>
+                  {heardNow
+                    ? 'Heard by this phone now'
+                    : `Last heard ${ago(f.lastSeenAt ?? undefined)}${f.placeName ? ` · ${f.placeName}` : ''}${by}`}
+                </Text>
+              </View>
+            </View>
+          );
+        })}
 
         {/* ── DISCOVERY ── */}
         {scanning && (
@@ -381,14 +444,34 @@ export default function FamilyItemsScreen() {
           </>
         )}
 
-        {/* ── PAIRING SHEET ── */}
-        {pairing && (
-          <View style={[st.pair, { backgroundColor: G.paneStrong, borderColor: colors.primary }]}>
+        {/* The "Left-behind alerts" switch is gone on purpose: nothing ever
+            consumed it. lib/items/leftBehind.ts (pure, self-checked) needs a
+            BACKGROUND scan tied to geofence exits, and scanning only runs
+            while this screen is open — so the switch promised an alert that
+            could never fire. Bring it back with that background wiring. */}
+
+        <Text style={{ color: colors.textDim, fontSize: 11.5, lineHeight: 16, marginTop: 16 }}>
+          Works with any Bluetooth tag — no brand lock-in, no subscription. Tags you pair are listed
+          in this space with the place they were last heard (a saved place&apos;s name, never
+          coordinates). While another member searches here on their phone, it reports the tags it
+          hears — yours included — so they can help find them. The tag&apos;s maker is never involved.
+        </Text>
+      </ScrollView>
+
+      {/* ── PAIRING SHEET ── a real modal, so the keyboard lifts it instead of
+          covering it at the bottom of a long list. */}
+      <Modal visible={!!pairing} transparent animationType="slide" onRequestClose={() => setPairing(null)}>
+        <KeyboardSafe keyboardOnly style={st.backdrop}>
+          <Pressable style={{ flex: 1 }} onPress={() => setPairing(null)}
+            accessibilityRole="button" accessibilityLabel="Cancel pairing" />
+          <View style={[st.pair, { backgroundColor: G.sheet, borderColor: G.edge }]}>
             <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15 }}>Name this item</Text>
             <TextInput
               value={pairName}
               onChangeText={setPairName}
               placeholder="Keys, wallet, bag…"
+              accessibilityLabel="Item name"
+              maxLength={80}
               placeholderTextColor={colors.textFaint}
               style={[st.input, { color: colors.text, borderColor: G.chipEdge, backgroundColor: G.paneFaint }]}
             />
@@ -400,7 +483,7 @@ export default function FamilyItemsScreen() {
                   accessibilityRole="button" accessibilityState={{ selected: pairIcon === ic }} accessibilityLabel={`${ic} icon`}
                   style={[st.iconPick, { borderColor: pairIcon === ic ? colors.primary : G.chipEdge, backgroundColor: pairIcon === ic ? brandAlpha(0.14) : G.paneFaint }]}
                 >
-                  <Ionicons name={ic as any} size={18} color={pairIcon === ic ? colors.primary : colors.textDim} />
+                  <Ionicons name={ic} size={18} color={pairIcon === ic ? colors.primary : colors.textDim} />
                 </TouchableOpacity>
               ))}
             </View>
@@ -408,25 +491,16 @@ export default function FamilyItemsScreen() {
               <TouchableOpacity onPress={() => setPairing(null)} accessibilityRole="button" style={[st.btn, { borderColor: G.chipEdge, flex: 1 }]}>
                 <Text style={{ color: colors.textDim, fontWeight: '700' }}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={doPair} accessibilityRole="button" accessibilityLabel="Save item" style={[st.btn, { borderColor: colors.primary, backgroundColor: brandAlpha(0.14), flex: 1 }]}>
-                <Text style={{ color: G.accentText, fontWeight: '800' }}>Save</Text>
+              <TouchableOpacity onPress={doPair} disabled={saving}
+                accessibilityRole="button" accessibilityLabel="Save item" accessibilityState={{ busy: saving, disabled: saving }}
+                style={[st.btn, { borderColor: colors.primary, backgroundColor: brandAlpha(0.14), flex: 1 }]}>
+                {saving ? <ActivityIndicator size="small" color={colors.primary} />
+                  : <Text style={{ color: G.accentText, fontWeight: '800' }}>Save</Text>}
               </TouchableOpacity>
             </View>
           </View>
-        )}
-
-        {/* The "Left-behind alerts" switch is gone on purpose: nothing ever
-            consumed it. lib/items/leftBehind.ts (pure, self-checked) needs a
-            BACKGROUND scan tied to geofence exits, and scanning only runs
-            while this screen is open — so the switch promised an alert that
-            could never fire. Bring it back with that background wiring. */}
-
-        <Text style={{ color: colors.textDim, fontSize: 11.5, lineHeight: 16, marginTop: 16 }}>
-          Works with any Bluetooth tag — no brand lock-in, no subscription. Tags you pair, and
-          where they were last heard, are shared with this space so any member&apos;s phone can help
-          find them. The tag&apos;s maker is never involved.
-        </Text>
-      </ScrollView>
+        </KeyboardSafe>
+      </Modal>
     </View>
   );
 }
@@ -442,7 +516,8 @@ const st = StyleSheet.create({
     borderWidth: 1, borderRadius: 18, padding: 12, marginBottom: 10, ...SPACE_SHADOW.rest,
   },
   icon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  pair: { borderWidth: 1, borderRadius: 20, padding: 14, gap: 11, marginTop: 12, ...SPACE_SHADOW.raised },
+  pair: { borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1, padding: 16, paddingBottom: 28, gap: 11 },
+  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
   input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, minHeight: 46, fontSize: 15 },
   iconRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   iconPick: { width: 42, height: 42, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },

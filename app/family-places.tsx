@@ -62,6 +62,9 @@ const LIFETIMES: { label: string; ms: number | null }[] = [
   { label: '7 days',    ms: 7 * 24 * 3600_000 },
 ];
 
+/** rchip/day chips draw ~34–36 dp tall; this carries the tap target to 44. */
+const CHIP_SLOP = { top: 6, bottom: 6 };
+
 const hhmm = (min: number) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
 
 /** One-line summary of when a zone is live, for the list row. */
@@ -123,10 +126,16 @@ export default function FamilyPlacesScreen() {
 
   /** Choose (or clear) my reference place, and push it into the live publisher. */
   const chooseRef = async (nameOrNull: string | null) => {
+    const prev = refName;
     const next = refName === nameOrNull ? null : nameOrNull;   // tapping the chosen one clears it
     setRefName(next);
-    await setDefaultRef(cid, next);
-    await reloadPlaces(cid);   // the broadcaster caches this; refresh it now
+    try { await setDefaultRef(cid, next); }
+    catch {
+      setRefName(prev);
+      Alert.alert('Not saved', 'Your choice could not be saved on this phone. Try again.');
+      return;
+    }
+    await reloadPlaces(cid).catch(() => {});   // the broadcaster caches this; refresh it now
   };
 
   // Per-place lock stats from the SHARED history store (visits · time inside).
@@ -215,9 +224,16 @@ export default function FamilyPlacesScreen() {
       { text: 'Delete', style: 'destructive', onPress: async () => {
         // Deleting the place I am measured from must clear the choice, or the
         // publisher keeps looking for a name that no longer exists and the
-        // reference line silently disappears with no way to see why.
-        if (p.name === refName) { setRefName(null); await setDefaultRef(cid, null); }
-        if (await persist(places.filter((x) => x.id !== p.id))) setEditing(null);
+        // reference line silently disappears with no way to see why. Only
+        // AFTER the delete saved: a failed delete keeps the place, and with it
+        // the choice.
+        if (!(await persist(places.filter((x) => x.id !== p.id)))) return;
+        setEditing(null);
+        if (p.name === refName) {
+          setRefName(null);
+          await setDefaultRef(cid, null).catch(() => {});
+          await reloadPlaces(cid).catch(() => {});
+        }
       } },
     ]);
   };
@@ -238,10 +254,13 @@ export default function FamilyPlacesScreen() {
     const r = clampRadius(p.radiusM);
     const doArm = async () => {
       const me = await getCurrentUserAsync().catch(() => null);
-      const res = await armFamilyPlaceLock({
-        circleId: cid, place: p,
-        myId: String(me?.id ?? 'me'), myName: me?.name || me?.email || 'Me',
-      });
+      let res: { ok: boolean; reason?: string };
+      try {
+        res = await armFamilyPlaceLock({
+          circleId: cid, place: p,
+          myId: String(me?.id ?? 'me'), myName: me?.name || me?.email || 'Me',
+        });
+      } catch (e: any) { res = { ok: false, reason: e?.message }; }
       if (!res.ok) { Alert.alert('Could not lock', res.reason ?? 'Try again.'); return; }
       setEditing(null);
     };
@@ -254,7 +273,10 @@ export default function FamilyPlacesScreen() {
   const unlockPlace = () => {
     Alert.alert('Unlock?', 'Monitoring stops and the session is saved to history.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Unlock', style: 'destructive', onPress: () => { unlockLock().catch(() => {}); setEditing(null); } },
+      { text: 'Unlock', style: 'destructive', onPress: async () => {
+        try { await unlockLock(); setEditing(null); }
+        catch (e: any) { Alert.alert('Still locked', e?.message ?? 'Could not stop the lock. Try again.'); }
+      } },
     ]);
   };
 
@@ -267,20 +289,24 @@ export default function FamilyPlacesScreen() {
       Alert.alert('Radius', `Pick a radius between ${MIN_RADIUS} and ${MAX_RADIUS} metres.`);
       return;
     }
-    // The reference is stored by NAME, so a rename has to follow it across or
-    // the choice silently detaches from the place it was made for.
-    if (editing.name === refName && nm !== refName) {
-      setRefName(nm);
-      await setDefaultRef(cid, nm);
-    }
-    if (await persist(places.map((p) => (p.id === editing.id ? {
+    const ok = await persist(places.map((p) => (p.id === editing.id ? {
       ...p, name: nm, radiusM: r, icon: iconFor(nm),
       // Undefined rather than null, so an "always on / permanent" zone carries
       // no schedule keys at all and reads identically to one saved before
       // schedules existed.
       schedule: editSched ?? undefined,
       expiresAt: editExpiry ?? undefined,
-    } : p)))) setEditing(null);
+    } : p)));
+    if (!ok) return;
+    setEditing(null);
+    // The reference is stored by NAME, so a rename has to follow it across or
+    // the choice silently detaches from the place it was made for. Written
+    // only once the rename itself saved, so a failed save changes nothing.
+    if (editing.name === refName && nm !== refName) {
+      setRefName(nm);
+      await setDefaultRef(cid, nm).catch(() => {});
+      await reloadPlaces(cid).catch(() => {});
+    }
   };
 
   const activeCount = places.filter((p) => p.enabled !== false).length;
@@ -299,16 +325,18 @@ export default function FamilyPlacesScreen() {
         <View style={[st.field, { borderColor: G.chipEdge, backgroundColor: G.paneFaint }]}>
           <Ionicons name={iconFor(name)} size={18} color={colors.textDim} />
           <TextInput value={name} onChangeText={setName} placeholder="Name (Home, School, Work…)"
+            accessibilityLabel="Place name" maxLength={60}
             placeholderTextColor={colors.textFaint} style={[st.input, { color: colors.text }]} returnKeyType="next" />
         </View>
 
         <View style={[st.field, { borderColor: G.chipEdge, backgroundColor: G.paneFaint, marginTop: 10 }]}>
           <Ionicons name="search" size={18} color={colors.textDim} />
           <TextInput value={where} onChangeText={setWhere} placeholder="Address or lat, lng — blank = where I am now"
+            accessibilityLabel="Address or latitude, longitude. Leave blank to use where you are now"
             placeholderTextColor={colors.textFaint} autoCapitalize="none" style={[st.input, { color: colors.text }]}
             returnKeyType="done" onSubmitEditing={add} />
           {!!where && (
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Clear" onPress={() => setWhere('')}><Ionicons name="close-circle" size={17} color={colors.textFaint} /></TouchableOpacity>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Clear the address" hitSlop={{ top: 14, bottom: 14, left: 10, right: 10 }} onPress={() => setWhere('')}><Ionicons name="close-circle" size={17} color={colors.textFaint} /></TouchableOpacity>
           )}
         </View>
 
@@ -316,7 +344,8 @@ export default function FamilyPlacesScreen() {
           {RADII.map((r) => (
             <TouchableOpacity key={r} onPress={() => setRadius(r)}
               accessibilityRole="button" accessibilityState={{ selected: radius === r }} accessibilityLabel={`${r} metre radius`}
-              style={[st.rchip, { borderColor: radius === r ? colors.primary : G.chipEdge, backgroundColor: radius === r ? brandAlpha(0.14) : G.paneFaint }]}>
+              hitSlop={CHIP_SLOP}
+                    style={[st.rchip, { borderColor: radius === r ? colors.primary : G.chipEdge, backgroundColor: radius === r ? brandAlpha(0.14) : G.paneFaint }]}>
               <Text style={{ color: radius === r ? G.accentText : colors.text, fontWeight: radius === r ? '700' : '500', fontSize: 13 }}>{r} m</Text>
             </TouchableOpacity>
           ))}
@@ -364,6 +393,7 @@ export default function FamilyPlacesScreen() {
                     accessibilityRole="button"
                     accessibilityState={{ selected: on }}
                     accessibilityLabel={`Measure me from ${p.name}${on ? ', selected' : ''}`}
+                    hitSlop={CHIP_SLOP}
                     style={[st.rchip, { borderColor: on ? colors.primary : G.chipEdge, backgroundColor: on ? brandAlpha(0.14) : G.paneFaint }]}
                   >
                     <Text numberOfLines={1} style={{ color: on ? G.accentText : colors.text, fontWeight: on ? '700' : '500', fontSize: 13 }}>
@@ -426,7 +456,8 @@ export default function FamilyPlacesScreen() {
             rescue it, because the sheet itself was covered, not just its
             content. keyboardOnly: the sheet already pads its own bottom. */}
         <KeyboardSafe keyboardOnly style={st.backdrop}>
-          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setEditing(null)} />
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setEditing(null)}
+            accessibilityRole="button" accessibilityLabel="Close without saving" />
           {/* Height-capped with an inner scroll: radius + schedule + lifetime
               + four buttons overflow a short phone, and the keyboard renders
               over a native Modal with no KeyboardAvoidingView — scrolling is
@@ -439,12 +470,14 @@ export default function FamilyPlacesScreen() {
             <View style={[st.field, { borderColor: G.chipEdge, backgroundColor: G.paneFaint }]}>
               <Ionicons name={iconFor(editName)} size={18} color={colors.textDim} />
               <TextInput value={editName} onChangeText={setEditName} placeholder="Name"
+                accessibilityLabel="Place name" maxLength={60}
                 placeholderTextColor={colors.textFaint} style={[st.input, { color: colors.text }]} />
             </View>
 
             <View style={[st.field, { borderColor: G.chipEdge, backgroundColor: G.paneFaint, marginTop: 10 }]}>
               <Ionicons name="resize" size={18} color={colors.textDim} />
               <TextInput value={editRadius} onChangeText={setEditRadius} keyboardType="number-pad"
+                accessibilityLabel={`Radius in metres, ${MIN_RADIUS} to ${MAX_RADIUS}`} maxLength={4}
                 placeholder={`Radius in metres (${MIN_RADIUS}–${MAX_RADIUS})`} placeholderTextColor={colors.textFaint}
                 style={[st.input, { color: colors.text }]} />
             </View>
@@ -453,7 +486,8 @@ export default function FamilyPlacesScreen() {
               {RADII.map((r) => (
                 <TouchableOpacity key={r} onPress={() => setEditRadius(String(r))}
                   accessibilityRole="button" accessibilityState={{ selected: Number(editRadius) === r }} accessibilityLabel={`${r} metre radius`}
-                  style={[st.rchip, { borderColor: Number(editRadius) === r ? colors.primary : G.chipEdge, backgroundColor: Number(editRadius) === r ? brandAlpha(0.14) : G.paneFaint }]}>
+                  hitSlop={CHIP_SLOP}
+                    style={[st.rchip, { borderColor: Number(editRadius) === r ? colors.primary : G.chipEdge, backgroundColor: Number(editRadius) === r ? brandAlpha(0.14) : G.paneFaint }]}>
                   <Text style={{ color: Number(editRadius) === r ? G.accentText : colors.text, fontSize: 13 }}>{r} m</Text>
                 </TouchableOpacity>
               ))}
@@ -469,6 +503,7 @@ export default function FamilyPlacesScreen() {
                 return (
                   <TouchableOpacity key={pr.label} onPress={() => setEditSched(pr.sched ? { ...pr.sched } : null)}
                     accessibilityRole="button" accessibilityState={{ selected: on }}
+                    hitSlop={CHIP_SLOP}
                     style={[st.rchip, { borderColor: on ? colors.primary : G.chipEdge, backgroundColor: on ? brandAlpha(0.14) : G.paneFaint }]}>
                     <Text style={{ color: on ? G.accentText : colors.text, fontSize: 12.5, fontWeight: on ? '700' : '500' }}>{pr.label}</Text>
                   </TouchableOpacity>
@@ -493,6 +528,7 @@ export default function FamilyPlacesScreen() {
                         setEditSched({ ...editSched, days: next.length ? next : [] });
                       }}
                         accessibilityRole="checkbox" accessibilityLabel={DAY_NAMES[i]} accessibilityState={{ checked: on }}
+                        hitSlop={CHIP_SLOP}
                         style={[st.day, { borderColor: on ? colors.primary : G.chipEdge, backgroundColor: on ? brandAlpha(0.14) : G.paneFaint }]}>
                         <Text style={{ color: on ? G.accentText : colors.textDim, fontSize: 12, fontWeight: '700' }}>{d}</Text>
                       </TouchableOpacity>
@@ -508,6 +544,23 @@ export default function FamilyPlacesScreen() {
 
             <Text style={[st.h, { color: colors.textDim, marginTop: 20, marginBottom: 8 }]}>How long it lasts</Text>
             <View style={st.radii}>
+              {/* A timed zone reopened for editing: its CURRENT lifetime is a
+                  chip of its own, selected until another is picked — the timed
+                  chips below are relative to now and can never match it. */}
+              {editing?.expiresAt != null && editing.expiresAt > Date.now() && (() => {
+                const on = editExpiry === editing.expiresAt;
+                const until = new Date(editing.expiresAt).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+                return (
+                  <TouchableOpacity
+                    accessibilityRole="button" accessibilityState={{ selected: on }}
+                    accessibilityLabel={`Keep the current end time, ${until}`}
+                    onPress={() => { setEditExpiry(editing.expiresAt!); setEditLife(null); }}
+                    hitSlop={CHIP_SLOP}
+                    style={[st.rchip, { borderColor: on ? colors.primary : G.chipEdge, backgroundColor: on ? brandAlpha(0.14) : G.paneFaint }]}>
+                    <Text style={{ color: on ? G.accentText : colors.text, fontSize: 12.5, fontWeight: on ? '700' : '500' }}>Until {until}</Text>
+                  </TouchableOpacity>
+                );
+              })()}
               {LIFETIMES.map((lt) => {
                 // Timed choices are remembered by label for this edit: the
                 // stored value is an absolute expiresAt, which no chip matches.
@@ -516,6 +569,7 @@ export default function FamilyPlacesScreen() {
                   <TouchableOpacity key={lt.label}
                     accessibilityRole="button" accessibilityState={{ selected: on }}
                     onPress={() => { setEditExpiry(lt.ms == null ? null : Date.now() + lt.ms); setEditLife(lt.ms == null ? null : lt.label); }}
+                    hitSlop={CHIP_SLOP}
                     style={[st.rchip, { borderColor: on ? colors.primary : G.chipEdge, backgroundColor: on ? brandAlpha(0.14) : G.paneFaint }]}>
                     <Text style={{ color: on ? G.accentText : colors.text, fontSize: 12.5, fontWeight: on ? '700' : '500' }}>{lt.label}</Text>
                   </TouchableOpacity>
@@ -533,18 +587,19 @@ export default function FamilyPlacesScreen() {
               <View style={{ flexDirection: 'row', gap: 8, marginTop: 14 }}>
                 <TouchableOpacity
                   onPress={() => { navigateTo(editing.center.lat, editing.center.lng, editing.name); setEditing(null); }}
+                  accessibilityRole="button" accessibilityLabel={`Navigate to ${editing.name}`}
                   style={[st.btn, { flex: 1, marginTop: 0, backgroundColor: 'transparent', borderWidth: 1, borderColor: G.chipEdge }]}>
                   <Ionicons name="navigate" size={17} color={colors.primary} />
                   <Text style={[st.btnTxt, { color: colors.text }]}>Navigate</Text>
                 </TouchableOpacity>
                 {lockedHere(editing) ? (
-                  <TouchableOpacity onPress={unlockPlace}
+                  <TouchableOpacity onPress={unlockPlace} accessibilityRole="button" accessibilityLabel={`Unlock ${editing.name}`}
                     style={[st.btn, { flex: 1, marginTop: 0, backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.danger }]}>
                     <Ionicons name="lock-open" size={17} color={G.dangerText} />
                     <Text style={[st.btnTxt, { color: G.dangerText }]}>Unlock</Text>
                   </TouchableOpacity>
                 ) : (
-                  <TouchableOpacity onPress={() => lockPlace(editing)}
+                  <TouchableOpacity onPress={() => lockPlace(editing)} accessibilityRole="button" accessibilityLabel={`Lock at ${editing.name}`}
                     style={[st.btn, { flex: 1, marginTop: 0, backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.primary }]}>
                     <Ionicons name="lock-closed" size={17} color={colors.primary} />
                     <Text style={[st.btnTxt, { color: G.accentText }]}>Lock here</Text>
@@ -553,15 +608,15 @@ export default function FamilyPlacesScreen() {
               </View>
             )}
             {editing && lockedHere(editing) && (
-              <TouchableOpacity onPress={() => { setEditing(null); router.push('/location-lock' as any); }} style={{ alignSelf: 'center', marginTop: 10 }}>
+              <TouchableOpacity onPress={() => { setEditing(null); router.push('/location-lock'); }} accessibilityRole="link" hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }} style={{ alignSelf: 'center', marginTop: 10 }}>
                 <Text style={{ color: G.accentText, fontWeight: '600', fontSize: 13 }}>View live lock status</Text>
               </TouchableOpacity>
             )}
 
-            <TouchableOpacity onPress={saveEdit} style={[st.btn, { backgroundColor: colors.brandOnLight }]}>
+            <TouchableOpacity onPress={saveEdit} accessibilityRole="button" accessibilityLabel="Save place" style={[st.btn, { backgroundColor: colors.brandOnLight }]}>
               <Ionicons name="checkmark" size={18} color="#fff" /><Text style={st.btnTxt}>Save</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => editing && remove(editing)} style={[st.btn, { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.danger, marginTop: 8 }]}>
+            <TouchableOpacity onPress={() => editing && remove(editing)} accessibilityRole="button" style={[st.btn, { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.danger, marginTop: 8 }]}>
               <Ionicons name="trash" size={18} color={G.dangerText} />
               <Text style={[st.btnTxt, { color: G.dangerText }]}>Delete place</Text>
             </TouchableOpacity>
