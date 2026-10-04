@@ -159,6 +159,14 @@ async function taps() {
   await openWhenUnlocked('/chat?id=6', Promise.resolve(true), () => '/(tabs)/chats', open);
   ok('a failed lock check does not strand taps', opened.join() === '/chat?id=6');
   setResumeLockCheck(Promise.resolve(false));
+
+  // The gate settles once per process. A launch sent to the lock or sign-in
+  // must not hold every later tap after the user has unlocked.
+  opened.length = 0;
+  await openWhenUnlocked('/chat?id=7', Promise.resolve(false), () => '/onboard', open);
+  ok('redirected launch, still signing in: held', opened.length === 0 && consumeLaunchLink() === '/chat?id=7');
+  await openWhenUnlocked('/chat?id=8', Promise.resolve(false), () => '/(tabs)/chats', open);
+  ok('redirected launch, unlocked since: opened', opened.join() === '/chat?id=8' && consumeLaunchLink() === null);
 }
 
 // ── the wiring, pinned from source ───────────────────────────────────────

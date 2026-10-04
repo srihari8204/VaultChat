@@ -138,8 +138,14 @@ export function setResumeLockCheck(check: Promise<boolean>): void {
 }
 
 /**
- * Open `href` once the launch gate has allowed this launch and no resume lock
- * is deciding or showing; otherwise hold it for replay after unlock.
+ * Open `href` once the launch gate has decided and nothing is locking now;
+ * otherwise hold it for replay after unlock.
+ *
+ * `launch` settles ONCE per process, so `false` means only "this launch was sent
+ * to the lock or sign-in", not "still locked". After the user unlocks or signs
+ * in, later taps must open, so the current route decides. While the launch was
+ * redirected, the root path ('/', the veil) still counts as locked: the
+ * redirect may not have reached the router yet.
  */
 export async function openWhenUnlocked(
   href: string,
@@ -148,6 +154,8 @@ export async function openWhenUnlocked(
   open: (href: string) => void,
 ): Promise<void> {
   const [allowed, relocking] = await Promise.all([launch, resumeLock]);
-  if (allowed && !relocking && !isLockOrAuthRoute(currentPath())) open(href);
+  const path = currentPath();
+  const stillGated = isLockOrAuthRoute(path) || (!allowed && (!path || path === '/'));
+  if (!relocking && !stillGated) open(href);
   else stashLaunchLink(href);
 }

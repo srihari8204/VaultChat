@@ -90,6 +90,8 @@ async function loadReminders(): Promise<ReminderRow[]> {
 async function cachedText(r: ReminderRow): Promise<string | null> {
   try {
     const [m] = await getCachedMessagesByIds(r.chatId, [Number(r.messageId)]);
+    // View-once / Invisible Ink text is never shown outside its bubble.
+    if (m?.meta?.viewOnce || m?.meta?.invisibleInk) return null;
     const t = m?.type === 'text' ? m.content : null;
     return t && !looksEncrypted(t) ? t : null;
   } catch { return null; }

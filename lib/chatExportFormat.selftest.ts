@@ -40,6 +40,8 @@ async function main() {
   assert.equal(exportBody(msg(1, 'cap', { type: 'image' }), isCipher), '[Image] cap');
   assert.equal(exportBody(msg(1, null, { type: 'audio' }), isCipher), '[Voice message]');
   assert.equal(exportBody(msg(1, 'x', { deletedAt: 'y' }), isCipher), '[deleted]');
+  assert.equal(exportBody({ ...msg(1, 'secret'), meta: { viewOnce: true } }, isCipher), '[Protected message]');
+  assert.equal(exportBody({ ...msg(1, 'ink'), meta: { invisibleInk: true } }, isCipher), '[Protected message]');
 
   // ── wiring: the export decrypts and cleans up ──
   const SCREEN = readFileSync('app/chat-export.tsx', 'utf8');
