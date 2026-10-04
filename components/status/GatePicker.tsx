@@ -13,7 +13,7 @@
 // weaker option look equally strong would be the most damaging thing this
 // screen could do.
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { GRID_MIN, GRID_MAX, isAcceptableAnswer, ANSWER_MIN_LEN } from '../../lib/status/gate';
@@ -75,6 +75,9 @@ function Opt({ kind, icon, title, sub, value, onChange, ink, S }: {
 export default function GatePicker({ value, onChange, accent, text, dim, surface }: Props) {
   const c = useColors();
   const S = useMemo(() => makeS(c), [c]);
+  // Hidden by default (shoulder-surfing), but the poster must be able to check
+  // it: a typo here locks every viewer out and cannot be recovered.
+  const [showAnswer, setShowAnswer] = useState(false);
   const ink: Ink = { accent, text, dim, surface };
   const opt = { value, onChange, ink, S };
 
@@ -131,22 +134,32 @@ export default function GatePicker({ value, onChange, accent, text, dim, surface
             accessibilityLabel="Question"
           />
           <Text style={[S.label, { color: dim, marginTop: 12 }]}>Answer</Text>
-          <TextInput
-            value={value.answer}
-            onChangeText={(t) => onChange({ ...value, answer: t })}
-            placeholder="Only they would know this"
-            placeholderTextColor={dim}
-            style={[S.input, { color: text, borderColor: dim }]}
-            maxLength={100}
-            autoCapitalize="none"
-            // The answer is the key to the story: keep it out of the keyboard's
-            // learned words and suggestions, and off the screen.
-            secureTextEntry
-            autoCorrect={false}
-            autoComplete="off"
-            spellCheck={false}
-            accessibilityLabel="Answer"
-          />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <TextInput
+              value={value.answer}
+              onChangeText={(t) => onChange({ ...value, answer: t })}
+              placeholder="Only they would know this"
+              placeholderTextColor={dim}
+              style={[S.input, { color: text, borderColor: dim, flex: 1 }]}
+              maxLength={100}
+              autoCapitalize="none"
+              // The answer is the key to the story: keep it out of the keyboard's
+              // learned words and suggestions, and hidden unless the poster asks.
+              secureTextEntry={!showAnswer}
+              autoCorrect={false}
+              autoComplete="off"
+              spellCheck={false}
+              accessibilityLabel="Answer"
+            />
+            <TouchableOpacity
+              onPress={() => setShowAnswer((v) => !v)}
+              style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}
+              accessibilityRole="button"
+              accessibilityLabel={showAnswer ? 'Hide answer' : 'Show answer'}
+            >
+              <Ionicons name={showAnswer ? 'eye-off-outline' : 'eye-outline'} size={20} color={dim} />
+            </TouchableOpacity>
+          </View>
           {/* Spelling and spacing are forgiven; the secret is not recoverable.
               Both facts change what a poster chooses, so both are said here. */}
           <Text style={[S.note, { color: dim }]}>
