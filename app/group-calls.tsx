@@ -31,6 +31,7 @@ import { getSocket } from '../lib/socket';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { AuroraBackground, AppText as Text } from '../components/ui';
 import { initialOf } from '../lib/format';
+import { GroupNotFound } from '../components/groups/GroupNotFound';
 
 type CallMode = 'voice' | 'video';
 
@@ -52,7 +53,8 @@ export default function GroupCallsScreen() {
   // Load failed: an error with Retry, not "No other members to call."
   const [failed, setFailed] = useState(false);
   const [reload, setReload] = useState(0);
-  // One tap starts one call; cleared when the screen is focused again.
+  // One tap starts one call; cleared when the screen is focused again, or after
+  // a few seconds in case the call screen never took focus.
   const starting = useRef(false);
   useFocusEffect(useCallback(() => { starting.current = false; }, []));
 
@@ -128,11 +130,14 @@ export default function GroupCallsScreen() {
       Alert.alert('Could not start the call', e?.message ?? 'Try again.');
       return;
     }
+    setTimeout(() => { starting.current = false; }, 3000);
     if (!rang) {
       // The call room opened, but nobody was told it exists.
       Alert.alert('Members were not rung', 'Could not reach the server to ring the group. They can still join from the group chat.');
     }
   }, [members, chatId, groupName, mode, router]);
+
+  if (!chatId) return <GroupNotFound title="Group call" />;
 
   return (
     <View style={s.container}>
@@ -150,7 +155,7 @@ export default function GroupCallsScreen() {
         {(['voice', 'video'] as const).map(mo => (
           <TouchableOpacity key={mo} style={[s.modeBtn, mode === mo && s.modeBtnActive]} onPress={() => setMode(mo)}
             accessibilityRole="radio" accessibilityLabel={mo === 'voice' ? 'Voice' : 'Video'} accessibilityState={{ selected: mode === mo, checked: mode === mo }}>
-            <Ionicons name={mo === 'voice' ? 'call' : 'videocam'} size={18} color={mode === mo ? '#FFFFFF' : colors.textDim} />
+            <Ionicons name={mo === 'voice' ? 'call' : 'videocam'} size={18} color={mode === mo ? colors.onPrimary : colors.textDim} />
             <Text style={[s.modeTxt, mode === mo && s.modeTxtActive]}>{mo === 'voice' ? 'Voice' : 'Video'}</Text>
           </TouchableOpacity>
         ))}
@@ -165,7 +170,7 @@ export default function GroupCallsScreen() {
         accessibilityLabel={`Start ${mode} group call`}
         accessibilityState={{ disabled: loading || members.length === 0 }}
       >
-        <Ionicons name={mode === 'video' ? 'videocam' : 'call'} size={20} color="#fff" />
+        <Ionicons name={mode === 'video' ? 'videocam' : 'call'} size={20} color={colors.onPrimary} />
         <Text style={s.startTxt}>Start {mode} group call</Text>
       </TouchableOpacity>
       <Text style={s.noticeTxt}>Rings everyone in the group at once. Or tap a member below for a 1:1 call.</Text>
@@ -224,10 +229,10 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   modeBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 10 },
   modeBtnActive: { backgroundColor: c.primary },
   modeTxt: { color: c.textDim, fontSize: 14, fontWeight: '700' },
-  modeTxtActive: { color: '#FFFFFF' },
+  modeTxtActive: { color: c.onPrimary },
   noticeTxt: { color: c.textDim, fontSize: 12, lineHeight: 17, marginHorizontal: 18, marginTop: 8, textAlign: 'center' },
   startBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginHorizontal: 16, marginTop: 12, paddingVertical: 14, borderRadius: 14, backgroundColor: c.primary },
-  startTxt: { color: '#fff', fontSize: 15, fontWeight: '800', textTransform: 'capitalize' },
+  startTxt: { color: c.onPrimary, fontSize: 15, fontWeight: '800', textTransform: 'capitalize' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: c.glassSoft, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: c.glassStroke },
   avatar: { width: 46, height: 46, borderRadius: 23, backgroundColor: c.surfaceSolid, alignItems: 'center', justifyContent: 'center', overflow: 'visible' },
   avatarImg: { width: 46, height: 46, borderRadius: 23 },

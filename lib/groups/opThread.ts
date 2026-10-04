@@ -50,29 +50,42 @@ export interface OpThreadResult<Op> {
   complete: boolean;
 }
 
+/**
+ * Read server pages newest first with `before=`, until a short page (the start
+ * of the thread), `enough(page)` says the caller has what it needs, or
+ * `maxPages`. The first page failing throws; a later one keeps what was read
+ * and reports `complete: false`.
+ */
+export async function pageBack(
+  page: (before?: number) => Promise<Message[]>,
+  maxPages: number = OP_MAX_PAGES,
+  enough?: (page: Message[]) => boolean,
+): Promise<{ messages: Message[]; complete: boolean }> {
+  const messages: Message[] = [];
+  let before: number | undefined;
+  for (let i = 0; i < maxPages; i++) {
+    let p: Message[];
+    if (i === 0) {
+      p = await page();                // the first page failing IS the load failing
+    } else {
+      try { p = await page(before); } catch { break; }
+    }
+    messages.push(...p);
+    if (p.length < OP_PAGE || enough?.(p)) return { messages, complete: true };
+    const oldest = Math.min(...p.map((m) => m.id));
+    // No progress means a server that ignores `before`; stop rather than loop.
+    if (!Number.isFinite(oldest) || (before != null && oldest >= before)) break;
+    before = oldest;
+  }
+  return { messages, complete: false };
+}
+
 export async function collectOps<Op extends { by: string }>(
   io: OpThreadIO,
   decode: (body: string) => Op | null,
   maxPages: number = OP_MAX_PAGES,
 ): Promise<OpThreadResult<Op>> {
-  const server: Message[] = [];
-  let before: number | undefined;
-  let complete = false;
-  for (let i = 0; i < maxPages; i++) {
-    let page: Message[];
-    if (i === 0) {
-      page = await io.page();          // the first page failing IS the load failing
-    } else {
-      // A later page failing keeps what was read; the screen says it is partial.
-      try { page = await io.page(before); } catch { break; }
-    }
-    server.push(...page);
-    if (page.length < OP_PAGE) { complete = true; break; }
-    const oldest = Math.min(...page.map((m) => m.id));
-    // No progress means a server that ignores `before`; stop rather than loop.
-    if (!Number.isFinite(oldest) || (before != null && oldest >= before)) break;
-    before = oldest;
-  }
+  const { messages: server, complete } = await pageBack((before) => io.page(before), maxPages);
 
   const ops: Op[] = [];
   let unreadable = 0;

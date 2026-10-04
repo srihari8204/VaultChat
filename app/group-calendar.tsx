@@ -12,8 +12,9 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   View, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
-  ActivityIndicator, Modal,
+  ActivityIndicator, Modal, Platform,
 } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
@@ -34,6 +35,8 @@ import {
 import { syncEventReminders } from '../lib/groups/taskReminders';
 import { KeyboardSafe } from '../components/ui';
 import { useDatePicker } from '../components/ui/useDatePicker';
+import { GroupNotFound } from '../components/groups/GroupNotFound';
+import { eventWriter, writerRecorded } from '../lib/groups/serverContracts';
 
 const REPEATS: { key: Recurrence; label: string }[] = [
   { key: 'none', label: 'Once' },
@@ -65,30 +68,47 @@ const defaultStart = () => withHour(Date.now(), 18);
 /** Who I am in this group, for the edit/delete gate (lib/groups/calendar eventActions). */
 interface Access { typed: boolean; myRole: string | null; permissions: string[] }
 
+/** Decrypted rows by id + ciphertext, so a row is opened once per screen visit.
+ *  Failures are not remembered: a later load may have the sender's key. */
+type DecryptMemo = Map<string, GroupEvent>;
+
 /**
  * Decrypt server rows into events. Rows we cannot open or parse are skipped,
  * never fatal, and counted in `unreadable` so the screen can say so.
  */
-async function decryptRows(groupId: string, rows: GroupEventRow[]) {
+// `updatedBy`: who sealed the current payload (R4 backend C10, not deployed;
+// absent today). Not yet on GroupEventRow in lib/chatService.
+type ServerEventRow = GroupEventRow & { updatedBy?: string | null };
+
+async function decryptRows(groupId: string, rows: ServerEventRow[], memo: DecryptMemo) {
   const out: GroupEvent[] = [];
   const ids: Record<string, number> = {};
   let unreadable = 0;
   for (const r of rows) {
+    // The month view and the reminder sync read overlapping rows; an edit
+    // changes the payload, so the key never serves a stale event.
+    const key = `${r.id}\n${r.payload}`;
+    const hit = memo.get(key);
+    if (hit) { out.push(hit); ids[hit.id] = r.id; continue; }
     try {
       // ponytail: the row id doubles as the plaintext-cache message id, so it can
       // share a cache slot with a chat message of the same id in this group. A
       // collision makes one of the two unreadable. Needs a cache namespace in
       // decryptFromChat (lib/chatService.ts, not this screen's to change).
-      const json = await decryptFromChat(groupId, r.createdBy ?? '', r.payload, r.id);
+      // Sealed by the last writer: `updatedBy` once the server records it, else
+      // the author (lib/groups/serverContracts eventWriter).
+      const json = await decryptFromChat(groupId, eventWriter(r), r.payload, r.id);
       const e = JSON.parse(json) as GroupEvent;
       // The row id is the server's handle; the payload carries the rest.
       if (e && typeof e.startsAt === 'number' && e.title) {
-        out.push({ ...e, id: String(r.id), createdBy: r.createdBy ?? e.createdBy });
-        ids[String(r.id)] = r.id;
+        const ev = { ...e, id: String(r.id), createdBy: r.createdBy ?? e.createdBy };
+        memo.set(key, ev);
+        out.push(ev);
+        ids[ev.id] = r.id;
       } else unreadable++;
     } catch { unreadable++; }
   }
-  return { events: out, ids, unreadable };
+  return { events: out, ids, unreadable, writerKnown: writerRecorded(rows) };
 }
 
 /**
@@ -96,14 +116,14 @@ async function decryptRows(groupId: string, rows: GroupEventRow[]) {
  * which month is on screen (the reconciler would otherwise cancel reminders for
  * months that are not loaded). Never prompts for notification permission.
  */
-async function syncReminders(groupId: string, me: string): Promise<void> {
+async function syncReminders(groupId: string, me: string, memo: DecryptMemo): Promise<void> {
   const now = Date.now(), to = now + REMINDER_HORIZON_MS;
-  const { events } = await decryptRows(groupId, await listGroupEvents(groupId, monthKeysInRange(now, to)));
+  const { events } = await decryptRows(groupId, await listGroupEvents(groupId, monthKeysInRange(now, to)), memo);
   await syncEventReminders(groupId, eventReminderItems(occurrencesInRange(events, now, to), me), me, now);
 }
 
 export default function GroupCalendarScreen() {
-  const { colors } = useTheme();
+  const { colors, scheme } = useTheme();
   const params = useLocalSearchParams<{ groupId?: string; name?: string }>();
   const groupId = String(params.groupId || '');
 
@@ -118,9 +138,13 @@ export default function GroupCalendarScreen() {
   const [me, setMe] = useState<string | null>(null);
   // null until GET /chats/:id answers; then only my own events are editable.
   const [access, setAccess] = useState<Access | null>(null);
+  // The server records who last sealed each event (updatedBy), so an admin may
+  // edit others' events too. False on today's server: edit stays author-only.
+  const [writerKnown, setWriterKnown] = useState(false);
   // Only the latest load may write state: switching months quickly must not let
   // an older month's slower response overwrite the one being shown.
   const loadSeq = useRef(0);
+  const memo = useRef<DecryptMemo>(new Map()).current;
 
   const [composing, setComposing] = useState(false);
   // The event being edited, or null for a new one.
@@ -130,7 +154,11 @@ export default function GroupCalendarScreen() {
   const [start, setStart] = useState(defaultStart);
   const [repeat, setRepeat] = useState<Recurrence>('none');
   const [busy, setBusy] = useState(false);
+  // Android: the native date/time dialogs (not a React Modal). iOS: the picker
+  // is drawn inline in the composer sheet, because the hook's iOS sheet is its
+  // own <Modal> and a Modal presented from inside this one is unreliable.
   const picker = useDatePicker();
+  const [pickingIOS, setPickingIOS] = useState(false);
 
   const bounds = useMemo(() => monthBounds(cursor), [cursor]);
 
@@ -139,8 +167,9 @@ export default function GroupCalendarScreen() {
     const seq = ++loadSeq.current;
     try {
       const rows = await listGroupEvents(groupId, monthKeysInRange(bounds.from, bounds.to));
-      const { events: out, ids, unreadable: bad } = await decryptRows(groupId, rows);
+      const { events: out, ids, unreadable: bad, writerKnown: wk } = await decryptRows(groupId, rows, memo);
       if (seq !== loadSeq.current) return;
+      if (wk) setWriterKnown(true);
       setEvents(out);
       setRowIds(ids);
       setUnreadable(bad);
@@ -149,7 +178,7 @@ export default function GroupCalendarScreen() {
       // Offline: keep what is on screen rather than blanking the month.
       if (seq === loadSeq.current) setFailed(true);
     } finally { if (seq === loadSeq.current) setLoading(false); }
-  }, [groupId, bounds.from, bounds.to]);
+  }, [groupId, bounds.from, bounds.to, memo]);
 
   useFocusEffect(useCallback(() => {
     let live = true;
@@ -162,10 +191,10 @@ export default function GroupCalendarScreen() {
           .catch(() => { /* unknown role: only my own events offer edit/delete */ });
       }
       await load();
-      if (u && groupId) syncReminders(groupId, String(u.id)).catch(() => {});
+      if (u && groupId) syncReminders(groupId, String(u.id), memo).catch(() => {});
     })();
     return () => { live = false; };
-  }, [load, groupId]));
+  }, [load, groupId, memo]));
 
   const occurrences = useMemo(
     () => occurrencesInRange(events, bounds.from, bounds.to),
@@ -185,12 +214,12 @@ export default function GroupCalendarScreen() {
 
   const actionsFor = (e: GroupEvent) => eventActions({
     createdBy: e.createdBy, me, typed: access?.typed ?? false,
-    myRole: access?.myRole ?? null, permissions: access?.permissions,
+    myRole: access?.myRole ?? null, permissions: access?.permissions, writerKnown,
   });
 
   const openNew = () => {
     setEditing(null); setTitle(''); setLocation(''); setRepeat('none'); setStart(defaultStart());
-    setComposing(true);
+    setPickingIOS(false); setComposing(true);
   };
 
   // A repeating event is edited as a series: the sheet shows the series start,
@@ -198,7 +227,7 @@ export default function GroupCalendarScreen() {
   const openEdit = (e: GroupEvent) => {
     setEditing(e); setTitle(e.title); setLocation(e.location ?? ''); setRepeat(e.recurrence);
     setStart(e.startsAt);
-    setComposing(true);
+    setPickingIOS(false); setComposing(true);
   };
 
   const save = async () => {
@@ -226,7 +255,7 @@ export default function GroupCalendarScreen() {
       // Jump the view to the month the event landed in, so it is visible.
       setCursor(event.startsAt);
       await load();
-      syncReminders(groupId, me).catch(() => {});
+      syncReminders(groupId, me, memo).catch(() => {});
     } catch (e: any) {
       // The sheet stays open with everything typed, so Retry is one tap.
       Alert.alert(editing ? 'Could not save' : 'Could not add', e?.message ?? 'Try again.');
@@ -247,7 +276,7 @@ export default function GroupCalendarScreen() {
         { text: 'Delete', style: 'destructive', onPress: async () => {
           try {
             await deleteGroupEvent(groupId, rowId); await load();
-            if (me) syncReminders(groupId, me).catch(() => {});
+            if (me) syncReminders(groupId, me, memo).catch(() => {});
             if (editing?.id === o.event.id) { setComposing(false); setEditing(null); }
           }
           catch (e: any) { Alert.alert('Could not delete', e?.message ?? 'Try again.'); }
@@ -256,10 +285,18 @@ export default function GroupCalendarScreen() {
     );
   };
 
+  const startLabel = whenLabel(start);
+  const pickStart = () => {
+    if (Platform.OS === 'ios') setPickingIOS((v) => !v);
+    else picker.open(new Date(start), (d) => setStart(d.getTime()), 'datetime');
+  };
+
   const shiftMonth = (by: number) => {
     const d = new Date(cursor); d.setDate(1); d.setMonth(d.getMonth() + by);
     setCursor(d.getTime()); setLoading(true);
   };
+
+  if (!groupId) return <GroupNotFound title="Calendar" />;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -291,7 +328,7 @@ export default function GroupCalendarScreen() {
           <Text style={{ color: colors.text, fontWeight: '700', marginTop: 10 }}>Couldn’t load this month</Text>
           <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry loading the calendar" onPress={() => { setLoading(true); load(); }}
             style={[st.btn, { backgroundColor: colors.primary, paddingHorizontal: 22 }]}>
-            <Text style={st.btnTxt}>Retry</Text>
+            <Text style={[st.btnTxt, { color: colors.onPrimary }]}>Retry</Text>
           </TouchableOpacity>
         </View>
       ) : days.length === 0 ? (
@@ -329,7 +366,7 @@ export default function GroupCalendarScreen() {
           ))}
           {unreadable > 0 && <UnreadableNote count={unreadable} />}
           <Text style={{ color: colors.textFaint, fontSize: 11.5, textAlign: 'center', marginTop: 20 }}>
-            Tap an event you added to change it.
+            {writerKnown ? 'Tap an event to change it.' : 'Tap an event you added to change it.'}
           </Text>
         </ScrollView>
       )}
@@ -343,7 +380,9 @@ export default function GroupCalendarScreen() {
         <KeyboardSafe keyboardOnly style={st.backdrop}>
           <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setComposing(false)}
             accessibilityRole="button" accessibilityLabel="Close without saving" />
-          <View style={[st.sheet, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
+          {/* Scrolls when the inline iOS picker makes it taller than the screen. */}
+          <ScrollView style={[st.sheet, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}
+            contentContainerStyle={st.sheetBody} keyboardShouldPersistTaps="handled" bounces={false}>
             <Text style={{ color: colors.text, fontWeight: '800', fontSize: 16, marginBottom: 14 }} accessibilityRole="header">
               {editing ? 'Edit event' : 'New event'}
             </Text>
@@ -360,13 +399,25 @@ export default function GroupCalendarScreen() {
             </View>
 
             <TouchableOpacity
-              onPress={() => picker.open(new Date(start), (d) => setStart(d.getTime()), 'datetime')}
-              accessibilityRole="button" accessibilityLabel={`Starts ${whenLabel(start)}`} accessibilityHint="Opens a date and time picker"
+              onPress={pickStart}
+              accessibilityRole="button" accessibilityLabel={`Starts ${startLabel}`}
+              accessibilityHint={pickingIOS ? 'Hides the date and time picker' : 'Opens a date and time picker'}
+              accessibilityState={Platform.OS === 'ios' ? { expanded: pickingIOS } : undefined}
               style={[st.field, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft, marginTop: 10 }]}>
               <Ionicons name="time-outline" size={17} color={colors.textDim} />
-              <Text style={{ color: colors.text, fontSize: 15, flex: 1 }}>{whenLabel(start)}</Text>
-              <Text style={{ color: colors.primary, fontSize: 13, fontWeight: '700' }}>Change</Text>
+              <Text style={{ color: colors.text, fontSize: 15, flex: 1 }}>{startLabel}</Text>
+              <Text style={{ color: colors.primary, fontSize: 13, fontWeight: '700' }}>{pickingIOS ? 'Done' : 'Change'}</Text>
             </TouchableOpacity>
+            {pickingIOS && (
+              <DateTimePicker
+                value={new Date(start)}
+                mode="datetime"
+                display="inline"
+                themeVariant={scheme === 'dark' ? 'dark' : 'light'}
+                accentColor={colors.primary}
+                onChange={(_e, d) => { if (d) setStart(d.getTime()); }}
+              />
+            )}
 
             <View style={st.chips}>
               {WHEN.map((wd) => {
@@ -419,13 +470,15 @@ export default function GroupCalendarScreen() {
             <TouchableOpacity onPress={save} disabled={!title.trim() || busy || !me}
               accessibilityRole="button" accessibilityState={{ disabled: !title.trim() || busy || !me, busy }}
               style={[st.btn, { backgroundColor: title.trim() && !busy && me ? colors.primary : colors.border }]}>
-              {busy ? <ActivityIndicator color="#fff" />
-                : <><Ionicons name="checkmark" size={18} color="#fff" /><Text style={st.btnTxt}>{editing ? 'Save changes' : 'Add to calendar'}</Text></>}
+              {busy ? <ActivityIndicator color={colors.onPrimary} />
+                : <><Ionicons name="checkmark" size={18} color={colors.onPrimary} /><Text style={[st.btnTxt, { color: colors.onPrimary }]}>{editing ? 'Save changes' : 'Add to calendar'}</Text></>}
             </TouchableOpacity>
-          </View>
-          {picker.element}
+          </ScrollView>
         </KeyboardSafe>
       </Modal>
+      {/* Always null today (Android uses native dialogs, iOS the inline picker);
+          kept outside the composer Modal so it can never nest inside it. */}
+      {picker.element}
     </View>
   );
 }
@@ -437,13 +490,14 @@ const st = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 11, borderBottomWidth: StyleSheet.hairlineWidth },
   time: { paddingHorizontal: 9, paddingVertical: 5, borderRadius: 8, minWidth: 62, alignItems: 'center' },
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' },
-  sheet: { borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, padding: 18, paddingBottom: 32 },
+  sheet: { borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, flexGrow: 0, flexShrink: 1 },
+  sheetBody: { padding: 18, paddingBottom: 32 },
   field: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, minHeight: 48 },
   input: { flex: 1, fontSize: 15 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 12 },
   chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 13, paddingVertical: 8 },
   btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 50, borderRadius: 13, marginTop: 18 },
-  btnTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  btnTxt: { fontSize: 15, fontWeight: '800' },
   banner: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderWidth: 1, borderRadius: 12, marginBottom: 4 },
   rowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 11, minWidth: 0 },
   rowBtn: { padding: 8 },

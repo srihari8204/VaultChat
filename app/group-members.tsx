@@ -22,7 +22,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, StyleSheet, TouchableOpacity, ScrollView, Alert,
-  ActivityIndicator, Modal, Image, Pressable,
+  ActivityIndicator, Modal, Image, Pressable, FlatList,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -44,6 +44,7 @@ import {
 import { getCurrentUserAsync } from './(constants)/authService';
 import { initialOf } from '../lib/format';
 import { useAuthHeader } from '../hooks/useAuthHeader';
+import { GroupNotFound } from '../components/groups/GroupNotFound';
 
 /** Role dot colour, from theme tokens so it follows light/dark. */
 const roleTone = (c: Palette, r: string): string => (
@@ -80,6 +81,8 @@ export default function GroupMembersScreen() {
   const [chats, setChats] = useState<ChatSummary[]>([]);
   // Share picker: loading, or the chat list failed (an error, not "no chats").
   const [chatsState, setChatsState] = useState<'loading' | 'ok' | 'failed'>('loading');
+  // A share is being posted (double-tap guard: one card per confirm).
+  const [shareBusy, setShareBusy] = useState(false);
 
   const load = useCallback(async () => {
     if (!groupId) { setLoading(false); return; }
@@ -170,15 +173,19 @@ export default function GroupMembersScreen() {
   };
 
   const doShare = (to: ChatSummary) => {
+    if (shareBusy) return;
     Alert.alert(
       `Share ${groupName}?`,
       `${to.name ?? 'They'} will see a card saying the group exists and can ask to join. It does not let anyone in — you still approve every request.`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Share', onPress: async () => {
+          if (shareBusy) return;
+          setShareBusy(true);
           setSharing(false);
           try { await shareGroup(to.id, groupId); Alert.alert('Shared', `The card is in your chat with ${to.name ?? 'them'}.`); }
           catch (e: any) { Alert.alert('Could not share', e?.message ?? 'Try again.'); }
+          finally { setShareBusy(false); }
         } },
       ],
     );
@@ -250,6 +257,8 @@ export default function GroupMembersScreen() {
     );
   };
 
+  if (!groupId) return <GroupNotFound title="Members" />;
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
       <AuroraBackground variant="chat" />
@@ -281,7 +290,7 @@ export default function GroupMembersScreen() {
             </TouchableOpacity>
           )}
           <View style={st.sechead}>
-            <Text style={[st.h, { color: colors.text, marginBottom: 0 }]}>
+            <Text style={[st.h, { color: colors.text, marginBottom: 0 }]} accessibilityRole="header">
               {members.length} {members.length === 1 ? 'member' : 'members'}
             </Text>
             {seats >= 0 && (
@@ -307,7 +316,8 @@ export default function GroupMembersScreen() {
           {/* ── how people get in ── */}
           {myRole === 'owner' && typed && (
             <>
-              <Text style={[st.h, { color: colors.text, marginTop: 30 }]}>How people join</Text>
+              <Text style={[st.h, { color: colors.text, marginTop: 30 }]} accessibilityRole="header">How people join</Text>
+              <View accessibilityRole="radiogroup" accessibilityLabel="How people join">
               {MODES.map((m) => {
                 const on = m.key === mode;
                 return (
@@ -328,6 +338,7 @@ export default function GroupMembersScreen() {
                   </TouchableOpacity>
                 );
               })}
+              </View>
               <Text style={{ color: colors.textFaint, fontSize: 11.5, marginTop: 10, lineHeight: 16 }}>
                 Only you can change this. Nobody is ever added to {groupName} without agreeing to
                 join, whichever setting is on.
@@ -335,7 +346,8 @@ export default function GroupMembersScreen() {
 
               {mode === 'admin_approval' && (
                 <>
-                  <TouchableOpacity onPress={openShare} accessibilityRole="button"
+                  <TouchableOpacity onPress={openShare} accessibilityRole="button" disabled={shareBusy}
+                    accessibilityState={{ disabled: shareBusy, busy: shareBusy }}
                     style={[st.addBtn, { borderColor: colors.glassStroke, marginTop: 18 }]}>
                     <Ionicons name="share-outline" size={18} color={colors.primary} />
                     <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 14 }}>
@@ -358,25 +370,17 @@ export default function GroupMembersScreen() {
         <View style={st.backdrop}>
           <Pressable style={{ flex: 1 }} onPress={() => setSharing(false)} accessibilityRole="button" accessibilityLabel="Close" />
           <View style={[st.sheet, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke, maxHeight: '70%' }]}>
-            <Text style={{ color: colors.text, fontWeight: '800', fontSize: 16, marginBottom: 4 }}>
+            <Text style={{ color: colors.text, fontWeight: '800', fontSize: 16, marginBottom: 4 }} accessibilityRole="header">
               Share with
             </Text>
             <Text style={{ color: colors.textDim, fontSize: 12.5, marginBottom: 12 }}>
               They can ask to join. You still approve.
             </Text>
-            <ScrollView>
-              {chatsState === 'loading' ? (
-                <ActivityIndicator color={colors.primary} style={{ paddingVertical: 16 }} accessibilityLabel="Loading your chats" />
-              ) : chatsState === 'failed' ? (
-                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Couldn't load your chats. Retry" onPress={openShare}>
-                  <Text style={{ color: colors.danger, fontSize: 13.5, paddingVertical: 12 }}>Couldn’t load your chats. Tap to retry.</Text>
-                </TouchableOpacity>
-              ) : chats.length === 0 ? (
-                <Text style={{ color: colors.textDim, fontSize: 13.5, paddingVertical: 12 }}>
-                  No other chats to share into yet.
-                </Text>
-              ) : chats.map((c) => (
-                <TouchableOpacity key={c.id} onPress={() => doShare(c)}
+            <FlatList
+              data={chatsState === 'ok' ? chats : []}
+              keyExtractor={(c) => c.id}
+              renderItem={({ item: c }) => (
+                <TouchableOpacity onPress={() => doShare(c)}
                   accessibilityRole="button" accessibilityLabel={`Share in ${c.name ?? c.peerName ?? 'Chat'}`}
                   style={[st.opt, { borderColor: colors.glassStroke }]}>
                   <Ionicons name={c.type === 'group' ? 'people' : 'person'} size={18} color={colors.primary} />
@@ -384,8 +388,19 @@ export default function GroupMembersScreen() {
                     {c.name ?? c.peerName ?? 'Chat'}
                   </Text>
                 </TouchableOpacity>
-              ))}
-            </ScrollView>
+              )}
+              ListEmptyComponent={chatsState === 'loading' ? (
+                <ActivityIndicator color={colors.primary} style={{ paddingVertical: 16 }} accessibilityLabel="Loading your chats" />
+              ) : chatsState === 'failed' ? (
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Couldn't load your chats. Retry" onPress={openShare}>
+                  <Text style={{ color: colors.danger, fontSize: 13.5, paddingVertical: 12 }}>Couldn’t load your chats. Tap to retry.</Text>
+                </TouchableOpacity>
+              ) : (
+                <Text style={{ color: colors.textDim, fontSize: 13.5, paddingVertical: 12 }}>
+                  No other chats to share into yet.
+                </Text>
+              )}
+            />
             <TouchableOpacity onPress={() => setSharing(false)} accessibilityRole="button"
               style={[st.close, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
               <Text style={{ color: colors.text, fontWeight: '700', fontSize: 14.5 }}>Close</Text>
@@ -445,7 +460,8 @@ function MemberSheet({ member, acts, avatar, onRole, onHandOver, onRemove, onClo
 
       {acts.roles.length > 0 && (
         <>
-          <Text style={[st.h, { color: colors.textDim, marginTop: 20 }]}>Change role</Text>
+          <Text style={[st.h, { color: colors.textDim, marginTop: 20 }]} accessibilityRole="header">Change role</Text>
+          <View accessibilityRole="radiogroup" accessibilityLabel="Change role">
           {acts.roles.map((r) => (
             <TouchableOpacity key={r} onPress={() => onRole(r)}
               accessibilityRole="radio" accessibilityLabel={`${ROLE_LABELS[r]}. ${ROLE_BLURBS[r]}`}
@@ -461,6 +477,7 @@ function MemberSheet({ member, acts, avatar, onRole, onHandOver, onRemove, onClo
               {r === role && <Ionicons name="checkmark" size={18} color={colors.primary} />}
             </TouchableOpacity>
           ))}
+          </View>
         </>
       )}
 

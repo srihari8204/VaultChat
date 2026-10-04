@@ -263,10 +263,12 @@ export function isDayOffset(start: number, addDays: number, now: number): boolea
  * chats_calendar.go): the person who added it, or anyone holding
  * edit_settings (in an untyped group the server reads that as admin/owner).
  *
- * Edit is narrower on purpose: only the author. The payload is sealed with the
- * writer's group sender key, but readers open it with `createdBy`'s key (the
- * row never records who last wrote it). An admin's edit of someone else's
- * event would therefore be unreadable for every member.
+ * Edit is narrower unless `writerKnown`: only the author. The payload is
+ * sealed with the writer's group sender key, and a server that does not record
+ * who last wrote a row (`updatedBy`, not deployed yet) leaves readers opening
+ * it with `createdBy`'s key, so an admin's edit of someone else's event would
+ * be unreadable for every member. Once rows carry `updatedBy`, edit follows
+ * calMayEdit too.
  */
 export function eventActions(a: {
   createdBy: string | null | undefined;
@@ -274,12 +276,13 @@ export function eventActions(a: {
   typed: boolean;
   myRole: string | null | undefined;
   permissions: readonly string[] | null | undefined;
+  writerKnown?: boolean;
 }): { canEdit: boolean; canDelete: boolean } {
   const mine = !!a.me && a.createdBy === a.me;
   const settings = a.typed
     ? (a.permissions ?? []).includes('edit_settings')
     : a.myRole === 'owner' || a.myRole === 'admin';
-  return { canEdit: mine, canDelete: mine || settings };
+  return { canEdit: mine || (!!a.writerKnown && !!a.me && settings), canDelete: mine || settings };
 }
 
 // ── self-check ──

@@ -106,6 +106,31 @@ export function hexColorOr(v: string | null | undefined, fallback: string): stri
   return typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v) ? v : fallback;
 }
 
+/** WCAG 2.x relative luminance of a `#RRGGBB` colour. */
+function luminance(hex: string): number {
+  const ch = [1, 3, 5].map((i) => {
+    const v = parseInt(hex.slice(i, i + 2), 16) / 255;
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+}
+
+const INK_LIGHT = '#FFFFFF';
+const INK_DARK = '#010628'; // BRAND_NIGHT (constants/theme), kept literal so this file stays pure
+
+/**
+ * Text/icon colour for a solid group-colour fill: white or the night ink,
+ * whichever contrasts more. Group colours are data (the type's default, the
+ * creator's pick, or a server/route value), so white is not always readable:
+ * on amber #F59E0B it is 2.1:1.
+ */
+export function inkOn(fill: string): string {
+  const L = luminance(hexColorOr(fill, '#000000'));
+  const vsWhite = 1.05 / (L + 0.05);
+  const vsDark = (L + 0.05) / (luminance(INK_DARK) + 0.05);
+  return vsWhite >= vsDark ? INK_LIGHT : INK_DARK;
+}
+
 // ── self-check ──
 if (require.main === module) {
   // The client list is checked against the migrations that actually seed
@@ -161,6 +186,23 @@ if (require.main === module) {
   // a legacy untyped group still renders
   const legacy = groupIdentity({ name: 'Old group' });
   if (legacy.color !== UNTYPED.color || legacy.label !== 'Old group') throw new Error('legacy group must render');
+
+  // ink on a group colour: dark on light fills, white on deep ones, and always
+  // the better of the two, ≥ 4.5:1 on every catalog colour
+  if (inkOn('#F59E0B') !== INK_DARK) throw new Error('amber needs dark ink');
+  if (inkOn('#22C55E') !== INK_DARK) throw new Error('green needs dark ink');
+  if (inkOn('#1552E0') !== INK_LIGHT) throw new Error('deep blue keeps white ink');
+  if (inkOn('#000000') !== INK_LIGHT) throw new Error('black keeps white ink');
+  if (inkOn('#FFFFFF') !== INK_DARK) throw new Error('white needs dark ink');
+  if (inkOn('not-a-colour') !== INK_LIGHT) throw new Error('an invalid fill is treated as black');
+  const ratio = (a: string, b: string) => {
+    const [x, y] = [luminance(a), luminance(b)].sort((m, n) => n - m);
+    return (x + 0.05) / (y + 0.05);
+  };
+  for (const g of GROUP_TYPES) {
+    const r = ratio(g.color, inkOn(g.color));
+    if (r < 4.5) throw new Error(`ink on ${g.type} ${g.color} is only ${r.toFixed(2)}:1`);
+  }
 
   console.log('groups/catalog self-check OK');
 }

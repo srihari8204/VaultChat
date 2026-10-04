@@ -21,6 +21,7 @@ import { brandAlpha } from '../constants/theme';
 import { sendMessage } from '../lib/chatService';
 import { readGroupOps } from '../lib/groups/opThread';
 import { ThreadGaps } from '../components/groups/ThreadGaps';
+import { GroupNotFound } from '../components/groups/GroupNotFound';
 import { circleMembers } from '../lib/family/circle';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { syncTaskReminders } from '../lib/groups/taskReminders';
@@ -155,6 +156,8 @@ export default function GroupTasksScreen() {
   const ordered = useMemo(() => sortTasks(tasks), [tasks]);
   const open = ordered.filter((t) => !t.done).length;
 
+  if (!groupId) return <GroupNotFound title="Tasks" />;
+
   return (
     <KeyboardSafe style={{ flex: 1, backgroundColor: colors.bg }}>
       <AuroraBackground variant="chat" />
@@ -179,7 +182,7 @@ export default function GroupTasksScreen() {
 
         {!!title.trim() && (
           <>
-            <View style={st.chips}>
+            <View style={st.chips} accessibilityRole="radiogroup" accessibilityLabel="Due date">
               {DUE_PRESETS.map((d) => {
                 const on = dueMs === d.ms;
                 return (
@@ -191,7 +194,7 @@ export default function GroupTasksScreen() {
                 );
               })}
             </View>
-            <View style={st.chips}>
+            <View style={st.chips} accessibilityRole="radiogroup" accessibilityLabel="Assigned to">
               <TouchableOpacity onPress={() => setAssignee(null)}
                 accessibilityRole="radio" accessibilityLabel="Assign to anyone" accessibilityState={{ selected: assignee == null, checked: assignee == null }}
                 style={[st.chip, { borderColor: assignee == null ? colors.primary : colors.border, backgroundColor: assignee == null ? brandAlpha(0.1) : 'transparent' }]}>
@@ -214,7 +217,7 @@ export default function GroupTasksScreen() {
         )}
 
         <View style={st.sechead}>
-          <Text style={[st.h, { color: colors.text }]}>
+          <Text style={[st.h, { color: colors.text }]} accessibilityRole="header">
             {open ? `${open} to do` : 'All done'}
           </Text>
           {loading && <ActivityIndicator size="small" color={colors.primary} />}

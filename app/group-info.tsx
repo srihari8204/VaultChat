@@ -50,7 +50,8 @@ import { unionWithLocalHistory } from '../lib/messageHistory';
 import SharedMediaThumb from '../components/chat/SharedMediaThumb';
 import { AuroraBackground, KeyboardSafe, AppText as Text } from '../components/ui';
 import { permissionDenied } from '../lib/permissionDenied';
-import { memberActions } from '../lib/groups/permissions';
+import { memberActions, ROLE_LABELS } from '../lib/groups/permissions';
+import { GroupNotFound } from '../components/groups/GroupNotFound';
 
 function useS() {
   const { colors } = useTheme();
@@ -75,6 +76,8 @@ export default function GroupInfoScreen() {
   const [loading,   setLoading]   = useState(true);
   // First load failed with no cache: an error screen with Retry and Back.
   const [loadError, setLoadError] = useState<string | null>(null);
+  // A refresh failed while the cached copy is on screen: a banner with Retry.
+  const [stale, setStale] = useState(false);
   // Rename / description save in flight (double-submit guard).
   const [saving,    setSaving]    = useState(false);
   const [renaming,  setRenaming]  = useState(false);
@@ -123,12 +126,14 @@ export default function GroupInfoScreen() {
       setMeId(me?.id ?? null);
       setNameDraft(c.name ?? '');
       setLoadError(null);
+      setStale(false);
       if (chatId) writeCache<ChatDetail>(cacheKey, c);
     } catch (e: any) {
       // Keep painted cache on error; only surface failure when nothing is shown.
       // Rendered as a screen (not an Alert) so there is a Back and a Retry —
       // the bare spinner used to trap the user.
       if (!painted) setLoadError(e?.message ?? 'Check your connection and try again.');
+      else setStale(true);
     } finally {
       if (!painted) setLoading(false);
     }
@@ -136,19 +141,23 @@ export default function GroupInfoScreen() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Shared-media strip. Unioned with the device's own history because
-  // delete-on-delivery nulls a delivered body server-side, so the server list
-  // alone drops media this phone can still render. Best-effort: a failure here
-  // just leaves the "Media, links and docs" row without its preview.
+  // Shared-media strip: the newest 9 images/videos. The device's own history
+  // comes first (no network, and delete-on-delivery nulls a delivered body
+  // server-side, so the server list alone drops media this phone can still
+  // render); the server is asked only when this phone has fewer than 9.
+  // Best-effort: a failure here just leaves the row without its preview.
   useEffect(() => {
     if (!chatId) return;
     let active = true;
+    const pick = (list: Message[]) =>
+      list.filter(m => !m.deletedAt && (m.type === 'image' || m.type === 'video')).slice(0, 9);
     (async () => {
-      const server = await getMessages(chatId, { limit: 200 }).catch(() => [] as Message[]);
-      const all = await unionWithLocalHistory(chatId, server, 400).catch(() => [] as Message[]);
-      if (active) {
-        setMedia(all.filter(m => !m.deletedAt && (m.type === 'image' || m.type === 'video')).slice(0, 9));
+      let shown = pick(await unionWithLocalHistory(chatId, [], 400).catch(() => [] as Message[]));
+      if (shown.length < 9) {
+        const server = await getMessages(chatId, { limit: 200 }).catch(() => [] as Message[]);
+        shown = pick(await unionWithLocalHistory(chatId, server, 400).catch(() => [] as Message[]));
       }
+      if (active) setMedia(shown);
     })();
     return () => { active = false; };
   }, [chatId]);
@@ -282,22 +291,7 @@ export default function GroupInfoScreen() {
   // forever with nothing to press: `loading` is false and `chat` is null, so it
   // never resolves and there is no header to go back from. Say what happened and
   // give a way out.
-  if (!chatId) {
-    return (
-      <View style={[S.screen, S.center]}>
-      <AuroraBackground />
-        <Text style={{ color: colors.text, fontSize: 16, fontWeight: '700', marginBottom: 6 }}>
-          Group not found
-        </Text>
-        <Text style={{ color: colors.textDim, fontSize: 13, textAlign: 'center', marginBottom: 16 }}>
-          This link did not say which group to open.
-        </Text>
-        <TouchableOpacity onPress={() => router.back()} activeOpacity={0.8} accessibilityRole="button" style={{ padding: 8 }}>
-          <Text style={{ color: colors.primary, fontSize: 15, fontWeight: '700' }}>Go back</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
+  if (!chatId) return <GroupNotFound title="Group info" />;
 
   if (!loading && !chat && loadError) {
     return (
@@ -361,9 +355,9 @@ export default function GroupInfoScreen() {
               <Text style={S.heroTxt}>{initialOf(chat.name, '#')}</Text>
             )}
             {photoBusy && (
-              <View style={S.heroBusy}><ActivityIndicator color="#fff" /></View>
+              <View style={S.heroBusy}><ActivityIndicator color={colors.onPrimary} /></View>
             )}
-            {isAdmin && <View style={S.heroEditPill}><Ionicons name="camera" size={15} color="#fff" /></View>}
+            {isAdmin && <View style={S.heroEditPill}><Ionicons name="camera" size={15} color={colors.onPrimary} /></View>}
           </View>
         </TouchableOpacity>
 
@@ -382,7 +376,7 @@ export default function GroupInfoScreen() {
             />
             <TouchableOpacity onPress={onRename} disabled={saving} style={[S.saveBtn, saving && { opacity: 0.6 }]}
               accessibilityRole="button" accessibilityLabel="Save group name" accessibilityState={{ disabled: saving, busy: saving }}>
-              {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={S.saveBtnTxt}>Save</Text>}
+              {saving ? <ActivityIndicator color={colors.onPrimary} size="small" /> : <Text style={S.saveBtnTxt}>Save</Text>}
             </TouchableOpacity>
           </View>
         ) : (
@@ -393,6 +387,14 @@ export default function GroupInfoScreen() {
         )}
         <Text style={S.subInfo}>{activeMembers.length} members</Text>
       </View>
+
+      {stale && (
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Couldn't refresh this group. Showing the saved copy. Retry"
+          onPress={() => { setStale(false); load(); }} style={S.staleBar}>
+          <Ionicons name="cloud-offline-outline" size={15} color={colors.danger} />
+          <Text style={S.staleTxt}>Couldn’t refresh — this may be out of date. Tap to retry.</Text>
+        </TouchableOpacity>
+      )}
 
       {/* Group description (WhatsApp) */}
       <View style={S.section}>
@@ -411,7 +413,7 @@ export default function GroupInfoScreen() {
             />
             <TouchableOpacity onPress={onSaveDesc} disabled={saving} style={[S.saveBtn, saving && { opacity: 0.6 }]}
               accessibilityRole="button" accessibilityLabel="Save description" accessibilityState={{ disabled: saving, busy: saving }}>
-              {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={S.saveBtnTxt}>Save</Text>}
+              {saving ? <ActivityIndicator color={colors.onPrimary} size="small" /> : <Text style={S.saveBtnTxt}>Save</Text>}
             </TouchableOpacity>
           </View>
         ) : (
@@ -666,13 +668,13 @@ function MemberRow({
             a second UUID fragment under the first — noise, not information. */}
         {(member.role !== 'member' || !!member.email) && (
           <Text style={S.memberSub} numberOfLines={1}>
-            {member.role !== 'member' && `${member.role}${member.email ? ' · ' : ''}`}
+            {member.role !== 'member' && `${ROLE_LABELS[member.role as keyof typeof ROLE_LABELS] ?? member.role}${member.email ? ' · ' : ''}`}
             {member.email}
           </Text>
         )}
       </View>
       {showRemove && (
-        <TouchableOpacity onPress={onRemove} style={S.removeBtn} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`Remove ${display} from the group`}>
+        <TouchableOpacity onPress={onRemove} style={S.removeBtn} activeOpacity={0.7} hitSlop={10} accessibilityRole="button" accessibilityLabel={`Remove ${display} from the group`}>
           <Text style={S.removeBtnTxt}>Remove</Text>
         </TouchableOpacity>
       )}
@@ -692,7 +694,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   heroWrap:      { alignItems: 'center', paddingVertical: 20, gap: 8 },
   hero:          { width: 112, height: 112, borderRadius: 56, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   heroImg:       { width: '100%', height: '100%' },
-  heroTxt:       { color: '#fff', fontSize: 48, fontWeight: '800' },
+  heroTxt:       { color: c.onPrimary, fontSize: 48, fontWeight: '800' },
   heroBusy:      { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.4)' },
   heroEditPill:  { position: 'absolute', right: 0, bottom: 0, backgroundColor: c.primary, borderRadius: 16, padding: 6, borderWidth: 2, borderColor: c.bg },
   groupName:     { color: c.text, fontSize: 22, fontWeight: '700' },
@@ -701,8 +703,10 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   renameRow:     { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, width: '100%' },
   renameInput:   { flex: 1, color: c.text, backgroundColor: c.glassSoft, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16 },
   saveBtn:       { backgroundColor: c.primary, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10 },
-  saveBtnTxt:    { color: '#fff', fontWeight: '700' },
+  saveBtnTxt:    { color: c.onPrimary, fontWeight: '700' },
 
+  staleBar:      { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginTop: 4, padding: 10, borderRadius: 12, borderWidth: 1, borderColor: c.danger },
+  staleTxt:      { color: c.danger, fontSize: 12.5, flex: 1 },
   addBtn:        { flexDirection: 'row', gap: 8, marginHorizontal: 16, marginTop: 8, padding: 12, borderRadius: 12, backgroundColor: c.glassSoft, borderWidth: 1, borderColor: c.glassStroke, alignItems: 'center', justifyContent: 'center' },
   addBtnTxt:     { color: c.primary, fontWeight: '700' },
 
@@ -726,7 +730,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   memberAvatarWrap: { width: 44, height: 44 },
   memberAvatar:  { width: 44, height: 44, borderRadius: 22, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   memberAvatarImg: { width: '100%', height: '100%' },
-  memberAvatarTxt: { color: '#fff', fontWeight: '700', fontSize: 17 },
+  memberAvatarTxt: { color: c.onPrimary, fontWeight: '700', fontSize: 17 },
   memberPresenceDot: { position: 'absolute', right: 0, bottom: 0, width: 12, height: 12, borderRadius: 6, backgroundColor: c.online, borderWidth: 2, borderColor: c.bg },
   memberName:    { color: c.text, fontSize: 15, fontWeight: '600' },
   memberMeTag:   { color: c.textDim, fontSize: 12, fontWeight: '400' },

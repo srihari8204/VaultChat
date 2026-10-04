@@ -11,7 +11,7 @@
 // immediately. Without that, a setting would only take effect after a restart,
 // which for a privacy control is a bug, not a delay.
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, StyleSheet, TouchableOpacity, ScrollView, Switch, ActivityIndicator, Alert,
 } from 'react-native';
@@ -27,6 +27,7 @@ import {
   type GroupPrivacy, type LocationPrecision,
 } from '../lib/groups/privacy';
 import { reloadPrivacy } from '../lib/family/presence';
+import { GroupNotFound } from '../components/groups/GroupNotFound';
 
 const PRECISIONS: {
   key: LocationPrecision; label: string; blurb: string; icon: keyof typeof Ionicons.glyphMap;
@@ -54,13 +55,22 @@ export default function GroupPrivacyScreen() {
 
   const [p, setP] = useState<GroupPrivacy>(DEFAULT_GROUP_PRIVACY);
   const [loading, setLoading] = useState(true);
+  // The stored settings could not be read: never show defaults as if they were mine.
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [reload, setReload] = useState(0);
   // The timer chips, the summary and "Sharing stops" are all relative to now:
   // tick while a timer is set so they never go stale or point into the past.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     setNow(Date.now());
-    if (p.sharingUntil == null) return;
-    const t = setInterval(() => setNow(Date.now()), 30_000);
+    const until = p.sharingUntil;
+    if (until == null || until <= Date.now()) return;
+    // Stops by itself once the timer has run out ("Sharing stopped at …").
+    const t = setInterval(() => {
+      const n = Date.now();
+      setNow(n);
+      if (n >= until) clearInterval(t);
+    }, 30_000);
     return () => clearInterval(t);
   }, [p.sharingUntil]);
 
@@ -68,15 +78,30 @@ export default function GroupPrivacyScreen() {
     let live = true;
     (async () => {
       if (!groupId) { setLoading(false); return; }
-      const cur = await getGroupPrivacy(groupId);
-      if (!live) return;
-      setP(cur); setLoading(false);
+      try {
+        const cur = await getGroupPrivacy(groupId);
+        if (!live) return;
+        setP(cur); setLoadFailed(false);
+      } catch {
+        if (live) setLoadFailed(true);
+      } finally { if (live) setLoading(false); }
     })();
     return () => { live = false; };
-  }, [groupId]));
+    // reload is a deliberate trigger (Retry), not a value read inside.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupId, reload]));
+
+  // Saves run one after another: setGroupPrivacy reads, merges and writes the
+  // stored value, so two quick taps in parallel could each merge onto the same
+  // old value and the second would undo the first.
+  const queue = useRef<Promise<void>>(Promise.resolve());
+  const patch = (next: Partial<GroupPrivacy>) => {
+    queue.current = queue.current.then(() => applyPatch(next)).catch(() => {});
+    return queue.current;
+  };
 
   /** Persist, then push into the live publisher so it applies to the next fix. */
-  const patch = async (next: Partial<GroupPrivacy>) => {
+  const applyPatch = async (next: Partial<GroupPrivacy>) => {
     if (!groupId) return;
     let saved: GroupPrivacy;
     try {
@@ -99,13 +124,23 @@ export default function GroupPrivacyScreen() {
   const startTemporary = (ms: number | null) =>
     patch({ sharingUntil: ms == null ? null : Date.now() + ms, invisible: false });
 
-  if (!groupId) {
+  if (!groupId) return <GroupNotFound title="Privacy" />;
+
+  if (!loading && loadFailed) {
     return (
       <View style={[st.center, { backgroundColor: colors.bg, padding: 32 }]}>
         <AuroraBackground variant="chat" />
         <Stack.Screen options={{ headerShown: true, title: 'Privacy', headerTitleAlign: 'center', headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false }} />
-        <Text style={{ color: colors.text, fontWeight: '700', fontSize: 15 }}>Group not found</Text>
-        <Text style={{ color: colors.textDim, fontSize: 13, textAlign: 'center', marginTop: 6 }}>This link did not say which group to open.</Text>
+        <Ionicons name="alert-circle-outline" size={30} color={colors.textFaint} />
+        <Text style={{ color: colors.text, fontWeight: '700', fontSize: 15, marginTop: 10 }}>Couldn’t read your settings</Text>
+        <Text style={{ color: colors.textDim, fontSize: 13, textAlign: 'center', marginTop: 6 }}>
+          Nothing was changed. Your privacy settings for {groupName} stay as they were.
+        </Text>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry reading privacy settings"
+          onPress={() => { setLoading(true); setReload((n) => n + 1); }}
+          style={[st.chip, { borderColor: colors.primary, marginTop: 14 }]}>
+          <Text style={{ color: colors.primary, fontWeight: '700' }}>Retry</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -150,6 +185,7 @@ export default function GroupPrivacyScreen() {
         </Text>
 
         <Text style={[st.h, { color: colors.text }]} accessibilityRole="header">Location</Text>
+        <View accessibilityRole="radiogroup" accessibilityLabel="Location">
         {PRECISIONS.map((opt) => {
           const on = p.precision === opt.key && !p.invisible;
           return (
@@ -168,8 +204,9 @@ export default function GroupPrivacyScreen() {
             </TouchableOpacity>
           );
         })}
+        </View>
 
-        <Text style={[st.h, { color: colors.text }]}>Details</Text>
+        <Text style={[st.h, { color: colors.text }]} accessibilityRole="header">Details</Text>
         <View style={[st.card, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
           <View style={st.toggle}>
             <View style={{ flex: 1 }}>
@@ -195,7 +232,7 @@ export default function GroupPrivacyScreen() {
           </View>
         </View>
 
-        <Text style={[st.h, { color: colors.text }]}>Invisible</Text>
+        <Text style={[st.h, { color: colors.text }]} accessibilityRole="header">Invisible</Text>
         <View style={[st.card, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
           <View style={st.toggle}>
             <View style={{ flex: 1 }}>
@@ -209,8 +246,8 @@ export default function GroupPrivacyScreen() {
           </View>
         </View>
 
-        <Text style={[st.h, { color: colors.text }]}>Share for a while</Text>
-        <View style={st.chips}>
+        <Text style={[st.h, { color: colors.text }]} accessibilityRole="header">Share for a while</Text>
+        <View style={st.chips} accessibilityRole="radiogroup" accessibilityLabel="Share for a while">
           {DURATIONS.map((d) => {
             // Only the end time is stored, so the timed chips are derived from
             // what is left: up to an hour reads as "1 hour", more as "8 hours".

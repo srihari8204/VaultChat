@@ -63,9 +63,9 @@ export function useDatePicker(skin?: DatePickerSkin) {
     scrimOpacity: scheme === 'dark' ? 0.7 : 0.4,
   };
   const close = () => setReq(null);
-  // iOS: this sheet is its own Modal. Opened from inside another Modal (the
-  // group-calendar composer) it stacks a second Modal — 📱 needs a device check
-  // that it presents above the first rather than behind it.
+  // iOS: this sheet is its own Modal, so don't open it from inside another
+  // Modal (a second Modal may present behind the first). Screens with a modal
+  // composer draw DateTimePicker inline instead (group-calendar does).
   const element = req ? (
     <Modal visible transparent animationType="fade" onRequestClose={close}>
       <View style={styles.wrap}>

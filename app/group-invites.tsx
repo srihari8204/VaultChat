@@ -31,11 +31,15 @@ import { AppText as Text } from '../components/ui/Text';
 import { brandAlpha } from '../constants/theme';
 import {
   createInvitation, listInvitations, resendInvitation, revokeInvitation, cancelInvitation,
-  inviteCandidates, pendingMembers, approveMember, rejectMember, attachmentUrl,
-  type Invitation, type InvitationStatus, type InviteCandidate, type PendingMember,
+  inviteCandidates, approveMember, rejectMember, attachmentUrl,
+  approveJoinRequest, rejectJoinRequest,
+  type Invitation, type InvitationStatus, type InviteCandidate,
 } from '../lib/chatService';
 import { initialOf } from '../lib/format';
 import { useAuthHeader } from '../hooks/useAuthHeader';
+import { inkOn } from '../lib/groups/catalog';
+import { approvalQueue, isLinkRow, queueKey, type QueueRow } from '../lib/groups/serverContracts';
+import { GroupNotFound } from '../components/groups/GroupNotFound';
 
 const STATUS_TONE: Record<InvitationStatus, 'good' | 'warn' | 'bad' | 'mute'> = {
   joined: 'good', accepted: 'warn', pending: 'warn',
@@ -77,14 +81,18 @@ export default function GroupInvitesScreen() {
   const [searchFailed, setSearchFailed] = useState(false);
   const [inviting, setInviting] = useState<string | null>(null);
 
-  const [waiting, setWaiting] = useState<PendingMember[]>([]);
+  // One queue: invitations, plus invite-link requests once the server merges
+  // them (R4 backend C8; today the server returns invitations only and the
+  // link requests stay in Group admin).
+  const [waiting, setWaiting] = useState<QueueRow[]>([]);
   const [sent, setSent] = useState<Invitation[]>([]);
   const [loading, setLoading] = useState(true);
-  const [acting, setActing] = useState<number | null>(null);
+  const [acting, setActing] = useState<string | null>(null);
   // Which half of the last refresh failed, shown over the lists instead of silence.
   const [refreshFailed, setRefreshFailed] = useState(false);
-  // Resend in flight, per invitation (double-tap guard).
+  // Resend / withdraw in flight, per invitation (double-tap guard).
   const [resending, setResending] = useState<number | null>(null);
+  const [withdrawing, setWithdrawing] = useState<number | null>(null);
 
   const refresh = useCallback(async () => {
     if (!chatId) { setLoading(false); return; }
@@ -92,7 +100,7 @@ export default function GroupInvitesScreen() {
     // other, and neither should stop the spinner from clearing.
     const [inv, pend] = await Promise.allSettled([
       listInvitations(chatId),
-      pendingMembers(chatId),
+      approvalQueue(chatId),
     ]);
     if (inv.status === 'fulfilled') setSent(inv.value);
     if (pend.status === 'fulfilled') setWaiting(pend.value);
@@ -142,23 +150,33 @@ export default function GroupInvitesScreen() {
     } finally { setInviting(null); }
   };
 
-  const approve = async (p: PendingMember) => {
+  // A link request is approved by user id on /join-requests; an invitation by its id.
+  const approve = async (p: QueueRow) => {
     if (acting) return;
-    setActing(p.id);
-    try { await approveMember(chatId, p.id); await refresh(); }
+    setActing(queueKey(p));
+    try {
+      if (isLinkRow(p)) await approveJoinRequest(chatId, String(p.userId));
+      else await approveMember(chatId, Number(p.id));
+      await refresh();
+    }
     catch (e: any) { Alert.alert('Could not approve', e?.message ?? 'Try again.'); }
     finally { setActing(null); }
   };
 
-  const decline = (p: PendingMember) => {
+  const decline = (p: QueueRow) => {
     Alert.alert(
       p.requested ? 'Turn down this request?' : 'Turn down this person?',
       `${p.name ?? 'They'} will not join ${groupName}. You can invite them again later.`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Turn down', style: 'destructive', onPress: async () => {
-          setActing(p.id);
-          try { await rejectMember(chatId, p.id); await refresh(); }
+          if (acting) return;
+          setActing(queueKey(p));
+          try {
+            if (isLinkRow(p)) await rejectJoinRequest(chatId, String(p.userId));
+            else await rejectMember(chatId, Number(p.id));
+            await refresh();
+          }
           catch (e: any) { Alert.alert('Could not do that', e?.message ?? 'Try again.'); }
           finally { setActing(null); }
         } },
@@ -185,11 +203,14 @@ export default function GroupInvitesScreen() {
       [
         { text: 'Keep it', style: 'cancel' },
         { text: inv.mine ? 'Withdraw' : 'Revoke', style: 'destructive', onPress: async () => {
+          if (withdrawing != null) return;
+          setWithdrawing(inv.id);
           try {
             if (inv.mine) await cancelInvitation(chatId, inv.id);
             else await revokeInvitation(chatId, inv.id);
-            refresh();
+            await refresh();
           } catch (e: any) { Alert.alert('Could not do that', e?.message ?? 'Try again.'); }
+          finally { setWithdrawing(null); }
         } },
       ],
     );
@@ -215,6 +236,8 @@ export default function GroupInvitesScreen() {
         </View>
       )
   );
+
+  if (!chatId) return <GroupNotFound title="Add people" />;
 
   return (
     <KeyboardSafe style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -285,8 +308,8 @@ export default function GroupInvitesScreen() {
                 accessibilityRole="button" accessibilityLabel={`Invite ${c.name ?? 'crazzychat user'}`}
                 accessibilityState={{ disabled: inviting === c.id, busy: inviting === c.id }} hitSlop={6}
                 style={[st.pill, { backgroundColor: colors.primary }]}>
-                {inviting === c.id ? <ActivityIndicator size="small" color="#fff" />
-                  : <Text style={st.pillTxt}>Invite</Text>}
+                {inviting === c.id ? <ActivityIndicator size="small" color={colors.onPrimary} />
+                  : <Text style={[st.pillTxt, { color: colors.onPrimary }]}>Invite</Text>}
               </TouchableOpacity>
             ) : (
               <Ionicons
@@ -307,7 +330,7 @@ export default function GroupInvitesScreen() {
 
         {/* ── waiting on the owner ── */}
         <View style={st.sechead}>
-          <Text style={[st.h, { color: colors.text, marginBottom: 0 }]}>Waiting ({waiting.length})</Text>
+          <Text style={[st.h, { color: colors.text, marginBottom: 0 }]} accessibilityRole="header">Waiting ({waiting.length})</Text>
           {loading && <ActivityIndicator size="small" color={colors.primary} />}
         </View>
 
@@ -318,24 +341,25 @@ export default function GroupInvitesScreen() {
         )}
 
         {waiting.map((p) => (
-          <View key={p.id} style={[st.row, { borderColor: colors.glassStroke }]}>
+          <View key={queueKey(p)} style={[st.row, { borderColor: colors.glassStroke }]}>
             {avatar(p.name, p.photoURL)}
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14 }} numberOfLines={1}>
                 {p.name ?? 'crazzychat user'}
               </Text>
               <Text style={{ color: p.canApprove ? colors.primary : colors.textDim, fontSize: 11.5 }} numberOfLines={1}>
-                {p.requested ? 'Asked to join'
+                {isLinkRow(p) ? 'Opened an invite link — approve to let them in'
+                  : p.requested ? 'Asked to join'
                   : p.canApprove ? 'Accepted — approve to let them in'
                   : 'Invited, has not answered'}
               </Text>
             </View>
-            {acting === p.id ? <ActivityIndicator size="small" color={colors.primary} /> : (
+            {acting === queueKey(p) ? <ActivityIndicator size="small" color={colors.primary} /> : (
               <>
                 {p.canApprove && (
                   <TouchableOpacity onPress={() => approve(p)} style={[st.pill, { backgroundColor: colors.success }]} hitSlop={6}
                     accessibilityRole="button" accessibilityLabel={`Approve ${p.name ?? 'crazzychat user'}`}>
-                    <Text style={st.pillTxt}>Approve</Text>
+                    <Text style={[st.pillTxt, { color: inkOn(colors.success) }]}>Approve</Text>
                   </TouchableOpacity>
                 )}
                 {p.canReject && (
@@ -350,7 +374,7 @@ export default function GroupInvitesScreen() {
 
         {/* ── sent but unanswered ── */}
         <View style={st.sechead}>
-          <Text style={[st.h, { color: colors.text, marginBottom: 0 }]}>Sent ({unanswered.length})</Text>
+          <Text style={[st.h, { color: colors.text, marginBottom: 0 }]} accessibilityRole="header">Sent ({unanswered.length})</Text>
         </View>
 
         {!loading && unanswered.length === 0 && (
@@ -379,8 +403,12 @@ export default function GroupInvitesScreen() {
                   ? <ActivityIndicator size="small" color={colors.primary} />
                   : <Ionicons name="refresh" size={17} color={colors.primary} />}
               </TouchableOpacity>
-              <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Withdraw the invitation to ${inv.name ?? inv.ref ?? "crazzychat user"}`} onPress={() => doWithdraw(inv)} style={st.rowBtn} hitSlop={8}>
-                <Ionicons name="close-circle" size={17} color={colors.danger} />
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel={`${inv.mine ? 'Withdraw' : 'Revoke'} the invitation to ${inv.name ?? inv.ref ?? "crazzychat user"}`}
+                accessibilityState={{ disabled: withdrawing != null, busy: withdrawing === inv.id }}
+                disabled={withdrawing != null} onPress={() => doWithdraw(inv)} style={st.rowBtn} hitSlop={8}>
+                {withdrawing === inv.id
+                  ? <ActivityIndicator size="small" color={colors.danger} />
+                  : <Ionicons name="close-circle" size={17} color={colors.danger} />}
               </TouchableOpacity>
             </View>
           );
@@ -410,6 +438,6 @@ const st = StyleSheet.create({
   rowBtn: { padding: 6 },
   avatar: { alignItems: 'center', justifyContent: 'center' },
   pill: { paddingHorizontal: 14, minHeight: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', minWidth: 74 },
-  pillTxt: { color: '#fff', fontSize: 12.5, fontWeight: '800' },
+  pillTxt: { fontSize: 12.5, fontWeight: '800' },
   footer: { flexDirection: 'row', gap: 9, alignItems: 'flex-start', marginTop: 28, paddingTop: 14, borderTopWidth: StyleSheet.hairlineWidth },
 });

@@ -3,41 +3,62 @@
 // A community is an umbrella over group chats with an auto-created Announcements
 // group. List your communities → open one → see its groups → tap to chat.
 
-import { HEADER_TOP, SCREEN_BOTTOM } from '../constants/layout';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, ScrollView, FlatList, TouchableOpacity, StyleSheet, Modal, TextInput, Alert, ActivityIndicator, BackHandler,
+  View, ScrollView, FlatList, TouchableOpacity, Alert, ActivityIndicator, BackHandler,
 } from 'react-native';
 import { useRouter, useFocusEffect, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
-import { type Palette } from '../constants/theme';
 import {
-  listCommunities, createCommunity, getCommunity, createCommunityGroup,
-  type Community, type CommunityDetail,
+  listCommunities, createCommunity, getCommunity, createCommunityGroup, listChats,
+  type Community, type CommunityDetail, type ChatSummary,
 } from '../lib/chatService';
 import { readCache, writeCache } from '../lib/localCache';
 import { AuroraBackground } from '../components/ui';
-import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 import { AppText as Text } from '../components/ui/Text';
+import { makeCommunityStyles } from '../components/groups/communityStyles';
+import { CommunityNameModal, type NameModalMode } from '../components/groups/CommunityNameModal';
+import { CommunityDetailView, type CommunityAction } from '../components/groups/CommunityDetailView';
+import { CommunityAttachSheet } from '../components/groups/CommunityAttachSheet';
+import {
+  editCommunity, deleteCommunity, leaveCommunity, attachGroupToCommunity, NotAvailableYet,
+} from '../lib/groups/serverContracts';
+
+/** Edit / delete / leave / attach are new server routes (R4 backend C9), not deployed yet. */
+const notYet = (e: unknown, what: string) => {
+  if (e instanceof NotAvailableYet) {
+    Alert.alert('Not available yet', `${what} needs a server update that has not been released. Nothing was changed.`);
+    return true;
+  }
+  return false;
+};
 
 export default function CommunitiesScreen() {
   const { colors } = useTheme();
-  const S = useMemo(() => makeStyles(colors), [colors]);
+  const S = useMemo(() => makeCommunityStyles(colors), [colors]);
   const router = useRouter();
 
   const [list, setList] = useState<Community[]>([]);
   const [detail, setDetail] = useState<CommunityDetail | null>(null);
+  // The detail on screen is the saved copy: its refresh failed.
+  const [detailStale, setDetailStale] = useState(false);
   const [loading, setLoading] = useState(true);
   // Set when the network refresh failed; the cached list (if any) stays shown.
   const [loadError, setLoadError] = useState(false);
-  // Single name/desc modal, reused for "new community" and "new group".
-  const [modal, setModal] = useState<null | 'community' | 'group'>(null);
+  // Single name/desc modal: "new community", "new group" and "edit community".
+  const [modal, setModal] = useState<NameModalMode | null>(null);
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
   const [busy, setBusy] = useState(false);
   // Error-bar retry in flight: the bar shows a spinner instead of looking dead.
   const [retrying, setRetrying] = useState(false);
+  // A management request in flight (edit / delete / leave / attach).
+  const [acting, setActing] = useState<CommunityAction | null>(null);
+  // "Add a group you manage" picker.
+  const [attachOpen, setAttachOpen] = useState(false);
+  const [attachState, setAttachState] = useState<'loading' | 'ok' | 'failed'>('loading');
+  const [myGroups, setMyGroups] = useState<ChatSummary[]>([]);
   // Only the latest openCommunity may write: tapping A then B must end on B.
   const openSeq = useRef(0);
 
@@ -57,12 +78,14 @@ export default function CommunitiesScreen() {
   }, []);
   useFocusEffect(useCallback(() => { if (!detail) loadList(); }, [detail, loadList]));
 
+  const closeDetail = useCallback(() => { openSeq.current++; setDetail(null); setDetailStale(false); }, []);
+
   // Detail is in-screen state, not a route: Android back returns to the list.
   useEffect(() => {
     if (!detail) return;
-    const sub = BackHandler.addEventListener('hardwareBackPress', () => { openSeq.current++; setDetail(null); return true; });
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => { closeDetail(); return true; });
     return () => sub.remove();
-  }, [detail]);
+  }, [detail, closeDetail]);
 
   const openCommunity = useCallback(async (id: string) => {
     const seq = ++openSeq.current;
@@ -77,9 +100,12 @@ export default function CommunitiesScreen() {
       const d = await getCommunity(id);
       if (seq !== openSeq.current) return;
       setDetail(d);
+      setDetailStale(false);
       writeCache('community:' + id, d);
     } catch {
-      if (seq === openSeq.current && !cached) Alert.alert('Could not open this community', 'Check your connection and try again.');
+      if (seq !== openSeq.current) return;
+      if (cached) setDetailStale(true);
+      else Alert.alert('Could not open this community', 'Check your connection and try again.');
     }
     finally { if (seq === openSeq.current) setLoading(false); }
   }, []);
@@ -90,12 +116,80 @@ export default function CommunitiesScreen() {
     try { await loadList(); } finally { setRetrying(false); }
   }, [retrying, loadList]);
 
+  const retryDetail = useCallback(async () => {
+    if (!detail || retrying) return;
+    setRetrying(true);
+    try { await openCommunity(detail.id); } finally { setRetrying(false); }
+  }, [detail, retrying, openCommunity]);
+
+  const loadMyGroups = useCallback(async () => {
+    setAttachState('loading');
+    try {
+      const inHere = new Set(detail?.groups.map((g) => g.id) ?? []);
+      setMyGroups((await listChats()).filter((c) =>
+        c.type === 'group' && (c.myRole === 'owner' || c.myRole === 'admin') && !inHere.has(c.id)));
+      setAttachState('ok');
+    } catch { setAttachState('failed'); }
+  }, [detail]);
+
+  const attach = useCallback(async (g: ChatSummary) => {
+    if (!detail || acting) return;
+    setAttachOpen(false);
+    setActing('attach');
+    try {
+      await attachGroupToCommunity(detail.id, g.id);
+      await openCommunity(detail.id);
+    } catch (e: any) {
+      if (!notYet(e, 'Adding an existing group')) Alert.alert('Could not add the group', e?.message ?? 'Try again.');
+    } finally { setActing(null); }
+  }, [detail, acting, openCommunity]);
+
+  const onAction = useCallback((a: CommunityAction) => {
+    if (!detail || acting) return;
+    const d = detail;
+    if (a === 'edit') { setName(d.name); setDesc(d.description ?? ''); setModal('edit'); return; }
+    if (a === 'attach') { setAttachOpen(true); loadMyGroups(); return; }
+    const run = async () => {
+      setActing(a);
+      try {
+        if (a === 'delete') await deleteCommunity(d.id); else await leaveCommunity(d.id);
+        closeDetail();
+        loadList();
+      } catch (e: any) {
+        if (!notYet(e, a === 'delete' ? 'Deleting a community' : 'Leaving a community')) {
+          Alert.alert(a === 'delete' ? 'Could not delete' : 'Could not leave', e?.message ?? 'Try again.');
+        }
+      } finally { setActing(null); }
+    };
+    if (a === 'delete') {
+      Alert.alert(`Delete ${d.name}?`,
+        'The community is removed for everyone. Its groups stay as ordinary groups, with their members and messages.', [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Delete', style: 'destructive', onPress: run },
+        ]);
+    } else {
+      Alert.alert(`Leave ${d.name}?`, 'You leave every group of this community you are in.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Leave', style: 'destructive', onPress: run },
+      ]);
+    }
+  }, [detail, acting, loadMyGroups, closeDetail, loadList]);
+
   const submitModal = useCallback(async () => {
     const n = name.trim();
     if (!n || busy) return;
     setBusy(true);
     try {
-      if (modal === 'community') {
+      if (modal === 'edit' && detail) {
+        try {
+          await editCommunity(detail.id, { name: n, description: desc.trim() });
+        } catch (e) {
+          if (notYet(e, 'Editing a community')) { setModal(null); return; }
+          throw e;
+        }
+        setModal(null);
+        await openCommunity(detail.id);
+      } else if (modal === 'community') {
         const r = await createCommunity(n, desc.trim() || undefined);
         setModal(null); setName(''); setDesc('');
         await openCommunity(r.id);
@@ -105,59 +199,30 @@ export default function CommunitiesScreen() {
         setModal(null); setName('');
         await openCommunity(detail.id);
       }
-    } catch (e: any) { Alert.alert('Could not create', e?.message ?? 'Try again'); }
+    } catch (e: any) { Alert.alert(modal === 'edit' ? 'Could not save' : 'Could not create', e?.message ?? 'Try again'); }
     finally { setBusy(false); }
   }, [name, desc, modal, detail, busy, openCommunity, loadList]);
+
+  const nameModal = (
+      <CommunityNameModal S={S} mode={modal} name={name} desc={desc} onName={setName} onDesc={setDesc}
+        busy={busy} onCancel={() => setModal(null)} onSubmit={submitModal} />
+  );
 
   // ── Community detail view ──────────────────────────────────────────
   if (detail) {
     return (
-      <View style={S.screen}>
-      <AuroraBackground />
-        <Stack.Screen options={{ headerShown: false }} />
-        <View style={S.header}>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back to communities" onPress={() => { openSeq.current++; setDetail(null); }} style={S.hBtn} hitSlop={8}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
-          <Text style={S.hTitle} numberOfLines={1} accessibilityRole="header">{detail.name}</Text>
-        </View>
-
-        <FlatList
-          data={detail.groups}
-          contentContainerStyle={S.listContent}
-          keyExtractor={g => g.id}
-          ListHeaderComponent={
-            <View>
-              <View style={S.commHero}>
-                <View style={S.commIcon}><Ionicons name="people" size={32} color="#fff" /></View>
-                <Text numberOfLines={1} style={S.commName}>{detail.name}</Text>
-                {!!detail.description && <Text style={S.commDesc}>{detail.description}</Text>}
-              </View>
-              <Text style={S.sectionLabel}>GROUPS</Text>
-            </View>
-          }
-          renderItem={({ item: g }) => (
-            <TouchableOpacity style={S.row} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`${g.name}, ${g.isAnnouncement ? 'announcements' : `${g.members} member${g.members === 1 ? '' : 's'}`}`} onPress={() => router.push({ pathname: '/chat', params: { id: g.id } } as any)}>
-              <View style={[S.groupIcon, g.isAnnouncement && { backgroundColor: colors.primary }]}>
-                <Ionicons name={g.isAnnouncement ? 'megaphone' : 'people-outline'} size={20} color={g.isAnnouncement ? '#fff' : colors.primary} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={S.rowName} numberOfLines={1}>{g.name}</Text>
-                <Text style={S.rowSub}>{g.isAnnouncement ? 'Announcements' : `${g.members} member${g.members === 1 ? '' : 's'}`}</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
-            </TouchableOpacity>
-          )}
-          ListFooterComponent={
-            // Any community member may add a group: the server only checks
-            // membership (POST /communities/:id/groups — communities.go /
-            // communities.js), and everyone who can open this screen is one.
-            <TouchableOpacity style={S.addRow} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="New group in this community" onPress={() => { setName(''); setModal('group'); }}>
-              <View style={S.addIcon}><Ionicons name="add" size={22} color={colors.primary} /></View>
-              <Text style={S.addTxt}>New group</Text>
-            </TouchableOpacity>
-          }
+      <>
+        <CommunityDetailView
+          S={S} detail={detail} stale={detailStale} retrying={retrying} acting={acting}
+          onBack={closeDetail} onRetry={retryDetail}
+          onOpenGroup={(id) => router.push({ pathname: '/chat', params: { id } } as any)}
+          onNewGroup={() => { setName(''); setModal('group'); }}
+          onAction={onAction}
         />
-        {nameModal()}
-      </View>
+        <CommunityAttachSheet S={S} visible={attachOpen} state={attachState} groups={myGroups}
+          onPick={attach} onRetry={loadMyGroups} onClose={() => setAttachOpen(false)} />
+        {nameModal}
+      </>
     );
   }
 
@@ -194,7 +259,7 @@ export default function CommunitiesScreen() {
           <Ionicons name="people-circle-outline" size={56} color={colors.textDim} />
           <Text style={S.emptyTitle}>No communities yet</Text>
           <Text style={S.emptySub}>Communities bring related groups together under one roof.</Text>
-          <TouchableOpacity style={S.cta} accessibilityRole="button" onPress={() => { setName(''); setDesc(''); setModal('community'); }}><Text style={S.ctaTxt}>New community</Text></TouchableOpacity>
+          <TouchableOpacity style={S.cta} accessibilityRole="button" accessibilityLabel="Create a new community" onPress={() => { setName(''); setDesc(''); setModal('community'); }}><Text style={S.ctaTxt}>New community</Text></TouchableOpacity>
         </ScrollView>
       ) : (
         <FlatList
@@ -203,7 +268,7 @@ export default function CommunitiesScreen() {
           contentContainerStyle={S.listContent}
           renderItem={({ item: c }) => (
             <TouchableOpacity style={S.row} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`${c.name}, ${c.groupCount} group${c.groupCount === 1 ? '' : 's'}`} onPress={() => openCommunity(c.id)}>
-              <View style={S.commIconSm}><Ionicons name="people" size={22} color="#fff" /></View>
+              <View style={S.commIconSm}><Ionicons name="people" size={22} color={colors.onPrimary} /></View>
               <View style={{ flex: 1 }}>
                 <Text style={S.rowName} numberOfLines={1}>{c.name}</Text>
                 <Text style={S.rowSub} numberOfLines={1}>{c.description || `${c.groupCount} group${c.groupCount === 1 ? '' : 's'}`}</Text>
@@ -213,73 +278,7 @@ export default function CommunitiesScreen() {
           )}
         />
       )}
-      {nameModal()}
+      {nameModal}
     </View>
   );
-
-  function nameModal() {
-    return (
-      <Modal visible={modal != null} transparent animationType="fade" onRequestClose={() => setModal(null)}>
-        <KeyboardSafe keyboardOnly>
-        <View style={S.modalBackdrop}>
-          <ScrollView style={S.modalCard} contentContainerStyle={S.modalContent} keyboardShouldPersistTaps="handled">
-            <Text style={S.modalTitle} accessibilityRole="header">{modal === 'group' ? 'New group' : 'New community'}</Text>
-            <TextInput style={S.modalInput} value={name} onChangeText={setName} placeholder={modal === 'group' ? 'Group name' : 'Community name'} accessibilityLabel={modal === 'group' ? 'Group name' : 'Community name'} placeholderTextColor={colors.textDim} autoFocus maxLength={100} />
-            {modal === 'community' && (
-              <TextInput style={[S.modalInput, { minHeight: 60, textAlignVertical: 'top' }]} value={desc} onChangeText={setDesc} placeholder="Description (optional)" accessibilityLabel="Description, optional" placeholderTextColor={colors.textDim} multiline maxLength={512} />
-            )}
-            <View style={S.modalBtns}>
-              <TouchableOpacity accessibilityRole="button" onPress={() => setModal(null)} style={S.modalBtn}><Text style={S.modalCancel}>Cancel</Text></TouchableOpacity>
-              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Create" accessibilityState={{ disabled: !name.trim() || busy, busy }} onPress={submitModal} disabled={!name.trim() || busy} style={[S.modalBtn, S.modalBtnPrimary, (!name.trim() || busy) && { opacity: 0.5 }]}>
-                {busy ? <ActivityIndicator color="#fff" /> : <Text style={S.modalCreate}>Create</Text>}
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </View>
-        </KeyboardSafe>
-      </Modal>
-    );
-  }
 }
-
-const makeStyles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: 'transparent' },
-  center:  { flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 32, paddingVertical: 32 },
-  listContent: { paddingTop: 8, paddingBottom: SCREEN_BOTTOM + 16 },
-  header:  { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
-  hBtn:    { width: 44, height: 44, borderRadius: 16, backgroundColor: c.glassSoft, alignItems: 'center', justifyContent: 'center' },
-  hTitle:  { flex: 1, color: c.text, fontSize: 18, fontWeight: '700' },
-
-  commHero: { alignItems: 'center', paddingVertical: 24, gap: 8 },
-  commIcon: { width: 80, height: 80, borderRadius: 24, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
-  commName: { color: c.text, fontSize: 22, fontWeight: '800', marginTop: 8 },
-  commDesc: { color: c.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20, paddingHorizontal: 24 },
-  sectionLabel: { color: c.textDim, fontSize: 12, fontWeight: '700', letterSpacing: 1, marginHorizontal: 16, marginTop: 8, marginBottom: 4 },
-
-  row:      { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 16, marginBottom: 10, padding: 16, borderRadius: 20, backgroundColor: c.glassSoft, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
-  rowName:  { color: c.text, fontSize: 16, fontWeight: '600' },
-  rowSub:   { color: c.textDim, fontSize: 13, marginTop: 2 },
-  commIconSm: { width: 48, height: 48, borderRadius: 16, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
-  groupIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: c.surfaceSolid, alignItems: 'center', justifyContent: 'center' },
-  addRow:   { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, paddingVertical: 12 },
-  addIcon:  { width: 44, height: 44, borderRadius: 22, borderWidth: 1.5, borderColor: c.primary, alignItems: 'center', justifyContent: 'center' },
-  addTxt:   { color: c.primary, fontSize: 16, fontWeight: '600' },
-
-  errBar:   { marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 12, backgroundColor: c.glassSoft, borderWidth: StyleSheet.hairlineWidth, borderColor: c.danger },
-  errTxt:   { color: c.danger, fontSize: 13, fontWeight: '600', textAlign: 'center' },
-  emptyTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
-  emptySub: { color: c.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20 },
-  cta:      { marginTop: 8, backgroundColor: c.primary, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 14 },
-  ctaTxt:   { color: '#fff', fontWeight: '800', fontSize: 14 },
-
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center', padding: 28 },
-  modalCard: { width: '100%', maxWidth: 420, maxHeight: '100%', flexGrow: 0, backgroundColor: c.surfaceSolid, borderRadius: 24, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
-  modalContent: { padding: 20, gap: 12 },
-  modalTitle: { color: c.text, fontSize: 17, fontWeight: '800' },
-  modalInput: { color: c.text, backgroundColor: c.glassSoft, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
-  modalBtns: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 4 },
-  modalBtn:  { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12 },
-  modalBtnPrimary: { backgroundColor: c.primary, minWidth: 84, alignItems: 'center' },
-  modalCancel: { color: c.textDim, fontWeight: '700' },
-  modalCreate: { color: '#fff', fontWeight: '800' },
-});

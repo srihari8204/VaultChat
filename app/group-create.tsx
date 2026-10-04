@@ -25,7 +25,7 @@ import { useTheme } from '../lib/theme';
 import { AuroraBackground } from '../components/ui/AuroraBackground';
 import { AppText as Text } from '../components/ui/Text';
 import { brandAlpha } from '../constants/theme';
-import { GROUP_TYPES, groupTypeInfo, type GroupType } from '../lib/groups/catalog';
+import { GROUP_TYPES, groupTypeInfo, inkOn, type GroupType } from '../lib/groups/catalog';
 import { saveGroup, setActiveGroupId } from '../lib/groups/store';
 import { createGroupChat } from '../lib/chatService';
 
@@ -64,6 +64,7 @@ export default function GroupCreateScreen() {
     if (!n) { Alert.alert('Name it', 'Give your group a name.'); return; }
     if (busy) return;
     setBusy(true);
+    let id: string;
     try {
       const res = await createGroupChat(
         n,
@@ -79,16 +80,26 @@ export default function GroupCreateScreen() {
           color: color ?? undefined,
         },
       );
-      await saveGroup({
-        id: String(res.id), name: n, groupType: type,
-        icon: icon ?? null, color: color ?? null, privacy,
-      });
-      await setActiveGroupId(String(res.id));
-      // Replace: Back should not return to a half-filled create form.
-      router.replace({ pathname: '/group-invites' as any, params: { chatId: String(res.id), name: n } });
+      id = String(res.id);
     } catch (e: any) {
+      setBusy(false);
       Alert.alert('Could not create group', e?.message ?? 'Try again.');
-    } finally { setBusy(false); }
+      return;
+    }
+    // The group exists on the server from here on. A failure to record it on
+    // this phone must not read as "could not create", or a retry makes a
+    // duplicate group.
+    let savedHere = true;
+    try {
+      await saveGroup({ id, name: n, groupType: type, icon: icon ?? null, color: color ?? null, privacy });
+      await setActiveGroupId(id);
+    } catch { savedHere = false; }
+    setBusy(false);
+    // Replace: Back should not return to a half-filled create form.
+    router.replace({ pathname: '/group-invites' as any, params: { chatId: id, name: n } });
+    if (!savedHere) {
+      Alert.alert('Group created', `${n} was created, but this phone could not make it your active space. You can switch to it from Family.`);
+    }
   };
 
   return (
@@ -108,8 +119,8 @@ export default function GroupCreateScreen() {
           <Text style={{ color: colors.textDim, fontSize: 12.5 }}>{info.blurb}</Text>
         </View>
 
-        <Text style={[st.h, { color: colors.text }]}>Type</Text>
-        <View style={st.grid}>
+        <Text style={[st.h, { color: colors.text }]} accessibilityRole="header">Type</Text>
+        <View style={st.grid} accessibilityRole="radiogroup" accessibilityLabel="Group type">
           {GROUP_TYPES.map((g) => {
             const on = g.type === type;
             return (
@@ -128,7 +139,7 @@ export default function GroupCreateScreen() {
           })}
         </View>
 
-        <Text style={[st.h, { color: colors.text }]}>Name</Text>
+        <Text style={[st.h, { color: colors.text }]} accessibilityRole="header">Name</Text>
         <View style={[st.field, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
           <Ionicons name={shownIcon} size={17} color={colors.textDim} />
           <TextInput
@@ -147,19 +158,19 @@ export default function GroupCreateScreen() {
           />
         </View>
 
-        <Text style={[st.h, { color: colors.text }]}>Colour</Text>
-        <View style={st.swatches}>
+        <Text style={[st.h, { color: colors.text }]} accessibilityRole="header">Colour</Text>
+        <View style={st.swatches} accessibilityRole="radiogroup" accessibilityLabel="Colour">
           {PALETTE.map((c) => (
             <TouchableOpacity accessibilityRole="radio" accessibilityLabel={`Colour ${c.name}`} key={c.hex} onPress={() => setColor(c.hex)}
               accessibilityState={{ selected: shownColor === c.hex, checked: shownColor === c.hex }} hitSlop={4}
               style={[st.swatch, { backgroundColor: c.hex, borderColor: shownColor === c.hex ? colors.text : 'transparent' }]}>
-              {shownColor === c.hex && <Ionicons name="checkmark" size={15} color="#fff" />}
+              {shownColor === c.hex && <Ionicons name="checkmark" size={15} color={inkOn(c.hex)} />}
             </TouchableOpacity>
           ))}
         </View>
 
-        <Text style={[st.h, { color: colors.text }]}>Icon</Text>
-        <View style={st.swatches}>
+        <Text style={[st.h, { color: colors.text }]} accessibilityRole="header">Icon</Text>
+        <View style={st.swatches} accessibilityRole="radiogroup" accessibilityLabel="Icon">
           {ICONS.map((ic) => (
             <TouchableOpacity accessibilityRole="radio" accessibilityLabel={`Icon ${ic.replace(/-/g, ' ')}`} key={ic} onPress={() => setIcon(ic)}
               accessibilityState={{ selected: shownIcon === ic, checked: shownIcon === ic }}
@@ -169,7 +180,8 @@ export default function GroupCreateScreen() {
           ))}
         </View>
 
-        <Text style={[st.h, { color: colors.text }]}>Who can join</Text>
+        <Text style={[st.h, { color: colors.text }]} accessibilityRole="header">Who can join</Text>
+        <View accessibilityRole="radiogroup" accessibilityLabel="Who can join">
         {([
           ['private', 'lock-closed', 'Private', 'Anyone with an invite can join straight away'],
           ['invite_only', 'shield-checkmark', 'Approval needed', 'An admin approves each person before they join'],
@@ -188,12 +200,13 @@ export default function GroupCreateScreen() {
             </TouchableOpacity>
           );
         })}
+        </View>
 
         <TouchableOpacity onPress={create} disabled={busy || !name.trim()}
           accessibilityRole="button" accessibilityState={{ disabled: busy || !name.trim(), busy }}
           style={[st.btn, { backgroundColor: name.trim() && !busy ? colors.primary : colors.border }]}>
-          {busy ? <ActivityIndicator color="#fff" />
-            : <><Ionicons name="add-circle" size={18} color="#fff" /><Text style={st.btnTxt}>Create group</Text></>}
+          {busy ? <ActivityIndicator color={colors.onPrimary} />
+            : <><Ionicons name="add-circle" size={18} color={colors.onPrimary} /><Text style={[st.btnTxt, { color: colors.onPrimary }]}>Create group</Text></>}
         </TouchableOpacity>
         <Text style={{ color: colors.textFaint, fontSize: 11.5, textAlign: 'center', marginTop: 10 }}>
           You can invite people on the next screen.
@@ -219,5 +232,5 @@ const st = StyleSheet.create({
   iconCell: { width: 44, height: 44, borderRadius: 13, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   privacyRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 13, borderWidth: 1, borderRadius: 14, marginBottom: 9 },
   btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 52, borderRadius: 14, marginTop: 26 },
-  btnTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  btnTxt: { fontSize: 15, fontWeight: '800' },
 });

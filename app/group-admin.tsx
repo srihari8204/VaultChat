@@ -24,7 +24,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState , useMemo} from 'react';
 import {
-  ActivityIndicator, Alert, ScrollView, Switch,
+  ActivityIndicator, Alert, FlatList, Switch,
   StyleSheet, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { useTheme } from '../lib/theme';
@@ -38,6 +38,7 @@ import { AuroraBackground, KeyboardSafe, AppText as Text } from '../components/u
 import { HEADER_TOP } from '../constants/layout';
 import { initialOf } from '../lib/format';
 import { memberActions, ROLE_LABELS as GROUP_ROLE_LABELS, type GroupRole } from '../lib/groups/permissions';
+import { GroupNotFound } from '../components/groups/GroupNotFound';
 
 type Policy = 'everyone' | 'admins';
 
@@ -172,45 +173,33 @@ export default function GroupAdminScreen() {
     }
   };
 
-  const changeSlowMode = async (s: number) => {
-    const prev = slowMode;
-    setSlowMode(s);
-    try { await updateChat(chatId!, { slowModeSeconds: s }); flash('ok', s ? `Slow mode: ${s < 60 ? s + 's' : s / 60 + 'm'}` : 'Slow mode off'); }
-    catch (e: any) { setSlowMode(prev); flash('err', e?.message ?? 'Failed'); }
+  // One save per setting at a time: a second tap while the first PATCH is in
+  // flight would restore the wrong `prev` if either failed.
+  const inFlight = useRef(new Set<string>());
+  const applySetting = async <T,>(
+    key: keyof Parameters<typeof updateChat>[1], prev: T, next: T, set: (v: T) => void, ok: string,
+  ): Promise<boolean> => {
+    if (prev === next || inFlight.current.has(key)) return false;
+    inFlight.current.add(key);
+    set(next);
+    try { await updateChat(chatId!, { [key]: next } as Parameters<typeof updateChat>[1]); flash('ok', ok); return true; }
+    catch (e: any) { set(prev); flash('err', e?.message ?? 'Failed'); return false; }
+    finally { inFlight.current.delete(key); }
   };
 
-  const changeSendPolicy = async (p: Policy) => {
-    const prev = sendPolicy;
-    setSendPolicy(p);
-    try { await updateChat(chatId!, { sendPolicy: p }); flash('ok', p === 'admins' ? 'Only admins can send' : 'Everyone can send'); }
-    catch (e: any) { setSendPolicy(prev); flash('err', e?.message ?? 'Failed'); }
-  };
-
-  const changeMediaPolicy = async (p: Policy) => {
-    const prev = mediaPolicy; setMediaPolicy(p);
-    try { await updateChat(chatId!, { mediaPolicy: p }); flash('ok', p === 'admins' ? 'Only admins send media' : 'Everyone can send media'); }
-    catch (e: any) { setMediaPolicy(prev); flash('err', e?.message ?? 'Failed'); }
-  };
-
-  const changeAddPolicy = async (p: Policy) => {
-    const prev = addPolicy; setAddPolicy(p);
-    try { await updateChat(chatId!, { addMembersPolicy: p }); flash('ok', p === 'everyone' ? 'Anyone can add members' : 'Only admins add members'); }
-    catch (e: any) { setAddPolicy(prev); flash('err', e?.message ?? 'Failed'); }
-  };
-
-  const toggleAntiSpam = async (v: boolean) => {
-    const prev = antiSpam; setAntiSpam(v);
-    try { await updateChat(chatId!, { antiSpamLinks: v }); flash('ok', v ? 'Link anti-spam on' : 'Link anti-spam off'); }
-    catch (e: any) { setAntiSpam(prev); flash('err', e?.message ?? 'Failed'); }
-  };
-
+  const changeSlowMode = (v: number) => applySetting('slowModeSeconds', slowMode, v, setSlowMode,
+    v ? `Slow mode: ${v < 60 ? v + 's' : v / 60 + 'm'}` : 'Slow mode off');
+  const changeSendPolicy = (p: Policy) => applySetting('sendPolicy', sendPolicy, p, setSendPolicy,
+    p === 'admins' ? 'Only admins can send' : 'Everyone can send');
+  const changeMediaPolicy = (p: Policy) => applySetting('mediaPolicy', mediaPolicy, p, setMediaPolicy,
+    p === 'admins' ? 'Only admins send media' : 'Everyone can send media');
+  const changeAddPolicy = (p: Policy) => applySetting('addMembersPolicy', addPolicy, p, setAddPolicy,
+    p === 'everyone' ? 'Anyone can add members' : 'Only admins add members');
+  const toggleAntiSpam = (v: boolean) => { applySetting('antiSpamLinks', antiSpam, v, setAntiSpam,
+    v ? 'Link anti-spam on' : 'Link anti-spam off'); };
   const toggleApprove = async (v: boolean) => {
-    const prev = approve; setApprove(v);
-    try {
-      await updateChat(chatId!, { approveMembers: v });
-      flash('ok', v ? 'New members need approval' : 'Open joining');
-      if (v) loadJoinReqs(chatId!); else { setJoinReqs([]); setReqsFailed(false); }
-    } catch (e: any) { setApprove(prev); flash('err', e?.message ?? 'Failed'); }
+    if (!(await applySetting('approveMembers', approve, v, setApprove, v ? 'New members need approval' : 'Open joining'))) return;
+    if (v) loadJoinReqs(chatId!); else { setJoinReqs([]); setReqsFailed(false); }
   };
 
   const approveReq = async (uid: string) => {
@@ -219,10 +208,16 @@ export default function GroupAdminScreen() {
     catch (e: any) { flash('err', e?.message ?? 'Failed'); loadJoinReqs(chatId!); }
   };
 
-  const rejectReq = async (uid: string) => {
-    setJoinReqs(list => list.filter(r => r.userId !== uid));
-    try { await rejectJoinRequest(chatId!, uid); }
-    catch (e: any) { flash('err', e?.message ?? 'Failed'); loadJoinReqs(chatId!); }
+  const rejectReq = (r: JoinRequest) => {
+    const who = r.name || 'this person';
+    Alert.alert('Reject join request?', `${who} will not join. They can ask again with the link.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Reject', style: 'destructive', onPress: async () => {
+        setJoinReqs(list => list.filter(x => x.userId !== r.userId));
+        try { await rejectJoinRequest(chatId!, r.userId); flash('ok', 'Request rejected'); }
+        catch (e: any) { flash('err', e?.message ?? 'Failed'); loadJoinReqs(chatId!); }
+      } },
+    ]);
   };
 
   const changeRole = async (m: ChatMember, role: Exclude<GroupRole, 'owner'>) => {
@@ -259,6 +254,8 @@ export default function GroupAdminScreen() {
     ]);
   };
 
+  if (!chatId) return <GroupNotFound title="Group Admin" />;
+
   if (loading) {
     return (
       <View style={[s.container, s.center]}>
@@ -277,7 +274,7 @@ export default function GroupAdminScreen() {
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} accessibilityLabel="Go back" style={s.backBtn} hitSlop={10}>
+        <TouchableOpacity onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" style={s.backBtn} hitSlop={10}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.headerTitle} accessibilityRole="header">Group Admin</Text>
@@ -290,7 +287,14 @@ export default function GroupAdminScreen() {
         </View>
       )}
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 60 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      <FlatList
+        data={members}
+        keyExtractor={(m) => m.userId}
+        extraData={[roleMenuUid, myRole, myId, typed, perms]}
+        contentContainerStyle={{ paddingBottom: 60 }}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        ListHeaderComponent={<>
         {/* Group Info. Hidden after a failed load: myRole is still the default
             'member' then, and "Only admins can edit" would be a guess. */}
         {!loadFailed && (
@@ -314,7 +318,7 @@ export default function GroupAdminScreen() {
             <TouchableOpacity style={s.saveNameBtn} onPress={saveName} disabled={savingName}
               accessibilityRole="button" accessibilityState={{ disabled: savingName, busy: savingName }}>
               {savingName
-                ? <ActivityIndicator size="small" color="#FFFFFF" />
+                ? <ActivityIndicator size="small" color={colors.onPrimary} />
                 : <Text style={s.saveNameTxt}>Save name</Text>}
             </TouchableOpacity>
           )}
@@ -401,14 +405,15 @@ export default function GroupAdminScreen() {
                 <Text style={[s.memberName, { flex: 1 }]} numberOfLines={1}>{r.name || r.userId.slice(0, 8)}</Text>
                 <TouchableOpacity style={s.reqApprove} onPress={() => approveReq(r.userId)} hitSlop={6}
                   accessibilityRole="button" accessibilityLabel={`Approve ${r.name || 'this person'}`}><Text style={s.reqApproveTxt}>Approve</Text></TouchableOpacity>
-                <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Reject the join request from ${r.name || r.userId.slice(0, 8)}`} style={s.reqReject} onPress={() => rejectReq(r.userId)} hitSlop={10}><Ionicons name="close" size={18} color={colors.danger} /></TouchableOpacity>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Reject the join request from ${r.name || r.userId.slice(0, 8)}`} style={s.reqReject} onPress={() => rejectReq(r)} hitSlop={10}><Ionicons name="close" size={18} color={colors.danger} /></TouchableOpacity>
               </View>
             ))}
           </View>
         )}
 
-        {/* Members */}
-        <View style={s.section}>
+        {/* Members: the title here, one row per member below (a FlatList, so a
+            large group is not laid out all at once). */}
+        <View style={[s.section, s.sectionHead]}>
           <Text style={s.sectionTitle} accessibilityRole="header">Members ({members.length})</Text>
           {members.length === 0 && loadFailed && (
             <TouchableOpacity accessibilityRole="button" accessibilityLabel="Couldn't load members. Retry" onPress={() => { setLoading(true); load(); }}>
@@ -418,17 +423,19 @@ export default function GroupAdminScreen() {
           {members.length === 0 && !loadFailed && (
             <Text style={[s.hint, { textAlign: 'center', marginVertical: 16 }]}>No members.</Text>
           )}
-          {members.map(m => {
-            const role = (m.role as GroupRole) ?? 'member';
-            const isMe = m.userId === myId;
-            const label = m.name || m.email || m.userId.slice(0, 8);
+        </View>
+        </>}
+        renderItem={({ item }) => {
+            const role = (item.role as GroupRole) ?? 'member';
+            const isMe = item.userId === myId;
+            const label = item.name || item.email || item.userId.slice(0, 8);
             // The same rank-aware check as /group-members (and the server): an
             // admin cannot touch a peer admin, nobody touches the owner.
             const acts = memberActions({ actorRole: myRole, targetRole: role, isMe, typed, permissions: perms });
             const roleOptions = acts.roles.filter((r): r is Exclude<GroupRole, 'owner'> => r !== 'owner');
             const canEditRole = roleOptions.length > 0;
             return (
-              <View key={m.userId}>
+              <View style={s.sectionBody}>
                 {/* The row and Remove are SIBLINGS: a touchable nested in a
                     touchable is merged into one element by screen readers, so
                     Remove could not be reached on its own. */}
@@ -438,31 +445,31 @@ export default function GroupAdminScreen() {
                     activeOpacity={canEditRole ? 0.6 : 1}
                     disabled={!canEditRole}
                     accessibilityRole={canEditRole ? 'button' : 'text'}
-                    accessibilityLabel={`${label}${isMe ? ' (you)' : ''}, ${GROUP_ROLE_LABELS[role] ?? m.role}`}
+                    accessibilityLabel={`${label}${isMe ? ' (you)' : ''}, ${GROUP_ROLE_LABELS[role] ?? item.role}`}
                     accessibilityHint={canEditRole ? 'Shows role options' : undefined}
-                    accessibilityState={canEditRole ? { expanded: roleMenuUid === m.userId } : undefined}
-                    onPress={() => setRoleMenuUid(roleMenuUid === m.userId ? null : m.userId)}
+                    accessibilityState={canEditRole ? { expanded: roleMenuUid === item.userId } : undefined}
+                    onPress={() => setRoleMenuUid(roleMenuUid === item.userId ? null : item.userId)}
                   >
                     <View style={s.avatar}><Text style={s.avatarText}>{initialOf(label)}</Text></View>
                     <View style={{ flex: 1 }}>
                       <Text style={s.memberName} numberOfLines={1}>{label}{isMe ? ' (You)' : ''}</Text>
-                      <Text style={s.roleBadgeText}>{GROUP_ROLE_LABELS[role] ?? m.role}</Text>
+                      <Text style={s.roleBadgeText}>{GROUP_ROLE_LABELS[role] ?? item.role}</Text>
                     </View>
                   </TouchableOpacity>
                   {acts.canRemove && (
-                    <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Remove ${label} from the group`} onPress={() => removeMember(m)} style={s.removeBtn} hitSlop={8}>
+                    <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Remove ${label} from the group`} onPress={() => removeMember(item)} style={s.removeBtn} hitSlop={8}>
                       <Ionicons name="close-circle" size={22} color={colors.danger} />
                     </TouchableOpacity>
                   )}
                 </View>
 
-                {roleMenuUid === m.userId && canEditRole && (
+                {roleMenuUid === item.userId && canEditRole && (
                   <View style={s.roleMenu}>
                     {roleOptions.map(r => (
                       <TouchableOpacity
                         key={r}
                         style={[s.roleOption, role === r && s.roleOptionActive]}
-                        onPress={() => changeRole(m, r)}
+                        onPress={() => changeRole(item, r)}
                         accessibilityRole="radio"
                         accessibilityLabel={role === r ? GROUP_ROLE_LABELS[r] : `Make ${GROUP_ROLE_LABELS[r]}`}
                         accessibilityState={{ selected: role === r, checked: role === r }}
@@ -479,12 +486,13 @@ export default function GroupAdminScreen() {
                 )}
               </View>
             );
-          })}
-          {isAdmin && (
-            <Text style={s.hint}>Tap a member to change their role.</Text>
-          )}
-        </View>
-      </ScrollView>
+        }}
+        ListFooterComponent={
+          <View style={[s.sectionBody, s.sectionFoot]}>
+            {isAdmin && <Text style={s.hint}>Tap a member to change their role.</Text>}
+          </View>
+        }
+      />
     </KeyboardSafe>
   );
 }
@@ -509,6 +517,13 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     marginHorizontal: 16, marginTop: 16, backgroundColor: c.glassSoft,
     borderRadius: 16, padding: 16, borderWidth: 1, borderColor: c.glassStroke,
   },
+  // The Members box is split across the list header, rows and footer.
+  sectionHead: { borderBottomWidth: 0, borderBottomLeftRadius: 0, borderBottomRightRadius: 0, paddingBottom: 0 },
+  sectionBody: {
+    marginHorizontal: 16, paddingHorizontal: 16, backgroundColor: c.glassSoft,
+    borderLeftWidth: 1, borderRightWidth: 1, borderColor: c.glassStroke,
+  },
+  sectionFoot: { borderBottomWidth: 1, borderBottomLeftRadius: 16, borderBottomRightRadius: 16, paddingBottom: 16 },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: c.text, marginBottom: 12 },
   label: { fontSize: 13, color: c.textDim, marginTop: 4, marginBottom: 4 },
   hint: { fontSize: 12, color: c.textDim, marginTop: 8 },
@@ -521,7 +536,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     marginTop: 12, backgroundColor: c.primary, borderRadius: 10,
     paddingVertical: 11, alignItems: 'center',
   },
-  saveNameTxt: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 },
+  saveNameTxt: { color: c.onPrimary, fontWeight: '800', fontSize: 14 },
 
   memberRow: {
     flexDirection: 'row', alignItems: 'center', paddingVertical: 10,
@@ -544,13 +559,13 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   switchSub: { color: c.textDim, fontSize: 12, marginTop: 2, flexShrink: 1 },
   linkRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, minHeight: 44 },
   reqApprove: { backgroundColor: c.primary, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7, marginRight: 8 },
-  reqApproveTxt: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
+  reqApproveTxt: { color: c.onPrimary, fontSize: 12, fontWeight: '800' },
   reqReject: { padding: 6 },
   policyRow: { flexDirection: 'row', gap: 8 },
   policyBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center', backgroundColor: c.glassSoft, borderWidth: 1, borderColor: c.glassStroke },
   policyBtnActive: { backgroundColor: c.primary, borderColor: c.primary },
   policyTxt: { color: c.textDim, fontSize: 13, fontWeight: '600' },
-  policyTxtActive: { color: '#FFFFFF', fontWeight: '800' },
+  policyTxtActive: { color: c.onPrimary, fontWeight: '800' },
   slowRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   slowChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, backgroundColor: c.glassSoft, borderWidth: 1, borderColor: c.glassStroke },
   slowChipActive: { backgroundColor: brandAlpha(0.15), borderColor: c.primary },

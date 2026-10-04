@@ -27,6 +27,7 @@ import {
 } from '../lib/groups/notes';
 import { readGroupOps } from '../lib/groups/opThread';
 import { KeyboardSafe } from '../components/ui';
+import { GroupNotFound } from '../components/groups/GroupNotFound';
 import { ThreadGaps } from '../components/groups/ThreadGaps';
 
 const when = (ts: number) => {
@@ -53,6 +54,8 @@ export default function GroupNotesScreen() {
   const [draftBody, setDraftBody] = useState('');
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Banner Retry in flight: the list stays on screen (no full-screen spinner).
+  const [retrying, setRetrying] = useState(false);
 
   const rebuild = useCallback(async () => {
     if (!groupId) { setLoading(false); return; }
@@ -142,6 +145,14 @@ export default function GroupNotesScreen() {
 
   const ordered = useMemo(() => sortNotes(notes), [notes]);
 
+  const retryInPlace = async () => {
+    if (retrying) return;
+    setRetrying(true);
+    try { await rebuild(); } finally { setRetrying(false); }
+  };
+
+  if (!groupId) return <GroupNotFound title="Notes" />;
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
       <AuroraBackground variant="chat" />
@@ -163,7 +174,7 @@ export default function GroupNotesScreen() {
           <Text style={{ color: colors.text, fontWeight: '700', marginTop: 10 }}>Couldn’t load notes</Text>
           <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry loading notes" onPress={() => { setLoading(true); rebuild(); }}
             style={[st.btn, { backgroundColor: colors.primary, paddingHorizontal: 22 }]}>
-            <Text style={st.btnTxt}>Retry</Text>
+            <Text style={[st.btnTxt, { color: colors.onPrimary }]}>Retry</Text>
           </TouchableOpacity>
         </View>
       ) : ordered.length === 0 ? (
@@ -178,33 +189,38 @@ export default function GroupNotesScreen() {
         <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
           {failed && (
             <TouchableOpacity accessibilityRole="button" accessibilityLabel="Couldn't refresh notes. Showing what was loaded before. Retry"
-              onPress={() => { setLoading(true); rebuild(); }}
+              accessibilityState={{ busy: retrying, disabled: retrying }} disabled={retrying}
+              onPress={retryInPlace}
               style={[st.banner, { borderColor: colors.danger }]}>
-              <Ionicons name="cloud-offline-outline" size={15} color={colors.danger} />
+              {retrying ? <ActivityIndicator size="small" color={colors.danger} />
+                : <Ionicons name="cloud-offline-outline" size={15} color={colors.danger} />}
               <Text style={{ color: colors.danger, fontSize: 12.5, flex: 1 }}>Couldn’t refresh — these may be out of date. Tap to retry.</Text>
             </TouchableOpacity>
           )}
           {ordered.map((n) => (
-            <TouchableOpacity key={n.id} onPress={() => openEdit(n)} activeOpacity={0.75}
-              accessibilityRole="button" accessibilityLabel={`${n.title}${n.pinned ? ', pinned' : ''}. Edit note`}
-              style={[st.card, { backgroundColor: colors.glassSoft, borderColor: n.pinned ? colors.primary : colors.border }]}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Text style={{ color: colors.text, fontWeight: '700', fontSize: 15, flex: 1 }} numberOfLines={1}>
+            // Edit and Pin are SIBLINGS: a touchable nested in a touchable is
+            // merged into one element by screen readers (Pin was unreachable
+            // with VoiceOver).
+            <View key={n.id} style={[st.card, { backgroundColor: colors.glassSoft, borderColor: n.pinned ? colors.primary : colors.border }]}>
+              <TouchableOpacity onPress={() => openEdit(n)} activeOpacity={0.75} style={st.cardMain}
+                accessibilityRole="button" accessibilityLabel={`${n.title}${n.pinned ? ', pinned' : ''}. Edit note`}>
+                <Text style={{ color: colors.text, fontWeight: '700', fontSize: 15, paddingRight: 30 }} numberOfLines={1}>
                   {n.title}
                 </Text>
-                <TouchableOpacity accessibilityRole="button" accessibilityLabel={n.pinned ? `Unpin ${n.title}` : `Pin ${n.title}`} onPress={() => togglePin(n)} hitSlop={12}>
-                  <Ionicons name={n.pinned ? 'pin' : 'pin-outline'} size={17} color={n.pinned ? colors.primary : colors.textFaint} />
-                </TouchableOpacity>
-              </View>
-              {!!preview(n) && (
-                <Text style={{ color: colors.textDim, fontSize: 13, marginTop: 4 }} numberOfLines={2}>
-                  {preview(n)}
+                {!!preview(n) && (
+                  <Text style={{ color: colors.textDim, fontSize: 13, marginTop: 4 }} numberOfLines={2}>
+                    {preview(n)}
+                  </Text>
+                )}
+                <Text style={{ color: colors.textFaint, fontSize: 11, marginTop: 6 }}>
+                  Updated {when(n.updatedAt)}
                 </Text>
-              )}
-              <Text style={{ color: colors.textFaint, fontSize: 11, marginTop: 6 }}>
-                Updated {when(n.updatedAt)}
-              </Text>
-            </TouchableOpacity>
+              </TouchableOpacity>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel={n.pinned ? `Unpin ${n.title}` : `Pin ${n.title}`}
+                onPress={() => togglePin(n)} hitSlop={12} style={st.pin}>
+                <Ionicons name={n.pinned ? 'pin' : 'pin-outline'} size={17} color={n.pinned ? colors.primary : colors.textFaint} />
+              </TouchableOpacity>
+            </View>
           ))}
           <ThreadGaps unreadable={gaps.unreadable} complete={gaps.complete} what="notes" />
         </ScrollView>
@@ -221,7 +237,7 @@ export default function GroupNotesScreen() {
             accessibilityRole="button" accessibilityLabel="Close without saving" />
           <View style={[st.sheet, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-              <Text style={{ color: colors.text, fontWeight: '800', fontSize: 16, flex: 1 }}>
+              <Text style={{ color: colors.text, fontWeight: '800', fontSize: 16, flex: 1 }} accessibilityRole="header">
                 {editing ? 'Edit note' : 'New note'}
               </Text>
               {!!editing && (
@@ -243,8 +259,8 @@ export default function GroupNotesScreen() {
             <TouchableOpacity onPress={save} disabled={!draftTitle.trim() || busy || !me}
               accessibilityRole="button" accessibilityState={{ disabled: !draftTitle.trim() || busy || !me, busy }}
               style={[st.btn, { backgroundColor: draftTitle.trim() && !busy && me ? colors.primary : colors.border }]}>
-              {busy ? <ActivityIndicator color="#fff" />
-                : <><Ionicons name="checkmark" size={18} color="#fff" /><Text style={st.btnTxt}>{editing ? 'Save' : 'Add note'}</Text></>}
+              {busy ? <ActivityIndicator color={colors.onPrimary} />
+                : <><Ionicons name="checkmark" size={18} color={colors.onPrimary} /><Text style={[st.btnTxt, { color: colors.onPrimary }]}>{editing ? 'Save' : 'Add note'}</Text></>}
             </TouchableOpacity>
             {!!editing && (
               <Text style={{ color: colors.textFaint, fontSize: 11.5, textAlign: 'center', marginTop: 10 }}>
@@ -260,12 +276,14 @@ export default function GroupNotesScreen() {
 
 const st = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  card: { borderWidth: 1, borderRadius: 14, padding: 14, marginBottom: 10 },
+  card: { borderWidth: 1, borderRadius: 14, marginBottom: 10 },
+  cardMain: { padding: 14 },
+  pin: { position: 'absolute', top: 10, right: 10, padding: 4 },
   banner: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderWidth: 1, borderRadius: 12, marginBottom: 12 },
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' },
   sheet: { borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, padding: 18, paddingBottom: 32 },
   field: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, minHeight: 48 },
   input: { flex: 1, fontSize: 15 },
   btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 50, borderRadius: 13, marginTop: 16 },
-  btnTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  btnTxt: { fontSize: 15, fontWeight: '800' },
 });

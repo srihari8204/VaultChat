@@ -1,9 +1,11 @@
 // app/create-group.tsx — Create a new group chat (Postgres-backed).
 //
 // People are picked from those you already have a direct chat with (derived
-// from GET /chats). The group is created with only you in it, and each picked
-// person gets an INVITATION they accept or decline in /group-invitations —
-// the same consent path as Group info → Add member (/family-add) and
+// from GET /chats). Anyone else is found by phone or email in Add people
+// (/group-invites), which needs the group to exist first — so creating with
+// nobody picked opens it straight away. The group is created with only you in
+// it, and each picked person gets an INVITATION they accept or decline in
+// /group-invitations — the same consent path as Group info → Add member (/family-add) and
 // /group-create. Nobody is added to a group without agreeing to join.
 //
 // WHY TWO "NEW GROUP" SCREENS. This one makes a plain chat group from New chat.
@@ -97,9 +99,10 @@ export default function CreateGroupScreen() {
     });
   }, []);
 
+  // Nobody picked is allowed: Add people opens next, with search by phone/email.
   const canCreate = useMemo(
-    () => groupName.trim().length > 0 && selected.size > 0 && !creating,
-    [groupName, selected.size, creating],
+    () => groupName.trim().length > 0 && !creating,
+    [groupName, creating],
   );
 
   const create = async () => {
@@ -108,7 +111,14 @@ export default function CreateGroupScreen() {
     setError(null);
     try {
       // Created with only me in it; everyone picked is INVITED, not added.
-      const { id } = await createGroupChat(groupName.trim(), { allowEmpty: true });
+      const name = groupName.trim();
+      const { id } = await createGroupChat(name, { allowEmpty: true });
+      if (selected.size === 0) {
+        // Back from Add people lands in the new group, not on this form.
+        router.replace({ pathname: '/chat', params: { id } } as any);
+        router.push({ pathname: '/group-invites' as any, params: { chatId: id, name } });
+        return;
+      }
       const ids = Array.from(selected);
       const results = await Promise.allSettled(ids.map(userId => createInvitation(id, { userId })));
       const nameOf = (uid: string) => people.find(p => p.userId === uid)?.name ?? 'Someone';
@@ -134,7 +144,7 @@ export default function CreateGroupScreen() {
         <Avatar uri={item.photoURL && authHeader ? attachmentUrl(item.photoURL) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={item.name} size={46} ring />
         <Text style={s.name} numberOfLines={1}>{item.name}</Text>
         <View style={[s.check, sel && s.checkSel]}>
-          {sel && <Ionicons name="checkmark" size={15} color="#FFFFFF" />}
+          {sel && <Ionicons name="checkmark" size={15} color={colors.onPrimary} />}
         </View>
       </TouchableOpacity>
     );
@@ -185,7 +195,8 @@ export default function CreateGroupScreen() {
         <TextInput style={s.searchInput} value={query} onChangeText={setQuery} placeholder="Search contacts" placeholderTextColor={colors.textDim} autoCorrect={false} accessibilityLabel="Search contacts" />
       </View>
 
-      <Text style={s.label}>{selected.size} SELECTED · THEY JOIN WHEN THEY ACCEPT</Text>
+      <Text style={s.label} accessibilityRole="header">{selected.size} SELECTED · THEY JOIN WHEN THEY ACCEPT</Text>
+      <Text style={s.hint}>Not in your chats? Create the group, then add anyone by phone number or email.</Text>
 
       {/* The list region takes the remaining height, so the Create bar below it
           sits in normal flow and KeyboardSafe can lift it above the keyboard. */}
@@ -227,9 +238,9 @@ export default function CreateGroupScreen() {
           accessibilityState={{ disabled: !canCreate, busy: creating }}
         >
           {creating
-            ? <ActivityIndicator color="#FFFFFF" />
+            ? <ActivityIndicator color={colors.onPrimary} />
             : <Text style={[s.createTxt, !canCreate && s.createTxtOff]}>
-                Create & invite{selected.size > 0 ? ` (${selected.size})` : ''}
+                {selected.size > 0 ? `Create & invite (${selected.size})` : 'Create & add people'}
               </Text>}
         </TouchableOpacity>
       </View>
@@ -250,7 +261,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   // danger is #RRGGBB in both palettes, so a hex alpha suffix is valid.
   errorBar: { backgroundColor: c.danger + '1F', borderColor: c.danger + '66', borderWidth: 1, marginHorizontal: 16, marginTop: 10, padding: 10, borderRadius: 10 },
   errorTxt: { color: c.danger, fontSize: 12 },
-  label: { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 8 },
+  label: { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 4 },
+  hint: { color: c.textFaint, fontSize: 12, lineHeight: 16, paddingHorizontal: 16, paddingBottom: 8 },
   chipRow: { maxHeight: 46, marginTop: 12 },
   chip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.glass, borderRadius: 18, paddingLeft: 4, paddingRight: 10, paddingVertical: 4, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
   chipTxt: { color: c.text, fontSize: 13, fontWeight: '600', maxWidth: 90 },
@@ -272,6 +284,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   bottomBar: { padding: 16, paddingBottom: 16 + SCREEN_BOTTOM, backgroundColor: c.glass, borderTopWidth: 1, borderTopColor: c.hairline },
   createBtn: { backgroundColor: c.primary, borderRadius: 12, paddingVertical: 15, alignItems: 'center' },
   createBtnOff: { backgroundColor: c.glassSoft },
-  createTxt: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
+  createTxt: { color: c.onPrimary, fontSize: 16, fontWeight: '800' },
   createTxtOff: { color: c.textFaint },
 });

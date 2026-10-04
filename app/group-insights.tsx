@@ -32,6 +32,8 @@ import {
 import { announceFromMessage } from '../lib/groups/tripSession';
 import { unionWithLocalHistoryAsc } from '../lib/messageHistory';
 import { getMessages } from '../lib/chatService';
+import { pageBack, OP_PAGE } from '../lib/groups/opThread';
+import { GroupNotFound } from '../components/groups/GroupNotFound';
 import { type CircleMember } from '../lib/family/types';
 import { Avatar } from '../components/ui';
 
@@ -122,8 +124,15 @@ export default function GroupInsightsScreen() {
         // the local alert inbox. Nothing new is stored; the recent messages are
         // fetched like any chat read, and the fold runs here.
         try {
-          const msgs = await unionWithLocalHistoryAsc(
-            groupId, await getMessages(groupId, { limit: 300 }), 1200);
+          // Paged: the server caps a page at OP_PAGE (200), so one request
+          // could cut a busy month short. Stop once a page reaches before the
+          // range starts.
+          const { messages: server } = await pageBack(
+            (before) => getMessages(groupId, { limit: OP_PAGE, before }),
+            undefined,
+            (page) => page.some((m) => Date.parse(m.createdAt) < range.from),
+          );
+          const msgs = await unionWithLocalHistoryAsc(groupId, server, 1200);
           const announces: TripAnnounce[] = [];
           for (const m of msgs) {
             const a = announceFromMessage(m);
@@ -163,11 +172,13 @@ export default function GroupInsightsScreen() {
   const retry = () => { setLoading(true); setReload((n) => n + 1); };
 
   const stat = (label: string, value: string) => (
-    <View style={st.stat}>
+    <View style={st.stat} accessible accessibilityLabel={`${label}: ${value}`}>
       <Text style={[st.statVal, { color: colors.text }]}>{value}</Text>
       <Text style={[st.statLbl, { color: colors.textDim }]}>{label}</Text>
     </View>
   );
+
+  if (!groupId) return <GroupNotFound title="Insights" />;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -259,7 +270,7 @@ export default function GroupInsightsScreen() {
             </View>
           )}
 
-          <Text style={[st.h, { color: colors.text }]}>By member</Text>
+          <Text style={[st.h, { color: colors.text }]} accessibilityRole="header">By member</Text>
           {ranked.length === 0 && (
             <Text style={{ color: colors.textDim, fontSize: 13.5 }}>
               {!mayViewOthers && !me
@@ -269,7 +280,14 @@ export default function GroupInsightsScreen() {
           )}
 
           {ranked.map((i) => (
-            <View key={i.userId} style={[st.row, { borderColor: colors.glassStroke }]}>
+            <View key={i.userId} style={[st.row, { borderColor: colors.glassStroke }]} accessible
+              accessibilityLabel={[
+                nameOf(i.userId), formatDistance(i.distanceM),
+                i.activeDays ? `${i.activeDays} active day${i.activeDays === 1 ? '' : 's'}` : 'no activity',
+                i.arrivals ? `${i.arrivals} arrival${i.arrivals === 1 ? '' : 's'}` : '',
+                i.deviations ? `${i.deviations} off-route` : '',
+                i.lastSeen != null ? `last seen ${ago(i.lastSeen)}` : '',
+              ].filter(Boolean).join(', ')}>
               <Avatar name={nameOf(i.userId)} size={34} ring />
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14 }} numberOfLines={1}>
@@ -290,7 +308,7 @@ export default function GroupInsightsScreen() {
             </View>
           ))}
 
-          <Text style={[st.h, { color: colors.text }]}>Trips</Text>
+          <Text style={[st.h, { color: colors.text }]} accessibilityRole="header">Trips</Text>
           {trips.length === 0 ? (
             <Text style={{ color: colors.textDim, fontSize: 13.5 }}>
               No group trips this {span}.
@@ -303,7 +321,12 @@ export default function GroupInsightsScreen() {
                 </Text>
               )}
               {trips.map((t) => (
-                <View key={t.id} style={[st.row, { borderColor: colors.glassStroke }]}>
+                <View key={t.id} style={[st.row, { borderColor: colors.glassStroke }]} accessible
+                  accessibilityLabel={[
+                    `Trip to ${t.destinationName}`, new Date(t.startedAt).toLocaleDateString(), `started by ${nameOf(t.startedBy)}`,
+                    t.arrivals.length ? `${t.arrivals.length} arrived` : 'nobody arrived',
+                    t.deviations ? `${t.deviations} off-route` : '',
+                  ].filter(Boolean).join(', ')}>
                   <View style={[st.avatar, { backgroundColor: colors.primary + '22' }]}>
                     <Ionicons name="car" size={16} color={colors.primary} />
                   </View>

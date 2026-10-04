@@ -14,5 +14,5 @@
 import { Redirect } from 'expo-router';
 
 export default function CreatorChannelsRedirect() {
-  return <Redirect href={'/broadcast' as any} />;
+  return <Redirect href="/broadcast" />;
 }

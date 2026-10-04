@@ -31,6 +31,7 @@ import {
 import { type CircleMember } from '../lib/family/types';
 import { TRIP_TTL_MS } from '../lib/groups/trips';
 import { permissionDenied } from '../lib/permissionDenied';
+import { GroupNotFound } from '../components/groups/GroupNotFound';
 
 const COORD_RE = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/;
 
@@ -50,11 +51,17 @@ export default function GroupTripScreen() {
 
   const [me, setMe] = useState<string | null>(null);
   const [members, setMembers] = useState<CircleMember[]>([]);
-  const [trip, setTrip] = useState<Trip | null>(currentTrip());
+  // The session's trip may belong to another group; only this group's is shown.
+  const [trip, setTrip] = useState<Trip | null>(() => {
+    const t = currentTrip();
+    return t && t.groupId === groupId ? t : null;
+  });
   const [pings, setPings] = useState<TripPing[]>([]);
   const [where, setWhere] = useState('');
   const [lead, setLead] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Navigate / Leave / End in flight (double-tap guard).
+  const [acting, setActing] = useState<'join' | 'leave' | 'end' | null>(null);
   const [tick, setTick] = useState(0);
 
   useFocusEffect(useCallback(() => {
@@ -144,7 +151,8 @@ export default function GroupTripScreen() {
   };
 
   const join = async () => {
-    if (!trip || !me) return;
+    if (!trip || !me || acting) return;
+    setActing('join');
     try {
       // The sealing key resolves from the harvested announcement inside
       // joinTrip — passing '' here used to make a joiner seal with a key
@@ -152,14 +160,18 @@ export default function GroupTripScreen() {
       await joinTrip(trip, me);
       navigateTo(trip.destination.lat, trip.destination.lng, trip.destinationName);
     } catch (e: any) { Alert.alert('Could not join', e?.message ?? 'Try again.'); }
+    finally { setActing(null); }
   };
 
   const leave = () => {
     Alert.alert('Leave the trip?', 'You stop sharing your ETA. The trip continues for everyone else.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Leave', style: 'destructive', onPress: async () => {
+        if (acting) return;
+        setActing('leave');
         try { await leaveTrip(); setTrip(null); setPings([]); }
         catch (e: any) { Alert.alert('Could not leave', e?.message ?? 'Try again.'); }
+        finally { setActing(null); }
       } },
     ]);
   };
@@ -168,6 +180,8 @@ export default function GroupTripScreen() {
     Alert.alert('End the trip?', 'The trip is over for everyone in the group.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'End trip', style: 'destructive', onPress: async () => {
+        if (acting) return;
+        setActing('end');
         // Pass the trip on screen: after a restart it is not in tripSession's memory.
         try {
           const { confirmed } = await endTrip(trip);
@@ -178,6 +192,7 @@ export default function GroupTripScreen() {
           }
         }
         catch (e: any) { Alert.alert('Could not end the trip', e?.message ?? 'Check your connection and try again.'); }
+        finally { setActing(null); }
       } },
     ]);
   };
@@ -188,16 +203,7 @@ export default function GroupTripScreen() {
       : k === 'dim' ? colors.textDim : colors.primary;
   };
 
-  if (!groupId) {
-    return (
-      <View style={{ flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center', padding: 32 }}>
-        <AuroraBackground variant="chat" />
-        <Stack.Screen options={{ headerShown: true, title: 'Trip', headerTitleAlign: 'center', headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false }} />
-        <Text style={{ color: colors.text, fontWeight: '700', fontSize: 15 }}>Group not found</Text>
-        <Text style={{ color: colors.textDim, fontSize: 13, textAlign: 'center', marginTop: 6 }}>This link did not say which group the trip is for.</Text>
-      </View>
-    );
-  }
+  if (!groupId) return <GroupNotFound title="Trip" detail="This link did not say which group the trip is for." />;
 
   return (
     <KeyboardSafe style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -232,8 +238,8 @@ export default function GroupTripScreen() {
             <TouchableOpacity onPress={begin} disabled={!where.trim() || busy || !me}
               accessibilityRole="button" accessibilityState={{ disabled: !where.trim() || busy || !me, busy }}
               style={[st.btn, { backgroundColor: where.trim() && !busy && me ? colors.primary : colors.border }]}>
-              {busy ? <ActivityIndicator color="#fff" />
-                : <><Ionicons name="navigate" size={18} color="#fff" /><Text style={st.btnTxt}>Start trip</Text></>}
+              {busy ? <ActivityIndicator color={colors.onPrimary} />
+                : <><Ionicons name="navigate" size={18} color={colors.onPrimary} /><Text style={[st.btnTxt, { color: colors.onPrimary }]}>Start trip</Text></>}
             </TouchableOpacity>
             <Text style={{ color: colors.textDim, fontSize: 12.5, marginTop: 14, lineHeight: 18 }}>
               Everyone in {groupName} is invited to join. Each phone works out its own arrival time —
@@ -264,25 +270,34 @@ export default function GroupTripScreen() {
             </View>
 
             <View style={st.actions}>
-              <TouchableOpacity onPress={join} accessibilityRole="button" style={[st.action, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
-                <Ionicons name="navigate" size={18} color={colors.primary} />
+              <TouchableOpacity onPress={join} disabled={!!acting} accessibilityRole="button"
+                accessibilityState={{ disabled: !!acting, busy: acting === 'join' }}
+                style={[st.action, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
+                {acting === 'join' ? <ActivityIndicator size="small" color={colors.primary} />
+                  : <Ionicons name="navigate" size={18} color={colors.primary} />}
                 <Text style={[st.actionTxt, { color: colors.text }]}>Navigate</Text>
               </TouchableOpacity>
               {/* The starter ends it for everyone; anyone else can only leave. */}
               {trip.startedBy === me ? (
-                <TouchableOpacity onPress={end} accessibilityRole="button" style={[st.action, { borderColor: colors.danger, backgroundColor: colors.danger + '12' }]}>
-                  <Ionicons name="flag-outline" size={18} color={colors.danger} />
+                <TouchableOpacity onPress={end} disabled={!!acting} accessibilityRole="button"
+                  accessibilityState={{ disabled: !!acting, busy: acting === 'end' }}
+                  style={[st.action, { borderColor: colors.danger, backgroundColor: colors.danger + '12' }]}>
+                  {acting === 'end' ? <ActivityIndicator size="small" color={colors.danger} />
+                    : <Ionicons name="flag-outline" size={18} color={colors.danger} />}
                   <Text style={[st.actionTxt, { color: colors.danger }]}>End trip</Text>
                 </TouchableOpacity>
               ) : (
-                <TouchableOpacity onPress={leave} accessibilityRole="button" style={[st.action, { borderColor: colors.danger, backgroundColor: colors.danger + '12' }]}>
-                  <Ionicons name="exit-outline" size={18} color={colors.danger} />
+                <TouchableOpacity onPress={leave} disabled={!!acting} accessibilityRole="button"
+                  accessibilityState={{ disabled: !!acting, busy: acting === 'leave' }}
+                  style={[st.action, { borderColor: colors.danger, backgroundColor: colors.danger + '12' }]}>
+                  {acting === 'leave' ? <ActivityIndicator size="small" color={colors.danger} />
+                    : <Ionicons name="exit-outline" size={18} color={colors.danger} />}
                   <Text style={[st.actionTxt, { color: colors.danger }]}>Leave</Text>
                 </TouchableOpacity>
               )}
             </View>
 
-            <Text style={[st.h, { color: colors.text, marginTop: 26 }]}>
+            <Text style={[st.h, { color: colors.text, marginTop: 26 }]} accessibilityRole="header">
               {participants.length ? `${participants.length} on the way` : 'Nobody sharing yet'}
             </Text>
 
@@ -293,7 +308,10 @@ export default function GroupTripScreen() {
             )}
 
             {participants.map((p) => (
-              <View key={p.userId} style={[st.row, { borderColor: colors.glassStroke }]}>
+              <View key={p.userId} style={[st.row, { borderColor: colors.glassStroke }]} accessible
+                accessibilityLabel={`${p.name}, ${STATUS_LABEL[p.status]}${p.status !== 'arrived' && p.etaAt != null
+                  ? `, arriving in about ${minutesUntil(p.etaAt, now)} minutes`
+                  : p.status !== 'arrived' ? ', no arrival time yet' : ''}`}>
                 <View style={[st.dot, { backgroundColor: tone(p.status) + '22' }]}>
                   <Ionicons
                     name={p.status === 'arrived' ? 'checkmark' : p.status === 'deviated' ? 'git-branch'
@@ -330,7 +348,7 @@ const st = StyleSheet.create({
   input: { flex: 1, fontSize: 15 },
   btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 50, borderRadius: 13, marginTop: 14 },
   lead: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, padding: 13, borderWidth: 1, borderRadius: 13, marginTop: 14 },
-  btnTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  btnTxt: { fontSize: 15, fontWeight: '800' },
   dest: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderWidth: 1, borderRadius: 16 },
   destIcon: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
   actions: { flexDirection: 'row', gap: 9, marginTop: 12 },

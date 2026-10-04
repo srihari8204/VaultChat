@@ -13,8 +13,10 @@
 import { Redirect, useLocalSearchParams } from 'expo-router';
 
 export default function GroupChatRedirect() {
-  const params = useLocalSearchParams<{ chatId?: string; id?: string; groupName?: string }>();
+  const params = useLocalSearchParams<{ chatId?: string; id?: string }>();
   const id = String(params.chatId ?? params.id ?? '');
-  if (!id) return <Redirect href={'/(tabs)/chats' as any} />;
-  return <Redirect href={{ pathname: '/chat', params: { id, name: String(params.groupName ?? '') } } as any} />;
+  if (!id) return <Redirect href="/(tabs)/chats" />;
+  // Only the id: /chat reads no name param, so a group name would just ride
+  // along in route history.
+  return <Redirect href={{ pathname: '/chat', params: { id } }} />;
 }

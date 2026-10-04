@@ -25,11 +25,13 @@ import { AuroraBackground } from '../components/ui/AuroraBackground';
 import { AppText as Text } from '../components/ui/Text';
 import { brandAlpha } from '../constants/theme';
 import { requestToJoin, myInvitations } from '../lib/chatService';
-import { groupTypeInfo, hexColorOr } from '../lib/groups/catalog';
+import { groupTypeInfo, hexColorOr, inkOn } from '../lib/groups/catalog';
+import { joinRefusal } from '../lib/groups/serverContracts';
 
 // 'invited': they already hold an invitation for this group; answering it is
 // what lets them in, so this screen sends them to it rather than asking again.
-type State = 'idle' | 'sending' | 'asked' | 'invited' | 'member';
+// 'accepted': they said yes to one and an admin has not admitted them yet.
+type State = 'idle' | 'sending' | 'asked' | 'invited' | 'accepted' | 'member';
 
 export default function GroupJoinScreen() {
   const { colors } = useTheme();
@@ -46,6 +48,7 @@ export default function GroupJoinScreen() {
   // The card's route params are whatever the sender's message carried: draw only
   // a known glyph and a #RRGGBB colour, else the type's own.
   const accent = hexColorOr(params.color ? String(params.color) : null, type.color);
+  const ink = inkOn(accent);
   const rawIcon = String(params.icon || '');
   const icon = (rawIcon && rawIcon in Ionicons.glyphMap ? rawIcon : type.icon) as keyof typeof Ionicons.glyphMap;
 
@@ -60,7 +63,9 @@ export default function GroupJoinScreen() {
         const mine = await myInvitations();
         if (!live) return;
         const row = mine.find((i) => i.chatId === groupId);
-        if (row) setState(row.requested ? 'asked' : 'invited');
+        // An accepted invitation that only waits on an admin is not something
+        // to "answer" again; a stranded one (canAccept) still needs their tap.
+        if (row) setState(row.requested ? 'asked' : row.status === 'accepted' && !row.canAccept ? 'accepted' : 'invited');
       } catch {
         // Offline: leave the button available. The server is the real guard,
         // and refusing to let someone try because a list did not load is worse
@@ -79,14 +84,13 @@ export default function GroupJoinScreen() {
       await requestToJoin(groupId);
       setState('asked');
     } catch (e: any) {
-      const msg: string = e?.message ?? 'Try again.';
-      // ponytail: the server sends these as 409 with prose only (no error code),
-      // so the text is matched, and only on a 409. Replace with the code once
-      // POST /chats/:id/membership/request returns one (backend handoff).
-      if (e?.status === 409 && /already in this group/i.test(msg)) { setState('member'); return; }
-      if (e?.status === 409 && /already have a request|already have an invitation/i.test(msg)) { setState('asked'); return; }
+      // A 409 that means "you already did this" is a state, not a failure: the
+      // server's `code` once deployed, its wording until then
+      // (lib/groups/serverContracts joinRefusal).
+      const refusal = joinRefusal(e);
+      if (refusal) { setState(refusal); return; }
       setState('idle');
-      Alert.alert('Could not ask to join', msg);
+      Alert.alert('Could not ask to join', e?.message ?? 'Try again.');
     }
   };
 
@@ -136,10 +140,18 @@ export default function GroupJoinScreen() {
             </View>
             <TouchableOpacity onPress={() => router.replace('/group-invitations' as any)}
               accessibilityRole="button" style={[st.btn, { backgroundColor: accent }]}>
-              <Ionicons name="mail-open-outline" size={18} color="#fff" />
-              <Text style={st.btnTxt}>Open invitations</Text>
+              <Ionicons name="mail-open-outline" size={18} color={ink} />
+              <Text style={[st.btnTxt, { color: ink }]}>Open invitations</Text>
             </TouchableOpacity>
           </>
+        ) : state === 'accepted' ? (
+          <View style={[st.note, { borderColor: accent, backgroundColor: accent + '12' }]}>
+            <Ionicons name="hourglass-outline" size={19} color={accent} />
+            <Text style={{ color: colors.text, fontSize: 13.5, flex: 1, lineHeight: 19 }}>
+              You accepted an invitation to {name}. An admin still has to approve you — you will be
+              added when they do.
+            </Text>
+          </View>
         ) : state === 'asked' ? (
           <View style={[st.note, { borderColor: accent, backgroundColor: accent + '12' }]}>
             <Ionicons name="hourglass-outline" size={19} color={accent} />
@@ -159,14 +171,14 @@ export default function GroupJoinScreen() {
               accessibilityState={{ disabled: state !== 'idle', busy: state === 'sending' }}
               style={[st.btn, { backgroundColor: accent }]}>
               {state === 'sending'
-                ? <ActivityIndicator color="#fff" />
-                : <><Ionicons name="hand-right-outline" size={18} color="#fff" />
-                    <Text style={st.btnTxt}>Ask to join</Text></>}
+                ? <ActivityIndicator color={ink} />
+                : <><Ionicons name="hand-right-outline" size={18} color={ink} />
+                    <Text style={[st.btnTxt, { color: ink }]}>Ask to join</Text></>}
             </TouchableOpacity>
           </>
         )}
 
-        {(state === 'asked' || state === 'member') && (
+        {(state === 'asked' || state === 'accepted' || state === 'member') && (
           <TouchableOpacity onPress={() => router.back()} accessibilityRole="button"
             style={[st.btn, { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.glassStroke }]}>
             <Text style={[st.btnTxt, { color: colors.text }]}>Done</Text>
@@ -190,6 +202,6 @@ const st = StyleSheet.create({
   icon: { width: 76, height: 76, borderRadius: 38, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   note: { flexDirection: 'row', alignItems: 'flex-start', gap: 11, padding: 15, borderWidth: 1, borderRadius: 14, marginTop: 30 },
   btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 52, borderRadius: 14, marginTop: 20 },
-  btnTxt: { color: '#fff', fontSize: 15.5, fontWeight: '800' },
+  btnTxt: { fontSize: 15.5, fontWeight: '800' },
   footer: { flexDirection: 'row', gap: 9, alignItems: 'flex-start', marginTop: 30, padding: 13, borderWidth: 1, borderRadius: 12 },
 });
