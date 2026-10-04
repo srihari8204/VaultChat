@@ -5,25 +5,24 @@
 // 195 chances to pass the wrong name, and 195 files to edit the day the rule
 // changes.
 //
-// It reads the router's current path and nothing else. There is no way for a
-// screen to hand it anything extra, which is the point: the instrument cannot
-// grow into a logger by accident, because the call site has nothing to give it.
+// It reads the router's current ROUTE PATTERN and nothing else — `join/[code]`,
+// never `join/AB12CD` (lib/routePattern.ts). There is no way for a screen to
+// hand it anything extra, which is the point: the instrument cannot grow into
+// a logger by accident, because the call site has nothing to give it.
 
-import { usePathname } from 'expo-router';
+import { useSegments } from 'expo-router';
 import { useEffect } from 'react';
 
 import { countScreen } from '../lib/usageCounter';
+import { routePatternName } from '../lib/routePattern';
 
 export function UsageCounter(): null {
-  const path = usePathname();
+  const segments = useSegments();
+  const name = routePatternName(segments);
 
   useEffect(() => {
-    // usePathname gives "/shop-book", "/(tabs)/chats", "/chat". The group
-    // segment is routing structure, not a screen anyone would decide to keep or
-    // cut, so it is stripped here rather than taught to the server.
-    const name = String(path ?? '').replace(/^\/?\(tabs\)\//, '').replace(/^\//, '');
     if (name) countScreen(name);
-  }, [path]);
+  }, [name]);
 
   return null;
 }

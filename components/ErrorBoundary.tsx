@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import * as Sentry from '@sentry/react-native';
 
 interface Props {
   children: React.ReactNode;
@@ -9,6 +10,10 @@ interface Props {
 }
 interface State { hasError: boolean; }
 
+// Usable at the root of the app (app/_layout.tsx wraps RootLayout in it), where
+// it is the last line before a white screen — so it depends on nothing but
+// React Native: no theme, no i18n, no router.
+//
 // THEMING: deliberately NOT theme-aware. This renders after the tree has
 // thrown — possibly ThemeProvider itself — so reading the palette from context
 // here risks the crash screen crashing. Its colours stay fixed and dark.
@@ -19,15 +24,27 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     console.error('[ErrorBoundary]', this.props.screen, error.message, info);
+    // No-op when Sentry was never initialised (no EXPO_PUBLIC_SENTRY_DSN).
+    try {
+      Sentry.captureException(error, {
+        tags: { boundary: this.props.screen ?? 'unknown' },
+        extra: { componentStack: info.componentStack },
+      });
+    } catch { /* reporting must never re-throw from the crash screen */ }
   }
 
   render() {
     if (this.state.hasError) {
       return (
         <View style={s.wrap}>
-          <Text style={s.title}>{this.props.fallbackTitle ?? 'Something went wrong'}</Text>
+          <Text style={s.title} accessibilityRole="header">{this.props.fallbackTitle ?? 'Something went wrong'}</Text>
           <Text style={s.msg}>{this.props.fallbackMessage ?? 'Please restart the app.'}</Text>
-          <TouchableOpacity style={s.btn} onPress={() => this.setState({ hasError: false })}>
+          <TouchableOpacity
+            style={s.btn}
+            onPress={() => this.setState({ hasError: false })}
+            accessibilityRole="button"
+            accessibilityLabel="Try again"
+          >
             <Text style={s.btnTxt}>Try Again</Text>
           </TouchableOpacity>
         </View>

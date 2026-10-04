@@ -13,7 +13,7 @@ import { AppState, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, Vie
 import { canUseFullScreenIntent, openFullScreenIntentSettings } from "../lib/CallService";
 
 // Entered from Settings as well as mid-onboarding, exactly like backup-pin.tsx.
-// The three exits below used to push /setup-complete unconditionally, which
+// The three exits below used to push the legacy setup-complete screen unconditionally, which
 // from Settings would have dropped the user into the OLD onboarding success
 // screen with no way back to where they came from (2026-09-17).
 const PERMS = [
@@ -32,7 +32,9 @@ export default function PermissionsScreen() {
   const fromSettings = useLocalSearchParams<{ from?: string }>().from === 'settings';
   // One exit for all three buttons: back to Settings when that is where the
   // user came from, onward through onboarding when it is not.
-  const done = () => { if (fromSettings) router.back(); else router.push('/setup-complete' as any); };
+  // The legacy onboarding chain (and its setup-complete screen) is deleted; the only
+  // entry is Settings, so every exit goes back there.
+  const done = () => { if (fromSettings || router.canGoBack()) router.back(); else router.replace('/settings' as any); };
   const [granted,setGranted] = useState<Record<string,boolean>>({});
   const [loading,setLoading] = useState(false);
   // Android 14 turned USE_FULL_SCREEN_INTENT into a user-granted special

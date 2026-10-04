@@ -1,16 +1,16 @@
 // lib/chatLock.ts — real per-chat lock.
 //
 // Locked chats require biometric and/or a PIN before app/chat.tsx will render
-// their messages. The PIN is never stored in clear — only a salted SHA-256
-// hash. Config lives in AsyncStorage (device-local, like the rest of the
-// app-lock settings).
+// their messages. The PIN is never stored in clear — only a per-lock salted
+// scrypt record (lib/chatLockPin; older unsalted hashes are upgraded on the
+// next correct PIN). Wrong PINs back off. Config lives in AsyncStorage
+// (device-local, like the rest of the app-lock settings).
 
 import 'react-native-get-random-values';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { Platform } from 'react-native';
-import { sha256 } from '@noble/hashes/sha2.js';
-import { bytesToHex } from '@noble/hashes/utils.js';
+import { afterFailure, chatPinWaitMs, checkChatPinHash, makeChatPinHash } from './chatLockPin';
 
 const KEY = 'vc_locked_chats';
 
@@ -23,11 +23,10 @@ export interface LockedChat {
   locked: boolean;
   lockMethod: LockMethod;
   autoLockTimer: AutoLockTimer;
-  pinHash?: string;       // salted SHA-256 — never the raw PIN
-}
-
-function hashPin(pin: string): string {
-  return bytesToHex(sha256(new TextEncoder().encode('vaultchat-chatlock-v1:' + pin)));
+  pinHash?: string;       // lib/chatLockPin format — never the raw PIN
+  /** Wrong-PIN streak (lib/chatLockPin backoff). */
+  failN?: number;
+  failAt?: number;
 }
 
 // ABSENT IS NOT THE SAME AS UNREADABLE.
@@ -58,6 +57,21 @@ async function saveAll(d: Record<string, LockedChat>): Promise<void> {
   await AsyncStorage.setItem(KEY, JSON.stringify(d));
 }
 
+// verifyPin is synchronous (its callers in chat.tsx / chat-export.tsx test it
+// inline), so what it learns — a failure to count, an old hash to upgrade — is
+// written here, one read-modify-write at a time, and only onto the same lock
+// it verified (a lock re-set or removed meanwhile is left alone).
+let writes: Promise<void> = Promise.resolve();
+function patchLock(chatId: string, expectHash: string | undefined, patch: Partial<LockedChat>): void {
+  writes = writes.then(async () => {
+    const all = await getAllLocks();
+    const e = all[chatId];
+    if (!e || e.pinHash !== expectHash) return;
+    all[chatId] = { ...e, ...patch };
+    await saveAll(all);
+  }).catch(() => { /* best effort: the in-memory lock object still counts */ });
+}
+
 export async function getLock(chatId: string): Promise<LockedChat | null> {
   const all = await getAllLocks();
   const e = all[chatId];
@@ -74,7 +88,7 @@ export async function setChatLock(
   const all = await getAllLocks();
   all[chatId] = {
     chatId, chatName, locked: true, lockMethod: method, autoLockTimer: timer,
-    pinHash: pin ? hashPin(pin) : undefined,
+    pinHash: pin ? await makeChatPinHash(pin) : undefined,
   };
   await saveAll(all);
 }
@@ -85,8 +99,38 @@ export async function removeChatLock(chatId: string): Promise<void> {
   await saveAll(all);
 }
 
+/**
+ * True when `pin` is this lock's PIN. False — without checking — while a
+ * backoff from earlier wrong PINs is running; pinRetryAfterMs says how long.
+ * Updates `lock` in place (callers keep it in state between attempts) and
+ * persists the streak / the upgraded hash in the background.
+ */
 export function verifyPin(lock: LockedChat, pin: string): boolean {
-  return !!lock.pinHash && lock.pinHash === hashPin(pin);
+  const now = Date.now();
+  if (!lock.pinHash || chatPinWaitMs(lock, now) > 0) return false;
+  const verified = lock.pinHash;
+  const { ok, upgrade } = checkChatPinHash(verified, pin);
+  if (!ok) {
+    Object.assign(lock, afterFailure(lock, now));
+    patchLock(lock.chatId, verified, { failN: lock.failN, failAt: lock.failAt });
+    return false;
+  }
+  const hadStreak = !!lock.failN;
+  lock.failN = 0; lock.failAt = 0;
+  if (upgrade) {
+    makeChatPinHash(pin).then((h) => {
+      if (lock.pinHash === verified) lock.pinHash = h;
+      patchLock(lock.chatId, verified, { pinHash: h, failN: 0, failAt: 0 });
+    }).catch(() => { /* stays on the old hash; upgraded next time */ });
+  } else if (hadStreak) {
+    patchLock(lock.chatId, verified, { failN: 0, failAt: 0 });
+  }
+  return true;
+}
+
+/** Milliseconds until verifyPin will check a PIN for this lock again (0 = now). */
+export function pinRetryAfterMs(lock: LockedChat): number {
+  return chatPinWaitMs(lock, Date.now());
 }
 
 // FAIL CLOSED ON WEB.

@@ -20,6 +20,7 @@ import {
   makePinRecordAsync, checkPinRecordAsync, type PinRecord,
 } from './vaultKeys';
 import { createPinAttemptTracker } from './pinAttempts';
+import { isPinFormat } from './pinFormat';
 
 const KEY          = 'vc_pin_v1';     // the scrypt record
 const LEGACY_HASH  = 'vc_pin_hash';   // authService: unsalted SHA-256 of the PIN
@@ -50,7 +51,7 @@ const apiMod = () => import('../../lib/api');
 
 /** Replace the stored PIN. Also clears the legacy keys so no weak copy lingers. */
 export async function setPin(pin: string): Promise<void> {
-  if (!pin || pin.length < 4 || pin.length > 8 || !/^\d+$/.test(pin)) {
+  if (!isPinFormat(pin)) {
     throw new Error('PIN must be 4-8 digits');
   }
   await write(await makePinRecordAsync(pin));
@@ -79,6 +80,15 @@ const attempts = createPinAttemptTracker({
   set: (k: string, v: string) => SecureStore.setItemAsync(k, v),
   del: (k: string) => SecureStore.deleteItemAsync(k).then(() => undefined),
 });
+
+/**
+ * Milliseconds before verifyPin will accept another attempt (0 = now).
+ * verifyPin answers false during the backoff without saying why, so a screen
+ * calls this after a false to tell "wrong PIN" from "wait N seconds".
+ */
+export async function pinBackoffMs(): Promise<number> {
+  try { return await attempts.getBackoffMs(); } catch { return 0; }
+}
 
 /** True when `pin` is the stored PIN. Upgrades a legacy value on first success. */
 export async function verifyPin(pin: string): Promise<boolean> {

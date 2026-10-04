@@ -1,29 +1,33 @@
 import { AppText as Text } from '../components/ui/Text';
 import { AuroraBackground } from '../components/ui';
 // app/vault.tsx
-// Real 8-PIN gated secure storage
-// AES-256-GCM encrypted files via d2deService
+// Device-PIN gated local file vault (the PIN set in Settings → Device PIN,
+// 4–8 digits — services/security/pinFormat).
+// Files are AES-256-GCM encrypted on this phone (lib/vaultCrypto v2: a random
+// file key wrapped under the PIN, so changing the PIN does not orphan files).
 // Tabs: Documents / Photos / Voice / Videos
-// Upload files — stored encrypted in app's secure directory
-// 30-day auto backup — email option
-// PIN stored in hardware-backed SecureStore
+// "Export file list" shares names/sizes/dates only — not the files, not encrypted.
+// There is no automatic or server backup of vault files.
 
 import { BRAND_ACCENT } from '../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View, TouchableOpacity, StyleSheet,
   FlatList, Alert, Vibration, ActivityIndicator,
-  Modal, TextInput,
+  Modal,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import * as pinStore from '../services/security/pinStore';
+import { isPinFormat, PIN_MAX, PIN_MIN } from '../services/security/pinFormat';
+import { PinPad } from '../components/PinPad';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import { vaultEncrypt, vaultDecrypt } from '../lib/vaultCrypto';
+import { clearVaultKeyCache, vaultFileDecrypt, vaultFileEncrypt, type VaultKeys } from '../lib/vaultCrypto';
+import { unlockVaultKeys } from '../lib/vaultKeyStore';
 import type { Palette } from '../constants/theme';
 import { useColors, useTheme } from '../lib/theme';
 import { HEADER_TOP } from '../constants/layout';
@@ -57,6 +61,13 @@ const TAB_CONFIG: Record<VaultTab, { icon: string; color: string; accept: string
 };
 
 const VAULT_DIR = (FileSystem as any).documentDirectory + 'vault/';
+// Decrypted copies handed to the share sheet. Each is deleted once the sheet
+// returns, and the whole folder on every vault open and close, so a copy the
+// share target was still reading (or a crash) cannot outlive the next visit.
+const OPEN_DIR = (FileSystem as any).cacheDirectory + 'vault-open/';
+const wipeOpenDir = () => FileSystem.deleteAsync(OPEN_DIR, { idempotent: true }).catch(() => {});
+/** A file name safe to use as a path segment. */
+const safeName = (name: string) => name.replace(/[/\\]/g, '_').replace(/^\.+/, '') || 'file';
 const MANIFEST_KEY = 'vault_manifest'; // SecureStore key for file list
 
 function formatSize(bytes: number): string {
@@ -75,86 +86,84 @@ function formatDate(ms: number): string {
 // PIN Entry Component
 // ─────────────────────────────────────────────────────────────────
 
-function PinGate({ onUnlock }: { onUnlock: (pin: string) => void }) {
+function PinGate({ onUnlock }: { onUnlock: (pin: string) => Promise<void> }) {
   const c = useColors();
   const { scheme } = useTheme();
+  const router = useRouter();
   const pinStyles = useMemo(() => makePinStyles(c, scheme === 'light'), [c, scheme]);
-  const [pin,   setPin]   = useState<string[]>([]);
+  const [pin,   setPin]   = useState('');
   const [error, setError] = useState('');
-  const [shake, setShake] = useState(false);
+  const [busy,  setBusy]  = useState(false);
+  // null = not checked yet. Re-checked on focus, so returning from Device PIN
+  // setup shows the keypad without leaving the screen.
+  const [havePin, setHavePin] = useState<boolean | null>(null);
+  useFocusEffect(useCallback(() => {
+    let live = true;
+    pinStore.hasPin().then(h => { if (live) setHavePin(h); }).catch(() => { if (live) setHavePin(true); });
+    return () => { live = false; };
+  }, []));
 
-  const handleKey = async (key: string) => {
-    if (key === 'back') {
-      setPin(p => p.slice(0, -1));
-      setError('');
-      return;
-    }
-    const next = [...pin, key];
-    setPin(next);
-
-    if (next.length === 8) {
+  const submit = async (v: string) => {
+    if (busy) return;
+    if (!isPinFormat(v)) { setError(`Enter your ${PIN_MIN}–${PIN_MAX} digit Device PIN.`); return; }
+    setBusy(true);
+    try {
       // pinStore verifies against the scrypt record (and migrates a legacy value
       // on first success) — the PIN is no longer readable to compare against.
-      if (await pinStore.verifyPin(next.join(''))) {
-        onUnlock(next.join(''));
-      } else {
-        Vibration.vibrate([0, 100, 100, 100]);
-        setError('Incorrect PIN. Try again.');
-        setShake(true);
-        setTimeout(() => setShake(false), 400);
-        setPin([]);
-      }
+      if (await pinStore.verifyPin(v)) { await onUnlock(v); return; }
+      // verifyPin also answers false while a brute-force backoff is running;
+      // "Incorrect PIN" would then be a lie the user cannot act on.
+      const wait = await pinStore.pinBackoffMs();
+      Vibration.vibrate([0, 100, 100, 100]);
+      setError(wait > 0
+        ? `Too many attempts. Try again in ${Math.ceil(wait / 1000)} s.`
+        : 'Incorrect PIN. Try again.');
+      setPin('');
+    } finally {
+      setBusy(false);
     }
   };
 
-  const KEYS = [
-    ['1', '2', '3'],
-    ['4', '5', '6'],
-    ['7', '8', '9'],
-    ['back', '0', ''],
-  ];
+  if (havePin === false) {
+    return (
+      <View style={pinStyles.container}>
+        <AuroraBackground />
+        <Text style={pinStyles.lockIcon}>🔒</Text>
+        <Text style={pinStyles.title}>Vault</Text>
+        <Text style={[pinStyles.sub, { textAlign: 'center', paddingHorizontal: 32 }]}>
+          The vault opens with your Device PIN, and this phone does not have one yet.
+        </Text>
+        <TouchableOpacity
+          style={pinStyles.setBtn}
+          onPress={() => router.push('/backup-pin?from=settings' as any)}
+          accessibilityRole="button"
+          accessibilityLabel="Set a Device PIN"
+        >
+          <Text style={pinStyles.setBtnText}>Set a Device PIN</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   return (
     <View style={pinStyles.container}>
       <AuroraBackground />
       <Text style={pinStyles.lockIcon}>🔒</Text>
       <Text style={pinStyles.title}>Vault</Text>
-      <Text style={pinStyles.sub}>Enter 8-digit PIN to access</Text>
+      <Text style={pinStyles.sub}>Enter your Device PIN, then tap ✓</Text>
 
-      {/* PIN dots */}
-      <View style={[pinStyles.dotsRow, shake && pinStyles.shake]}>
-        {Array(8).fill(0).map((_, i) => (
-          <View
-            key={i}
-            style={[
-              pinStyles.dot,
-              i < pin.length && pinStyles.dotFilled,
-            ]}
-          />
-        ))}
-      </View>
+      <PinPad
+        value={pin}
+        onChange={(v) => { setPin(v); setError(''); }}
+        length={PIN_MAX}
+        minLength={PIN_MIN}
+        onSubmit={submit}
+        onComplete={submit}
+        error={!!error}
+      />
 
-      {error ? <Text style={pinStyles.error}>{error}</Text> : null}
-
-      {/* Numpad */}
-      {KEYS.map((row, ri) => (
-        <View key={ri} style={pinStyles.keyRow}>
-          {row.map((k, ki) => {
-            if (!k) return <View key={ki} style={pinStyles.keyEmpty} />;
-            return (
-              <TouchableOpacity
-                key={k}
-                style={pinStyles.key}
-                onPress={() => handleKey(k)}
-              >
-                <Text style={pinStyles.keyText}>
-                  {k === 'back' ? '⌫' : k}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      ))}
+      {busy ? <ActivityIndicator color={c.primary} style={{ marginTop: 8 }} /> : null}
+      {error ? <Text style={pinStyles.error} accessibilityLiveRegion="polite">{error}</Text> : null}
 
       <Text style={pinStyles.note}>
         🔐 Files are AES-256-GCM encrypted
@@ -174,11 +183,30 @@ export default function VaultScreen() {
 
   const [unlocked,    setUnlocked]    = useState(false);
   const [vaultPin,    setVaultPin]    = useState('');
+  // The v2 file key. null when this PIN cannot open the key record (the PIN
+  // was reset somewhere that could not re-wrap it): older files still open via
+  // the PIN, new files fall back to the PIN-derived format — see vaultKeyStore.
+  const [vaultKeys,   setVaultKeys]   = useState<VaultKeys | null>(null);
   const [activeTab,   setActiveTab]   = useState<VaultTab>('Documents');
   const [files,       setFiles]       = useState<VaultFile[]>([]);
   const [loading,     setLoading]     = useState(false);
+  const [loadingText, setLoadingText] = useState('Encrypting…');
   const [showBackup,  setShowBackup]  = useState(false);
   const [lastBackup,  setLastBackup]  = useState<string | null>(null);
+
+  // Nothing decrypted outlives the screen, and the derived keys go with it.
+  useEffect(() => {
+    wipeOpenDir();
+    return () => { wipeOpenDir(); clearVaultKeyCache(); };
+  }, []);
+
+  const unlock = async (pin: string) => {
+    let keys: VaultKeys | null = null;
+    try { keys = (await unlockVaultKeys(pin)).keys; } catch { keys = null; }
+    setVaultKeys(keys);
+    setVaultPin(pin);
+    setUnlocked(true);
+  };
 
   // ── Load manifest on unlock ───────────────────────────────────
   useEffect(() => {
@@ -229,7 +257,7 @@ export default function VaultScreen() {
       });
 
       // 2. Encrypt with AES-256-GCM using a key derived from the Vault PIN
-      const encrypted = vaultEncrypt(vaultPin, base64);
+      const encrypted = vaultFileEncrypt(vaultKeys, vaultPin, base64);
 
       // 3. Save encrypted payload to disk
       const fileId  = `vault_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -313,7 +341,9 @@ export default function VaultScreen() {
 
   // ── Decrypt and open file ─────────────────────────────────────
   const handleOpen = async (file: VaultFile) => {
+    setLoadingText('Decrypting…');
     setLoading(true);
+    let tempPath: string | null = null;
     try {
       // 1. Read encrypted payload from disk
       const raw = await FileSystem.readAsStringAsync(file.encPath, {
@@ -322,10 +352,11 @@ export default function VaultScreen() {
       const payload = JSON.parse(raw);
 
       // 2. Decrypt with the PIN-derived key
-      const base64 = vaultDecrypt(vaultPin, payload);
+      const base64 = vaultFileDecrypt(vaultKeys, vaultPin, payload);
 
-      // 3. Write decrypted file to temp location
-      const tempPath = (FileSystem as any).cacheDirectory + file.name;
+      // 3. Write decrypted file to temp location (deleted below)
+      await FileSystem.makeDirectoryAsync(OPEN_DIR, { intermediates: true }).catch(() => {});
+      tempPath = OPEN_DIR + safeName(file.name);
       await FileSystem.writeAsStringAsync(tempPath, base64, {
         encoding: 'base64',
       });
@@ -338,12 +369,18 @@ export default function VaultScreen() {
           dialogTitle: file.name,
         });
       } else {
-        Alert.alert('Opened', `File decrypted to: ${tempPath}`);
+        Alert.alert('Cannot open', 'This device has no app to open the file with.');
       }
     } catch (e: any) {
       Alert.alert('Error', 'Failed to decrypt file: ' + e.message);
     } finally {
+      // ponytail: deleted as soon as the share sheet returns. Android resolves
+      // shareAsync once the chooser closes, which is after a viewer has read the
+      // file in the cases checked; a target that reads lazily would lose it, and
+      // then the copy must move to a longer-lived cleanup (mediaCacheGC).
+      if (tempPath) await FileSystem.deleteAsync(tempPath, { idempotent: true }).catch(() => {});
       setLoading(false);
+      setLoadingText('Encrypting…');
     }
   };
 
@@ -361,39 +398,45 @@ export default function VaultScreen() {
               await FileSystem.deleteAsync(file.encPath, { idempotent: true });
               const updated = files.filter(f => f.id !== file.id);
               await saveManifest(updated);
-            } catch {}
+            } catch (e: any) {
+              Alert.alert('Not deleted', e?.message ?? 'The file could not be removed. Try again.');
+            }
           },
         },
       ]
     );
   };
 
-  // ── Backup ────────────────────────────────────────────────────
-  // The Vault is local-first: there is no server backup endpoint, so a
-  // "backup" exports the encrypted manifest via the system share sheet so the
-  // user can stash it wherever they like. The files themselves stay in the
-  // app's encrypted vault directory.
+  // ── Export file list ──────────────────────────────────────────
+  // The Vault is local-only: there is no server backup of these files and no
+  // automatic one. This shares a LIST (name, type, size, date) through the
+  // share sheet — not the files, not encrypted, and without on-device paths —
+  // and the copy in the modal says exactly that.
   const handleBackup = async () => {
+    setLoadingText('Preparing list…');
     setLoading(true);
+    let exportPath: string | null = null;
     try {
       const now = new Date().toLocaleDateString();
-      const manifestRaw = (await SecureStore.getItemAsync(MANIFEST_KEY)) || '[]';
-      const exportPath = (FileSystem as any).cacheDirectory + `vault_manifest_${Date.now()}.json`;
-      await FileSystem.writeAsStringAsync(exportPath, manifestRaw, { encoding: 'utf8' });
+      const list = files.map(f => ({ name: f.name, type: f.type, size: f.size, addedAt: new Date(f.addedAt).toISOString() }));
+      exportPath = (FileSystem as any).cacheDirectory + `vault_file_list_${Date.now()}.json`;
+      await FileSystem.writeAsStringAsync(exportPath, JSON.stringify(list, null, 2), { encoding: 'utf8' });
 
       await SecureStore.setItemAsync('vault_last_backup', now);
       setLastBackup(now);
       setShowBackup(false);
 
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(exportPath, { mimeType: 'application/json', dialogTitle: 'Export Vault manifest' });
+        await Sharing.shareAsync(exportPath, { mimeType: 'application/json', dialogTitle: 'Vault file list' });
       } else {
-        Alert.alert('Saved', `Vault manifest exported to:\n${exportPath}`);
+        Alert.alert('Cannot share', 'This device has no app to share the list with.');
       }
     } catch (e: any) {
       Alert.alert('Error', e.message);
     } finally {
+      if (exportPath) await FileSystem.deleteAsync(exportPath, { idempotent: true }).catch(() => {});
       setLoading(false);
+      setLoadingText('Encrypting…');
     }
   };
 
@@ -404,7 +447,7 @@ export default function VaultScreen() {
   // Show PIN gate until unlocked
   // ─────────────────────────────────────────────────────────────
   if (!unlocked) {
-    return <PinGate onUnlock={(pin) => { setVaultPin(pin); setUnlocked(true); }} />;
+    return <PinGate onUnlock={unlock} />;
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -426,6 +469,8 @@ export default function VaultScreen() {
         <TouchableOpacity hitSlop={4}
           style={styles.backupBtn}
           onPress={() => setShowBackup(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Export file list"
         >
           <Text style={styles.backupBtnText}>💾</Text>
         </TouchableOpacity>
@@ -447,9 +492,16 @@ export default function VaultScreen() {
         <View style={styles.statDivider} />
         <View style={styles.statItem}>
           <Text style={styles.statNum}>{lastBackup || 'Never'}</Text>
-          <Text style={styles.statLabel}>Last Backup</Text>
+          <Text style={styles.statLabel}>Last export</Text>
         </View>
       </View>
+
+      {!vaultKeys && (
+        <Text style={styles.keyNotice} accessibilityLiveRegion="polite">
+          This PIN cannot open the vault key from before your PIN was reset, so files added under the
+          old PIN may not open. New files are still encrypted with this PIN.
+        </Text>
+      )}
 
       {/* Tabs */}
       <View style={styles.tabs}>
@@ -460,6 +512,9 @@ export default function VaultScreen() {
               key={tab}
               style={[styles.tab, activeTab === tab && styles.tabActive]}
               onPress={() => setActiveTab(tab)}
+              accessibilityRole="tab"
+              accessibilityLabel={`${tab}, ${count} file${count === 1 ? '' : 's'}`}
+              accessibilityState={{ selected: activeTab === tab }}
             >
               <Text style={styles.tabIcon}>{TAB_CONFIG[tab].icon}</Text>
               <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
@@ -483,7 +538,7 @@ export default function VaultScreen() {
       {loading ? (
         <View style={styles.loadingWrap}>
           <ActivityIndicator color={c.primary} size="large" />
-          <Text style={styles.loadingText}>Encrypting...</Text>
+          <Text style={styles.loadingText}>{loadingText}</Text>
         </View>
       ) : (
         <FlatList
@@ -506,6 +561,8 @@ export default function VaultScreen() {
               style={styles.fileRow}
               onPress={() => handleOpen(item)}
               onLongPress={() => handleDelete(item)}
+              accessibilityRole="button"
+              accessibilityLabel={`Open ${item.name}, ${formatSize(item.size)}`}
             >
               <View style={[styles.fileIcon,
                 { backgroundColor: TAB_CONFIG[item.type].color + '22' }]}>
@@ -528,6 +585,8 @@ export default function VaultScreen() {
                 <TouchableOpacity
                   style={styles.deleteBtn}
                   onPress={() => handleDelete(item)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Delete ${item.name}`}
                 >
                   <Text style={styles.deleteBtnText}>🗑️</Text>
                 </TouchableOpacity>
@@ -556,17 +615,18 @@ export default function VaultScreen() {
         >
           <View style={styles.backupPanel}>
             <View style={styles.backupHandle} />
-            <Text style={styles.backupTitle}>Export Vault</Text>
+            <Text style={styles.backupTitle}>Export file list</Text>
             <Text style={styles.backupDesc}>
-              Export a manifest of your {files.length} vault files via the
-              share sheet. Files are AES-256-GCM encrypted with your Vault PIN —
-              only you can open it.
+              Shares a list of your {files.length} vault file names, sizes and
+              dates. The list is NOT encrypted and does not contain the files —
+              they stay encrypted on this phone only.
             </Text>
 
             <View style={styles.backupBtnRow}>
               <TouchableOpacity
                 style={styles.backupCancelBtn}
                 onPress={() => setShowBackup(false)}
+                accessibilityRole="button"
               >
                 <Text style={styles.backupCancelText}>Cancel</Text>
               </TouchableOpacity>
@@ -574,6 +634,8 @@ export default function VaultScreen() {
                 style={styles.backupConfirmBtn}
                 onPress={handleBackup}
                 disabled={loading}
+                accessibilityRole="button"
+                accessibilityLabel="Export file list"
               >
                 {loading
                   ? <ActivityIndicator color="#FFFFFF" size="small" />
@@ -589,7 +651,8 @@ export default function VaultScreen() {
             )}
 
             <Text style={styles.backupNote}>
-              Auto-backup runs every 30 days · Local storage only
+              Vault files are not backed up anywhere — not automatically, and not
+              with chat backup. Deleting the app deletes them.
             </Text>
           </View>
         </TouchableOpacity>
@@ -611,26 +674,11 @@ const makePinStyles = (c: Palette, light: boolean) => StyleSheet.create({
   },
   lockIcon:  { fontSize: 52, marginBottom: 12 },
   title:     { fontSize: 26, fontWeight: 'bold', color: c.text, marginBottom: 4 },
-  sub:       { fontSize: 13, color: c.textDim, marginBottom: 32 },
-  dotsRow:   { flexDirection: 'row', gap: 12, marginBottom: 10 },
-  shake:     { transform: [{ translateX: 8 }] },
-  dot: {
-    width: 14, height: 14, borderRadius: 7,
-    backgroundColor: c.surfaceSolid,
-    borderWidth: 1.5, borderColor: c.glassStroke,
-  },
-  dotFilled: { backgroundColor: c.primary, borderColor: c.primary },
-  error:     { color: light ? c.danger : '#FF4D6D', fontSize: 13, marginBottom: 12 },
-  keyRow:    { flexDirection: 'row', gap: 20, marginBottom: 14 },
-  key: {
-    width: 72, height: 72, borderRadius: 36,
-    backgroundColor: c.bg,
-    borderWidth: 1, borderColor: c.glassStroke,
-    justifyContent: 'center', alignItems: 'center',
-  },
-  keyEmpty:  { width: 72, height: 72 },
-  keyText:   { fontSize: 24, color: c.text, fontWeight: '600' },
+  sub:       { fontSize: 13, color: c.textDim, marginBottom: 24 },
+  error:     { color: light ? c.danger : '#FF4D6D', fontSize: 13, marginTop: 12, textAlign: 'center', paddingHorizontal: 24 },
   note:      { marginTop: 28, color: c.textDim, fontSize: 11 },
+  setBtn:    { marginTop: 8, minHeight: 48, paddingHorizontal: 24, borderRadius: 12, backgroundColor: c.primary, justifyContent: 'center', alignItems: 'center' },
+  setBtnText:{ color: '#FFFFFF', fontWeight: 'bold', fontSize: 15 },
 });
 
 const makeStyles = (c: Palette) => StyleSheet.create({
@@ -665,6 +713,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   statNum:     { fontSize: 15, fontWeight: 'bold', color: c.text },
   statLabel:   { fontSize: 12, color: c.textDim, marginTop: 2 },
   statDivider: { width: 0.5, backgroundColor: c.surfaceSolid, marginVertical: 4 },
+
+  keyNotice: { color: c.danger, fontSize: 12, lineHeight: 17, paddingHorizontal: 16, paddingVertical: 8 },
 
   // Tabs
   tabs: {

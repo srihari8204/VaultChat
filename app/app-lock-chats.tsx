@@ -1,16 +1,22 @@
 /**
  * app/app-lock-chats.tsx
  * Per-Chat App Lock — lock individual chats with biometric/PIN.
+ *
+ * Entry from a chat: router.push({ pathname: '/app-lock-chats',
+ *   params: { chatId, chatName } }) opens the lock setup for that chat
+ * directly (or just the list, highlighting nothing, if it is already locked).
  */
 
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState , useMemo} from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Animated,
   FlatList,
+  Modal,
   StyleSheet,
   Switch,
   TextInput,
@@ -21,29 +27,21 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { listChats } from '../lib/chatService';
 import {
-  getAllLocks, setChatLock, removeChatLock, verifyBiometric, verifyPin, hasBiometric,
+  getAllLocks, setChatLock, removeChatLock, verifyBiometric, verifyPin, hasBiometric, pinRetryAfterMs,
   type LockedChat, type LockMethod, type AutoLockTimer,
 } from '../lib/chatLock';
-import { AppText as Text, AuroraBackground } from '../components/ui';
+import { AppText as Text, AuroraBackground, KeyboardSafe } from '../components/ui';
 import { HEADER_TOP } from '../constants/layout';
 import { initialOf } from '../lib/format';
 
 
-// Was: StatusBar.currentHeight on Android, a hardcoded 44 elsewhere, read ONCE
-// at module scope. Three defects in one line (2026-09-18): currentHeight omits
-// the display cutout on some OEM skins; the ?? 0 fallback draws the header
-// UNDER the notch, and edgeToEdge is on at every API level here; and a module
-// read freezes whichever value it got at launch, so it never follows a rotation
-// or a fold. HEADER_TOP is the live binding and already carries the gap, so the
-// old "+ 8" goes with it. makeStyles is a factory re-run per layout generation,
-// so reading it here is read-at-render, not a frozen capture.
-
 interface ChatItem {
   id: string;
   name: string;
-  avatar?: string;
-  lastMessage?: string;
 }
+
+/** Digits only, at most 8 — the chat PIN is 4–8 digits. */
+const digitsOnly = (t: string) => t.replace(/\D/g, '').slice(0, 8);
 
 const AUTO_LOCK_OPTIONS: { label: string; value: AutoLockTimer }[] = [
   { label: 'Immediately', value: 0 },
@@ -66,8 +64,11 @@ export default function AppLockChatsScreen() {
   const { colors } = useTheme();
   const s = useS();
   const router = useRouter();
+  // Optional: opened from a chat to lock THAT chat.
+  const params = useLocalSearchParams<{ chatId?: string; chatName?: string }>();
 
   const [chats, setChats] = useState<ChatItem[]>([]);
+  const [chatsState, setChatsState] = useState<'loading' | 'ok' | 'error'>('loading');
   const [lockedChats, setLockedChats] = useState<Record<string, LockedChat>>({});
   // The lock table could not be READ - distinct from "nothing is locked".
   const [loadErr, setLoadErr] = useState(false);
@@ -76,22 +77,29 @@ export default function AppLockChatsScreen() {
   // chose a PIN (2026-09-17).
   const [unlockPrompt, setUnlockPrompt] = useState<LockedChat | null>(null);
   const [unlockPin, setUnlockPin] = useState('');
-  const [unlockErr, setUnlockErr] = useState(false);
+  const [unlockErr, setUnlockErr] = useState<string | null>(null);
   const unlockResolve = useRef<((ok: boolean) => void) | null>(null);
   const askUnlockPin = (lock: LockedChat) => new Promise<boolean>((resolve) => {
     unlockResolve.current = resolve;
-    setUnlockPin(''); setUnlockErr(false); setUnlockPrompt(lock);
+    setUnlockPin(''); setUnlockErr(null); setUnlockPrompt(lock);
   });
   const closeUnlock = (ok: boolean) => {
-    setUnlockPrompt(null); setUnlockPin(''); setUnlockErr(false);
+    setUnlockPrompt(null); setUnlockPin(''); setUnlockErr(null);
     unlockResolve.current?.(ok); unlockResolve.current = null;
   };
   const submitUnlockPin = () => {
-    if (unlockPrompt && verifyPin(unlockPrompt, unlockPin)) closeUnlock(true);
-    else setUnlockErr(true);
+    if (unlockPrompt && verifyPin(unlockPrompt, unlockPin)) { closeUnlock(true); return; }
+    // verifyPin refuses without checking while a backoff runs — say which.
+    const wait = unlockPrompt ? pinRetryAfterMs(unlockPrompt) : 0;
+    setUnlockPin('');
+    setUnlockErr(wait > 0 ? `Too many attempts. Try again in ${Math.ceil(wait / 1000)} s.` : 'Incorrect PIN.');
   };
   const [configChat, setConfigChat] = useState<string | null>(null);
   const [pinInput, setPinInput] = useState('');
+  // Typed twice: a typo in the only PIN that can remove the lock would leave
+  // the chat locked behind a PIN nobody knows.
+  const [pinConfirm, setPinConfirm] = useState('');
+  const [saving, setSaving] = useState(false);
   const [bioAvailable, setBioAvailable] = useState(false);
   const [configMethod, setConfigMethod] = useState<LockMethod>('biometric');
   const [configTimer, setConfigTimer] = useState<AutoLockTimer>(0);
@@ -107,12 +115,38 @@ export default function AppLockChatsScreen() {
       // believe their locks had vanished. Surface the failure instead.
       try { setLockedChats(await getAllLocks()); setLoadErr(false); }
       catch { setLoadErr(true); }
-      try {
-        const list = await listChats();
-        setChats(list.map(c => ({ id: c.id, name: c.name || c.peerName || 'Chat' })));
-      } catch {}
+      await loadChats();
     })();
-  }, [fadeIn]);
+  }, [fadeIn]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const loadChats = async () => {
+    setChatsState('loading');
+    let list: ChatItem[] = [];
+    try {
+      list = (await listChats()).map(c => ({ id: c.id, name: c.name || c.peerName || 'Chat' }));
+      setChatsState('ok');
+    } catch {
+      setChatsState('error');
+    }
+    // Opened from a chat: make sure that chat is listed even if the list
+    // failed or has not synced it yet.
+    const id = params.chatId ? String(params.chatId) : '';
+    if (id && !list.some(c => c.id === id)) list = [{ id, name: params.chatName ? String(params.chatName) : 'Chat' }, ...list];
+    setChats(list);
+  };
+
+  // Entry from a chat: go straight to setting up that chat's lock, once.
+  const openedFor = useRef(false);
+  useEffect(() => {
+    const id = params.chatId ? String(params.chatId) : '';
+    if (!id || openedFor.current || chatsState === 'loading' || loadErr) return;
+    openedFor.current = true;
+    if (!lockedChats[id]?.locked) {
+      setConfigMethod(bioAvailable ? 'biometric' : 'pin');
+      setConfigTimer(0);
+      setConfigChat(id);
+    }
+  }, [params.chatId, chatsState, loadErr, lockedChats, bioAvailable]);
 
   const reloadLocks = async () => {
     try { setLockedChats(await getAllLocks()); setLoadErr(false); }
@@ -149,7 +183,11 @@ export default function AppLockChatsScreen() {
       if (existing.lockMethod === 'pin' || existing.lockMethod === 'both') {
         if (!(await askUnlockPin(existing))) return;
       }
-      await removeChatLock(chat.id);
+      try {
+        await removeChatLock(chat.id);
+      } catch {
+        Alert.alert('Lock not removed', 'The lock settings could not be saved. The chat is still locked — try again.');
+      }
       await reloadLocks();
     } else {
       const ex = lockedChats[chat.id];
@@ -159,16 +197,31 @@ export default function AppLockChatsScreen() {
     }
   };
 
+  const closeConfig = () => { setConfigChat(null); setPinInput(''); setPinConfirm(''); };
+
   const confirmLockSetup = async (chatId: string, method: LockMethod, timer: AutoLockTimer, pin?: string) => {
-    if ((method === 'pin' || method === 'both') && (!pin || pin.length < 4)) {
-      Alert.alert('Invalid PIN', 'PIN must be at least 4 digits.');
+    if (saving) return;
+    const needsPin = method === 'pin' || method === 'both';
+    if (needsPin && (!pin || !/^\d{4,8}$/.test(pin))) {
+      Alert.alert('Invalid PIN', 'The PIN must be 4 to 8 digits.');
+      return;
+    }
+    if (needsPin && pin !== pinConfirm) {
+      Alert.alert('PINs do not match', 'Type the same PIN in both boxes.');
+      setPinConfirm('');
       return;
     }
     const chat = chats.find(c => c.id === chatId);
-    await setChatLock(chatId, chat?.name || 'Chat', method, timer, pin);
-    await reloadLocks();
-    setConfigChat(null);
-    setPinInput('');
+    setSaving(true);
+    try {
+      await setChatLock(chatId, chat?.name || 'Chat', method, timer, needsPin ? pin : undefined);
+      closeConfig();
+    } catch {
+      Alert.alert('Lock not set', 'The lock settings could not be saved, so this chat is NOT locked. Try again.');
+    } finally {
+      setSaving(false);
+      await reloadLocks();
+    }
   };
 
   // ── Config modal for a chat ──
@@ -181,9 +234,11 @@ export default function AppLockChatsScreen() {
     const setTimer = setConfigTimer;
 
     return (
+      <Modal visible transparent animationType="fade" onRequestClose={closeConfig}>
+      <KeyboardSafe style={{ flex: 1 }}>
       <View style={s.overlay}>
         <View style={s.configPanel}>
-          <Text style={s.configTitle}>Lock &quot;{chat?.name}&quot;</Text>
+          <Text style={s.configTitle} accessibilityRole="header">Lock &quot;{chat?.name}&quot;</Text>
 
           <Text style={s.configLabel}>Lock Method</Text>
           <View style={s.chipRow}>
@@ -200,6 +255,9 @@ export default function AppLockChatsScreen() {
                 key={opt.value}
                 style={[s.chip, method === opt.value && s.chipActive]}
                 onPress={() => setMethod(opt.value)}
+                accessibilityRole="radio"
+                accessibilityLabel={`Lock method: ${opt.label}`}
+                accessibilityState={{ checked: method === opt.value }}
               >
                 <Ionicons name={opt.icon as any} size={16} color={method === opt.value ? colors.accent : colors.textDim} />
                 <Text style={[s.chipText, method === opt.value && s.chipTextActive]}>{opt.label}</Text>
@@ -209,16 +267,28 @@ export default function AppLockChatsScreen() {
 
           {(method === 'pin' || method === 'both') && (
             <>
-              <Text style={s.configLabel}>Set PIN (4+ digits)</Text>
+              <Text style={s.configLabel}>Set PIN (4–8 digits)</Text>
               <TextInput
                 style={s.pinInput}
                 value={pinInput}
-                onChangeText={setPinInput}
+                onChangeText={(t) => setPinInput(digitsOnly(t))}
                 keyboardType="number-pad"
                 secureTextEntry
                 maxLength={8}
                 placeholderTextColor={colors.textFaint}
                 placeholder="Enter PIN"
+                accessibilityLabel="New chat PIN"
+              />
+              <TextInput
+                style={[s.pinInput, { marginTop: 8 }]}
+                value={pinConfirm}
+                onChangeText={(t) => setPinConfirm(digitsOnly(t))}
+                keyboardType="number-pad"
+                secureTextEntry
+                maxLength={8}
+                placeholderTextColor={colors.textFaint}
+                placeholder="Enter PIN again"
+                accessibilityLabel="Confirm chat PIN"
               />
             </>
           )}
@@ -230,6 +300,9 @@ export default function AppLockChatsScreen() {
                 key={opt.value}
                 style={[s.chip, timer === opt.value && s.chipActive]}
                 onPress={() => setTimer(opt.value)}
+                accessibilityRole="radio"
+                accessibilityLabel={`Auto-lock: ${opt.label}`}
+                accessibilityState={{ checked: timer === opt.value }}
               >
                 <Text style={[s.chipText, timer === opt.value && s.chipTextActive]}>{opt.label}</Text>
               </TouchableOpacity>
@@ -239,27 +312,36 @@ export default function AppLockChatsScreen() {
           <View style={s.configActions}>
             <TouchableOpacity
               style={s.cancelBtn}
-              onPress={() => { setConfigChat(null); setPinInput(''); }}
+              onPress={closeConfig}
+              accessibilityRole="button"
             >
               <Text style={s.cancelBtnText}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={s.confirmBtn}
+              style={[s.confirmBtn, saving && { opacity: 0.6 }]}
               onPress={() => confirmLockSetup(configChat, method, timer, pinInput)}
+              disabled={saving}
+              accessibilityRole="button"
+              accessibilityLabel={`Enable lock on ${chat?.name ?? 'this chat'}`}
+              accessibilityState={{ disabled: saving, busy: saving }}
             >
               <LinearGradient
-                colors={[colors.accent, '#2B7FE0']}
+                colors={[colors.accentLight, colors.accentDeep]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={s.confirmBtnGrad}
               >
-                <Ionicons name="lock-closed" size={16} color="#FFF" style={{ marginRight: 6 }} />
+                {saving
+                  ? <ActivityIndicator color="#FFF" size="small" />
+                  : <Ionicons name="lock-closed" size={16} color="#FFF" style={{ marginRight: 6 }} />}
                 <Text style={s.confirmBtnText}>Enable Lock</Text>
               </LinearGradient>
             </TouchableOpacity>
           </View>
         </View>
       </View>
+      </KeyboardSafe>
+      </Modal>
     );
   };
 
@@ -273,7 +355,7 @@ export default function AppLockChatsScreen() {
           <Text style={s.chatAvatarText}>{initialOf(item.name)}</Text>
           {isLocked && (
             <View style={s.lockBadge}>
-              <Ionicons name="lock-closed" size={10} color={'#F59E0B'} />
+              <Ionicons name="lock-closed" size={10} color={colors.accentOn} />
             </View>
           )}
         </View>
@@ -281,7 +363,7 @@ export default function AppLockChatsScreen() {
         <View style={s.chatInfo}>
           <Text numberOfLines={1} style={s.chatName}>{item.name}</Text>
           <Text style={s.chatPreview}>
-            {isLocked ? '\uD83D\uDD12 Chat locked' : item.lastMessage || 'No messages'}
+            {isLocked ? 'Chat locked' : 'Not locked'}
           </Text>
           {isLocked && config && (
             <View style={s.lockMeta}>
@@ -303,7 +385,9 @@ export default function AppLockChatsScreen() {
           value={isLocked}
           onValueChange={() => toggleLock(item)}
           trackColor={{ false: colors.border, true: colors.primary }}
-          thumbColor={isLocked ? colors.accent : '#9CA3AF'}
+          thumbColor={isLocked ? colors.accent : colors.textFaint}
+          accessibilityLabel={`Lock ${item.name}`}
+          accessibilityState={{ checked: isLocked }}
         />
       </View>
     );
@@ -346,13 +430,24 @@ export default function AppLockChatsScreen() {
             Your chat lock settings could not be read, so the list below may be incomplete. Existing locks are still in force.
           </Text>
         )}
+        {chatsState === 'error' && (
+          <TouchableOpacity onPress={loadChats} accessibilityRole="button" style={{ marginHorizontal: 20, marginBottom: 12 }}>
+            <Text style={{ color: colors.danger, textAlign: 'center' }}>
+              Your chats could not be loaded. Tap to try again.
+            </Text>
+          </TouchableOpacity>
+        )}
         <FlatList
           data={chats}
           keyExtractor={c => c.id}
           renderItem={renderChatItem}
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 40 }}
           ItemSeparatorComponent={() => <View style={{ height: 2 }} />}
-          ListEmptyComponent={<Text style={{ color: colors.textDim, textAlign: 'center', marginTop: 40 }}>No chats yet</Text>}
+          ListEmptyComponent={chatsState === 'loading'
+            ? <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
+            : chatsState === 'ok'
+              ? <Text style={{ color: colors.textDim, textAlign: 'center', marginTop: 40 }}>No chats yet</Text>
+              : null}
         />
       </Animated.View>
 
@@ -361,9 +456,11 @@ export default function AppLockChatsScreen() {
           config panel styles, so it inherits the same responsive behaviour and
           theme tokens rather than introducing a second dialog design. */}
       {unlockPrompt && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => closeUnlock(false)}>
+        <KeyboardSafe style={{ flex: 1 }}>
         <View style={s.overlay}>
           <View style={s.configPanel}>
-            <Text style={s.configTitle}>Enter this chat&apos;s PIN</Text>
+            <Text style={s.configTitle} accessibilityRole="header">Enter this chat&apos;s PIN</Text>
             <Text style={s.configLabel}>
               {unlockPrompt.lockMethod === 'both'
                 ? 'Biometrics verified. The PIN is the second factor you chose.'
@@ -372,7 +469,7 @@ export default function AppLockChatsScreen() {
             <TextInput
               style={s.pinInput}
               value={unlockPin}
-              onChangeText={(t) => { setUnlockPin(t); setUnlockErr(false); }}
+              onChangeText={(t) => { setUnlockPin(digitsOnly(t)); setUnlockErr(null); }}
               keyboardType="number-pad"
               secureTextEntry
               maxLength={8}
@@ -380,18 +477,25 @@ export default function AppLockChatsScreen() {
               placeholder="Enter PIN"
               placeholderTextColor={colors.textFaint}
               onSubmitEditing={submitUnlockPin}
+              accessibilityLabel="Chat PIN"
             />
-            {unlockErr && <Text style={[s.configLabel, { color: colors.danger }]}>Incorrect PIN.</Text>}
-            <View style={s.chipRow}>
+            {!!unlockErr && (
+              <Text style={[s.configLabel, { color: colors.danger }]} accessibilityLiveRegion="polite">{unlockErr}</Text>
+            )}
+            <View style={s.configActions}>
               <TouchableOpacity style={s.cancelBtn} onPress={() => closeUnlock(false)} accessibilityRole="button" accessibilityLabel="Cancel">
                 <Text style={s.cancelBtnText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={s.confirmBtn} onPress={submitUnlockPin} accessibilityRole="button" accessibilityLabel="Confirm PIN and remove the lock">
+              {/* Was a confirmBtn with no background and #FFF text — invisible on
+                  the light glass panel. Solid danger fill: this removes a lock. */}
+              <TouchableOpacity style={s.removeBtn} onPress={submitUnlockPin} accessibilityRole="button" accessibilityLabel="Confirm PIN and remove the lock">
                 <Text style={s.confirmBtnText}>Remove lock</Text>
               </TouchableOpacity>
             </View>
           </View>
         </View>
+        </KeyboardSafe>
+        </Modal>
       )}
     </View>
   );
@@ -533,6 +637,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   },
   cancelBtnText: { fontSize: 14, color: c.textDim, fontWeight: '600' },
   confirmBtn: { flex: 2, borderRadius: 10, overflow: 'hidden' },
+  removeBtn: { flex: 2, minHeight: 44, borderRadius: 10, backgroundColor: c.danger, justifyContent: 'center', alignItems: 'center', paddingVertical: 12 },
   confirmBtnGrad: {
     flexDirection: 'row',
     justifyContent: 'center',

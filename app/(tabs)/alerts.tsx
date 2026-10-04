@@ -9,10 +9,10 @@
 import { HEADER_TOP, TAB_BAR_SPACE } from '../../constants/layout';
 import { brandAlpha, type Palette } from '../../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useState , useMemo} from 'react';
 import {
-  ActivityIndicator, FlatList, RefreshControl, StyleSheet,
+  ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet,
   TouchableOpacity, View,
 } from 'react-native';
 import { useTheme } from '../../lib/theme';
@@ -66,6 +66,7 @@ function useS() {
 export default function AlertsScreen() {
   const { colors } = useTheme();
   const S = useS();
+  const router = useRouter();
   const [events, setEvents] = useState<SecurityEvent[]>([]);
   const [status, setStatus] = useState<ChainStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -104,18 +105,44 @@ export default function AlertsScreen() {
   // Refresh whenever the tab gains focus so new events appear immediately.
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const onScan = useCallback(async () => {
-    if (scanning) return;
+  // A scan is not read-only: on a wipe-level verdict (root / hooking tools)
+  // runSecurityCheck ERASES this phone's encryption keys before it returns
+  // (services/securityService.ts). So it is confirmed first, and its verdict is
+  // acted on and shown — it used to run on one tap and discard the report.
+  const runScan = useCallback(async () => {
     setScanning(true);
     try {
-      await scanDeviceAndRecord();
-    } catch {
-      // scan failures are non-fatal; the entry simply won't be added
+      const report = await scanDeviceAndRecord();
+      if (!report.clean) {
+        // Same routing as the launch scan in app/_layout.tsx.
+        router.replace({ pathname: '/blocked', params: { threats: JSON.stringify(report.threats), level: report.level } } as any);
+        return;
+      }
+      Alert.alert(
+        report.level === 'clean' ? 'No threats found' : 'Scan finished',
+        report.level === 'clean'
+          ? 'This device passed the integrity scan. The result is in the log below.'
+          : `${report.threats.length} low-risk signal${report.threats.length === 1 ? '' : 's'} noted (for example developer options). Nothing was blocked; details are in the log below.`,
+      );
+    } catch (e: any) {
+      Alert.alert('Scan failed', e?.message || 'The device scan could not run. Nothing was changed — try again.');
     } finally {
       setScanning(false);
       load();
     }
-  }, [scanning, load]);
+  }, [load, router]);
+
+  const onScan = useCallback(() => {
+    if (scanning) return;
+    Alert.alert(
+      'Scan this device?',
+      'Checks for rooting, hooking tools and similar tampering. If the device is found to be compromised, crazzychat erases its encryption keys on this phone to protect your messages, and you will need to sign in again.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Scan', style: 'destructive', onPress: runScan },
+      ],
+    );
+  }, [scanning, runScan]);
 
   const renderItem = useCallback(({ item }: { item: SecurityEvent }) => {
     const color = SEV_COLOR[item.severity] ?? SEV_COLOR.info;
@@ -164,7 +191,15 @@ export default function AlertsScreen() {
           <Text style={S.title}>Alerts</Text>
           <Text style={S.subtitle}>Tamper-evident security log</Text>
         </View>
-        <TouchableOpacity style={S.scanBtn} onPress={onScan} disabled={scanning} activeOpacity={0.8}>
+        <TouchableOpacity
+          style={S.scanBtn}
+          onPress={onScan}
+          disabled={scanning}
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel="Scan device"
+          accessibilityState={{ disabled: scanning, busy: scanning }}
+        >
           {scanning
             ? <ActivityIndicator size="small" color="#fff" />
             : <Ionicons name="shield-checkmark" size={16} color="#fff" />}

@@ -20,7 +20,6 @@
 // restore prompt that implies "now or never" pressures people into a slow
 // operation on mobile data at the worst moment.
 
-import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View,
@@ -34,6 +33,7 @@ import {
   cloudBackupMeta, restoreCloudBackup, restoreFromGoogleDrive, type BackupMeta,
 } from '../lib/cloudBackup';
 import { markRestorePromptSeen } from '../lib/restoreGate';
+import { resetTo } from '../lib/authNav';
 
 function humanSize(bytes?: number): string {
   if (!bytes || bytes <= 0) return '';
@@ -54,7 +54,6 @@ function humanWhen(iso?: string): string {
 }
 
 export default function RestoreBackupScreen() {
-  const router = useRouter();
   const { colors } = useTheme();
   const S = useS();
 
@@ -68,8 +67,10 @@ export default function RestoreBackupScreen() {
   // asked again on the next cold start, which reads as the app nagging.
   const leave = useCallback(async () => {
     await markRestorePromptSeen();
-    router.replace('/(tabs)/chats' as any);
-  }, [router]);
+    // resetTo: replays a launch deep link stashed before sign-in
+    // (lib/postSignIn.ts deliberately leaves it in place on the way here).
+    resetTo('/(tabs)/chats');
+  }, []);
 
   const run = useCallback(async (from: 'cloud' | 'drive') => {
     if (busy) return;

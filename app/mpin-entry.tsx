@@ -15,6 +15,7 @@ import { ActivityIndicator, Animated, Pressable, ScrollView, StyleSheet, Text, V
 import { MpinInput } from '../components/auth/MpinInput';
 import { onboarding, verifyMpinRemote, onboardingError } from '../lib/onboarding';
 import { resetTo } from '../lib/authNav';
+import { openRestoreIfNewPhone } from '../lib/postSignIn';
 import { AuthSky, BrandMark, KeyboardSafe } from '../components/ui';
 import { type AuthPalette } from '../constants/authTheme';
 import { useAuthTheme } from '../lib/useAuthTheme';
@@ -36,14 +37,19 @@ export default function MpinEntry() {
   };
 
   const submit = async (value: string) => {
-    if (busy || !userId) return;
+    if (busy) return;
+    // Reached without the number step (process death, a stale deep link):
+    // there is no account to check the MPIN against, so say so and go back to
+    // the start instead of silently doing nothing.
+    if (!userId) { setMpin(''); setError('Enter your mobile number first.'); resetTo('/onboard'); return; }
     setBusy(true); setError(null);
     try {
       await verifyMpinRemote(userId, value);
       onboarding.reset();
-      // resetTo, not replace: the landing form below this screen must not
-      // survive the sign-in (lib/authNav.ts).
-      resetTo('/(tabs)/chats');
+      // A phone with no chat history yet is offered the backup restore first
+      // (lib/postSignIn.ts). Otherwise resetTo, not replace: the landing form
+      // below this screen must not survive the sign-in (lib/authNav.ts).
+      if (!(await openRestoreIfNewPhone())) resetTo('/(tabs)/chats');
     } catch (e: any) {
       setMpin('');
       doShake();

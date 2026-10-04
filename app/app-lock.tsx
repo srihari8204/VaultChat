@@ -8,7 +8,7 @@
 // failure with a user-chosen re-login escape — never a silent bounce to
 // /onboard, which would look like the app forgot the account.
 
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Animated, BackHandler, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
 import { type Palette } from '../constants/theme';
@@ -24,6 +24,9 @@ export default function AppLock() {
   const { colors } = useTheme();
   const s = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
+  // resume=1: pushed by components/ResumeLock over a live stack after the app
+  // came back from the background — unlocking returns to that screen.
+  const { resume } = useLocalSearchParams<{ resume?: string }>();
 
   const [mode, setMode] = useState<'bio' | 'mpin' | 'seal'>('bio');
   const [pin, setPin] = useState('');
@@ -34,7 +37,10 @@ export default function AppLock() {
   const shake = useRef(new Animated.Value(0)).current;
   const doShake = () => { shake.setValue(0); Animated.sequence([12, -12, 8, -8, 0].map(t => Animated.timing(shake, { toValue: t, duration: 55, useNativeDriver: true }))).start(); };
 
-  const enter = () => resetTo('/(tabs)/chats');
+  const enter = () => {
+    if (resume === '1' && router.canGoBack()) router.back();
+    else resetTo('/(tabs)/chats');
+  };
 
   // BACK MUST NOT WALK AROUND THE LOCK.
   //
@@ -50,7 +56,7 @@ export default function AppLock() {
     return () => sub.remove();
   }, [router]);
 
-  useEffect(() => { getCachedUser().then(u => setUserId(u?.id ?? null)); }, []);
+  useEffect(() => { getCachedUser().then(u => setUserId(u?.id ?? null)).catch(() => setUserId(null)); }, []);
   useEffect(() => {
     // Sealed session? Only the local PIN opens it — don't prompt for a
     // biometric that cannot possibly unlock anything.
@@ -91,6 +97,20 @@ export default function AppLock() {
     ],
   );
 
+  // MPIN mode's way out when the MPIN itself is the problem. Same recovery as
+  // the sign-in screen (app/mpin-entry.tsx) — security questions, new MPIN.
+  const forgotMpin = () => {
+    if (userId) { router.push({ pathname: '/mpin-recover', params: { userId } } as any); return; }
+    signInAgain();
+  };
+  // No cached user id means the MPIN cannot be checked at all; offer the exit
+  // instead of an error with nothing to press.
+  const signInAgain = async () => {
+    await clearTokens().catch(() => {});
+    await setCachedUser(null).catch(() => {});
+    resetTo('/onboard');
+  };
+
   const submitMpin = async (value: string) => {
     if (busy || !userId) { if (!userId) setError('Session error — sign in again.'); return; }
     setBusy(true); setError(null);
@@ -108,7 +128,7 @@ export default function AppLock() {
       <Stack.Screen options={{ headerShown: false, gestureEnabled: false }} />
       <KeyboardSafe style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
-        <Text style={s.lock}>🔐</Text>
+        <Text style={s.lock} accessibilityElementsHidden importantForAccessibility="no">🔐</Text>
         <Text style={s.title}>crazzychat is locked</Text>
 
         {mode === 'seal' ? (
@@ -133,21 +153,23 @@ export default function AppLock() {
               onPress={submitSeal}
               disabled={busy || pin.length < 4}
               activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: busy || pin.length < 4, busy }}
             >
               <Text style={s.bioTxt}>{busy ? 'Unlocking…' : 'Unlock'}</Text>
             </TouchableOpacity>
-            {!!error && <Text style={s.error}>{error}</Text>}
-            <TouchableOpacity onPress={forgotPin} style={{ marginTop: 20 }}>
+            {!!error && <Text style={s.error} accessibilityLiveRegion="polite">{error}</Text>}
+            <TouchableOpacity onPress={forgotPin} style={{ marginTop: 20 }} accessibilityRole="button">
               <Text style={s.alt}>Forgotten your PIN?</Text>
             </TouchableOpacity>
           </>
         ) : mode === 'bio' ? (
           <>
             <Text style={s.sub}>Unlock with biometrics</Text>
-            <TouchableOpacity style={s.bioBtn} onPress={tryBiometric} activeOpacity={0.85}>
+            <TouchableOpacity style={s.bioBtn} onPress={tryBiometric} activeOpacity={0.85} accessibilityRole="button">
               <Text style={s.bioTxt}>Use biometrics</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => setMode('mpin')} style={{ marginTop: 18 }}>
+            <TouchableOpacity onPress={() => setMode('mpin')} style={{ marginTop: 18 }} accessibilityRole="button">
               <Text style={s.alt}>Use MPIN instead</Text>
             </TouchableOpacity>
           </>
@@ -158,9 +180,12 @@ export default function AppLock() {
               <MpinInput value={mpin} onChange={setMpin} onComplete={submitMpin} autoFocus shakeAnim={shake} />
             </View>
             {busy && <ActivityIndicator color={colors.primary} />}
-            {!!error && <Text style={s.error}>{error}</Text>}
-            <TouchableOpacity onPress={tryBiometric} style={{ marginTop: 16 }}>
+            {!!error && <Text style={s.error} accessibilityLiveRegion="polite">{error}</Text>}
+            <TouchableOpacity onPress={tryBiometric} style={{ marginTop: 16 }} accessibilityRole="button">
               <Text style={s.alt}>Use biometrics</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={forgotMpin} style={{ marginTop: 16 }} accessibilityRole="button">
+              <Text style={s.alt}>{userId ? 'Forgot MPIN?' : 'Sign in again'}</Text>
             </TouchableOpacity>
           </>
         )}

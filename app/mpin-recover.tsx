@@ -22,6 +22,8 @@ import {
   getRecoveryQuestions, verifyRecoveryAnswers, recoverMpin, onboarding, onboardingError,
 } from '../lib/onboarding';
 import { AuthSky, BrandMark, KeyboardSafe } from '../components/ui';
+import { openRestoreIfNewPhone } from '../lib/postSignIn';
+import { resetTo } from '../lib/authNav';
 import { type AuthPalette } from '../constants/authTheme';
 import { useAuthTheme } from '../lib/useAuthTheme';
 
@@ -83,7 +85,9 @@ export default function MpinRecover() {
     try {
       await recoverMpin(userId, ticket, v);
       onboarding.reset();
-      router.replace('/(tabs)/chats' as any);
+      // Not router.replace: /onboard and /mpin-entry must not stay under Chats,
+      // and a new phone gets the restore offer (lib/postSignIn.ts).
+      if (!(await openRestoreIfNewPhone())) resetTo('/(tabs)/chats');
     } catch (e: any) {
       setBusy(false); setMpinPhase('set'); setFirst(''); setConfirm('');
       Alert.alert('Could not reset', onboardingError(e, 'Try again'));

@@ -2,20 +2,25 @@ import { AppText as Text } from '../components/ui/Text';
 import { AuroraBackground } from '../components/ui';
 import { Ionicons } from '@expo/vector-icons';
 // app/vault-features.tsx
-// crazzychat premium security features
+// crazzychat advanced security
 //
-// 1. Temp Chat Codes — generate a time-limited invite code
-//    that auto-expires and can only be used once
-// 2. Disappearing Messages — set default timer for all chats
-// 3. Screen Lock Timer — auto-lock after X minutes of inactivity
-// 4. Email Share — share encrypted chat transcript via email
-// 5. Chat Backup — export encrypted backup to email
+// 1. Temp Chat Codes — single-use invite code, 5-minute expiry (real backend)
+// 2. Auto Screen Lock — how long the app may be in the background before it
+//    asks for biometrics / MPIN again (components/ResumeLock reads it; applies
+//    when Device MFA is on)
+// 3. Links to the real notification-privacy controls and the Vault
+//
+// REMOVED 2026-10-04, because nothing read them: a "default disappearing timer"
+// saved only here (the real one is Settings → Default message timer, which the
+// server applies), and the Screenshot Alerts / Incognito Keyboard switches.
+// Also removed: "Email Encrypted Transcript" (an alert, then the chat list) and
+// "Backup vault files to email" (the vault has no backup).
 
 
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   View, TouchableOpacity, StyleSheet,
-  ScrollView, Switch, Alert, ActivityIndicator,
+  ScrollView, Alert, ActivityIndicator,
   Modal, Share,
 } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -25,19 +30,15 @@ import { createSyncCode } from '../lib/chatService';
 import type { Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { HEADER_TOP } from '../constants/layout';
+import { isMfaEnabled } from '../lib/mfa';
+import { DEFAULT_LOCK_TIMER, LOCK_SETTINGS_KEY, parseLockTimer, type LockTimer } from '../lib/resumeLockPolicy';
 
 // ─────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────
 
-type DisappearTimer = 'off' | '5m' | '1h' | '24h' | '7d' | '30d' | '90d';
-type LockTimer      = '1m' | '5m' | '15m' | '30m' | 'never';
-
 interface VaultSettings {
-  disappearTimer:     DisappearTimer;
   lockTimer:          LockTimer;
-  screenshotAlert:    boolean;
-  incognitoKeyboard:  boolean;
 }
 // REMOVED: hidePreviewInApp / hideChatPreview. Both were written to SecureStore
 // and read by nothing — and "Hide message text in notification tray" described
@@ -50,16 +51,6 @@ interface VaultSettings {
 // Constants
 // ─────────────────────────────────────────────────────────────────
 
-const DISAPPEAR_OPTIONS: { label: string; value: DisappearTimer }[] = [
-  { label: 'Off',      value: 'off' },
-  { label: '5 min',   value: '5m'  },
-  { label: '1 hour',  value: '1h'  },
-  { label: '24 hours',value: '24h' },
-  { label: '7 days',  value: '7d'  },
-  { label: '30 days', value: '30d' },
-  { label: '90 days', value: '90d' },
-];
-
 const LOCK_OPTIONS: { label: string; value: LockTimer }[] = [
   { label: '1 minute',  value: '1m'    },
   { label: '5 minutes', value: '5m'    },
@@ -69,10 +60,7 @@ const LOCK_OPTIONS: { label: string; value: LockTimer }[] = [
 ];
 
 const DEFAULT_SETTINGS: VaultSettings = {
-  disappearTimer:    'off',
-  lockTimer:         '5m',
-  screenshotAlert:   true,
-  incognitoKeyboard: true,
+  lockTimer:         DEFAULT_LOCK_TIMER,
 };
 
 // ─────────────────────────────────────────────────────────────────
@@ -93,12 +81,12 @@ export default function VaultFeaturesScreen() {
   const [generatingCode,setGeneratingCode]= useState(false);
   const [codeCopied,    setCodeCopied]    = useState(false);
 
-  // Fake PIN modal
-
-  // Disappear picker modal
-  const [showDisappear, setShowDisappear] = useState(false);
   // Lock timer picker modal
   const [showLock,      setShowLock]      = useState(false);
+  // The relock only applies to a user with Device MFA on (the same condition
+  // as the cold-launch lock); say so rather than offer a timer that does nothing.
+  const [mfaOn,         setMfaOn]         = useState<boolean | null>(null);
+  useEffect(() => { isMfaEnabled().then(setMfaOn).catch(() => setMfaOn(false)); }, []);
 
   // ── Load settings ─────────────────────────────────────────────
   useEffect(() => {
@@ -107,8 +95,8 @@ export default function VaultFeaturesScreen() {
 
   const loadSettings = async () => {
     try {
-      const raw = await SecureStore.getItemAsync('vault_features_settings');
-      if (raw) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(raw) });
+      const raw = await SecureStore.getItemAsync(LOCK_SETTINGS_KEY);
+      setSettings({ lockTimer: parseLockTimer(raw) });
 
       const code   = await SecureStore.getItemAsync('vault_chat_code');
       const expiry = await SecureStore.getItemAsync('vault_chat_code_expiry');
@@ -127,13 +115,16 @@ export default function VaultFeaturesScreen() {
   };
 
   const saveSetting = async (key: keyof VaultSettings, value: any) => {
+    const prev = settings;
     const updated = { ...settings, [key]: value };
     setSettings(updated);
-    // Device-local preferences (no server enforcement layer).
-    await SecureStore.setItemAsync(
-      'vault_features_settings',
-      JSON.stringify(updated)
-    );
+    // Device-local; read by components/ResumeLock via services/lockService.
+    try {
+      await SecureStore.setItemAsync(LOCK_SETTINGS_KEY, JSON.stringify(updated));
+    } catch {
+      setSettings(prev);
+      Alert.alert('Not saved', 'The setting could not be saved. Try again.');
+    }
   };
 
   // ── Generate temp chat code ───────────────────────────────────
@@ -302,49 +293,14 @@ export default function VaultFeaturesScreen() {
           )}
         </View>
 
-        {/* ── 2. Disappearing Messages ── */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionIcon}>⏱️</Text>
-            <View>
-              <Text style={styles.sectionTitle}>Disappearing Messages</Text>
-              <Text style={styles.sectionDesc}>
-                Auto-delete all new messages after set time
-              </Text>
-            </View>
-          </View>
-
-          <TouchableOpacity
-            style={styles.pickerRow}
-            onPress={() => setShowDisappear(true)}
-          >
-            <Text style={styles.pickerLabel}>Default timer</Text>
-            <View style={styles.pickerValue}>
-              <Text style={styles.pickerValueText}>
-                {DISAPPEAR_OPTIONS.find(o => o.value === settings.disappearTimer)?.label}
-              </Text>
-              <Ionicons name="chevron-forward" size={18} color={scheme === 'light' ? c.textDim : '#9CA3AF'} />
-            </View>
-          </TouchableOpacity>
-
-          {settings.disappearTimer !== 'off' && (
-            <View style={styles.infoBanner}>
-              <Text style={styles.infoBannerText}>
-                ⏱️  All new messages will auto-delete after{' '}
-                {DISAPPEAR_OPTIONS.find(o => o.value === settings.disappearTimer)?.label}
-              </Text>
-            </View>
-          )}
-        </View>
-
-        {/* ── 4. Auto Screen Lock ── */}
+        {/* ── 2. Auto Screen Lock ── */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionIcon}>🔒</Text>
             <View>
               <Text style={styles.sectionTitle}>Auto Screen Lock</Text>
               <Text style={styles.sectionDesc}>
-                Lock app after inactivity
+                Ask for biometrics or your MPIN when you come back to the app after this long away
               </Text>
             </View>
           </View>
@@ -352,6 +308,8 @@ export default function VaultFeaturesScreen() {
           <TouchableOpacity
             style={styles.pickerRow}
             onPress={() => setShowLock(true)}
+            accessibilityRole="button"
+            accessibilityLabel={`Lock after: ${LOCK_OPTIONS.find(o => o.value === settings.lockTimer)?.label}`}
           >
             <Text style={styles.pickerLabel}>Lock after</Text>
             <View style={styles.pickerValue}>
@@ -361,42 +319,16 @@ export default function VaultFeaturesScreen() {
               <Ionicons name="chevron-forward" size={18} color={scheme === 'light' ? c.textDim : '#9CA3AF'} />
             </View>
           </TouchableOpacity>
+          {mfaOn === false && (
+            <Text style={[styles.sectionDesc, { marginTop: 10 }]}>
+              Turn on Device MFA in Settings → Security for this to take effect.
+            </Text>
+          )}
         </View>
 
-        {/* ── 5. Privacy toggles ── */}
+        {/* ── 3. Privacy ── */}
         <View style={styles.section}>
-          <Text style={styles.toggleSectionLabel}>PRIVACY SETTINGS</Text>
-
-          {[
-            {
-              key:   'screenshotAlert',
-              icon:  '📸',
-              title: 'Screenshot Alerts',
-              desc:  'Notify you when someone screenshots your status',
-            },
-            {
-              key:   'incognitoKeyboard',
-              icon:  '⌨️',
-              title: 'Incognito Keyboard',
-              desc:  'Prevent keyboard from learning your messages',
-            },
-          ].map(({ key, icon, title, desc }) => (
-            <View key={key} style={styles.toggleRow}>
-              <Text style={styles.toggleIcon}>{icon}</Text>
-              <View style={styles.toggleInfo}>
-                <Text numberOfLines={1} style={styles.toggleTitle}>{title}</Text>
-                <Text style={styles.toggleDesc}>{desc}</Text>
-              </View>
-              <Switch
-                value={settings[key as keyof VaultSettings] as boolean}
-                onValueChange={v => saveSetting(key as keyof VaultSettings, v)}
-                trackColor={{ false: '#E5E7EB', true: '#D1FAE5' }}
-                thumbColor={
-                  settings[key as keyof VaultSettings] ? c.primary : '#6B7280'
-                }
-              />
-            </View>
-          ))}
+          <Text style={styles.toggleSectionLabel}>PRIVACY</Text>
 
           <TouchableOpacity
             style={styles.exportRow}
@@ -413,34 +345,19 @@ export default function VaultFeaturesScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* ── 6. Export / Share ── */}
+        {/* ── 4. Vault ── */}
         <View style={styles.section}>
-          <Text style={styles.toggleSectionLabel}>EXPORT</Text>
-
-          <TouchableOpacity
-            style={styles.exportRow}
-            onPress={() => Alert.alert(
-              'Export Chat',
-              'Select a chat to export an encrypted transcript.',
-              [{ text: 'OK', onPress: () => router.push('/(tabs)/chats') }]
-            )}
-          >
-            <Text style={styles.exportIcon}>📧</Text>
-            <View style={styles.exportInfo}>
-              <Text style={styles.exportTitle}>Email Encrypted Transcript</Text>
-              <Text style={styles.exportDesc}>Share a chat history via email</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={scheme === 'light' ? c.textDim : '#9CA3AF'} />
-          </TouchableOpacity>
-
+          <Text style={styles.toggleSectionLabel}>VAULT</Text>
           <TouchableOpacity
             style={styles.exportRow}
             onPress={() => router.push('/vault')}
+            accessibilityRole="button"
+            accessibilityLabel="Vault: encrypted files stored on this phone"
           >
             <Text style={styles.exportIcon}>🔒</Text>
             <View style={styles.exportInfo}>
-              <Text style={styles.exportTitle}>Vault Backup</Text>
-              <Text style={styles.exportDesc}>Backup vault files to email</Text>
+              <Text style={styles.exportTitle}>Vault</Text>
+              <Text style={styles.exportDesc}>Encrypted files, stored on this phone only</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={scheme === 'light' ? c.textDim : '#9CA3AF'} />
           </TouchableOpacity>
@@ -448,48 +365,6 @@ export default function VaultFeaturesScreen() {
 
         <View style={{ height: 40 }} />
       </ScrollView>
-
-      {/* ── Disappearing messages picker ── */}
-      <Modal
-        visible={showDisappear}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowDisappear(false)}
-      >
-        <TouchableOpacity
-          style={modalStyles.overlay}
-          activeOpacity={1}
-          onPress={() => setShowDisappear(false)}
-        >
-          <View style={modalStyles.panel}>
-            <View style={modalStyles.handle} />
-            <Text style={modalStyles.title}>Disappearing Messages</Text>
-            {DISAPPEAR_OPTIONS.map(opt => (
-              <TouchableOpacity
-                key={opt.value}
-                style={[
-                  modalStyles.option,
-                  settings.disappearTimer === opt.value && modalStyles.optionActive,
-                ]}
-                onPress={() => {
-                  saveSetting('disappearTimer', opt.value);
-                  setShowDisappear(false);
-                }}
-              >
-                <Text style={[
-                  modalStyles.optionText,
-                  settings.disappearTimer === opt.value && modalStyles.optionTextActive,
-                ]}>
-                  {opt.label}
-                </Text>
-                {settings.disappearTimer === opt.value && (
-                  <Ionicons name="checkmark" size={16} color={c.primary} />
-                )}
-              </TouchableOpacity>
-            ))}
-          </View>
-        </TouchableOpacity>
-      </Modal>
 
       {/* ── Lock timer picker ── */}
       <Modal
@@ -509,6 +384,8 @@ export default function VaultFeaturesScreen() {
             {LOCK_OPTIONS.map(opt => (
               <TouchableOpacity
                 key={opt.value}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: settings.lockTimer === opt.value }}
                 style={[
                   modalStyles.option,
                   settings.lockTimer === opt.value && modalStyles.optionActive,

@@ -36,7 +36,7 @@ import { Stack, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
 import { PinPad } from '../components/PinPad';
-import { clearNotesKeyCache, decryptNotes, encryptNotes } from '../lib/notesCrypto';
+import { clearNotesKeyCache, decryptNotes, encryptNotes, hasDEK } from '../lib/notesCrypto';
 import { armNoteReminder, cancelNoteReminder } from '../lib/notesReminders';
 import {
   buildBundle, checkPassphrase, hasPassphrase, purgeExpired, restoreBundle,
@@ -191,15 +191,38 @@ export default function EncryptedNotesScreen() {
   const [bkHasPass, setBkHasPass] = useState(false);
   useEffect(() => { hasPassphrase().then(setBkHasPass).catch(() => {}); }, [showBackup]);
 
+  // WRITES ARE BLOCKED UNTIL THE STORE HAS BEEN READ (2026-10-04).
+  //
+  // loadNotes used to swallow every failure and leave notes = [], and the next
+  // save then sealed that empty-plus-one list over the blob it could not read —
+  // a missing key or a transient read error became the loss of every note.
+  // Every write goes through saveNotes, which now refuses unless the load
+  // actually succeeded (or there was nothing stored yet).
+  const [loadState, setLoadState] = useState<'loading' | 'ok' | 'failed'>('loading');
+  const [loadProblem, setLoadProblem] = useState<string | null>(null);
+  const loadOk = useRef(false);
+  const markLoad = (ok: boolean, problem: string | null = null) => {
+    loadOk.current = ok;
+    setLoadState(ok ? 'ok' : 'failed');
+    setLoadProblem(problem);
+  };
+
   useEffect(() => { loadNotes(); }, []);
 
   const loadNotes = async () => {
     try {
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
+      if (!raw) { setNotes([]); markLoad(true); return; }
       const dec = await decryptNotes(raw);
-      if (!dec) return; // sealed blob we can't open — don't clobber it
+      if (!dec) {
+        // Sealed blob we can't open — don't clobber it, and say why.
+        markLoad(false, (await hasDEK())
+          ? 'Your notes could not be decrypted on this device.'
+          : 'The key for your notes is missing on this device.');
+        return;
+      }
       const parsed: Note[] = JSON.parse(dec.text);
+      if (!Array.isArray(parsed)) throw new Error('not a notes list');
 
       // Honour the 30 days the trash promises. TRASH_DAYS was declared and
       // never read, so "30-Day Recovery" recovered forever: trashed notes and
@@ -213,6 +236,7 @@ export default function EncryptedNotesScreen() {
         );
       }
       setNotes(kept);
+      markLoad(true);
 
       // Re-arm alarms for anything still in the future. Alarms are OS-level and
       // notes are not: a restore (or a reinstall) brings back a note carrying a
@@ -231,12 +255,26 @@ export default function EncryptedNotesScreen() {
       if (!dec.wasEncrypted || expired > 0) {
         await AsyncStorage.setItem(STORAGE_KEY, await encryptNotes(JSON.stringify(kept)));
       }
-    } catch {}
+    } catch {
+      // Read/parse failure before the notes were in hand: block writes. A
+      // failure AFTER they loaded (re-arming, re-sealing) leaves them usable.
+      if (!loadOk.current) markLoad(false, 'Your notes could not be read.');
+    }
   };
 
-  const saveNotes = async (updated: Note[]) => {
-    setNotes(updated);
+  /** Seal and store. Returns false (and says why) when writing would overwrite
+   *  a store this screen could not read. Throws on a storage error. */
+  const saveNotes = async (updated: Note[]): Promise<boolean> => {
+    if (!loadOk.current) {
+      Alert.alert(
+        'Not saved',
+        'Your existing notes could not be opened, so saving is turned off to avoid overwriting them. Open Backup to recover the key, or try again later.',
+      );
+      return false;
+    }
     await AsyncStorage.setItem(STORAGE_KEY, await encryptNotes(JSON.stringify(updated)));
+    setNotes(updated);
+    return true;
   };
 
   // Challenge a locked note before anything of it is rendered. Same
@@ -327,9 +365,19 @@ export default function EncryptedNotesScreen() {
     ]);
   };
 
-  const removeAttachment = async (att: NoteAttachment) => {
-    await deleteAttachment(att.id);
+  // Removing only detaches it from the draft; the encrypted file is deleted
+  // when the note is SAVED without it. Deleting immediately meant Cancel left
+  // the saved note pointing at a file that no longer existed.
+  const removeAttachment = (att: NoteAttachment) => {
     setEdAttachments(prev => prev.filter(x => x.id !== att.id));
+  };
+
+  // Cancel: attachments added to this draft are referenced by nothing, so
+  // their encrypted files go; the saved note keeps exactly what it had.
+  const cancelEditor = () => {
+    const kept = new Set((editNote?.attachments ?? []).map(a => a.id));
+    edAttachments.filter(a => !kept.has(a.id)).forEach(a => { deleteAttachment(a.id).catch(() => {}); });
+    setShowEditor(false);
   };
 
   const openAttachmentFile = async (att: NoteAttachment) => {
@@ -356,26 +404,43 @@ export default function EncryptedNotesScreen() {
     setEdContent(edContent.slice(0, lineStart) + prefix + edContent.slice(lineStart));
   };
 
+  const savingNote = useRef(false);
   const saveNote = async () => {
     if (!edTitle.trim()) { Alert.alert('Error', 'Title required'); return; }
-    const now = Date.now();
-    const id = editNote ? editNote.id : `note_${now}`;
-    if (editNote) {
-      const updated = notes.map(n => n.id === editNote.id ? { ...n, title: edTitle.trim(), content: edContent, category: edCategory, tags: edTags, tagColor: edTagColor, isSensitive: edSensitive, isLocked: edLocked, attachments: edAttachments, reminder: edReminder, updatedAt: now } : n);
-      await saveNotes(updated);
-    } else {
-      const newNote: Note = {
-        id, title: edTitle.trim(), content: edContent,
-        category: edCategory, tags: edTags, tagColor: edTagColor,
-        isSensitive: edSensitive, isLocked: edLocked, attachments: edAttachments,
-        reminder: edReminder, createdAt: now, updatedAt: now,
-      };
-      await saveNotes([newNote, ...notes]);
+    if (savingNote.current) return;
+    savingNote.current = true;
+    try {
+      const now = Date.now();
+      const id = editNote ? editNote.id : `note_${now}`;
+      let saved: boolean;
+      if (editNote) {
+        const updated = notes.map(n => n.id === editNote.id ? { ...n, title: edTitle.trim(), content: edContent, category: edCategory, tags: edTags, tagColor: edTagColor, isSensitive: edSensitive, isLocked: edLocked, attachments: edAttachments, reminder: edReminder, updatedAt: now } : n);
+        saved = await saveNotes(updated);
+      } else {
+        const newNote: Note = {
+          id, title: edTitle.trim(), content: edContent,
+          category: edCategory, tags: edTags, tagColor: edTagColor,
+          isSensitive: edSensitive, isLocked: edLocked, attachments: edAttachments,
+          reminder: edReminder, createdAt: now, updatedAt: now,
+        };
+        saved = await saveNotes([newNote, ...notes]);
+      }
+      if (!saved) return;   // editor stays open; nothing was written
+      // Now that the note no longer references them, drop removed attachments.
+      const still = new Set(edAttachments.map(a => a.id));
+      (editNote?.attachments ?? []).filter(a => !still.has(a.id))
+        .forEach(a => { deleteAttachment(a.id).catch(() => {}); });
+      setShowEditor(false);
+      // Arm the OS alarm last, so a notifee failure never costs the user the save.
+      try {
+        if (edReminder) await armNoteReminder(id, edReminder, edTitle.trim(), edSensitive, edLocked);
+        else await cancelNoteReminder(id);
+      } catch { /* the note is saved; the alarm is best effort */ }
+    } catch (e: any) {
+      Alert.alert('Not saved', e?.message ?? 'Your note could not be saved. Try again.');
+    } finally {
+      savingNote.current = false;
     }
-    // Arm the OS alarm last, so a notifee failure never costs the user the save.
-    if (edReminder) await armNoteReminder(id, edReminder, edTitle.trim(), edSensitive, edLocked);
-    else await cancelNoteReminder(id);
-    setShowEditor(false);
   };
 
   const deleteNote = (id: string) => {
@@ -383,26 +448,34 @@ export default function EncryptedNotesScreen() {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Trash', style: 'destructive', onPress: async () => {
         const updated = notes.map(n => n.id === id ? { ...n, isDeleted: true, deletedAt: Date.now() } : n);
-        await saveNotes(updated);
+        if (!(await saveNotes(updated).catch(() => false))) return;
         // A trashed note must stop nagging, or its alarm outlives it by 30 days.
-        await cancelNoteReminder(id);
+        await cancelNoteReminder(id).catch(() => {});
       }},
     ]);
   };
 
   const restoreNote = async (id: string) => {
     const updated = notes.map(n => n.id === id ? { ...n, isDeleted: false, deletedAt: undefined } : n);
-    await saveNotes(updated);
+    if (!(await saveNotes(updated).catch(() => false))) return;
     // Put back the alarm trashing cancelled, if its time is still ahead.
     const n = updated.find(x => x.id === id);
     if (n?.reminder) await armNoteReminder(n.id, n.reminder, n.title, n.isSensitive, n.isLocked);
   };
 
-  const permanentDelete = async (id: string) => {
+  // Confirmed: this is the one delete in the vault with no way back. The note
+  // is removed from the store FIRST, so a failed write never leaves a note
+  // whose attachments are already gone.
+  const permanentDelete = (id: string) => {
     const gone = notes.find(n => n.id === id);
-    if (gone?.attachments?.length) await Promise.all(gone.attachments.map(a => deleteAttachment(a.id)));
-    await cancelNoteReminder(id);
-    await saveNotes(notes.filter(n => n.id !== id));
+    Alert.alert('Delete forever?', `“${gone?.title ?? 'This note'}” and its attachments will be erased. This cannot be undone.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete forever', style: 'destructive', onPress: async () => {
+        if (!(await saveNotes(notes.filter(n => n.id !== id)).catch(() => false))) return;
+        if (gone?.attachments?.length) await Promise.all(gone.attachments.map(a => deleteAttachment(a.id).catch(() => {})));
+        await cancelNoteReminder(id).catch(() => {});
+      }},
+    ]);
   };
 
   // Password generator — CSPRNG (@noble randomBytes) with rejection sampling so
@@ -453,6 +526,9 @@ export default function EncryptedNotesScreen() {
   // sent — can open the vault, including from the server's side of a backup.
 
   const savePassphrase = async () => {
+    // With the notes unreadable, the key on this device may be a stand-in;
+    // wrapping it would replace the backup copy of the real one.
+    if (loadState === 'failed') { Alert.alert('Recover first', 'Your notes could not be opened. Recover the key with your existing passphrase before setting a new one.'); return; }
     if (bkPass !== bkPass2) { Alert.alert('Passphrases differ', 'The two entries must match.'); return; }
     setBkBusy(true);
     try {
@@ -469,6 +545,7 @@ export default function EncryptedNotesScreen() {
 
   // Write a self-contained encrypted file and hand it to the share sheet.
   const exportBundle = async () => {
+    if (loadState === 'failed') { Alert.alert('Nothing to export', 'Your notes could not be opened on this device, so there is nothing safe to export.'); return; }
     if (!bkPass) { Alert.alert('Passphrase needed', 'Enter the passphrase to seal this export.'); return; }
     setBkBusy(true);
     try {
@@ -509,8 +586,10 @@ export default function EncryptedNotesScreen() {
           [
             { text: 'Cancel', style: 'cancel' },
             { text: 'Replace', style: 'destructive', onPress: async () => {
-              const f = await restoreBundle(bkPass, JSON.parse(raw), true);
-              if (f.status === 'ok') { clearNotesKeyCache(); await loadNotes(); setShowBackup(false); Alert.alert('Restored', `Notes and ${f.attachments} attachment(s) restored.`); }
+              try {
+                const f = await restoreBundle(bkPass, JSON.parse(raw), true);
+                if (f.status === 'ok') { clearNotesKeyCache(); await loadNotes(); setShowBackup(false); Alert.alert('Restored', `Notes and ${f.attachments} attachment(s) restored.`); }
+              } catch (e: any) { Alert.alert('Restore failed', e?.message ?? 'Try again'); }
             }},
           ],
         );
@@ -542,9 +621,11 @@ export default function EncryptedNotesScreen() {
           [
             { text: 'Cancel', style: 'cancel' },
             { text: 'Replace', style: 'destructive', onPress: async () => {
-              await restoreKeyFromWrap(bkPass, true);
-              clearNotesKeyCache(); await loadNotes(); setShowBackup(false);
-              Alert.alert('Key recovered', 'Your notes should be readable again.');
+              try {
+                await restoreKeyFromWrap(bkPass, true);
+                clearNotesKeyCache(); await loadNotes(); setShowBackup(false);
+                Alert.alert('Key recovered', 'Your notes should be readable again.');
+              } catch (e: any) { Alert.alert('Could not recover', e?.message ?? 'Try again'); }
             }},
           ],
         );
@@ -608,8 +689,8 @@ export default function EncryptedNotesScreen() {
               onComplete={(v) => submitPin(v)}
               error={!!pinErr}
             />
-            {!!pinErr && <Text style={{ color: '#ff6b6b', marginTop: 12 }}>{pinErr}</Text>}
-            <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 20 }}>
+            {!!pinErr && <Text style={{ color: colors.danger, marginTop: 12 }} accessibilityLiveRegion="polite">{pinErr}</Text>}
+            <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 20 }} accessibilityRole="button">
               <Text style={{ color: colors.textDim }}>Cancel</Text>
             </TouchableOpacity>
           </>
@@ -642,6 +723,15 @@ export default function EncryptedNotesScreen() {
           <Ionicons name="trash-outline" size={18} color={colors.text} />
         </TouchableOpacity>
       </View>
+
+      {loadState === 'failed' && (
+        <TouchableOpacity style={s.loadFail} onPress={() => setShowBackup(true)} accessibilityRole="button" accessibilityLiveRegion="polite">
+          <Text style={{ color: colors.danger, fontWeight: '700' }}>{loadProblem}</Text>
+          <Text style={{ color: colors.textDim, marginTop: 4 }}>
+            Saving is off so nothing overwrites them. Tap to open Backup and recover the key with your passphrase.
+          </Text>
+        </TouchableOpacity>
+      )}
 
       {/* Search */}
       <View style={s.searchBar}>
@@ -722,11 +812,11 @@ export default function EncryptedNotesScreen() {
       </TouchableOpacity>
 
       {/* Note Editor Modal */}
-      <Modal visible={showEditor} animationType="slide">
+      <Modal visible={showEditor} animationType="slide" onRequestClose={cancelEditor}>
         <KeyboardSafe keyboardOnly>
         <View style={s.editorScreen}>
           <View style={s.editorHeader}>
-            <TouchableOpacity onPress={() => setShowEditor(false)}>
+            <TouchableOpacity onPress={cancelEditor} accessibilityRole="button">
               <Text style={s.editorCancel}>Cancel</Text>
             </TouchableOpacity>
             <Text style={s.editorTitle}>{editNote ? 'Edit Note' : 'New Note'}</Text>
@@ -734,7 +824,7 @@ export default function EncryptedNotesScreen() {
               <TouchableOpacity onPress={() => setEdPreview(p => !p)}>
                 <Text style={[s.editorCancel, edPreview && { color: colors.primary }]}>{edPreview ? 'Edit' : 'Preview'}</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={saveNote}>
+              <TouchableOpacity onPress={saveNote} accessibilityRole="button" accessibilityState={{ disabled: loadState !== 'ok' }}>
                 <Text style={s.editorSave}>Save</Text>
               </TouchableOpacity>
             </View>
@@ -911,7 +1001,7 @@ export default function EncryptedNotesScreen() {
       </Modal>
 
       {/* Secure Trash Modal */}
-      <Modal visible={showTrash} animationType="slide">
+      <Modal visible={showTrash} animationType="slide" onRequestClose={() => setShowTrash(false)}>
         <View style={s.editorScreen}>
           <View style={s.editorHeader}>
             <TouchableOpacity onPress={() => setShowTrash(false)} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
@@ -933,7 +1023,7 @@ export default function EncryptedNotesScreen() {
                   <TouchableOpacity style={s.trashRestore} onPress={() => restoreNote(n.id)}>
                     <Text style={{ color: colors.primary, fontWeight: '600', fontSize: 13 }}>Restore</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={s.trashDelete} onPress={() => permanentDelete(n.id)}>
+                  <TouchableOpacity style={s.trashDelete} onPress={() => permanentDelete(n.id)} accessibilityRole="button" accessibilityLabel={`Delete ${n.title} forever`}>
                     <Text style={{ color: colors.danger, fontWeight: '600', fontSize: 13 }}>Delete Forever</Text>
                   </TouchableOpacity>
                 </View>
@@ -1083,6 +1173,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   headerSub: { fontSize: 10, color: c.textDim, marginTop: 1 },
   trashBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: c.surfaceSolid, alignItems: 'center', justifyContent: 'center' },
 
+  loadFail: { marginHorizontal: 12, marginTop: 8, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: c.danger, backgroundColor: c.glassSoft },
   searchBar: { flexDirection: 'row', alignItems: 'center', gap: 8, margin: 12, backgroundColor: c.glassSoft, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: c.glassStroke },
   searchIcon: { fontSize: 16 },
   searchInput: { flex: 1, color: c.text, fontSize: 14 },

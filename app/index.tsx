@@ -46,9 +46,11 @@ export default function IndexScreen() {
         if (await shouldCheckRestore()) { router.replace("/restore-backup" as any); return; }
 
         router.replace("/(tabs)/chats" as any);
-      } catch {
+      } catch (e) {
         // No fallback redirect: the root already routes a failed gate to
         // /onboard, and a second replace from here is the race this removes.
+        // Logged, though: a throw here leaves the splash fallback on screen.
+        console.warn('[index] launch routing failed', e);
       }
     })();
   }, []);
@@ -83,6 +85,9 @@ export default function IndexScreen() {
         source={require("../assets/images/splash-icon.png")}
         style={S.mark}
         resizeMode="contain"
+        accessible={false}
+        accessibilityElementsHidden
+        importantForAccessibility="no"
       />
     </View>
   );

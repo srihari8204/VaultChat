@@ -16,7 +16,7 @@
 // user could not read would be worth nothing, which is the whole reason
 // caddy/public/terms.html is served at a stable URL.
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -29,6 +29,11 @@ import { acceptTerms, fetchTermsState, termsAreAnUpdate, termsOutstanding, type 
 export function TermsGate({ children }: { children: React.ReactNode }) {
   useLang();   // re-render if the language changes while this is on screen
   const [state, setState] = useState<TermsState | null>(null);
+  // The AppState listener below is registered once; it reads the CURRENT
+  // answer through this ref. It used to read `state` from the mount render —
+  // always null — so its "already outstanding?" test never saw a real answer.
+  const stateRef = useRef<TermsState | null>(null);
+  stateRef.current = state;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,8 +57,8 @@ export function TermsGate({ children }: { children: React.ReactNode }) {
     // moment there is one. An answer includes "nothing outstanding" — this
     // stops as soon as the server says anything at all.
     let delay = 1500;
-    const ask = () => {
-      fetchTermsState()
+    const ask = (force = false) => {
+      fetchTermsState(force)
         .then((s) => {
           if (!alive) return;
           if (s) { setState(s); return; }   // an answer, of either kind — done
@@ -61,7 +66,7 @@ export function TermsGate({ children }: { children: React.ReactNode }) {
           // endpoint. Ask again, but give up climbing past half a minute so an
           // app that is simply signed out is not polling forever.
           delay = Math.min(delay * 2, 30_000);
-          timer = setTimeout(ask, delay);
+          timer = setTimeout(() => ask(), delay);
         })
         .catch(() => {});
     };
@@ -69,8 +74,14 @@ export function TermsGate({ children }: { children: React.ReactNode }) {
 
     // Coming back to the foreground is the other moment the answer can change —
     // a session established in another tab, a token refreshed, terms republished.
+    // force: without it fetchTermsState returns the answer cached at the first
+    // ask, so terms republished while the app was running were never seen.
+    // The retry ladder restarts from here rather than running twice.
     const sub = AppState.addEventListener('change', (st) => {
-      if (st === 'active' && alive && !termsOutstanding(state)) ask();
+      if (st !== 'active' || !alive || termsOutstanding(stateRef.current)) return;
+      if (timer) { clearTimeout(timer); timer = null; }
+      delay = 1500;
+      ask(true);
     });
 
     return () => {
@@ -78,7 +89,6 @@ export function TermsGate({ children }: { children: React.ReactNode }) {
       if (timer) clearTimeout(timer);
       sub.remove();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const onAccept = useCallback(async () => {

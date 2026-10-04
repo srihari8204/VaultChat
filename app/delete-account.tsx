@@ -12,18 +12,27 @@
 //   • "why are you leaving" is optional feedback, never a gate.
 //
 // The final native confirm is still there. Two deliberate acts, no more.
+//
+// RE-AUTHENTICATION (2026-10-04). Typing the number back is a confirmation,
+// not proof of who is holding the phone (lib/confirmIdentity.ts says so), and
+// the number is on the profile for anyone with the unlocked phone to read. The
+// account MPIN is now checked against the server (POST /auth/mpin/verify, the
+// same check the lock screen uses) before DELETE /user/account is sent.
+// ponytail: client-side gate — the DELETE endpoint itself does not yet demand a
+// fresh MPIN proof; binding one to the request needs a backend change.
 
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Platform, ScrollView,
+  ActivityIndicator, Alert, ScrollView,
   StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { HEADER_TOP } from '../constants/layout';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
-import { api } from '../lib/api';
+import { api, getCachedUser } from '../lib/api';
+import { onboardingError, verifyMpinRemote } from '../lib/onboarding';
 import { profileFromProtobuf } from '../lib/userProfilePolicy';
 import { identityMatches, type AccountIdentity } from '../lib/confirmIdentity';
 import { deleteAccount } from '../lib/chatService';
@@ -58,6 +67,9 @@ export default function DeleteAccountScreen() {
   const S = useS();
 
   const [me, setMe] = useState<AccountIdentity | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [mpin, setMpin] = useState('');
+  const [authErr, setAuthErr] = useState<string | null>(null);
   const [loadErr, setLoadErr] = useState(false);
   const [typed, setTyped] = useState('');
   const [reason, setReason] = useState<string | null>(null);
@@ -74,6 +86,11 @@ export default function DeleteAccountScreen() {
       // be deleted. Rendering the form anyway leaves a button that can never
       // arm; the retry at least has a way forward.
       if (!id.phone && !id.email && !id.vaultId) { setLoadErr(true); return; }
+      const uid = u?.id || u?.userId || (await getCachedUser().catch(() => null))?.id || null;
+      // No user id means the MPIN cannot be checked — a failed load, not a
+      // form that skips re-authentication.
+      if (!uid) { setLoadErr(true); return; }
+      setUserId(String(uid));
       setMe(id);
     } catch {
       setLoadErr(true);
@@ -87,10 +104,21 @@ export default function DeleteAccountScreen() {
   const mode: 'phone' | 'email' | 'vaultId' = me?.phone ? 'phone' : me?.email ? 'email' : 'vaultId';
   const byPhone = mode === 'phone';
 
-  const armed = useMemo(() => identityMatches(me, typed), [me, typed]);
+  const identityOk = useMemo(() => identityMatches(me, typed), [me, typed]);
+  const armed = identityOk && /^\d{6}$/.test(mpin);
 
   const run = useCallback(async () => {
+    if (!userId) return;
     setBusy(true);
+    setAuthErr(null);
+    try {
+      await verifyMpinRemote(userId, mpin);
+    } catch (e: any) {
+      setBusy(false);
+      setMpin('');
+      setAuthErr(onboardingError(e, 'Incorrect MPIN. The account was not deleted.'));
+      return;
+    }
     try {
       await deleteAccount(reason ?? undefined);
       // Order matters: the account is gone, so these are best-effort cleanups
@@ -107,7 +135,7 @@ export default function DeleteAccountScreen() {
       setBusy(false);
       Alert.alert('Delete failed', e?.message ?? 'Check your connection and try again.');
     }
-  }, [reason]);
+  }, [reason, userId, mpin]);
 
   const confirm = useCallback(() => {
     if (!armed || busy) return;
@@ -153,7 +181,7 @@ export default function DeleteAccountScreen() {
         </Text>
 
         {loadErr ? (
-          <TouchableOpacity style={S.retry} onPress={load} activeOpacity={0.8}>
+          <TouchableOpacity style={S.retry} onPress={load} activeOpacity={0.8} accessibilityRole="button">
             <Ionicons name="refresh" size={18} color={colors.primary} />
             <Text style={S.retryTxt}>Couldn’t load your account. Tap to retry.</Text>
           </TouchableOpacity>
@@ -175,6 +203,7 @@ export default function DeleteAccountScreen() {
               autoCapitalize="none"
               autoCorrect={false}
               editable={!busy}
+              accessibilityLabel={mode === 'phone' ? 'Your phone number' : mode === 'email' ? 'Your email' : 'Your VaultID'}
             />
             <Text style={S.hint}>
               {mode === 'phone'
@@ -184,6 +213,26 @@ export default function DeleteAccountScreen() {
                   : 'Type your VaultID — it is on your Profile — to turn on the button below.'}
             </Text>
 
+            {identityOk && (
+              <>
+                <Text style={S.sectionLabel}>ENTER YOUR MPIN</Text>
+                <TextInput
+                  style={S.input}
+                  value={mpin}
+                  onChangeText={(t) => { setMpin(t.replace(/\D/g, '').slice(0, 6)); setAuthErr(null); }}
+                  placeholder="6-digit MPIN"
+                  placeholderTextColor={colors.textFaint}
+                  keyboardType="number-pad"
+                  secureTextEntry
+                  maxLength={6}
+                  editable={!busy}
+                  accessibilityLabel="Your 6-digit MPIN"
+                />
+                <Text style={S.hint}>The MPIN you sign in with. It proves this is you before anything is erased.</Text>
+                {!!authErr && <Text style={S.err} accessibilityLiveRegion="polite">{authErr}</Text>}
+              </>
+            )}
+
             <Text style={S.sectionLabel}>WHY ARE YOU LEAVING? (OPTIONAL)</Text>
             <View style={S.chips}>
               {REASONS.map(r => (
@@ -191,7 +240,9 @@ export default function DeleteAccountScreen() {
                   key={r}
                   style={[S.chip, reason === r && S.chipOn]}
                   onPress={() => setReason(reason === r ? null : r)}
-                  activeOpacity={0.8}>
+                  activeOpacity={0.8}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: reason === r }}>
                   <Text style={[S.chipTxt, reason === r && S.chipTxtOn]}>{r}</Text>
                 </TouchableOpacity>
               ))}
@@ -201,7 +252,9 @@ export default function DeleteAccountScreen() {
               style={[S.cta, (!armed || busy) && S.ctaOff]}
               onPress={confirm}
               disabled={!armed || busy}
-              activeOpacity={0.85}>
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !armed || busy, busy }}>
               {busy ? <ActivityIndicator color="#fff" />
                     : <Text style={S.ctaTxt}>Delete my account</Text>}
             </TouchableOpacity>
@@ -237,6 +290,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   sectionLabel: { color: c.textDim, fontSize: 12, fontWeight: '700', letterSpacing: 1, paddingTop: 24, paddingBottom: 8 },
   input: { minHeight: 52, borderRadius: 14, paddingHorizontal: 16, backgroundColor: c.glassSoft, color: c.text, fontSize: 17, fontWeight: '700' },
   hint: { color: c.textFaint, fontSize: 12, marginTop: 8, lineHeight: 17 },
+  err: { color: c.danger, fontSize: 13, marginTop: 8, fontWeight: '600' },
 
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20, backgroundColor: c.glassSoft, borderWidth: 1, borderColor: 'transparent' },

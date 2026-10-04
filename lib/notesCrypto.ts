@@ -14,10 +14,17 @@ import { Buffer } from 'buffer';
 const DEK_KEY = 'vc_notes_dek_v1';
 let dekCache: Uint8Array | null = null;
 
-async function getDEK(): Promise<Uint8Array> {
+// A key is only ever CREATED on the encrypt paths. Reading (decrypt) with no key
+// used to mint a fresh one: the notes failed to open, and the new key then sat
+// in SecureStore, so recovering the real key from a backup was refused as
+// "this device already has a key" and the next save sealed over the old notes
+// for good (2026-10-04). Now a missing key on read is a failure the screen
+// reports, and nothing is written.
+async function getDEK(create = true): Promise<Uint8Array | null> {
   if (dekCache) return dekCache;
   let hex = await SecureStore.getItemAsync(DEK_KEY);
   if (!hex) {
+    if (!create) return null;
     const dek = randomBytes(32);
     hex = bytesToHex(dek);
     await SecureStore.setItemAsync(DEK_KEY, hex);
@@ -36,7 +43,7 @@ function isCipher(o: any): o is NotesCipher {
 
 // Encrypt a plaintext string → a JSON string holding the sealed blob.
 export async function encryptNotes(plaintext: string): Promise<string> {
-  const key = await getDEK();
+  const key = (await getDEK())!;
   const iv = randomBytes(12);
   const ct = gcm(key, iv).encrypt(new TextEncoder().encode(plaintext));
   const payload: NotesCipher = {
@@ -58,7 +65,8 @@ export async function decryptNotes(raw: string): Promise<{ text: string; wasEncr
   if (!isCipher(parsed)) return { text: raw, wasEncrypted: false };
 
   try {
-    const key = await getDEK();
+    const key = await getDEK(false);
+    if (!key) return null;   // the key is missing — never invent one here
     const iv = Buffer.from(parsed.iv, 'base64');
     const ct = Buffer.from(parsed.ct, 'base64');
     const pt = gcm(key, iv).decrypt(ct);
@@ -73,7 +81,7 @@ export async function decryptNotes(raw: string): Promise<{ text: string; wasEncr
 // to disk as a small JSON envelope {v,iv,ct(base64)}. Returns the envelope string
 // to persist via FileSystem.writeAsStringAsync (UTF-8).
 export async function encryptBytesToString(bytes: Uint8Array): Promise<string> {
-  const key = await getDEK();
+  const key = (await getDEK())!;
   const iv = randomBytes(12);
   const ct = gcm(key, iv).encrypt(bytes);
   const payload: NotesCipher = {
@@ -90,7 +98,8 @@ export async function decryptStringToBytes(raw: string): Promise<Uint8Array | nu
   try { parsed = JSON.parse(raw); } catch { return null; }
   if (!isCipher(parsed)) return null;
   try {
-    const key = await getDEK();
+    const key = await getDEK(false);
+    if (!key) return null;
     const iv = Buffer.from(parsed.iv, 'base64');
     const ct = Buffer.from(parsed.ct, 'base64');
     return gcm(key, iv).decrypt(ct);
@@ -110,7 +119,7 @@ export function clearNotesKeyCache(): void { dekCache = null; }
 
 /** The raw DEK as hex, creating it if this install has none. */
 export async function exportDEKHex(): Promise<string> {
-  return bytesToHex(await getDEK());
+  return bytesToHex((await getDEK())!);
 }
 
 /**

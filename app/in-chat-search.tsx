@@ -4,14 +4,18 @@
 // holds ciphertext and never sees the query or the content. Covers the chat
 // history cached on this device. Debounced, highlighted, Obsidian colors.
 //
-// NOTE: tapping a result returns to the chat. Scroll-to-message requires
-// pagination-aware loading in app/chat.tsx (the history is keyset-paginated,
-// so an old match may not be in memory) — tracked as a follow-up rather than
-// faked here.
+// Tapping a result hands the message id to the chat (lib/chatJump), which
+// scrolls to it on focus.
+//
+// LOCKED CHATS (2026-10-04): this screen is reachable without opening the chat
+// (Chats list avatar → contact-info → Search), so it applies the chat's own
+// lock — the same factors app/chat.tsx enforces — before any search runs. An
+// unreadable lock table fails closed.
 
 import { brandAlpha, type Palette } from '../constants/theme';
 import React, { useState, useEffect, useRef, useCallback , useMemo} from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator } from 'react-native';
+import { getLock, pinRetryAfterMs, verifyBiometric, verifyPin, type LockedChat } from '../lib/chatLock';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
@@ -39,6 +43,52 @@ export default function InChatSearchScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // The chat's lock, satisfied before anything is searched.
+  const [gate, setGate] = useState<'checking' | 'locked' | 'unreadable' | 'open'>('checking');
+  const [lockInfo, setLockInfo] = useState<LockedChat | null>(null);
+  const [lockBio, setLockBio] = useState(false);   // 'both': biometric half done
+  const [lockPin, setLockPin] = useState('');
+  const [lockErr, setLockErr] = useState<string | null>(null);
+
+  const tryBiometric = useCallback(async (lock: LockedChat) => {
+    if (!(await verifyBiometric('Unlock this chat to search it'))) return;
+    if (lock.lockMethod === 'both') { setLockBio(true); return; }
+    setGate('open');
+  }, []);
+
+  useEffect(() => {
+    let cancel = false;
+    setGate('checking');
+    (async () => {
+      if (!chatId) { setGate('open'); return; }   // nothing to search anyway
+      let lock: LockedChat | null;
+      try { lock = await getLock(chatId); }
+      catch { if (!cancel) setGate('unreadable'); return; }   // fail closed
+      if (cancel) return;
+      setLockInfo(lock); setLockBio(false); setLockPin(''); setLockErr(null);
+      if (!lock) { setGate('open'); return; }
+      setGate('locked');
+      if (lock.lockMethod !== 'pin') await tryBiometric(lock);
+    })();
+    return () => { cancel = true; };
+  }, [chatId, tryBiometric]);
+
+  const submitLockPin = () => {
+    if (!lockInfo) return;
+    if (!verifyPin(lockInfo, lockPin)) {
+      const wait = pinRetryAfterMs(lockInfo);
+      setLockPin('');
+      setLockErr(wait > 0 ? `Too many attempts. Try again in ${Math.ceil(wait / 1000)} s.` : 'Incorrect PIN');
+      return;
+    }
+    // The PIN is the SECOND factor on a 'both' chat, never the only one.
+    if (lockInfo.lockMethod === 'both' && !lockBio) {
+      setLockErr('This chat needs biometrics too — tap “Use biometrics”.');
+      return;
+    }
+    setLockPin(''); setLockErr(null); setGate('open');
+  };
+
   // Debounced server search. A monotonically increasing reqSeq guards
   // against out-of-order responses overwriting a newer query's results.
   useEffect(() => {
@@ -47,7 +97,7 @@ export default function InChatSearchScreen() {
     // this inside the timer leaves a 300 ms window where stale results can win.
     const seq = ++reqSeq.current;
     const term = query.trim();
-    if (!chatId || !term) { setResults([]); setLoading(false); setError(null); return; }
+    if (!chatId || !term || gate !== 'open') { setResults([]); setLoading(false); setError(null); return; }
     setLoading(true);
     debounce.current = setTimeout(async () => {
       try {
@@ -60,13 +110,14 @@ export default function InChatSearchScreen() {
       }
     }, 300);
     return () => { if (debounce.current) clearTimeout(debounce.current); };
-  }, [query, chatId]);
+  }, [query, chatId, gate]);
 
-  // Auto-focus the input on entry.
+  // Auto-focus the input once the chat is open to search.
   useEffect(() => {
+    if (gate !== 'open') return;
     const t = setTimeout(() => inputRef.current?.focus(), 300);
     return () => clearTimeout(t);
-  }, []);
+  }, [gate]);
 
   const formatTime = useCallback((iso: string) => {
     try {
@@ -106,7 +157,14 @@ export default function InChatSearchScreen() {
   };
 
   const renderItem = ({ item }: { item: InChatMessageHit }) => (
-    <TouchableOpacity style={s.resultCard} activeOpacity={0.7} onPress={() => onTapResult(item.id)}>
+    <TouchableOpacity
+      style={s.resultCard}
+      activeOpacity={0.7}
+      onPress={() => onTapResult(item.id)}
+      accessibilityRole="button"
+      accessibilityLabel={`${item.senderName || 'Unknown'}, ${formatTime(item.createdAt)}: ${item.content}`}
+      accessibilityHint="Opens the chat at this message"
+    >
       <View style={s.resultHeader}>
         <Text style={s.senderName} numberOfLines={1}>{item.senderName || 'Unknown'}</Text>
         <Text style={s.timestamp}>{formatTime(item.createdAt)}</Text>
@@ -117,13 +175,78 @@ export default function InChatSearchScreen() {
 
   const hasQuery = query.trim().length > 0;
 
+  if (gate !== 'open') {
+    const m = lockInfo?.lockMethod;
+    return (
+      <View style={s.root}>
+        <AuroraBackground />
+        <Stack.Screen options={{ headerShown: false }} />
+        <View style={s.header}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
+            <Ionicons name="arrow-back" size={24} color={colors.text} />
+          </TouchableOpacity>
+        </View>
+        <View style={s.center}>
+          {gate === 'checking' ? <ActivityIndicator size="large" color={colors.primary} /> : (
+            <>
+              <Ionicons name="lock-closed" size={48} color={colors.textDim} />
+              <Text style={s.emptyTitle}>{gate === 'unreadable' ? 'Can’t search this chat' : 'This chat is locked'}</Text>
+              <Text style={s.emptySubtitle}>
+                {gate === 'unreadable'
+                  ? 'The chat lock settings could not be read, so this chat cannot be searched. Go back and try again.'
+                  : m === 'both' ? 'Unlock it with biometrics and its PIN to search it.'
+                  : m === 'biometric' ? 'Unlock it with biometrics to search it.'
+                  : 'Enter its PIN to search it.'}
+              </Text>
+              {gate === 'locked' && lockInfo && (
+                <>
+                  {(m === 'biometric' || m === 'both') && !lockBio && (
+                    <TouchableOpacity style={s.unlockBtn} onPress={() => tryBiometric(lockInfo)} accessibilityRole="button">
+                      <Text style={s.unlockTxt}>Use biometrics</Text>
+                    </TouchableOpacity>
+                  )}
+                  {!!lockInfo.pinHash && (
+                    <>
+                      <TextInput
+                        style={s.pinInput}
+                        value={lockPin}
+                        onChangeText={(t) => { setLockPin(t.replace(/\D/g, '').slice(0, 8)); setLockErr(null); }}
+                        keyboardType="number-pad"
+                        secureTextEntry
+                        maxLength={8}
+                        placeholder="Chat PIN"
+                        placeholderTextColor={colors.textFaint}
+                        onSubmitEditing={submitLockPin}
+                        accessibilityLabel="Chat PIN"
+                      />
+                      <TouchableOpacity
+                        style={[s.unlockBtn, lockPin.length < 4 && { opacity: 0.5 }]}
+                        onPress={submitLockPin}
+                        disabled={lockPin.length < 4}
+                        accessibilityRole="button"
+                        accessibilityState={{ disabled: lockPin.length < 4 }}
+                      >
+                        <Text style={s.unlockTxt}>Unlock</Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
+                  {!!lockErr && <Text style={[s.emptySubtitle, { color: colors.danger }]} accessibilityLiveRegion="polite">{lockErr}</Text>}
+                </>
+              )}
+            </>
+          )}
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={s.root}>
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={s.header}>
-        <TouchableOpacity accessibilityLabel="Go back" onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
 
@@ -141,7 +264,7 @@ export default function InChatSearchScreen() {
             returnKeyType="search"
           />
           {query.length > 0 && (
-            <TouchableOpacity accessibilityLabel="Clear search" onPress={() => setQuery('')} hitSlop={8}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Clear search" onPress={() => setQuery('')} hitSlop={8}>
               <Ionicons name="close-circle" size={18} color={colors.textDim} />
             </TouchableOpacity>
           )}
@@ -256,4 +379,10 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   timestamp: { color: c.textFaint, fontSize: 11 },
   msgText: { color: c.textDim, fontSize: 14, lineHeight: 20 },
   highlight: { color: c.text, backgroundColor: brandAlpha(0.28), fontWeight: '700' },
+  unlockBtn: { marginTop: 16, minHeight: 48, minWidth: 200, paddingHorizontal: 24, borderRadius: 12, backgroundColor: c.primary, justifyContent: 'center', alignItems: 'center' },
+  unlockTxt: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  pinInput: {
+    marginTop: 16, minWidth: 200, minHeight: 48, borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke,
+    backgroundColor: c.glassSoft, color: c.text, fontSize: 20, letterSpacing: 6, textAlign: 'center', paddingHorizontal: 12,
+  },
 });
