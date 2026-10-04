@@ -160,6 +160,9 @@ export default function FamilyAddScreen() {
         style={[s.row, isMember && { opacity: 0.5 }]}
         onPress={() => toggle(item.userId)}
         activeOpacity={isMember ? 1 : 0.7}
+        accessibilityRole="checkbox"
+        accessibilityLabel={isMember ? `${item.name}, already a member` : item.name}
+        accessibilityState={{ checked: sel, disabled: isMember }}
       >
         <Avatar
           ring
@@ -204,7 +207,7 @@ export default function FamilyAddScreen() {
       {/* The list below only shows people you already have a DM with (same
           source as new-chat). Address-book discovery lives on /contacts —
           without this row a fresh user sees an empty list and a dead end. */}
-      <TouchableOpacity onPress={() => router.push('/contacts' as any)} style={s.abRow}>
+      <TouchableOpacity onPress={() => router.push('/contacts' as any)} style={s.abRow} accessibilityRole="button">
         <Ionicons name="book-outline" size={18} color={colors.primary} />
         <Text style={[s.abTxt, { color: colors.primary }]}>Find contacts from address book</Text>
         <Ionicons name="chevron-forward" size={16} color={colors.textDim} />
@@ -232,7 +235,7 @@ export default function FamilyAddScreen() {
       )}
 
       {/* Fallback for people who aren't on crazzychat / not yet a contact. */}
-      <TouchableOpacity onPress={shareCode} style={s.codeRow} activeOpacity={0.7}>
+      <TouchableOpacity onPress={shareCode} style={s.codeRow} activeOpacity={0.7} accessibilityRole="button">
         <Ionicons name="key-outline" size={18} color={colors.primary} />
         <Text style={s.codeTxt}>Not in your contacts? Share an invite code</Text>
       </TouchableOpacity>
@@ -240,6 +243,8 @@ export default function FamilyAddScreen() {
       <TouchableOpacity
         onPress={add}
         disabled={!selected.size || busy}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: !selected.size || busy, busy }}
         style={[s.cta, { backgroundColor: selected.size && !busy ? colors.brandOnLight : colors.border }]}
       >
         {busy

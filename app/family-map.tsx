@@ -83,6 +83,9 @@ export default function FamilyMapScreen() {
   const [me, setMe] = useState<string | null>(null);
   const [members, setMembers] = useState<CircleMember[]>([]);
   const [membersLoaded, setMembersLoaded] = useState(false);
+  /** The roster request failed — shown with a Retry, not an endless spinner. */
+  const [membersFailed, setMembersFailed] = useState(false);
+  const [membersTry, setMembersTry] = useState(0);
   const [presences, setPresences] = useState<Record<string, MemberPresence>>({});
   const [focusId, setFocusId] = useState<string | null>(null);
   // Follow mode (spec: Follow member). Null = free map interaction. Seeded
@@ -145,6 +148,18 @@ export default function FamilyMapScreen() {
     return () => { live = false; };
   }, [me, now]);
 
+  // Roster, separately from the presence subscription so Retry re-asks for
+  // the roster alone. Never asserts an empty roster on failure.
+  useEffect(() => {
+    if (!circleId) return;
+    let live = true;
+    setMembersFailed(false);
+    circleMembers(circleId)
+      .then((m) => { if (live) { setMembers(m); setMembersLoaded(true); } })
+      .catch(() => { if (live) setMembersFailed(true); });
+    return () => { live = false; };
+  }, [circleId, membersTry]);
+
   useEffect(() => {
     if (!circleId) return;
     let live = true;
@@ -154,9 +169,6 @@ export default function FamilyMapScreen() {
       if (!live) return;
       const myId = u ? String(u.id) : null;
       setMe(myId);
-      circleMembers(circleId)
-        .then((m) => { if (live) { setMembers(m); setMembersLoaded(true); } })
-        .catch(() => { /* keep "still loading" rather than asserting an empty roster */ });
       if (!myId) return;
       try {
         const un = await subscribeCircle(circleId, myId, (e: PresenceEvent) => {
@@ -557,15 +569,24 @@ export default function FamilyMapScreen() {
   const showTrip = !!trip && !meetOpen;
   const showFollowBar = !!followId && !meetOpen;
   const showLeave = !!destination && !meetOpen && destSecs != null;
-  const showSearch = !meetOpen;
+  // While guiding, the top belongs to the maneuver capsule: the search bar
+  // (and the place chips under it) used to render after NavigationLayer at the
+  // same top offset and cover it.
+  const showSearch = !meetOpen && !navBanner.active;
+  const showPlaces = showSearch && !trip && myPlaces.length > 0;
   const slots = useMemo(() => {
     let i = 0;
     const searchTop = showSearch ? TOP_0 + TOP_PITCH * i++ : 0;
+    // The place-chip row is a slot like any bar; at a fixed searchTop+52 it
+    // sat under the follow/leave bars, which also started at searchTop+46.
+    const placesTop = showPlaces ? TOP_0 + TOP_PITCH * i++ : 0;
     const tripTop = showTrip ? TOP_0 + TOP_PITCH * i++ : 0;
     const followTop = showFollowBar ? TOP_0 + TOP_PITCH * i++ : 0;
     const leaveTop = showLeave ? TOP_0 + TOP_PITCH * i++ : 0;
-    return { searchTop, tripTop, followTop, leaveTop };
-  }, [showSearch, showTrip, showFollowBar, showLeave]);
+    // Where the free map starts below the stacked bars — the nav capsule's top.
+    const barsBottom = TOP_PITCH * i;
+    return { searchTop, placesTop, tripTop, followTop, leaveTop, barsBottom };
+  }, [showSearch, showPlaces, showTrip, showFollowBar, showLeave]);
 
   const anyRouteBar = !!(routeShape || homeRoute || destRoute);
   const showTurnBar = !!(memberTurn && routeShape);
@@ -648,13 +669,19 @@ export default function FamilyMapScreen() {
     [trip?.id, tripPings, now],
   );
 
-  const beginTrip = async (d: MeetDestination) => {
+  const beginTrip = (d: MeetDestination) => {
     if (!me) return;
-    try {
-      const t = await startTrip(circleId, me, { lat: d.lat, lng: d.lng }, d.name);
-      setTrip(t);
-      setMeetOpen(false);
-    } catch (e: any) { Alert.alert('Family trip', e?.message ?? 'Could not start the trip.'); }
+    // Confirmed: a trip changes EVERY member's map, not just this one.
+    Alert.alert('Start a family trip?', `Everyone in the circle will see a trip to ${d.name} on their map.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Start trip', onPress: async () => {
+        try {
+          const t = await startTrip(circleId, me, { lat: d.lat, lng: d.lng }, d.name);
+          setTrip(t);
+          setMeetOpen(false);
+        } catch (e: any) { Alert.alert('Family trip', e?.message ?? 'Could not start the trip.'); }
+      } },
+    ]);
   };
 
   const tripAction = async () => {
@@ -670,11 +697,11 @@ export default function FamilyMapScreen() {
         } },
       ]);
     } else if (joined) {
-      await leaveTrip();
-      setTrip({ ...trip });   // re-render: the button flips to JOIN
+      try { await leaveTrip(); setTrip({ ...trip }); }   // re-render: the button flips to JOIN
+      catch (e: any) { Alert.alert('Family trip', e?.message ?? 'Could not leave the trip.'); }
     } else {
-      await joinTrip(trip, me).catch(() => {});
-      setTrip({ ...trip });
+      try { await joinTrip(trip, me); setTrip({ ...trip }); }
+      catch (e: any) { Alert.alert('Family trip', e?.message ?? 'Could not join the trip.'); }
     }
   };
 
@@ -795,11 +822,12 @@ export default function FamilyMapScreen() {
           onStop={stopNav}
           onDone={stopNav}
           bottomInset={chipsBottom}
+          topInset={slots.barsBottom}
         />
 
         {/* SEARCH BAR, not a button. Meet Here is a search — it belongs at the
             top of the map looking like one, the way every maps app puts it. */}
-        {!meetOpen && (
+        {showSearch && (
           <TouchableOpacity
             onPress={() => setMeetOpen(true)}
             accessibilityRole="search"
@@ -813,8 +841,22 @@ export default function FamilyMapScreen() {
             {/* During a trip the destination belongs to the trip — it is ended
                 from the trip bar, never silently un-pinned here. */}
             {destination && !trip
-              ? <Ionicons name="close-circle" size={17} color={colors.textDim} onPress={() => setDestination(null)} />
+              ? <View style={{ width: 20 }} /> /* room for the clear button laid over this end */
               : <Ionicons name="people" size={16} color={colors.primary} />}
+          </TouchableOpacity>
+        )}
+        {/* The clear control is its own labelled button, laid OVER the search
+            bar's right end rather than nested in it: nested, a screen reader
+            could never reach it. */}
+        {showSearch && destination && !trip && (
+          <TouchableOpacity
+            onPress={() => setDestination(null)}
+            accessibilityRole="button"
+            accessibilityLabel={`Clear ${destination.name} as the destination`}
+            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+            style={[st.searchClear, { top: slots.searchTop }]}
+          >
+            <Ionicons name="close-circle" size={17} color={colors.textDim} />
           </TouchableOpacity>
         )}
 
@@ -827,8 +869,8 @@ export default function FamilyMapScreen() {
             member's, whose coordinates this device does not have and must not
             display. Hidden entirely while navigating: the destination is
             settled by then and the map belongs to the guidance. */}
-        {!meetOpen && !trip && !navBanner.active && myPlaces.length > 0 && (
-          <View style={[st.placeRow, { top: slots.searchTop + 52 }]}>
+        {showPlaces && (
+          <View style={[st.placeRow, { top: slots.placesTop }]}>
             {myPlaces.slice(0, 4).map((pl) => {
               const on = destination?.name === pl.name;
               return (
@@ -881,9 +923,12 @@ export default function FamilyMapScreen() {
                 {tripEta != null ? ` · all in by ~${minutesUntil(tripEta, now)} min` : ''}
               </Text>
             </View>
-            <Text onPress={tripAction} style={{ color: trip.startedBy === me || joined ? G.dangerText : G.accentText, fontWeight: '800', fontSize: 12 }}>
-              {trip.startedBy === me ? 'END' : joined ? 'LEAVE' : 'JOIN'}
-            </Text>
+            <BarAction
+              onPress={tripAction}
+              label={trip.startedBy === me ? 'END' : joined ? 'LEAVE' : 'JOIN'}
+              a11y={trip.startedBy === me ? 'End the family trip' : joined ? 'Leave the family trip' : 'Join the family trip'}
+              style={{ color: trip.startedBy === me || joined ? G.dangerText : G.accentText, fontWeight: '800', fontSize: 12 }}
+            />
           </View>
         )}
 
@@ -901,22 +946,19 @@ export default function FamilyMapScreen() {
                     {'  ·  arrive '}{new Date(arriveBy!).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
                   </Text>
                 </Text>
-                <Text onPress={() => setArriveBy(null)}
-                  style={{ color: G.accentText, fontWeight: '800', fontSize: 11 }}>CLEAR</Text>
+                <BarAction onPress={() => setArriveBy(null)} label="CLEAR" a11y="Clear the arrive-by time"
+                  style={{ color: G.accentText, fontWeight: '800', fontSize: 11 }} />
               </>
             ) : (
               <>
                 <Text style={{ color: colors.textDim, fontSize: 11.5 }}>Arrive by</Text>
-                {arriveChoices.map((t) => (
-                  <Text
-                    key={t}
-                    onPress={() => setArriveBy(t)}
-                    accessibilityRole="button"
-                    style={{ color: G.accentText, fontWeight: '800', fontSize: 11.5, paddingHorizontal: 7 }}
-                  >
-                    {new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                  </Text>
-                ))}
+                {arriveChoices.map((t) => {
+                  const hhmm = new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+                  return (
+                    <BarAction key={t} onPress={() => setArriveBy(t)} label={hhmm} a11y={`Arrive by ${hhmm}`}
+                      style={{ color: G.accentText, fontWeight: '800', fontSize: 11.5, paddingHorizontal: 7 }} />
+                  );
+                })}
               </>
             )}
           </View>
@@ -924,7 +966,9 @@ export default function FamilyMapScreen() {
 
         {/* Connector toggle — ten dashed lines are the point on one screen and
             clutter on another, so it is the user's call, not a fixed choice. */}
-        {!meetOpen && !routeShape && (
+        {/* Both FABs step aside for the nav dock and the selected-member
+            sheet, which occupy the same bottom-left corner. */}
+        {!meetOpen && !routeShape && !navBanner.active && !selectedId && (
           <TouchableOpacity
             onPress={() => setShowLinks((v) => !v)}
             accessibilityRole="button"
@@ -943,7 +987,7 @@ export default function FamilyMapScreen() {
             My own place only — place coordinates never leave a device, so no
             such route can exist for another member (their published number
             "1.2 km from Home" already rides their pings). */}
-        {!meetOpen && homePlace && !!mine && (
+        {!meetOpen && homePlace && !!mine && !navBanner.active && !selectedId && (
           <TouchableOpacity
             onPress={() => setShowHomeRoute((v) => !v)}
             accessibilityRole="button"
@@ -991,25 +1035,28 @@ export default function FamilyMapScreen() {
                 {/* Me -> member: this route can be DRIVEN, so offer it. A member ->
                     place route is THEIR road, not mine, and stays clear-only. */}
                 {!destination && routeTo && presences[routeTo] && !navBanner.active && (
-                  <Text
+                  <BarAction
                     onPress={() => startNavTo(nameOf.get(routeTo) || 'Member', presences[routeTo].pos.lat, presences[routeTo].pos.lng)}
-                    style={{ color: G.accentText, fontWeight: '800', fontSize: 12 }}>NAVIGATE</Text>
+                    label="NAVIGATE" a11y={`Navigate to ${nameOf.get(routeTo) || 'member'}`}
+                    style={{ color: G.accentText, fontWeight: '800', fontSize: 12 }} />
                 )}
                 {!destination && navBanner.active && (
-                  <Text onPress={stopNav} style={{ color: G.dangerText, fontWeight: '800', fontSize: 12 }}>STOP NAV</Text>
+                  <BarAction onPress={stopNav} label="STOP NAV" a11y="Stop navigation"
+                    style={{ color: G.dangerText, fontWeight: '800', fontSize: 12 }} />
                 )}
-                <Text onPress={() => { setRouteTo(null); setRouteShape(null); setRouteMans(null); }}
-                  style={{ color: G.accentText, fontWeight: '800', fontSize: 12 }}>CLEAR</Text>
+                <BarAction onPress={() => { setRouteTo(null); setRouteShape(null); setRouteMans(null); }}
+                  label="CLEAR" a11y="Clear the route"
+                  style={{ color: G.accentText, fontWeight: '800', fontSize: 12 }} />
               </View>
             ) : homeRoute ? (
-              <Text onPress={() => setShowHomeRoute(false)}
-                style={{ color: G.accentText, fontWeight: '800', fontSize: 12 }}>CLEAR</Text>
+              <BarAction onPress={() => setShowHomeRoute(false)} label="CLEAR" a11y="Clear the route"
+                style={{ color: G.accentText, fontWeight: '800', fontSize: 12 }} />
             ) : navBanner.active ? (
-              <Text onPress={stopNav}
-                style={{ color: G.dangerText, fontWeight: '800', fontSize: 12 }}>STOP NAV</Text>
+              <BarAction onPress={stopNav} label="STOP NAV" a11y="Stop navigation"
+                style={{ color: G.dangerText, fontWeight: '800', fontSize: 12 }} />
             ) : (
-              <Text onPress={startNav}
-                style={{ color: G.accentText, fontWeight: '800', fontSize: 12 }}>NAVIGATE</Text>
+              <BarAction onPress={startNav} label="NAVIGATE" a11y={`Navigate to ${destination?.name ?? 'the destination'}`}
+                style={{ color: G.accentText, fontWeight: '800', fontSize: 12 }} />
             )}
           </View>
         )}
@@ -1022,12 +1069,8 @@ export default function FamilyMapScreen() {
             <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, flex: 1 }} numberOfLines={1}>
               Following {nameOf.get(followId) || 'member'}
             </Text>
-            <Text
-              onPress={() => setFollowId(null)}
-              style={{ color: G.accentText, fontWeight: '800', fontSize: 12.5 }}
-            >
-              STOP
-            </Text>
+            <BarAction onPress={() => setFollowId(null)} label="STOP" a11y="Stop following"
+              style={{ color: G.accentText, fontWeight: '800', fontSize: 12.5 }} />
           </View>
         )}
       </View>
@@ -1046,7 +1089,13 @@ export default function FamilyMapScreen() {
         />
       ) : (
       <View style={[st.sheet, { backgroundColor: G.sheet, borderColor: G.edge }]}>
-        {!membersLoaded ? (
+        {!membersLoaded && membersFailed ? (
+          <View style={st.center}>
+            <Text style={{ color: colors.textDim, fontSize: 13 }}>Couldn&apos;t load the circle.</Text>
+            <BarAction onPress={() => setMembersTry((n) => n + 1)} label="RETRY" a11y="Retry loading the circle"
+              style={{ color: G.accentText, fontWeight: '800', fontSize: 12.5, paddingVertical: 6 }} />
+          </View>
+        ) : !membersLoaded ? (
           <View style={st.center}><ActivityIndicator color={colors.primary} /></View>
         ) : (
           <ScrollView style={{ maxHeight: 148 }} contentContainerStyle={{ paddingBottom: 4 }}>
@@ -1087,6 +1136,8 @@ export default function FamilyMapScreen() {
                   <View style={st.rowWrap}>
                     <Text
                       onPress={() => p && setFocusId(m.id)}
+                      accessibilityRole={p ? 'button' : undefined}
+                      accessibilityHint={p ? 'Centres the map on them' : undefined}
                       style={[st.row, { color: colors.text, flex: 1 }]}
                     >
                       <Text style={{ color: liveNow ? G.goodText : colors.textDim }}>● </Text>
@@ -1100,20 +1151,20 @@ export default function FamilyMapScreen() {
                     {/* Road route — to THIS member normally; with a trip or
                         Meet Here destination set, THEIR road to it instead. */}
                     {canFollow && (!!mine || !!destination) && (
-                      <Text
+                      <BarAction
                         onPress={() => { setRouteTo(routeTo === m.id ? null : m.id); setFocusId(m.id); }}
+                        label={routeBusy && routeTo === m.id ? '…' : routeTo === m.id ? 'ROUTED' : 'Route'}
+                        a11y={routeTo === m.id ? `Clear the route to ${m.name}` : `Show the road route to ${m.name}`}
                         style={{ color: routeTo === m.id ? G.accentText : colors.textDim, fontWeight: '700', fontSize: 12, paddingHorizontal: 6 }}
-                      >
-                        {routeBusy && routeTo === m.id ? '…' : routeTo === m.id ? 'ROUTED' : 'Route'}
-                      </Text>
+                      />
                     )}
                     {canFollow && (
-                      <Text
+                      <BarAction
                         onPress={() => { setFollowId(following ? null : m.id); setFocusId(m.id); }}
+                        label={following ? 'FOLLOWING' : 'Follow'}
+                        a11y={following ? `Stop following ${m.name}` : `Follow ${m.name}`}
                         style={{ color: following ? G.accentText : colors.textDim, fontWeight: '700', fontSize: 12, paddingHorizontal: 6 }}
-                      >
-                        {following ? 'FOLLOWING' : 'Follow'}
-                      </Text>
+                      />
                     )}
                   </View>
                   {/* Distance from THEIR reference place, with the picker over
@@ -1160,6 +1211,26 @@ export default function FamilyMapScreen() {
   );
 }
 
+/**
+ * A text action on an overlay bar (END, CLEAR, NAVIGATE, Route…). These were
+ * bare <Text onPress> at 11–12 px: no role for a screen reader and a target
+ * the height of one line. Same look; a real button with a ≥44 dp hit area.
+ */
+function BarAction({ label, a11y, onPress, style }: {
+  label: string; a11y?: string; onPress: () => void; style: any;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={a11y ?? label}
+      hitSlop={{ top: 14, bottom: 14, left: 8, right: 8 }}
+    >
+      <Text style={style}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
 const st = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   sheet: {
@@ -1176,6 +1247,11 @@ const st = StyleSheet.create({
   placeChip: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     paddingHorizontal: 12, minHeight: 32, borderRadius: 999,
+  },
+  // Sits over the right end of the search bar (minHeight 40), centred on it.
+  searchClear: {
+    position: 'absolute', right: 12, width: 44, minHeight: 40, alignItems: 'center', justifyContent: 'center',
+    elevation: 5,
   },
   searchBar: {
     position: 'absolute', left: 12, right: 12, top: 12, flexDirection: 'row', alignItems: 'center', gap: 9,

@@ -4,7 +4,7 @@
 import { AppText as Text } from '../components/ui/Text';
 import React, { useState } from 'react';
 import { KeyboardSafe } from '../components/ui';
-import { View, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, ScrollView, Platform } from 'react-native';
+import { View, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, ScrollView } from 'react-native';
 import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
@@ -16,11 +16,17 @@ export default function FamilySetupScreen() {
   const { colors } = useTheme();
   const G = useSpaceGlass();
   const router = useRouter();
-  // Pushed from an existing space ("create or join another") vs. reached by the
-  // zero-circle redirect. Returning is right in the first case; replacing is
-  // right in the second, where /family is no longer on the stack.
+  // Pushed from an existing space ("create or join another", which passes
+  // from=family) vs. opened with nothing behind it (deep link). Returning is
+  // right in the first case — the hub reloads on focus and opens the new
+  // active group; replacing is right in the second.
   const { from } = useLocalSearchParams<{ from?: string }>();
-  const done = () => { if (from === 'family') router.back(); else router.replace('/family' as any); };
+  // Both carry ?groupId= so the hub opens on the circle just created/joined.
+  const done = (groupId: string) => {
+    const href = { pathname: '/family' as any, params: { groupId } };
+    if (from === 'family' && router.canGoBack()) router.dismissTo(href);
+    else router.replace(href);
+  };
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState<'create' | 'join' | null>(null);
@@ -28,14 +34,23 @@ export default function FamilySetupScreen() {
   const create = async () => {
     if (!name.trim() || busy) return;
     setBusy('create');
-    try { await createCircle(name); done(); }
+    try { const c = await createCircle(name); done(c.id); }
     catch (e: any) { Alert.alert('Create failed', e?.message ?? 'Could not create the circle.'); }
     finally { setBusy(null); }
   };
   const join = async () => {
     if (!code.trim() || busy) return;
     setBusy('join');
-    try { await joinCircle(code); done(); }
+    try {
+      const r = await joinCircle(code);
+      if (r.pending) {
+        Alert.alert('Request sent', 'An admin of this circle has to approve you. You will be notified when you are in.');
+        router.back();
+        return;
+      }
+      if (r.alreadyMember) Alert.alert('Already a member', `You are already in "${r.name}".`);
+      done(r.id);
+    }
     catch (e: any) { Alert.alert('Join failed', e?.message ?? 'Check the code and try again.'); }
     finally { setBusy(null); }
   };
@@ -51,16 +66,17 @@ export default function FamilySetupScreen() {
         <View style={[st.hero, { backgroundColor: G.pane, borderColor: G.edge }]}>
           <Ionicons name="people-circle" size={44} color={colors.primary} />
           <Text style={[st.heroTitle, { color: colors.text }]}>Your family, privately</Text>
-          <Text style={[st.heroSub, { color: colors.textDim }]}>See each other on a live map, get arrive/leave alerts, and send SOS — all end-to-end encrypted. The server never sees a location.</Text>
+          <Text style={[st.heroSub, { color: colors.textDim }]}>See each other on a live map, get arrive/leave alerts, and send SOS. Live locations are end-to-end encrypted. Road distances, routes and history distances send points to crazzychat&apos;s routing server, which does not store them.</Text>
         </View>
 
         <Text style={[st.h, { color: colors.textDim }]}>Create a circle</Text>
         <View style={[st.field, { borderColor: G.edge, backgroundColor: G.pane }]}>
           <Ionicons name="home" size={18} color={colors.textDim} />
           <TextInput value={name} onChangeText={setName} placeholder="Circle name (e.g. Family)" placeholderTextColor={colors.textFaint}
+            accessibilityLabel="Circle name"
             style={[st.input, { color: colors.text }]} returnKeyType="done" onSubmitEditing={create} />
         </View>
-        <TouchableOpacity onPress={create} disabled={!name.trim() || !!busy} style={[st.btn, { backgroundColor: name.trim() ? colors.primary : colors.border }]}>
+        <TouchableOpacity onPress={create} disabled={!name.trim() || !!busy} accessibilityRole="button" accessibilityLabel="Create circle" accessibilityState={{ disabled: !name.trim() || !!busy, busy: busy === 'create' }} style={[st.btn, { backgroundColor: name.trim() ? colors.primary : colors.border }]}>
           {busy === 'create' ? <ActivityIndicator color="#fff" /> : <><Ionicons name="add" size={18} color="#fff" /><Text style={st.btnTxt}>Create circle</Text></>}
         </TouchableOpacity>
 
@@ -68,6 +84,7 @@ export default function FamilySetupScreen() {
             travel and the rest, each with its own icon, colour and permissions. */}
         <TouchableOpacity
           onPress={() => router.push('/group-create' as any)}
+          accessibilityRole="button"
           style={[st.btn, { backgroundColor: G.paneFaint, borderWidth: 1, borderColor: G.chipEdge }]}
         >
           <Ionicons name="grid-outline" size={18} color={colors.primary} />
@@ -80,9 +97,10 @@ export default function FamilySetupScreen() {
         <View style={[st.field, { borderColor: G.edge, backgroundColor: G.pane }]}>
           <Ionicons name="key" size={18} color={colors.textDim} />
           <TextInput value={code} onChangeText={setCode} placeholder="Invite code" placeholderTextColor={colors.textFaint}
+            accessibilityLabel="Invite code"
             autoCapitalize="none" autoCorrect={false} style={[st.input, { color: colors.text }]} returnKeyType="go" onSubmitEditing={join} />
         </View>
-        <TouchableOpacity onPress={join} disabled={!code.trim() || !!busy} style={[st.btn, { backgroundColor: code.trim() ? colors.primary : colors.border }]}>
+        <TouchableOpacity onPress={join} disabled={!code.trim() || !!busy} accessibilityRole="button" accessibilityLabel="Join circle" accessibilityState={{ disabled: !code.trim() || !!busy, busy: busy === 'join' }} style={[st.btn, { backgroundColor: code.trim() ? colors.primary : colors.border }]}>
           {busy === 'join' ? <ActivityIndicator color="#fff" /> : <><Ionicons name="enter" size={18} color="#fff" /><Text style={st.btnTxt}>Join circle</Text></>}
         </TouchableOpacity>
       </ScrollView>

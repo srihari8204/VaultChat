@@ -42,9 +42,13 @@ export default function SecurityHubScreen() {
   const [vm, setVm] = useState<DashboardVM>(() => buildDashboardViewModel(null, Date.now()));
   const [scanning, setScanning] = useState(false);
 
+  // Never rejects: a secure-store read failure used to surface as an unhandled
+  // rejection. The last rendered view stays (the scan path alerts on its own).
   const load = useCallback(async () => {
-    const snap = await getCurrentSnapshot();
-    setVm(buildDashboardViewModel(snap, Date.now()));
+    try {
+      const snap = await getCurrentSnapshot();
+      setVm(buildDashboardViewModel(snap, Date.now()));
+    } catch { /* keep the current view */ }
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -89,7 +93,11 @@ export default function SecurityHubScreen() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
         {/* Score hero — risk 0–100 (lower is safer). */}
         <View style={S.hero}>
-          <View style={[S.ring, { borderColor: vm.bandColor }]}>
+          <View
+            style={[S.ring, { borderColor: vm.bandColor }]}
+            accessible
+            accessibilityLabel={vm.score != null ? `Risk ${vm.score} of 100, ${vm.bandLabel}` : 'Not scanned yet'}
+          >
             <Text style={[S.scoreNum, { color: vm.bandColor }]}>{vm.score ?? '—'}</Text>
             {vm.score != null && <Text style={S.scoreMax}>/100</Text>}
           </View>
@@ -98,7 +106,8 @@ export default function SecurityHubScreen() {
           {vm.hasScanned && <Text style={S.lastScan}>Last scan {vm.lastScanText} · lower risk is safer</Text>}
         </View>
 
-        <TouchableOpacity style={S.scanBtn} onPress={onScan} disabled={scanning} activeOpacity={0.85}>
+        <TouchableOpacity style={S.scanBtn} onPress={onScan} disabled={scanning} activeOpacity={0.85}
+          accessibilityRole="button" accessibilityState={{ busy: scanning, disabled: scanning }}>
           {scanning ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="shield-checkmark" size={18} color="#fff" />}
           <Text style={S.scanBtnText}>{scanning ? 'Scanning device…' : 'Run device scan'}</Text>
         </TouchableOpacity>
@@ -160,7 +169,7 @@ export default function SecurityHubScreen() {
           </Text>
         </View>
 
-        <TouchableOpacity style={S.alertsLink} onPress={() => router.push('/(tabs)/alerts')} activeOpacity={0.7}>
+        <TouchableOpacity style={S.alertsLink} onPress={() => router.push('/(tabs)/alerts')} activeOpacity={0.7} accessibilityRole="button">
           <Text style={S.alertsLinkText}>View full security log</Text>
           <Ionicons name="arrow-forward" size={15} color={colors.primary} />
         </TouchableOpacity>

@@ -12,7 +12,7 @@
 import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, TextInput, Switch,
+  View, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams } from 'expo-router';
@@ -178,9 +178,10 @@ export default function FamilyItemsScreen() {
       // Tell the space. This is what lets another member's phone answer
       // "where are my keys" — and it is why hearing someone ELSE's tag is
       // worth reporting at all.
-      if (circleId) reportSighting(circleId, item.id, pos, place).catch(() => {});
+      // Only the place NAME is shared — never this phone's coordinates.
+      if (circleId) reportSighting(circleId, item.id, place).catch(() => {});
     } catch { /* a sighting we could not stamp is still a sighting */ }
-  }, [places]);
+  }, [places, circleId]);
 
   // Stamp a sighting at most once a minute per item while scanning.
   const lastStamp = useRef<Map<string, number>>(new Map());
@@ -210,9 +211,15 @@ export default function FamilyItemsScreen() {
   const doPair = async () => {
     if (!pairing) return;
     const name = pairName.trim() || pairing.name || 'Item';
-    const next = await addItem({
-      id: pairing.id, name, icon: pairIcon, addedAt: Date.now(), leftBehindAlerts: true,
-    });
+    let next: TrackedItem[];
+    try {
+      next = await addItem({
+        id: pairing.id, name, icon: pairIcon, addedAt: Date.now(), leftBehindAlerts: true,
+      });
+    } catch {
+      Alert.alert('Could not save', `"${name}" was not saved. Try again.`);
+      return;
+    }
     setItems(next);
     if (circleId) {
       // Crowd-find is the whole point of sharing a tag: without this call no
@@ -352,6 +359,8 @@ export default function FamilyItemsScreen() {
                 <TouchableOpacity
                   key={s.id}
                   onPress={() => { setPairing(s); setPairName(s.name ?? ''); }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Pair ${s.name || 'unnamed device'}, ${BAND_LABEL[bandOf(r)]}`}
                   style={[st.card, { backgroundColor: G.pane, borderColor: G.edge }]}
                 >
                   <View style={[st.icon, { backgroundColor: colors.primary + '18' }]}>
@@ -396,43 +405,21 @@ export default function FamilyItemsScreen() {
               ))}
             </View>
             <View style={{ flexDirection: 'row', gap: 9 }}>
-              <TouchableOpacity onPress={() => setPairing(null)} style={[st.btn, { borderColor: G.chipEdge, flex: 1 }]}>
+              <TouchableOpacity onPress={() => setPairing(null)} accessibilityRole="button" style={[st.btn, { borderColor: G.chipEdge, flex: 1 }]}>
                 <Text style={{ color: colors.textDim, fontWeight: '700' }}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={doPair} style={[st.btn, { borderColor: colors.primary, backgroundColor: brandAlpha(0.14), flex: 1 }]}>
+              <TouchableOpacity onPress={doPair} accessibilityRole="button" accessibilityLabel="Save item" style={[st.btn, { borderColor: colors.primary, backgroundColor: brandAlpha(0.14), flex: 1 }]}>
                 <Text style={{ color: G.accentText, fontWeight: '800' }}>Save</Text>
               </TouchableOpacity>
             </View>
           </View>
         )}
 
-        {/* ── LEFT-BEHIND TOGGLE ── */}
-        {items.length > 0 && (
-          <View style={[st.card, { backgroundColor: G.pane, borderColor: G.edge, marginTop: 18 }]}>
-            <View style={[st.icon, { backgroundColor: colors.primary + '18' }]}>
-              <Ionicons name="notifications-outline" size={19} color={colors.primary} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: colors.text, fontWeight: '700', fontSize: 14 }}>Left-behind alerts</Text>
-              <Text style={{ color: colors.textDim, fontSize: 11.5, lineHeight: 16 }}>
-                Warn me if I leave a saved place without an item. Needs the app to be searching.
-              </Text>
-            </View>
-            <Switch
-              value={items.every((i) => i.leftBehindAlerts !== false)}
-              onValueChange={async (v) => {
-                // allSettled, and refresh WHATEVER happened. The sequential
-                // await threw on the first network failure, so the remaining
-                // items were never touched AND setItems never ran: the switch
-                // kept showing the old value while half the items had flipped,
-                // with nothing on screen admitting it.
-                await Promise.allSettled(items.map((i) => patchItem(i.id, { leftBehindAlerts: v })));
-                setItems(await listItems().catch(() => items));
-              }}
-              trackColor={{ true: colors.primary }}
-            />
-          </View>
-        )}
+        {/* The "Left-behind alerts" switch is gone on purpose: nothing ever
+            consumed it. lib/items/leftBehind.ts (pure, self-checked) needs a
+            BACKGROUND scan tied to geofence exits, and scanning only runs
+            while this screen is open — so the switch promised an alert that
+            could never fire. Bring it back with that background wiring. */}
 
         <Text style={{ color: colors.textDim, fontSize: 11.5, lineHeight: 16, marginTop: 16 }}>
           Works with any Bluetooth tag — no brand lock-in, no subscription. Tags you pair, and

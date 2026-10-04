@@ -216,6 +216,7 @@ export default function LocationMap({
         </Text>
         <TouchableOpacity
           onPress={() => { setFailed(null); setReady(false); setAttempt((a) => a + 1); }}
+          accessibilityRole="button" accessibilityLabel="Try loading the map again"
           style={[S.retry, { borderColor: colors.glassStroke }]}
         >
           <Ionicons name="refresh" size={14} color={colors.primary} />

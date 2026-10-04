@@ -18,7 +18,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import React, { useCallback, useEffect, useRef, useState , useMemo} from 'react';
 import {
-  ActivityIndicator, Alert, Linking, Platform, ScrollView,
+  ActivityIndicator, Alert, Linking, ScrollView,
   StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import { useTheme } from '../lib/theme';
@@ -77,6 +77,13 @@ export default function LocationScreen() {
 
   const watchRef = useRef<Location.LocationSubscription | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Double-tap guard: the button stayed enabled while sendMessage was in
+  // flight, so a second tap sent a second live message and its watcher
+  // overwrote watchRef — leaking the first one, which kept streaming.
+  const startingRef = useRef(false);
+  const [startingLive, setStartingLive] = useState(false);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   const reverseGeocode = useCallback(async (latitude: number, longitude: number) => {
     try {
@@ -136,8 +143,17 @@ export default function LocationScreen() {
   }, [chatId]);
 
   const startLive = useCallback(async () => {
+    if (startingRef.current || watchRef.current) return;
     if (!loc) { Alert.alert('Please wait', 'Still getting your location…'); return; }
     if (!chatId) { Alert.alert('No chat', 'Open this from a chat to share live location.'); return; }
+    startingRef.current = true;
+    setStartingLive(true);
+    try { await beginLive(); } finally { startingRef.current = false; if (mountedRef.current) setStartingLive(false); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loc, chatId, selDuration, address, stopLive]);
+
+  const beginLive = async () => {
+    if (!loc) return;
     const dur = DURATIONS[selDuration];
     const until = Date.now() + dur.seconds * 1000;
 
@@ -159,14 +175,17 @@ export default function LocationScreen() {
     setTrail([{ lat: loc.coords.latitude, lng: loc.coords.longitude }]);
 
     // Encrypt each position with the session key and relay the opaque blob.
-    const pushUpdate = (latitude: number, longitude: number) => {
-      const blob = encryptPosition(liveKey, { lat: latitude, lng: longitude, address });
+    // Only the FIRST update carries the address — it was looked up for that
+    // position. Re-sending it with every later fix labelled a moving person
+    // with where they started; the peer's banner shows coordinates instead.
+    const pushUpdate = (latitude: number, longitude: number, addr?: string) => {
+      const blob = encryptPosition(liveKey, { lat: latitude, lng: longitude, ...(addr ? { address: addr } : {}) });
       if (blob) emit('live_location_update', { chatId, blob, until }).catch(() => {});
     };
-    pushUpdate(loc.coords.latitude, loc.coords.longitude);
+    pushUpdate(loc.coords.latitude, loc.coords.longitude, address);
 
     try {
-      watchRef.current = await Location.watchPositionAsync(
+      const sub = await Location.watchPositionAsync(
         { accuracy: Location.Accuracy.Balanced, timeInterval: 5000, distanceInterval: 10 },
         (newPos) => {
           setLoc(newPos);
@@ -174,6 +193,10 @@ export default function LocationScreen() {
           pushUpdate(newPos.coords.latitude, newPos.coords.longitude);
         },
       );
+      // Left the screen while the watcher was starting: the unmount cleanup
+      // already ran, so this one would stream with nothing to stop it.
+      if (!mountedRef.current) { sub.remove(); emit('live_location_stop', { chatId }).catch(() => {}); return; }
+      watchRef.current = sub;
     } catch (e: any) {
       Alert.alert('Could not start', e?.message ?? 'Try again');
       stopLive();
@@ -186,7 +209,7 @@ export default function LocationScreen() {
         return t - 1;
       });
     }, 1000);
-  }, [loc, chatId, selDuration, address, stopLive]);
+  };
 
   if (permDenied) {
     return (
@@ -239,7 +262,7 @@ export default function LocationScreen() {
                 <Text style={S.coords}>{lat.toFixed(5)}, {lng.toFixed(5)}</Text>
               )}
               {lat != null && lng != null && (
-                <TouchableOpacity style={S.mapsBtn} onPress={() => navigateTo(lat, lng, address || 'Location')}>
+                <TouchableOpacity style={S.mapsBtn} onPress={() => navigateTo(lat, lng, address || 'Location')} accessibilityRole="button">
                   <Ionicons name="navigate" size={15} color={colors.primary} />
                   <Text style={S.mapsBtnText}>Navigate here</Text>
                 </TouchableOpacity>
@@ -254,15 +277,16 @@ export default function LocationScreen() {
               <View style={S.liveDot} />
               <Text style={S.liveTitle}>Sharing live with {chatName}</Text>
             </View>
-            <Text style={S.liveSub}>{fmtClock(timeLeft)} remaining · updates as you move</Text>
-            <TouchableOpacity style={[S.primaryBtn, { backgroundColor: colors.danger, marginTop: 12 }]} onPress={stopLive}>
+            <Text style={S.liveSub}>{fmtClock(timeLeft)} remaining · updates as you move · stops if you leave this screen</Text>
+            <TouchableOpacity style={[S.primaryBtn, { backgroundColor: colors.danger, marginTop: 12 }]} onPress={stopLive} accessibilityRole="button">
               <Text style={S.primaryBtnText}>Stop sharing</Text>
             </TouchableOpacity>
           </View>
         ) : (
           <>
             {/* Send current location */}
-            <TouchableOpacity style={[S.primaryBtn, sending && { opacity: 0.5 }]} onPress={sendCurrent} disabled={sending || loading}>
+            <TouchableOpacity style={[S.primaryBtn, sending && { opacity: 0.5 }]} onPress={sendCurrent} disabled={sending || loading}
+              accessibilityRole="button" accessibilityState={{ disabled: sending || loading, busy: sending }}>
               {sending ? <ActivityIndicator size="small" color="#fff" /> : <Text style={S.primaryBtnText}>Send current location</Text>}
             </TouchableOpacity>
             <Text style={S.note}>
@@ -277,17 +301,27 @@ export default function LocationScreen() {
                   key={d.label}
                   style={[S.durBtn, selDuration === i && S.durBtnActive]}
                   onPress={() => setSelDuration(i)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: selDuration === i }}
                 >
                   <Text style={[S.durText, selDuration === i && S.durTextActive]}>{d.label}</Text>
                 </TouchableOpacity>
               ))}
             </View>
-            <TouchableOpacity style={[S.primaryBtn, { backgroundColor: colors.surfaceSolid, borderWidth: 1, borderColor: colors.glassStroke }]} onPress={startLive} disabled={loading}>
-              <Text style={[S.primaryBtnText, { color: colors.primary }]}>Start live location</Text>
+            <TouchableOpacity
+              style={[S.primaryBtn, { backgroundColor: colors.surfaceSolid, borderWidth: 1, borderColor: colors.glassStroke }, startingLive && { opacity: 0.5 }]}
+              onPress={startLive} disabled={loading || startingLive}
+              accessibilityRole="button" accessibilityState={{ disabled: loading || startingLive, busy: startingLive }}
+            >
+              {startingLive
+                ? <ActivityIndicator size="small" color={colors.primary} />
+                : <Text style={[S.primaryBtnText, { color: colors.primary }]}>Start live location</Text>}
             </TouchableOpacity>
+            {/* Matches the behaviour: the watcher lives in this screen, and
+                leaving it ends the session (the unmount calls stopLive). */}
             <Text style={S.note}>
-              Streams your position in real time. It’s relayed through the server and never stored,
-              stops automatically after the time you pick, and updates while crazzychat is open.
+              Streams your position in real time while this screen stays open. It’s relayed through
+              the server and never stored, and stops after the time you pick or when you leave this screen.
             </Text>
           </>
         )}

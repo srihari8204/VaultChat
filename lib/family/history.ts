@@ -230,6 +230,25 @@ export async function flushHistory(): Promise<void> {
   await Promise.all([..._dirty].map((cid) => flush(cid).catch(() => {})));
 }
 
+/**
+ * Whose tracks are in a circle-wide sample list, in the order a picker should
+ * offer them: `preferId` (the viewer) first when present, then by most recent
+ * fix. A circle-wide history must be shown ONE member at a time — samples from
+ * different people interleaved by time make a path that zig-zags between
+ * houses, a "distance" nobody travelled, and trips that never happened.
+ * Pure; checked in lib/family/historyOwners.selftest.ts.
+ */
+export function trackOwners(samples: TrackSample[], preferId?: string | null): string[] {
+  const latest = new Map<string, number>();
+  for (const s of samples) {
+    if (!s?.u) continue;
+    latest.set(s.u, Math.max(latest.get(s.u) ?? -Infinity, s.ts));
+  }
+  const ids = [...latest.keys()].sort((a, b) => (latest.get(b)! - latest.get(a)!) || a.localeCompare(b));
+  if (preferId && latest.has(preferId)) return [preferId, ...ids.filter((id) => id !== preferId)];
+  return ids;
+}
+
 // ── self-check ──
 if (require.main === module) {
   const base = { u: 'a', lat: 12.9716, lng: 77.5946 };

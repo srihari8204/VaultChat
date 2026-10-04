@@ -1,6 +1,8 @@
 // app/trusted-contacts.tsx — Trusted (emergency) Contacts (Postgres-backed).
 //
-// Up to 3 contacts alerted on new-device / panic events.
+// Up to 3 contacts alerted when the user sends an Emergency SOS. (No backend
+// sends new-device login alerts — only POST /user/sos reads trusted_contacts —
+// so the screen must not promise them.)
 // Backed by /contacts/trusted (list/add-by-VaultID/remove). No Firestore.
 
 import { HEADER_TOP } from '../constants/layout';
@@ -53,7 +55,7 @@ export default function TrustedContactsScreen() {
   }, [load]);
 
   const addByVaultId = async () => {
-    const id = searchId.trim().toLowerCase().replace('@', '');
+    const id = searchId.trim().toLowerCase().replace(/@/g, '');
     if (!id) return;
     if (trusted.length >= MAX_TRUSTED) { Alert.alert('Maximum reached', `You can have up to ${MAX_TRUSTED} trusted contacts.`); return; }
     setSearching(true);
@@ -99,7 +101,7 @@ export default function TrustedContactsScreen() {
           <Ionicons name="shield-checkmark" size={26} color={colors.primary} />
           <Text style={s.infoTitle}>Emergency Contacts</Text>
           <Text style={s.infoDesc}>
-            These contacts are silently notified with your location if you trigger the panic button, and when your account is accessed from a new device.
+            When you send an Emergency SOS, these contacts get a push alert with a link to your location (when your phone can get one).
           </Text>
           <Text style={s.infoStat}>{trusted.length}/{MAX_TRUSTED} contacts set</Text>
         </View>
@@ -119,8 +121,12 @@ export default function TrustedContactsScreen() {
                   <Text numberOfLines={1} style={s.contactName}>{item.name || 'Contact'}</Text>
                   <Text style={s.contactId}>@{item.vaultId || '—'}</Text>
                 </View>
-                <View style={[s.statusDot, { backgroundColor: item.online ? colors.online : colors.textFaint }]} />
-                <TouchableOpacity onPress={() => removeTrusted(item)} style={s.removeBtn}>
+                <View
+                  style={[s.statusDot, { backgroundColor: item.online ? colors.online : colors.textFaint }]}
+                  accessible accessibilityLabel={item.online ? 'Online' : 'Offline'}
+                />
+                <TouchableOpacity onPress={() => removeTrusted(item)} style={s.removeBtn}
+                  accessibilityRole="button" accessibilityLabel={`Remove ${item.name || 'contact'}`}>
                   <Text style={s.removeTxt}>Remove</Text>
                 </TouchableOpacity>
               </View>
@@ -135,7 +141,7 @@ export default function TrustedContactsScreen() {
         )}
 
         {!adding && trusted.length < MAX_TRUSTED && (
-          <TouchableOpacity style={[s.addBtn, { flexDirection: 'row', justifyContent: 'center', gap: 8 }]} onPress={() => setAdding(true)}>
+          <TouchableOpacity style={[s.addBtn, { flexDirection: 'row', justifyContent: 'center', gap: 8 }]} onPress={() => setAdding(true)} accessibilityRole="button">
             <Ionicons name="add" size={18} color={colors.primary} />
             <Text style={s.addBtnTxt}>Add Trusted Contact</Text>
           </TouchableOpacity>
@@ -155,7 +161,8 @@ export default function TrustedContactsScreen() {
                 autoCapitalize="none"
                 autoFocus
               />
-              <TouchableOpacity style={s.addConfirm} onPress={addByVaultId} disabled={searching}>
+              <TouchableOpacity style={s.addConfirm} onPress={addByVaultId} disabled={searching}
+                accessibilityRole="button" accessibilityLabel="Add trusted contact" accessibilityState={{ busy: searching }}>
                 {searching ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={s.addConfirmTxt}>Add</Text>}
               </TouchableOpacity>
             </View>
@@ -167,8 +174,8 @@ export default function TrustedContactsScreen() {
 
         <View style={s.alertInfo}>
           <Text style={s.alertTitle}>What trusted contacts receive:</Text>
-          <Text style={s.alertItem}>📱 New device login — device info + location</Text>
-          <Text style={s.alertItem}>🆘 Panic button — instant location share</Text>
+          <Text style={s.alertItem}>🆘 Emergency SOS — a push alert with a map link to where you are</Text>
+          <Text style={s.alertItem}>🧪 Test SOS — the same alert, clearly marked as a test</Text>
         </View>
       </View>
     </View>

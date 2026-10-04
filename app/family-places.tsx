@@ -2,7 +2,8 @@
 //
 // Definitions stay on-device; only the RESULT of a crossing ("arrived at / left
 // <place>") becomes an E2EE system message plus a local alert. No coordinate for
-// a place ever leaves the phone.
+// a place is ever published or stored off the phone. One caveat: a typed
+// ADDRESS is looked up through the server geocoder (/nav/geocode) to find it.
 //
 // v2 closes the gaps that made v1 barely usable:
 //   * per-place ON/OFF toggle — the mockup's switch list. Absent `enabled`
@@ -17,7 +18,7 @@ import React, { useEffect, useState } from 'react';
 import { KeyboardSafe } from '../components/ui';
 import {
   View, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator,
-  ScrollView, Switch, Modal, Platform,
+  ScrollView, Switch, Modal,
 } from 'react-native';
 import * as Location from 'expo-location';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
@@ -44,6 +45,8 @@ const MAX_RADIUS = 5000;
 const COORD_RE = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/;
 
 const DAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+/** Spoken names for the day chips — "S"/"T" alone are ambiguous. */
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 /** Windows people actually configure, so most users never touch the hours. */
 const PRESETS: { label: string; sched: ZoneSchedule | null }[] = [
   { label: 'Always',       sched: null },
@@ -107,6 +110,8 @@ export default function FamilyPlacesScreen() {
   const lock = useLockView();   // shared engine's live state (chip on locked place)
   const [editSched, setEditSched] = useState<ZoneSchedule | null>(null);
   const [editExpiry, setEditExpiry] = useState<number | null>(null);
+  /** Which timed lifetime chip was tapped in this edit (null = none / permanent). */
+  const [editLife, setEditLife] = useState<string | null>(null);
 
   useEffect(() => { if (cid) getPlaces(cid).then(setPlacesState).catch(() => {}); }, [cid]);
 
@@ -133,10 +138,20 @@ export default function FamilyPlacesScreen() {
     })();
   }, [places]);
 
-  const persist = async (next: Geofence[]) => {
+  /** Saves and re-arms. On a failed save the list reverts and the user is
+   *  told — a switch or edit that looks saved but is not is worse than none.
+   *  Resolves to whether it saved; never rejects. */
+  const persist = async (next: Geofence[]): Promise<boolean> => {
+    const prev = places;
     setPlacesState(next);
-    await setPlaces(cid, next);
-    await reloadPlaces(cid);   // push the new fence set into the live watcher
+    try { await setPlaces(cid, next); }
+    catch {
+      setPlacesState(prev);
+      Alert.alert('Not saved', 'Your safe zones could not be saved on this phone. Try again.');
+      return false;
+    }
+    await reloadPlaces(cid).catch(() => {});   // push the new fence set into the live watcher
+    return true;
   };
 
   /** Resolve the "where" box: blank → GPS, "lat,lng" → parsed, else geocoded. */
@@ -152,7 +167,14 @@ export default function FamilyPlacesScreen() {
       return { lat: loc.coords.latitude, lng: loc.coords.longitude };
     }
     const m = q.match(COORD_RE);
-    if (m) return { lat: Number(m[1]), lng: Number(m[2]) };
+    if (m) {
+      const lat = Number(m[1]), lng = Number(m[2]);
+      if (Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+        Alert.alert('Not a valid position', 'Latitude must be between -90 and 90, longitude between -180 and 180.');
+        return null;
+      }
+      return { lat, lng };
+    }
     // Server-proxied geocoder first, platform second — same order as
     // location-lock.tsx / navigate.tsx. Places search used to call
     // Location.geocodeAsync ALONE, which is dead on no-GMS devices, so on those
@@ -178,8 +200,7 @@ export default function FamilyPlacesScreen() {
         enabled: true,
         icon: iconFor(name),
       };
-      await persist([g, ...places]);
-      setName(''); setWhere('');
+      if (await persist([g, ...places])) { setName(''); setWhere(''); }
     } catch (e: any) {
       Alert.alert('Could not add place', e?.message ?? 'Try again.');
     } finally { setBusy(false); }
@@ -196,8 +217,7 @@ export default function FamilyPlacesScreen() {
         // publisher keeps looking for a name that no longer exists and the
         // reference line silently disappears with no way to see why.
         if (p.name === refName) { setRefName(null); await setDefaultRef(cid, null); }
-        await persist(places.filter((x) => x.id !== p.id));
-        setEditing(null);
+        if (await persist(places.filter((x) => x.id !== p.id))) setEditing(null);
       } },
     ]);
   };
@@ -208,6 +228,7 @@ export default function FamilyPlacesScreen() {
     setEditRadius(String(p.radiusM));
     setEditSched(p.schedule ?? null);
     setEditExpiry(p.expiresAt ?? null);
+    setEditLife(null);
   };
 
   // ── v3: family-aware actions on the SHARED engine (never a second engine) ──
@@ -252,15 +273,14 @@ export default function FamilyPlacesScreen() {
       setRefName(nm);
       await setDefaultRef(cid, nm);
     }
-    await persist(places.map((p) => (p.id === editing.id ? {
+    if (await persist(places.map((p) => (p.id === editing.id ? {
       ...p, name: nm, radiusM: r, icon: iconFor(nm),
       // Undefined rather than null, so an "always on / permanent" zone carries
       // no schedule keys at all and reads identically to one saved before
       // schedules existed.
       schedule: editSched ?? undefined,
       expiresAt: editExpiry ?? undefined,
-    } : p)));
-    setEditing(null);
+    } : p)))) setEditing(null);
   };
 
   const activeCount = places.filter((p) => p.enabled !== false).length;
@@ -295,6 +315,7 @@ export default function FamilyPlacesScreen() {
         <View style={st.radii}>
           {RADII.map((r) => (
             <TouchableOpacity key={r} onPress={() => setRadius(r)}
+              accessibilityRole="button" accessibilityState={{ selected: radius === r }} accessibilityLabel={`${r} metre radius`}
               style={[st.rchip, { borderColor: radius === r ? colors.primary : G.chipEdge, backgroundColor: radius === r ? brandAlpha(0.14) : G.paneFaint }]}>
               <Text style={{ color: radius === r ? G.accentText : colors.text, fontWeight: radius === r ? '700' : '500', fontSize: 13 }}>{r} m</Text>
             </TouchableOpacity>
@@ -302,6 +323,7 @@ export default function FamilyPlacesScreen() {
         </View>
 
         <TouchableOpacity onPress={add} disabled={!name.trim() || busy}
+          accessibilityRole="button" accessibilityState={{ disabled: !name.trim() || busy, busy }}
           style={[st.btn, { backgroundColor: name.trim() && !busy ? colors.brandOnLight : colors.border }]}>
           {busy
             ? <ActivityIndicator color="#fff" />
@@ -366,6 +388,7 @@ export default function FamilyPlacesScreen() {
           const live = isZoneActive(p, new Date());
           return (
             <TouchableOpacity key={p.id} activeOpacity={0.7} onPress={() => openEdit(p)}
+              accessibilityRole="button" accessibilityLabel={`${p.name}, ${describeZone(p, new Date())}`} accessibilityHint="Edit this place"
               style={[st.row, { borderColor: G.line }]}>
               <View style={[st.rowIcon, { backgroundColor: live ? brandAlpha(0.14) : G.paneFaint }]}>
                 <Ionicons name={(p.icon as keyof typeof Ionicons.glyphMap) ?? iconFor(p.name)} size={18}
@@ -388,7 +411,7 @@ export default function FamilyPlacesScreen() {
                   {lockStats[p.name]?.visits ? ` · ${lockStats[p.name].visits} lock${lockStats[p.name].visits > 1 ? 's' : ''}` : ''}
                 </Text>
               </View>
-              <Switch value={on} onValueChange={(v) => toggle(p.id, v)} trackColor={{ true: colors.primary }} />
+              <Switch value={on} onValueChange={(v) => { toggle(p.id, v); }} accessibilityLabel={`${p.name} alerts`} trackColor={{ true: colors.primary }} />
             </TouchableOpacity>
           );
         })}
@@ -429,6 +452,7 @@ export default function FamilyPlacesScreen() {
             <View style={st.radii}>
               {RADII.map((r) => (
                 <TouchableOpacity key={r} onPress={() => setEditRadius(String(r))}
+                  accessibilityRole="button" accessibilityState={{ selected: Number(editRadius) === r }} accessibilityLabel={`${r} metre radius`}
                   style={[st.rchip, { borderColor: Number(editRadius) === r ? colors.primary : G.chipEdge, backgroundColor: Number(editRadius) === r ? brandAlpha(0.14) : G.paneFaint }]}>
                   <Text style={{ color: Number(editRadius) === r ? G.accentText : colors.text, fontSize: 13 }}>{r} m</Text>
                 </TouchableOpacity>
@@ -444,6 +468,7 @@ export default function FamilyPlacesScreen() {
                   : !!editSched && editSched.fromMin === pr.sched.fromMin && editSched.toMin === pr.sched.toMin;
                 return (
                   <TouchableOpacity key={pr.label} onPress={() => setEditSched(pr.sched ? { ...pr.sched } : null)}
+                    accessibilityRole="button" accessibilityState={{ selected: on }}
                     style={[st.rchip, { borderColor: on ? colors.primary : G.chipEdge, backgroundColor: on ? brandAlpha(0.14) : G.paneFaint }]}>
                     <Text style={{ color: on ? G.accentText : colors.text, fontSize: 12.5, fontWeight: on ? '700' : '500' }}>{pr.label}</Text>
                   </TouchableOpacity>
@@ -467,6 +492,7 @@ export default function FamilyPlacesScreen() {
                         // treat "none" as "every day" instead.
                         setEditSched({ ...editSched, days: next.length ? next : [] });
                       }}
+                        accessibilityRole="checkbox" accessibilityLabel={DAY_NAMES[i]} accessibilityState={{ checked: on }}
                         style={[st.day, { borderColor: on ? colors.primary : G.chipEdge, backgroundColor: on ? brandAlpha(0.14) : G.paneFaint }]}>
                         <Text style={{ color: on ? G.accentText : colors.textDim, fontSize: 12, fontWeight: '700' }}>{d}</Text>
                       </TouchableOpacity>
@@ -483,10 +509,13 @@ export default function FamilyPlacesScreen() {
             <Text style={[st.h, { color: colors.textDim, marginTop: 20, marginBottom: 8 }]}>How long it lasts</Text>
             <View style={st.radii}>
               {LIFETIMES.map((lt) => {
-                const on = lt.ms == null ? editExpiry == null : false;
+                // Timed choices are remembered by label for this edit: the
+                // stored value is an absolute expiresAt, which no chip matches.
+                const on = lt.ms == null ? editExpiry == null : editLife === lt.label;
                 return (
                   <TouchableOpacity key={lt.label}
-                    onPress={() => setEditExpiry(lt.ms == null ? null : Date.now() + lt.ms)}
+                    accessibilityRole="button" accessibilityState={{ selected: on }}
+                    onPress={() => { setEditExpiry(lt.ms == null ? null : Date.now() + lt.ms); setEditLife(lt.ms == null ? null : lt.label); }}
                     style={[st.rchip, { borderColor: on ? colors.primary : G.chipEdge, backgroundColor: on ? brandAlpha(0.14) : G.paneFaint }]}>
                     <Text style={{ color: on ? G.accentText : colors.text, fontSize: 12.5, fontWeight: on ? '700' : '500' }}>{lt.label}</Text>
                   </TouchableOpacity>

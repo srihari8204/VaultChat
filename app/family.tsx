@@ -608,7 +608,8 @@ export default function FamilySpaceScreen() {
     return () => { dead = true; };
   }, [active?.id, bump]);
 
-  const toggleShare = async (v: boolean) => {
+  /** Resolves to whether sharing is ON afterwards. */
+  const toggleShare = async (v: boolean): Promise<boolean> => {
     // setSharing asks for location permission when turning ON — that is the
     // moment it is genuinely needed. If it is refused, leave the switch OFF
     // rather than showing it on while nothing is being published.
@@ -658,9 +659,10 @@ export default function FamilySpaceScreen() {
         + 'You can still use everything else here without it.',
         [{ text: 'Not now' }, { text: 'Open settings', onPress: () => { Linking.openSettings().catch(() => {}); } }],
       );
-      return;
+      return false;
     }
     if (ok) await offerBackground();
+    return ok;
   };
 
   const toggleSpeedAlert = async (on: boolean) => {
@@ -965,21 +967,32 @@ export default function FamilySpaceScreen() {
     sosProg.setValue(0);
     if (!active || !me) return;
     Vibration.vibrate([0, 400, 150, 400]);
+    // THE MESSAGE GOES FIRST. Turning sharing on can raise the location,
+    // background-location and battery-exemption system dialogs, and a high-
+    // accuracy fix can take tens of seconds — none of that may stand between
+    // the user and the alert. The OS's cached fix is instant and prompt-free
+    // (it throws without permission, which just means no coordinates); live
+    // sharing, started right after, supplies the real position.
     try {
-      await toggleShare(true);
       let where = '';
-      try { const c = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }); where = ` (${c.coords.latitude.toFixed(5)}, ${c.coords.longitude.toFixed(5)})`; } catch {}
+      try {
+        const c = await Location.getLastKnownPositionAsync();
+        if (c) where = ` (${c.coords.latitude.toFixed(5)}, ${c.coords.longitude.toFixed(5)})`;
+      } catch {}
       await sendMessage(active.id, `🆘 ${me.name} triggered an SOS — please respond${where}`, 'system');
-      await recordAlert({
-        circleId: active.id, kind: 'sos', actorId: me.id, actorName: me.name,
-        text: `${me.name} triggered an SOS`,
-      });
-      setBump((b) => b + 1);
-      Alert.alert('SOS sent', 'Your circle has been alerted and your live location is on.', [
-        { text: 'Also alert trusted contacts', onPress: () => router.push('/emergency-sos' as any) },
-        { text: 'OK' },
-      ]);
-    } catch (e: any) { Alert.alert('SOS', e?.message ?? 'Could not send SOS.'); }
+    } catch (e: any) { Alert.alert('SOS', e?.message ?? 'Could not send SOS.'); return; }
+    recordAlert({
+      circleId: active.id, kind: 'sos', actorId: me.id, actorName: me.name,
+      text: `${me.name} triggered an SOS`,
+    }).catch(() => {});
+    setBump((b) => b + 1);
+    const live = await toggleShare(true).catch(() => false);
+    Alert.alert('SOS sent', live
+      ? 'Your circle has been alerted and your live location is on.'
+      : 'Your circle has been alerted. Your live location is NOT being shared.', [
+      { text: 'Also alert trusted contacts', onPress: () => router.push('/emergency-sos' as any) },
+      { text: 'OK' },
+    ]);
   };
   const sosStart = () => {
     Vibration.vibrate(30);
@@ -1152,8 +1165,10 @@ export default function FamilySpaceScreen() {
     Alert.alert('Leave circle?', `You will stop sharing and seeing locations in "${active.name}".`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Leave', style: 'destructive', onPress: async () => {
-        await leaveCircle(active.id, me.id);
-        await afterCircleGone();
+        // leaveCircle throws when the server refused; the circle then stays
+        // listed (the user is still in it) and they are told why.
+        try { await leaveCircle(active.id, me.id); await afterCircleGone(); }
+        catch (e: any) { Alert.alert('Leave', e?.message ?? 'Could not leave the circle. Try again.'); }
       } },
     ]);
   };
@@ -1336,7 +1351,7 @@ export default function FamilySpaceScreen() {
           <Ionicons name={share ? 'navigate' : 'navigate-outline'} size={18} color={share ? colors.primary : colors.textDim} />
           <Text style={{ color: colors.text, fontWeight: '600', flexShrink: 1 }}>Share my location</Text>
         </View>
-        <Switch value={share} onValueChange={toggleShare} trackColor={{ true: colors.primary }} />
+        <Switch value={share} onValueChange={(v) => { toggleShare(v); }} accessibilityLabel="Share my location" trackColor={{ true: colors.primary }} />
       </View>
       {/* Explains itself in the SPACE'S OWN TERMS, and only where it matters.
           The old copy said "Location permission is required for Family Circle"
@@ -1651,6 +1666,7 @@ export default function FamilySpaceScreen() {
                       perms: Array.from(perms).join(','),
                     },
                   })}
+                  accessibilityRole="button"
                   style={[st.qa, { backgroundColor: G.pane, borderColor: G.edge }]}
                 >
                   <View style={[st.qaIcon, { backgroundColor: colors.primary + '22' }]}>
@@ -1670,6 +1686,7 @@ export default function FamilySpaceScreen() {
           <View style={st.qaGrid}>
             <TouchableOpacity
               onPress={() => setExpanded(true)}
+              accessibilityRole="button"
               style={[st.qa, { backgroundColor: G.pane, borderColor: G.edge }]}
             >
               <View style={[st.qaIcon, { backgroundColor: colors.primary + '22' }]}>
@@ -1693,6 +1710,7 @@ export default function FamilySpaceScreen() {
                 pathname: '/family-map' as any,
                 params: { circleId: active.id, circleName: active.name },
               })}
+              accessibilityRole="button"
               style={[st.qa, { backgroundColor: G.pane, borderColor: G.edge }]}
             >
               <View style={[st.qaIcon, { backgroundColor: colors.primary + '22' }]}>
@@ -1704,6 +1722,7 @@ export default function FamilySpaceScreen() {
 
             <TouchableOpacity
               onPress={() => router.push('/emergency-sos' as any)}
+              accessibilityRole="button"
               style={[st.qa, { backgroundColor: G.pane, borderColor: G.edge }]}
             >
               <View style={[st.qaIcon, { backgroundColor: colors.danger + '22' }]}>
@@ -1715,6 +1734,7 @@ export default function FamilySpaceScreen() {
 
             <TouchableOpacity
               onPress={() => setCheckin(true)}
+              accessibilityRole="button"
               style={[st.qa, { backgroundColor: G.pane, borderColor: G.edge }]}
             >
               <View style={[st.qaIcon, { backgroundColor: colors.success + '22' }]}>
@@ -1727,6 +1747,7 @@ export default function FamilySpaceScreen() {
             {canZones && (
               <TouchableOpacity
                 onPress={() => active && router.push({ pathname: '/family-places' as any, params: { circleId: active.id, name: active.name } })}
+                accessibilityRole="button"
                 style={[st.qa, { backgroundColor: G.pane, borderColor: G.edge }]}
               >
                 <View style={[st.qaIcon, { backgroundColor: colors.primary + '22' }]}>
@@ -1739,6 +1760,7 @@ export default function FamilySpaceScreen() {
 
             <TouchableOpacity
               onPress={() => active && router.push({ pathname: '/family-alerts' as any, params: { circleId: active.id, circleName: active.name } })}
+              accessibilityRole="button"
               style={[st.qa, { backgroundColor: G.pane, borderColor: G.edge }]}
             >
               <View style={[st.qaIcon, { backgroundColor: colors.primary + '22' }]}>
@@ -1760,6 +1782,7 @@ export default function FamilySpaceScreen() {
                 permission the space grants. */}
             <TouchableOpacity
               onPress={() => active && router.push({ pathname: '/family-items' as any, params: { circleId: active.id } })}
+              accessibilityRole="button"
               style={[st.qa, { backgroundColor: G.pane, borderColor: G.edge }]}
             >
               <View style={[st.qaIcon, { backgroundColor: colors.primary + '22' }]}>
@@ -1772,6 +1795,7 @@ export default function FamilySpaceScreen() {
             {canHistory && (
               <TouchableOpacity
                 onPress={() => active && router.push({ pathname: '/family-history' as any, params: { circleId: active.id, circleName: active.name } })}
+                accessibilityRole="button"
                 style={[st.qa, { backgroundColor: G.pane, borderColor: G.edge }]}
               >
                 <View style={[st.qaIcon, { backgroundColor: colors.primary + '22' }]}>
@@ -1794,8 +1818,17 @@ export default function FamilySpaceScreen() {
           {(spaceFamily === 'family' || spaceFamily === 'generic') && (
           <Pressable
             onPressIn={sosStart} onPressOut={sosEnd}
+            accessibilityRole="button"
             accessibilityLabel="Emergency SOS"
-            accessibilityHint="Press and hold for one and a half seconds to alert your circle and share your live location"
+            accessibilityHint="Press and hold for one and a half seconds to alert your circle and share your live location. With a screen reader, double-tap to confirm and send."
+            // A TalkBack/VoiceOver double-tap cannot perform a 1.5 s hold, so
+            // the activate action asks once and sends — the confirm stands in
+            // for the hold as the guard against an accidental alarm.
+            accessibilityActions={[{ name: 'activate' }, { name: 'longpress' }]}
+            onAccessibilityAction={() => Alert.alert('Send SOS?', 'Alert your circle and share your live location.', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Send SOS', style: 'destructive', onPress: () => { fireSos(); } },
+            ])}
             style={[st.sosBig, { borderColor: colors.danger, backgroundColor: colors.danger + (scheme === 'dark' ? '1F' : '14') }]}
           >
             <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.danger + '55', transform: [{ scaleX: sosProg }] }]} />
@@ -2217,27 +2250,27 @@ export default function FamilySpaceScreen() {
               </View>
             )}
 
-            <TouchableOpacity onPress={() => { setManage(false); openAdd(); }} style={[st.mRow, { borderColor: G.line }]}>
+            <TouchableOpacity onPress={() => { setManage(false); openAdd(); }} accessibilityRole="button" style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="person-add" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Invite from contacts</Text>
             </TouchableOpacity>
-            {canInvite && <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-invites' as any, params: { chatId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: G.line }]}>
+            {canInvite && <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-invites' as any, params: { chatId: active.id, name: active.name } }); }} accessibilityRole="button" style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="mail-open-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Sent invitations &amp; requests</Text>
             </TouchableOpacity>}
-            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-members' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: G.line }]}>
+            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-members' as any, params: { groupId: active.id, name: active.name } }); }} accessibilityRole="button" style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="people-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Members &amp; roles</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => { setManage(false); router.push('/group-invitations' as any); }} style={[st.mRow, { borderColor: G.line }]}>
+            <TouchableOpacity onPress={() => { setManage(false); router.push('/group-invitations' as any); }} accessibilityRole="button" style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="mail-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>My invitations</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => { setManage(false); router.push('/group-create' as any); }} style={[st.mRow, { borderColor: G.line }]}>
+            <TouchableOpacity onPress={() => { setManage(false); router.push('/group-create' as any); }} accessibilityRole="button" style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="add-circle-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Create or join another group</Text>
             </TouchableOpacity>
             {canAnnounce && (
-              <TouchableOpacity onPress={() => { setManage(false); setAnnounceTxt(''); setAnnouncing(true); }} style={[st.mRow, { borderColor: G.line }]}>
+              <TouchableOpacity onPress={() => { setManage(false); setAnnounceTxt(''); setAnnouncing(true); }} accessibilityRole="button" style={[st.mRow, { borderColor: G.line }]}>
                 <Ionicons name="megaphone-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Post an announcement</Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-calendar' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: G.line }]}>
+            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-calendar' as any, params: { groupId: active.id, name: active.name } }); }} accessibilityRole="button" style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="calendar-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Shared calendar</Text>
             </TouchableOpacity>
             {/* The admin console. Offered only to someone who actually runs this
@@ -2245,14 +2278,14 @@ export default function FamilySpaceScreen() {
                 console draws only what they can use — a tile that fails on tap
                 teaches people to distrust the whole screen. The permission list
                 is presentation; every endpoint behind it re-checks server-side. */}
-            {canOps && <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/space-admin' as any, params: { spaceId: active.id, name: active.name, groupType: active.groupType ?? '', perms: Array.from(perms).join(',') } }); }} style={[st.mRow, { borderColor: G.line }]}>
+            {canOps && <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/space-admin' as any, params: { spaceId: active.id, name: active.name, groupType: active.groupType ?? '', perms: Array.from(perms).join(',') } }); }} accessibilityRole="button" style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="shield-checkmark-outline" size={18} color={colors.primary} />
               <Text style={[st.mTxt, { color: G.accentText, fontWeight: '700' }]}>Admin console</Text>
             </TouchableOpacity>}
             {/* Attendance is only meaningful where someone oversees others, so
                 it is offered on the same permission that shows the runs card
                 rather than to every member of every household. */}
-            {canOps && <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/space-attendance' as any, params: { spaceId: active.id, name: active.name, groupType: active.groupType ?? '' } }); }} style={[st.mRow, { borderColor: G.line }]}>
+            {canOps && <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/space-attendance' as any, params: { spaceId: active.id, name: active.name, groupType: active.groupType ?? '' } }); }} accessibilityRole="button" style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="calendar-number-outline" size={18} color={colors.text} />
               <Text style={[st.mTxt, { color: colors.text }]}>Attendance</Text>
             </TouchableOpacity>}
@@ -2260,34 +2293,34 @@ export default function FamilySpaceScreen() {
                 a parent's "roster" is their own child, and that is the screen
                 that tells them so. The server decides what is in it. */}
             {(canOps || hasPerm(perms, 'manage_roster') || !!active?.groupType?.includes('school') || !!active?.groupType?.includes('transport')) &&
-              <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/space-roster' as any, params: { spaceId: active.id, name: active.name, canManage: hasPerm(perms, 'manage_roster') ? '1' : '0', groupType: active.groupType ?? '' } }); }} style={[st.mRow, { borderColor: G.line }]}>
+              <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/space-roster' as any, params: { spaceId: active.id, name: active.name, canManage: hasPerm(perms, 'manage_roster') ? '1' : '0', groupType: active.groupType ?? '' } }); }} accessibilityRole="button" style={[st.mRow, { borderColor: G.line }]}>
                 <Ionicons name="people-outline" size={18} color={colors.text} />
                 <Text style={[st.mTxt, { color: colors.text }]}>Roster</Text>
               </TouchableOpacity>}
-            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-insights' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: G.line }]}>
+            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-insights' as any, params: { groupId: active.id, name: active.name } }); }} accessibilityRole="button" style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="stats-chart-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Insights</Text>
             </TouchableOpacity>
             {canNavigate && (
-              <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-trip' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: G.line }]}>
+              <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-trip' as any, params: { groupId: active.id, name: active.name } }); }} accessibilityRole="button" style={[st.mRow, { borderColor: G.line }]}>
                 <Ionicons name="navigate-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Start a group trip</Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/media-gallery' as any, params: { chatId: active.id, peerName: active.name } }); }} style={[st.mRow, { borderColor: G.line }]}>
+            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/media-gallery' as any, params: { chatId: active.id, peerName: active.name } }); }} accessibilityRole="button" style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="images-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Shared album</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-notes' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: G.line }]}>
+            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-notes' as any, params: { groupId: active.id, name: active.name } }); }} accessibilityRole="button" style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="document-text-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Shared notes</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-tasks' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: G.line }]}>
+            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-tasks' as any, params: { groupId: active.id, name: active.name } }); }} accessibilityRole="button" style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="checkbox-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Shared tasks</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-privacy' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: G.line }]}>
+            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-privacy' as any, params: { groupId: active.id, name: active.name } }); }} accessibilityRole="button" style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="eye-off-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>What this group can see</Text>
             </TouchableOpacity>
             {/* High-speed alert for MY OWN device (spec: speed alerts). Tap the
                 threshold to cycle it. Off by default; detected on this phone —
                 the server never sees a speed. */}
-            <View style={[st.mRow, { borderColor: G.line }]}>
+            <View accessibilityRole="button" style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="speedometer-outline" size={19} color={colors.primary} />
               <Text style={[st.mTxt, { color: colors.text, flex: 1 }]}>High-speed alert</Text>
               {speedAlert.enabled && (
@@ -2295,25 +2328,25 @@ export default function FamilySpaceScreen() {
                   <Text style={{ color: G.accentText, fontWeight: '800', fontSize: 13 }}>{speedAlert.thresholdKmh} km/h</Text>
                 </TouchableOpacity>
               )}
-              <Switch value={speedAlert.enabled} onValueChange={toggleSpeedAlert} trackColor={{ true: colors.primary }} />
+              <Switch value={speedAlert.enabled} onValueChange={toggleSpeedAlert} accessibilityLabel="Speed alerts" trackColor={{ true: colors.primary }} />
             </View>
-            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/chat', params: { id: active.id } } as any); }} style={[st.mRow, { borderColor: G.line }]}>
+            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/chat', params: { id: active.id } } as any); }} accessibilityRole="button" style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="chatbubbles" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Open circle chat</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => { setManage(false); router.push('/family-setup' as any); }} style={[st.mRow, { borderColor: G.line }]}>
+            <TouchableOpacity onPress={() => { setManage(false); router.push({ pathname: '/family-setup' as any, params: { from: 'family' } }); }} accessibilityRole="button" style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="key" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Create or join another circle</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => { setManage(false); router.push('/emergency-sos' as any); }} style={[st.mRow, { borderColor: G.line }]}>
+            <TouchableOpacity onPress={() => { setManage(false); router.push('/emergency-sos' as any); }} accessibilityRole="button" style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="medkit" size={19} color={colors.danger} /><Text style={[st.mTxt, { color: colors.text }]}>Emergency SOS (trusted contacts)</Text>
             </TouchableOpacity>
             <Text style={{ color: colors.textDim, fontSize: 12, paddingVertical: 8 }}>
               Tap a member for their details and history. Long-press to change their role or remove them.
             </Text>
-            <TouchableOpacity onPress={doLeave} style={[st.mRow, { borderColor: G.line }]}>
+            <TouchableOpacity onPress={doLeave} accessibilityRole="button" style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="exit-outline" size={19} color={G.dangerText} /><Text style={[st.mTxt, { color: G.dangerText }]}>Leave circle</Text>
             </TouchableOpacity>
             {canManage && (
-              <TouchableOpacity onPress={doDelete} disabled={busy} style={[st.mRow, { borderColor: G.line }]}>
+              <TouchableOpacity onPress={doDelete} disabled={busy} accessibilityRole="button" style={[st.mRow, { borderColor: G.line }]}>
                 <Ionicons name="trash" size={19} color={G.dangerText} /><Text style={[st.mTxt, { color: G.dangerText, fontWeight: '800' }]}>Delete circle</Text>
               </TouchableOpacity>
             )}
@@ -2324,7 +2357,9 @@ export default function FamilySpaceScreen() {
 
       {/* ── Crash detected: loud, full-screen, and biased toward asking for
           help. Doing nothing sends the SOS; only "I'm OK" stops it. ── */}
-      <Modal visible={crashAsk} transparent animationType="fade" onRequestClose={() => setCrashAsk(false)}>
+      {/* Back does nothing: it used to cancel the countdown silently, which is
+          an "I'm OK" nobody chose. Only the two buttons decide. */}
+      <Modal visible={crashAsk} transparent animationType="fade" onRequestClose={() => {}}>
         <View style={[st.crashWrap, { backgroundColor: 'rgba(0,0,0,0.82)' }]}>
           {/* maxHeight + inner scroll for the EXPLANATION only — the two
               buttons stay pinned below it. At large font scales the old fixed
@@ -2346,7 +2381,10 @@ export default function FamilySpaceScreen() {
             <TouchableOpacity
               onPress={() => setCrashAsk(false)}
               accessibilityRole="button"
-              style={[st.crashBtn, { backgroundColor: 'rgba(34,197,94,0.20)' }]}
+              accessibilityLabel="I'm OK, cancel the SOS"
+              // Solid deep green: white on #15803D is ~5:1 (AA). The old 20%
+              // tint over the light sheet left white text near 1.3:1.
+              style={[st.crashBtn, { backgroundColor: '#15803D' }]}
             >
               <Text style={st.crashBtnTxt}>I’m OK</Text>
             </TouchableOpacity>

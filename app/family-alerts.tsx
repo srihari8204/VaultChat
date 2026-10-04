@@ -11,7 +11,7 @@
 
 import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, StyleSheet, TouchableOpacity, SectionList, Alert } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, SectionList, Alert, ActivityIndicator } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
@@ -68,7 +68,9 @@ export default function FamilyAlertsScreen() {
   const [filter, setFilter] = useState<AlertFilter>('all');
   const alerts = useFamilyAlerts(circleId, filter);
 
-  useEffect(() => { loadAlerts(); }, []);
+  // "No alerts yet" must not flash before the device store has been read.
+  const [ready, setReady] = useState(false);
+  useEffect(() => { loadAlerts().catch(() => {}).finally(() => setReady(true)); }, []);
   // Opening the inbox is the read receipt — same convention as the chats list.
   useFocusEffect(useCallback(() => {
     const t = setTimeout(() => { markAllRead(circleId); }, 600);
@@ -132,7 +134,9 @@ export default function FamilyAlertsScreen() {
         keyExtractor={(a) => a.id}
         contentContainerStyle={sections.length ? { paddingBottom: 30 } : { flex: 1 }}
         stickySectionHeadersEnabled={false}
-        ListEmptyComponent={
+        ListEmptyComponent={!ready ? (
+          <View style={st.empty}><ActivityIndicator color={colors.primary} /></View>
+        ) : (
           <View style={st.empty}>
             <Ionicons name="notifications-off-outline" size={30} color={colors.textFaint} />
             <Text style={{ color: colors.text, fontWeight: '700', marginTop: 10 }}>No alerts yet</Text>
@@ -140,17 +144,24 @@ export default function FamilyAlertsScreen() {
               Arrivals, departures, check-ins, SOS and low-battery warnings land here.
             </Text>
           </View>
-        }
+        )}
         renderSectionHeader={({ section }) => (
           // Transparent: a solid strip over the gradient ground reads as a bug.
           <Text numberOfLines={1} style={[st.sec, { color: colors.textDim }]}>{section.title}</Text>
         )}
-        renderItem={({ item }) => (
+        renderItem={({ item }) => {
+          // System rows ("sharing paused" etc.) have no member to open.
+          const hasMember = !!circleId && !!item.actorId && item.actorId !== 'system';
+          return (
           <TouchableOpacity
             activeOpacity={0.75}
-            onPress={() => circleId && router.push({
+            disabled={!hasMember}
+            accessibilityRole={hasMember ? 'button' : 'text'}
+            accessibilityLabel={`${item.read ? '' : 'Unread. '}${item.text}. ${when(item.at)}`}
+            accessibilityHint={hasMember ? `Opens ${item.actorName}` : undefined}
+            onPress={() => hasMember && router.push({
               pathname: '/family-member' as any,
-              params: { circleId, userId: item.actorId, name: item.actorName, circleName: params.circleName ?? '' },
+              params: { circleId: circleId!, userId: item.actorId, name: item.actorName, circleName: params.circleName ?? '' },
             })}
             style={[st.row, { borderColor: G.line, backgroundColor: item.read ? 'transparent' : brandAlpha(0.07) }]}
           >
@@ -165,7 +176,8 @@ export default function FamilyAlertsScreen() {
             </View>
             {!item.read && <View style={[st.unread, { backgroundColor: colors.brandOnLight }]} />}
           </TouchableOpacity>
-        )}
+          );
+        }}
       />
     </View>
   );

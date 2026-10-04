@@ -109,8 +109,22 @@ export default function FamilyMemberScreen() {
   const alerts = useFamilyAlerts(circleId || null, 'all');
   useEffect(() => { loadAlerts(); }, []);
 
+  /** The last pull threw — shown, and the 15 s poll keeps retrying. */
+  const [pullFailed, setPullFailed] = useState(false);
+  const [selfId, setSelfId] = useState<string | null>(null);
+
   const pull = useCallback(async () => {
     if (!circleId || !userId) { setLoading(false); return; }
+    try { await pullOnce(); if (alive.current) setPullFailed(false); }
+    catch {
+      // getPlaces/getGroup/getTrack rejected: no endless spinner, no
+      // unhandled rejection every 15 s from the interval.
+      if (alive.current) { setPullFailed(true); setLoading(false); }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [circleId, userId]);
+
+  const pullOnce = async () => {
     const [ps, g, me] = await Promise.all([
       getPlaces(circleId),
       getGroup(circleId),
@@ -140,11 +154,12 @@ export default function FamilyMemberScreen() {
     const denied = !allowed && userId !== (me ? String(me.id) : null);
     const track = denied ? [] : await getTrack(circleId, { from: startOfToday(), userId });
     if (!alive.current) return;   // blurred mid-flight — nothing below may set state
+    setSelfId(me ? String(me.id) : null);
     setMayViewHistory(!denied);
     setToday(track);
     setPlaces(ps);
     setLoading(false);
-  }, [circleId, userId]);
+  };
 
   // Poll while focused: presence.ts keeps writing pings into history behind us.
   useFocusEffect(useCallback(() => {
@@ -344,6 +359,11 @@ export default function FamilyMemberScreen() {
       }} />
       <SpaceGround aura={colorFor(userId)} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+        {pullFailed && (
+          <Text accessibilityLiveRegion="polite" style={{ color: G.dangerText, fontSize: 12.5, marginBottom: 10 }}>
+            Couldn&apos;t refresh {name}&apos;s details — retrying automatically.
+          </Text>
+        )}
 
         {/* identity card */}
         <View style={[st.card, { backgroundColor: G.paneStrong, borderColor: G.edge }]}>
@@ -397,8 +417,9 @@ export default function FamilyMemberScreen() {
 
         {/* actions */}
         <View style={st.actions}>
-          {action('chatbubble-ellipses', 'Message', () => openDirect('chat'))}
-          {action('call', 'Call', () => openDirect('voicecall'))}
+          {/* Not on your own row: these opened a "direct chat" with yourself. */}
+          {userId !== selfId && action('chatbubble-ellipses', 'Message', () => openDirect('chat'))}
+          {userId !== selfId && action('call', 'Call', () => openDirect('voicecall'))}
           {action('navigate-circle', 'Route', route)}
           {action('locate', 'Follow', follow)}
           {mayViewHistory && action('time', 'History', () => router.push({

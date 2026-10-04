@@ -5,7 +5,7 @@
 // these screens make no network requests (spec: lock-history).
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, TouchableOpacity, StyleSheet, FlatList, Alert, Share, TextInput } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, FlatList, Alert, Share, TextInput, ActivityIndicator } from 'react-native';
 import { Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
@@ -55,6 +55,9 @@ export default function LockHistoryScreen() {
   const [open, setOpen] = useState<number | null>(null);
   const [events, setEvents] = useState<LockEventRow[]>([]);
   const [noteDraft, setNoteDraft] = useState('');
+  // 'loading' and 'error' are not "No lock sessions yet" — the empty copy used
+  // to show while loading and after a failed read alike.
+  const [load, setLoad] = useState<'loading' | 'ok' | 'error'>('loading');
 
   const reload = useCallback(async () => {
     setSessions(await getSessions(filter));
@@ -67,13 +70,17 @@ export default function LockHistoryScreen() {
     setTrend(await distancePerDay(7));
   }, [filter, range]);
 
-  useEffect(() => { reload().catch(() => {}); }, [reload]);
+  useEffect(() => {
+    reload().then(() => setLoad('ok'), () => setLoad('error'));
+  }, [reload]);
+  const retry = () => { setLoad('loading'); reload().then(() => setLoad('ok'), () => setLoad('error')); };
 
   const toggle = async (id: number) => {
     if (open === id) { setOpen(null); return; }
     setOpen(id);
+    setEvents([]);   // never show the previous session's events under this one
     setNoteDraft(sessions.find((s) => s.id === id)?.notes ?? '');
-    setEvents(await getEvents(id));
+    setEvents(await getEvents(id).catch(() => []));
   };
 
   const doExport = () => {
@@ -87,19 +94,27 @@ export default function LockHistoryScreen() {
   const doClear = () => {
     Alert.alert('Delete all history?', 'This is immediate and irreversible.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete all', style: 'destructive', onPress: async () => { await clearAllHistory(); reload(); } },
+      { text: 'Delete all', style: 'destructive', onPress: async () => {
+        try { await clearAllHistory(); } catch { Alert.alert('Delete failed', 'History could not be deleted. Try again.'); }
+        reload().catch(() => {});
+      } },
     ]);
   };
 
   const removeOne = (id: number) => {
     Alert.alert('Delete this session?', undefined, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => { await deleteSession(id); if (open === id) setOpen(null); reload(); } },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+        try { await deleteSession(id); if (open === id) setOpen(null); }
+        catch { Alert.alert('Delete failed', 'This session could not be deleted. Try again.'); }
+        reload().catch(() => {});
+      } },
     ]);
   };
 
   const Chip = ({ on, label, onPress }: { on: boolean; label: string; onPress: () => void }) => (
     <TouchableOpacity onPress={onPress}
+      accessibilityRole="button" accessibilityState={{ selected: on }}
       style={[st.chip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? colors.primary + '1a' : 'transparent' }]}>
       <Text style={{ color: on ? colors.primary : colors.text, fontWeight: on ? '700' : '500', fontSize: 12.5 }}>{label}</Text>
     </TouchableOpacity>
@@ -155,11 +170,11 @@ export default function LockHistoryScreen() {
         </View>
       </View>
       <View style={[st.rowBetween, { marginTop: 10, marginBottom: 6 }]}>
-        <TouchableOpacity onPress={doExport} style={st.linkRow}>
+        <TouchableOpacity onPress={doExport} accessibilityRole="button" accessibilityLabel="Export history" style={st.linkRow}>
           <Ionicons name="share-outline" size={15} color={colors.primary} />
           <Text style={{ color: colors.primary, fontWeight: '600', fontSize: 13 }}>Export</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={doClear} style={st.linkRow}>
+        <TouchableOpacity onPress={doClear} accessibilityRole="button" accessibilityLabel="Delete all history" style={st.linkRow}>
           <Ionicons name="trash-outline" size={15} color={colors.danger} />
           <Text style={{ color: colors.danger, fontWeight: '600', fontSize: 13 }}>Delete all</Text>
         </TouchableOpacity>
@@ -177,12 +192,30 @@ export default function LockHistoryScreen() {
         ListHeaderComponent={header}
         contentContainerStyle={st.body}
         ListEmptyComponent={
-          <Text style={{ color: colors.textDim, textAlign: 'center', marginTop: 40, fontSize: 13.5 }}>
-            No lock sessions {filter !== 'all' ? 'matching this filter ' : ''}yet.
-          </Text>
+          load === 'loading' ? (
+            <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
+          ) : load === 'error' ? (
+            <View style={{ alignItems: 'center', marginTop: 40, gap: 10 }}>
+              <Text style={{ color: colors.textDim, fontSize: 13.5 }}>Couldn&apos;t read lock history on this phone.</Text>
+              <TouchableOpacity onPress={retry} accessibilityRole="button" hitSlop={12}>
+                <Text style={{ color: colors.primary, fontWeight: '700' }}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <Text style={{ color: colors.textDim, textAlign: 'center', marginTop: 40, fontSize: 13.5 }}>
+              No lock sessions {filter !== 'all' ? 'matching this filter ' : ''}yet.
+            </Text>
+          )
         }
         renderItem={({ item: s }) => (
           <TouchableOpacity onPress={() => toggle(s.id)} onLongPress={() => removeOne(s.id)}
+            accessibilityRole="button"
+            accessibilityLabel={`Lock session ${fmtT(s.started_at)}`}
+            accessibilityState={{ expanded: open === s.id }}
+            accessibilityHint="Shows the event timeline"
+            // Long-press stays as a shortcut; screen readers get a named action.
+            accessibilityActions={[{ name: 'delete', label: 'Delete session' }]}
+            onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'delete') removeOne(s.id); }}
             style={[st.session, { backgroundColor: colors.glass, borderColor: colors.glassStroke }]}>
             <View style={st.rowBetween}>
               <Text style={{ color: colors.text, fontWeight: '800', fontSize: 14 }}>{fmtT(s.started_at)}</Text>
@@ -210,7 +243,7 @@ export default function LockHistoryScreen() {
                     <View key={e.id} style={st.eventRow}>
                       <Ionicons name={meta.icon} size={14} color={meta.color} />
                       <Text style={{ color: colors.text, fontSize: 12.5, flex: 1 }}>{meta.label}</Text>
-                      {e.distance != null && <Text style={{ color: colors.textDim, fontSize: 12 }}>{Math.round(e.distance)} m</Text>}
+                      {e.distance != null && <Text style={{ color: colors.textDim, fontSize: 12 }}>{fmtDistance(e.distance, settings.units)}</Text>}
                       <Text style={{ color: colors.textDim, fontSize: 12 }}>
                         {new Date(e.t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                       </Text>
@@ -227,13 +260,25 @@ export default function LockHistoryScreen() {
                   />
                   <TouchableOpacity
                     accessibilityRole="button" accessibilityLabel="Save note"
-                    onPress={async () => { await setSessionNotes(s.id, noteDraft); reload(); }}>
+                    onPress={async () => {
+                      try { await setSessionNotes(s.id, noteDraft); }
+                      catch { Alert.alert('Not saved', 'The note could not be saved. Try again.'); return; }
+                      reload().catch(() => {});
+                    }}>
                     <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 12 }}>Save</Text>
                   </TouchableOpacity>
                 </View>
-                <Text style={{ color: colors.textFaint, fontSize: 11, marginTop: 6 }}>
-                  {s.center_lat.toFixed(5)}, {s.center_lng.toFixed(5)} · long-press card to delete
-                </Text>
+                <View style={[st.rowBetween, { marginTop: 6 }]}>
+                  <Text style={{ color: colors.textFaint, fontSize: 11 }}>
+                    {s.center_lat.toFixed(5)}, {s.center_lng.toFixed(5)}
+                  </Text>
+                  {/* A visible delete — long-press alone could not be found. */}
+                  <TouchableOpacity onPress={() => removeOne(s.id)} accessibilityRole="button"
+                    accessibilityLabel="Delete this session" hitSlop={12} style={st.linkRow}>
+                    <Ionicons name="trash-outline" size={14} color={colors.danger} />
+                    <Text style={{ color: colors.danger, fontWeight: '600', fontSize: 12 }}>Delete</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             )}
           </TouchableOpacity>

@@ -5,8 +5,10 @@
 // of any kind: MemberPresence was in-memory and discarded, so "where were they
 // at 3pm" had no answer. lib/family/history.ts is the store; this is the view.
 //
-// Everything here is read from the device. There is no history endpoint and
-// nothing on this screen was ever uploaded.
+// The track is read from the device; there is no history endpoint. One thing
+// does leave it: the "Distance" stat sends the shown member's polyline to
+// crazzychat's routing server (/nav/trace) for map-matching, which returns a
+// length and stores nothing. Circle-wide, one member is shown at a time.
 
 import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState, useEffect } from 'react';
@@ -18,7 +20,9 @@ import { brandAlpha } from '../constants/theme';
 import SpaceGround, { useSpaceGlass } from '../components/spaces/SpaceGround';
 import { SPACE_SHADOW } from '../constants/spaceTheme';
 import FamilyMap from '../components/family/FamilyMap';
-import { getTrack, summarize, type TrackSample } from '../lib/family/history';
+import { getTrack, summarize, trackOwners, type TrackSample } from '../lib/family/history';
+import { formatMetres } from '../lib/family/distance';
+import { circleMembers } from '../lib/family/circle';
 import { segmentTrips } from '../lib/family/status';
 import { useFamilyAlerts, loadAlerts, type FamilyAlert } from '../lib/family/alerts';
 import { getGroup, historyAccess } from '../lib/groups/store';
@@ -33,7 +37,7 @@ const RANGES: { key: Range; label: string; ms: number }[] = [
   { key: 'month', label: 'Month', ms: 31 * 24 * 3600 * 1000 },
 ];
 
-const dist = (m: number) => (m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1)} km`);
+const dist = formatMetres;
 const clock = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const dur = (ms: number) => {
   const m = Math.round(ms / 60_000);
@@ -60,7 +64,13 @@ export default function FamilyHistoryScreen() {
   const who = String(params.name || 'Family');
 
   const [range, setRange] = useState<Range>('day');
-  const [samples, setSamples] = useState<TrackSample[]>([]);
+  /** Everything getTrack returned — circle-wide, that is several people. */
+  const [allSamples, setAllSamples] = useState<TrackSample[]>([]);
+  /** Circle-wide only: whose track is shown. Never "everyone merged". */
+  const [pick, setPick] = useState<string | null>(null);
+  const [names, setNames] = useState<Record<string, string>>({});
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [reload, setReload] = useState(0);
   // Selected trip index; null = the whole range's path on the map.
   const [tripSel, setTripSel] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -81,8 +91,9 @@ export default function FamilyHistoryScreen() {
   useFocusEffect(useCallback(() => {
     let live = true;
     (async () => {
-      await loadAlerts();
+      await loadAlerts().catch(() => {});
       if (!circleId) { setLoading(false); return; }
+      setLoadFailed(false);
       const me = await getCurrentUserAsync().catch(() => null);
       if (live) setSelfId(me ? String(me.id) : null);
       const g = await getGroup(circleId);
@@ -112,12 +123,30 @@ export default function FamilyHistoryScreen() {
       setMayViewOthers(allowed);
       const t = denied ? [] : await getTrack(circleId, { from, userId });
       if (!live) return;
-      setSamples(t);
+      setAllSamples(t);
       setTripSel(null); // a stale index into the previous range's trips would highlight the wrong drive
       setLoading(false);
-    })();
+      if (!userId && !denied) {
+        circleMembers(circleId)
+          .then((ms) => { if (live) setNames(Object.fromEntries(ms.map((m) => [m.id, m.name]))); })
+          .catch(() => {});
+      }
+    })().catch(() => {
+      // getTrack/getGroup rejected: say so with a Retry instead of an endless spinner.
+      if (live) { setLoadFailed(true); setLoading(false); }
+    });
     return () => { live = false; };
-  }, [circleId, userId, from]));
+  // `reload` is a retry counter: changing it is what re-runs this loader.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [circleId, userId, from, reload]));
+
+  // Circle-wide: offer each member's track separately (viewer first).
+  const owners = useMemo(() => (userId ? [] : trackOwners(allSamples, selfId)), [allSamples, userId, selfId]);
+  const shownId = userId ?? (pick && owners.includes(pick) ? pick : owners[0] ?? null);
+  const samples = useMemo(
+    () => (userId ? allSamples : allSamples.filter((x) => x.u === shownId)),
+    [allSamples, userId, shownId]);
+  const nameOf = (id: string) => (id === selfId ? 'You' : names[id] || 'Member');
 
   const stats = useMemo(() => summarize(samples), [samples]);
 
@@ -191,6 +220,17 @@ export default function FamilyHistoryScreen() {
 
       {loading ? (
         <View style={st.center}><ActivityIndicator color={colors.primary} /></View>
+      ) : loadFailed ? (
+        <View style={[st.center, { padding: 32 }]}>
+          <Text style={{ color: colors.text, fontWeight: '700' }}>Couldn&apos;t load history</Text>
+          <TouchableOpacity
+            onPress={() => { setLoading(true); setReload((n) => n + 1); }}
+            accessibilityRole="button"
+            style={[st.tab, { marginTop: 12, flex: 0, paddingHorizontal: 20, borderColor: colors.primary, backgroundColor: brandAlpha(0.14) }]}
+          >
+            <Text style={{ color: G.accentText, fontWeight: '800' }}>Retry</Text>
+          </TouchableOpacity>
+        </View>
       ) : (!mayViewOthers && userId !== selfId) ? (
         <View style={[st.center, { padding: 32 }]}>
           <Ionicons name="lock-closed-outline" size={30} color={colors.textFaint} />
@@ -201,8 +241,28 @@ export default function FamilyHistoryScreen() {
         </View>
       ) : (
         <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 6, paddingBottom: 40 }}>
+          {/* member picker — circle-wide only, and only when there is a choice */}
+          {owners.length > 1 && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 10 }}>
+              {owners.map((id) => {
+                const on = id === shownId;
+                return (
+                  <TouchableOpacity key={id} onPress={() => { setPick(id); setTripSel(null); }}
+                    accessibilityRole="radio" accessibilityState={{ selected: on }}
+                    accessibilityLabel={`Show ${nameOf(id)}'s track`}
+                    style={[st.tab, { flex: 0, paddingHorizontal: 14, backgroundColor: on ? brandAlpha(0.14) : G.paneFaint, borderColor: on ? colors.primary : G.chipEdge }]}>
+                    <Text style={{ color: on ? G.accentText : colors.textDim, fontWeight: on ? '800' : '600', fontSize: 13 }}>{nameOf(id)}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          )}
           {/* path */}
-          <View style={[st.mapCard, { borderColor: G.edge }]}>
+          <View
+            style={[st.mapCard, { borderColor: G.edge }]}
+            accessible={path.length > 1}
+            accessibilityLabel={path.length > 1 ? `Map of ${shownId && !userId ? `${nameOf(shownId)}'s` : 'the'} track, ${path.length} points` : undefined}
+          >
             {path.length > 1 ? (
               <FamilyMap members={[]} path={path} style={{ flex: 1 }} />
             ) : (
@@ -249,6 +309,9 @@ export default function FamilyHistoryScreen() {
                   <TouchableOpacity
                     key={t.startTs}
                     onPress={() => setTripSel(on ? null : i)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: on }}
+                    accessibilityHint={on ? 'Shows the whole range on the map' : 'Shows this trip on the map'}
                     style={[st.evt, { borderColor: G.line }]}
                   >
                     <View style={[st.evtIcon, { backgroundColor: on ? brandAlpha(0.22) : brandAlpha(0.1) }]}>

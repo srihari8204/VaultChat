@@ -80,6 +80,10 @@ export interface StartNavOpts {
   profile: NavProfile; mode?: DisplayMode; custom?: Partial<Record<HapticEvent, HapticPattern>>;
   timing?: NotifTiming;
   routeOpts?: RouteOpts;      // fastest/shortest + toll/highway avoidance (v2)
+  /** A route the user already chose (e.g. a Valhalla alternative from the
+   *  preview). Driven as-is instead of fetching the primary; a reroute after
+   *  leaving it fetches fresh, as for any route. */
+  route?: Route;
 }
 
 // ── active session ──
@@ -268,7 +272,9 @@ export async function startNavigation(o: StartNavOpts): Promise<void> {
   opts = o; dest = o.to;
   const from = o.from ?? (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High })).coords;
   const fromLL: LatLng = 'lat' in (from as any) ? (from as LatLng) : { lat: (from as any).latitude, lng: (from as any).longitude };
-  route = await fetchRoute(fromLL, o.to, o.costing ?? 'auto', o.routeOpts);
+  route = o.route && o.route.shape.length > 1
+    ? o.route
+    : await fetchRoute(fromLL, o.to, o.costing ?? 'auto', o.routeOpts);
   setRouteGeometry(route);
   maneuverIdx = 0; timeline = null; last = null;
   startVoiceGuide(o.mode ?? 'vibrationOnly');

@@ -5,30 +5,25 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import { brandAlpha, type Palette } from '../constants/theme';
-import React, { useState, useEffect, useRef , useMemo} from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   Alert, ActivityIndicator, Vibration, Platform,
   Animated, Easing,
 } from 'react-native';
 import { useTheme } from '../lib/theme';
-import { useRouter, Stack } from 'expo-router';
+import { useRouter, Stack, useFocusEffect } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import { Accelerometer } from 'expo-sensors';
-import { listTrustedContacts, sendSOS, listSOSHistory } from '../lib/chatService';
+import { listTrustedContacts, sendSOS, listSOSHistory, type SOSHistoryItem } from '../lib/chatService';
 import { AuroraBackground } from '../components/ui';
 
-
-const SOS_MESSAGE = (name: string, lat: number, lng: number) =>
-  `\u{1F6A8} EMERGENCY: ${name} needs help. Location: https://maps.google.com/?q=${lat},${lng}`;
-
-const TEST_MESSAGE = (name: string, lat: number, lng: number) =>
-  `[TEST] \u{1F6A8} SOS Test from ${name}. Location: https://maps.google.com/?q=${lat},${lng} — This is a test, no emergency.`;
+type SosContact = { uid: string; name: string; vaultId: string };
 
 function useS() {
-  const { colors } = useTheme();
-  return useMemo(() => makeStyles(colors), [colors]);
+  const { colors, scheme } = useTheme();
+  return useMemo(() => makeStyles(colors, scheme === 'light'), [colors, scheme]);
 }
 
 /**
@@ -65,23 +60,20 @@ async function sosFix(): Promise<{ lat: number | null; lng: number | null }> {
   } catch { return none; }
 }
 
-// TEMPORARY INSTRUMENTATION (2026-09-20). This route does not navigate: not
-// from a deep link, not from the in-app SOS control, and JS logs nothing at
-// all either way. The bundle contains this screen and its imports resolve
-// everywhere else, so the remaining question is whether this module is ever
-// EVALUATED. These two lines answer it and come straight back out.
-console.warn('[sos-probe] module evaluated');
-
 export default function EmergencySOSScreen() {
-  console.warn('[sos-probe] component rendering');
   const { colors } = useTheme();
   const styles = useS();
   const router = useRouter();
 
   // State
-  const [trustedContacts, setTrustedContacts] = useState<any[]>([]);
+  const [trustedContacts, setTrustedContacts] = useState<SosContact[]>([]);
   const [selectedContacts, setSelectedContacts] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  // A failed load is NOT "no contacts": in an emergency that copy sends the
+  // user off to set contacts up instead of retrying. Kept separate on purpose.
+  const [loadError, setLoadError] = useState(false);
+  /** The server's own count of contacts it pushed to — not our selection size. */
+  const [notified, setNotified] = useState<number | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
@@ -89,7 +81,7 @@ export default function EmergencySOSScreen() {
   // sender has to know, because the whole point of the alert is "come find me".
   const [sentNoLoc, setSentNoLoc] = useState(false);
   const [testMode, setTestMode] = useState(false);
-  const [history, setHistory] = useState<any[]>([]);
+  const [history, setHistory] = useState<SOSHistoryItem[]>([]);
   const [shakeEnabled, setShakeEnabled] = useState(true);
 
   // Animations
@@ -117,65 +109,34 @@ export default function EmergencySOSScreen() {
   }, [pulseAnim]);
 
   // Load data
-  useEffect(() => {
-    const loadTrustedContacts = async () => {
-      setLoading(true);
-      try {
-        const tc = await listTrustedContacts();
-        const contacts = tc.map(c => ({ uid: c.userId, name: c.name || 'Unknown', vaultId: c.vaultId || c.userId.slice(0, 8) }));
-        setTrustedContacts(contacts);
-        setSelectedContacts(contacts.map(c => c.uid));
-      } catch {}
-      setLoading(false);
-    };
-    const loadHistory = async () => {
-      try { setHistory(await listSOSHistory()); } catch {}
-    };
-    loadTrustedContacts();
-    loadHistory();
+  const loadTrustedContacts = useCallback(async () => {
+    setLoading(true);
+    setLoadError(false);
+    try {
+      const tc = await listTrustedContacts();
+      const contacts = tc.map(c => ({ uid: c.userId, name: c.name || 'Unknown', vaultId: c.vaultId || c.userId.slice(0, 8) }));
+      setTrustedContacts(contacts);
+      setSelectedContacts(contacts.map(c => c.uid));
+    } catch {
+      setLoadError(true);
+    }
+    setLoading(false);
   }, []);
+  // On focus, not mount: the "Edit" link pushes /trusted-contacts, and the list
+  // must reflect what the user changed there when they come back.
+  useFocusEffect(useCallback(() => { loadTrustedContacts(); }, [loadTrustedContacts]));
+  useEffect(() => { listSOSHistory().then(setHistory).catch(() => {}); }, []);
 
-  // Shake detection
-  useEffect(() => {
-    if (!shakeEnabled) return;
+  // The shake listener reads the latest state through refs, so it subscribes
+  // once per focus instead of on every countdown tick, and it shares the button
+  // path's startCountdown instead of keeping a second copy of it.
+  const shakeGate = useRef({ busy: false, start: (_isTest: boolean) => {} });
+
+  // Shake detection — only while this screen is focused. With /trusted-contacts
+  // pushed on top, three shakes used to start a countdown nobody could see.
+  useFocusEffect(useCallback(() => {
+    if (!shakeEnabled || Platform.OS === 'web') return;
     const SHAKE_THRESHOLD = 1.8;
-    const triggerSOSInEffect = async (isTest: boolean) => {
-      setSending(true);
-      try {
-        const { lat, lng } = await sosFix();
-        await sendSOS(lat, lng, isTest, selectedContacts);
-        setSent(true);
-        setSentNoLoc(lat == null);
-        Vibration.vibrate([0, 500, 200, 500]);
-        try { setHistory(await listSOSHistory()); } catch {}
-      } catch {
-        Alert.alert('Error', 'Failed to send SOS. Please try again.');
-      }
-      setSending(false);
-    };
-    const startCountdownFromShake = (isTest: boolean) => {
-      if (selectedContacts.length === 0) {
-        Alert.alert('No Contacts', 'Select at least one trusted contact to send SOS to.');
-        return;
-      }
-      setTestMode(isTest);
-      setCountdown(5);
-      setSent(false);
-
-      let count = 5;
-      countdownTimer.current = setInterval(() => {
-        count -= 1;
-        if (count <= 0) {
-          clearInterval(countdownTimer.current);
-          setCountdown(null);
-          triggerSOSInEffect(isTest);
-        } else {
-          setCountdown(count);
-          if (Platform.OS !== 'web') Vibration.vibrate(100);
-        }
-      }, 1000);
-    };
-    if (Platform.OS === 'web') return;
     const subscription = Accelerometer.addListener(({ x, y, z }) => {
       const magnitude = Math.sqrt(x * x + y * y + z * z);
       const now = Date.now();
@@ -187,16 +148,16 @@ export default function EmergencySOSScreen() {
         }
         shakeRef.current.lastShake = now;
 
-        if (shakeRef.current.count >= 3 && countdown === null && !sending && !sent) {
+        if (shakeRef.current.count >= 3 && !shakeGate.current.busy) {
           shakeRef.current.count = 0;
-          if (Platform.OS !== 'web') Vibration.vibrate([0, 200, 100, 200]);
-          startCountdownFromShake(false);
+          Vibration.vibrate([0, 200, 100, 200]);
+          shakeGate.current.start(false);
         }
       }
     });
     Accelerometer.setUpdateInterval(100);
     return () => subscription.remove();
-  }, [shakeEnabled, countdown, sending, sent, selectedContacts]);
+  }, [shakeEnabled]));
 
   const toggleContact = (uid: string) => {
     setSelectedContacts(prev =>
@@ -243,8 +204,9 @@ export default function EmergencySOSScreen() {
       const { lat, lng } = await sosFix();
 
       // Dispatch via backend — pushes to the selected trusted contacts.
-      await sendSOS(lat, lng, isTest, selectedContacts);
+      const res = await sendSOS(lat, lng, isTest, selectedContacts);
 
+      setNotified(typeof res?.contactsNotified === 'number' ? res.contactsNotified : null);
       setSent(true);
       setSentNoLoc(lat == null);
       Vibration.vibrate([0, 500, 200, 500]);
@@ -255,10 +217,12 @@ export default function EmergencySOSScreen() {
     setSending(false);
   };
 
-  const formatTime = (ts: any) => {
+  shakeGate.current = { busy: countdown !== null || sending || sent, start: startCountdown };
+
+  const formatTime = (ts: string | null | undefined) => {
     if (!ts) return 'Unknown';
     try {
-      const d = new Date(ts.toDate ? ts.toDate() : ts);
+      const d = new Date(ts);
       return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     } catch { return 'Unknown'; }
   };
@@ -267,7 +231,6 @@ export default function EmergencySOSScreen() {
     <View style={styles.container}>
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
-      <LinearGradient colors={['#FFFFFF', '#0D0A18', '#FFFFFF']} style={StyleSheet.absoluteFill} />
 
       {/* Header */}
       <View style={styles.header}>
@@ -286,8 +249,17 @@ export default function EmergencySOSScreen() {
             // Countdown state
             <View style={styles.countdownContainer}>
               <Text style={styles.countdownLabel}>{testMode ? 'TEST ' : ''}SOS in</Text>
-              <Text style={styles.countdownNumber}>{countdown}</Text>
-              <TouchableOpacity onPress={cancelCountdown} style={styles.cancelBtn}>
+              <Text
+                style={styles.countdownNumber}
+                accessibilityLiveRegion="assertive"
+                accessibilityLabel={`${testMode ? 'Test ' : ''}SOS sends in ${countdown} seconds`}
+              >{countdown}</Text>
+              <TouchableOpacity
+                onPress={cancelCountdown}
+                style={styles.cancelBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel SOS"
+              >
                 <Text style={styles.cancelBtnText}>CANCEL</Text>
               </TouchableOpacity>
             </View>
@@ -302,13 +274,15 @@ export default function EmergencySOSScreen() {
             <View style={styles.sentContainer}>
               <Text style={styles.sentCheck}>✓</Text>
               <Text style={styles.sentText}>{testMode ? 'Test SOS Sent' : 'SOS Sent!'}</Text>
-              <Text style={styles.sentSub}>{selectedContacts.length} contact(s) notified</Text>
+              <Text style={styles.sentSub}>
+                {notified == null ? 'Sent to your trusted contacts' : `${notified} contact(s) notified`}
+              </Text>
               {sentNoLoc && (
                 <Text style={styles.sentWarn}>
                   Sent without your location — turn on location access so your contacts can find you.
                 </Text>
               )}
-              <TouchableOpacity onPress={() => setSent(false)} style={styles.resetBtn}>
+              <TouchableOpacity onPress={() => setSent(false)} style={styles.resetBtn} accessibilityRole="button">
                 <Text style={styles.resetBtnText}>OK</Text>
               </TouchableOpacity>
             </View>
@@ -322,13 +296,20 @@ export default function EmergencySOSScreen() {
                   delayLongPress={500}
                   style={styles.sosButton}
                   activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Send emergency SOS"
+                  accessibilityHint="Double-tap and hold to start a 5 second countdown"
+                  // A screen-reader user may not be able to perform a hold:
+                  // the activate/longpress actions start the same countdown.
+                  accessibilityActions={[{ name: 'activate' }, { name: 'longpress' }]}
+                  onAccessibilityAction={() => startCountdown(false)}
                 >
                   <LinearGradient colors={['#FF2D2D', '#CC0000']} style={styles.sosGradient}>
                     <Text style={styles.sosText}>SOS</Text>
                   </LinearGradient>
                 </TouchableOpacity>
               </Animated.View>
-              <TouchableOpacity onPress={() => startCountdown(true)} style={styles.testBtn}>
+              <TouchableOpacity onPress={() => startCountdown(true)} style={styles.testBtn} accessibilityRole="button">
                 <Text style={styles.testBtnText}>Send Test SOS</Text>
               </TouchableOpacity>
             </>
@@ -344,6 +325,9 @@ export default function EmergencySOSScreen() {
           <TouchableOpacity
             style={[styles.toggleBtn, shakeEnabled && styles.toggleBtnActive]}
             onPress={() => setShakeEnabled(!shakeEnabled)}
+            accessibilityRole="switch"
+            accessibilityLabel="Shake detection"
+            accessibilityState={{ checked: shakeEnabled }}
           >
             <Text style={[styles.toggleText, shakeEnabled && styles.toggleTextActive]}>
               {shakeEnabled ? 'ON' : 'OFF'}
@@ -353,13 +337,32 @@ export default function EmergencySOSScreen() {
 
         {/* Trusted Contacts for SOS */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>SOS Contacts</Text>
+          <View style={styles.sectionHead}>
+            <Text style={styles.sectionTitle}>SOS Contacts</Text>
+            {trustedContacts.length > 0 && (
+              <TouchableOpacity
+                onPress={() => router.push('/trusted-contacts')}
+                accessibilityRole="button"
+                accessibilityLabel="Edit trusted contacts"
+                hitSlop={12}
+              >
+                <Text style={styles.editLink}>Edit</Text>
+              </TouchableOpacity>
+            )}
+          </View>
           {loading ? (
             <ActivityIndicator color={colors.accent} style={{ marginTop: 16 }} />
+          ) : loadError ? (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyText}>Couldn&apos;t load your trusted contacts. Check your connection.</Text>
+              <TouchableOpacity onPress={loadTrustedContacts} style={styles.setupBtn} accessibilityRole="button" accessibilityLabel="Retry loading trusted contacts">
+                <Text style={styles.setupBtnText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
           ) : trustedContacts.length === 0 ? (
             <View style={styles.emptyCard}>
               <Text style={styles.emptyText}>No trusted contacts set up</Text>
-              <TouchableOpacity onPress={() => router.push('/trusted-contacts')} style={styles.setupBtn}>
+              <TouchableOpacity onPress={() => router.push('/trusted-contacts')} style={styles.setupBtn} accessibilityRole="button">
                 <Text style={styles.setupBtnText}>Set Up Trusted Contacts</Text>
               </TouchableOpacity>
             </View>
@@ -369,6 +372,9 @@ export default function EmergencySOSScreen() {
                 key={contact.uid}
                 style={[styles.contactRow, selectedContacts.includes(contact.uid) && styles.contactSelected]}
                 onPress={() => toggleContact(contact.uid)}
+                accessibilityRole="checkbox"
+                accessibilityLabel={`${contact.name}, @${contact.vaultId}`}
+                accessibilityState={{ checked: selectedContacts.includes(contact.uid) }}
               >
                 <View style={[styles.contactCheck, selectedContacts.includes(contact.uid) && styles.contactCheckActive]}>
                   {selectedContacts.includes(contact.uid) && <Ionicons name="checkmark" size={14} color={colors.accent} />}
@@ -410,12 +416,11 @@ export default function EmergencySOSScreen() {
 }
 
 const SOS_SIZE = 160;
-const makeStyles = (c: Palette) => StyleSheet.create({
+const makeStyles = (c: Palette, light: boolean) => StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: Platform.OS === 'ios' ? 56 : 40, paddingHorizontal: 16, paddingBottom: 14 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 8, paddingHorizontal: 16, paddingBottom: 14 },
   backBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(74,159,255,0.08)', justifyContent: 'center', alignItems: 'center' },
-  backArrow: { color: c.accent, fontSize: 20 },
-  headerTitle: { color: '#FFF', fontSize: 18, fontWeight: '700' },
+  headerTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
   scroll: { flex: 1 },
   scrollContent: { paddingHorizontal: 16 },
 
@@ -426,12 +431,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   sosGradient: { flex: 1, justifyContent: 'center', alignItems: 'center', borderRadius: SOS_SIZE / 2, borderWidth: 4, borderColor: 'rgba(255,45,45,0.5)' },
   sosText: { color: '#FFF', fontSize: 48, fontWeight: '900', letterSpacing: 6 },
   testBtn: { marginTop: 20, paddingHorizontal: 24, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(251,191,36,0.3)', backgroundColor: 'rgba(251,191,36,0.08)' },
-  testBtnText: { color: '#FBBF24', fontSize: 14, fontWeight: '600' },
+  testBtnText: { color: light ? '#B45309' : '#FBBF24', fontSize: 14, fontWeight: '600' },
 
   // Countdown
   countdownContainer: { alignItems: 'center' },
   countdownLabel: { color: c.danger, fontSize: 18, fontWeight: '600', marginBottom: 10 },
-  countdownNumber: { color: '#FFF', fontSize: 72, fontWeight: '900' },
+  countdownNumber: { color: c.text, fontSize: 72, fontWeight: '900' },
   cancelBtn: { marginTop: 20, backgroundColor: 'rgba(255,60,110,0.15)', paddingHorizontal: 40, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: c.danger },
   cancelBtnText: { color: c.danger, fontSize: 18, fontWeight: '800', letterSpacing: 2 },
 
@@ -440,33 +445,34 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   sendingText: { color: c.danger, fontSize: 16, fontWeight: '600', marginTop: 12 },
   sentContainer: { alignItems: 'center', marginVertical: 20 },
   sentCheck: { fontSize: 48, color: c.primary },
-  sentText: { color: '#FFF', fontSize: 22, fontWeight: '700', marginTop: 8 },
+  sentText: { color: c.text, fontSize: 22, fontWeight: '700', marginTop: 8 },
   sentSub: { color: c.textDim, fontSize: 14, marginTop: 4 },
   // Wraps and grows: this line is longer than the others and must stay
   // readable at any width or OS font scale.
-  sentWarn: { color: '#FBBF24', fontSize: 13, marginTop: 8, textAlign: 'center', paddingHorizontal: 20 },
+  sentWarn: { color: light ? '#B45309' : '#FBBF24', fontSize: 13, marginTop: 8, textAlign: 'center', paddingHorizontal: 20 },
   resetBtn: { marginTop: 20, backgroundColor: c.accent, paddingHorizontal: 40, paddingVertical: 10, borderRadius: 8 },
   resetBtnText: { color: '#FFF', fontSize: 15, fontWeight: '700' },
 
   // Shake
   shakeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 14, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: 'rgba(74,159,255,0.08)' },
-  shakeTitle: { color: '#FFF', fontSize: 15, fontWeight: '600' },
+  shakeTitle: { color: c.text, fontSize: 15, fontWeight: '600' },
   shakeSub: { color: c.textDim, fontSize: 12, marginTop: 2 },
-  toggleBtn: { paddingHorizontal: 18, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
+  toggleBtn: { paddingHorizontal: 18, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: c.border },
   toggleBtnActive: { borderColor: c.primary, backgroundColor: brandAlpha(0.15) },
   toggleText: { color: c.textDim, fontSize: 13, fontWeight: '700' },
   toggleTextActive: { color: c.primary },
 
   // Contacts
   section: { marginTop: 20 },
-  sectionTitle: { color: '#FFF', fontSize: 16, fontWeight: '700', marginBottom: 12 },
+  sectionTitle: { color: c.text, fontSize: 16, fontWeight: '700' },
+  sectionHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  editLink: { color: c.accentOn, fontSize: 14, fontWeight: '600' },
   contactRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(74,159,255,0.06)' },
   contactSelected: { borderColor: 'rgba(0,229,255,0.3)', backgroundColor: 'rgba(0,229,255,0.04)' },
-  contactCheck: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: 'rgba(255,255,255,0.15)', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  contactCheck: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: c.border, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   contactCheckActive: { borderColor: c.accent, backgroundColor: 'rgba(0,229,255,0.2)' },
-  checkMark: { color: c.accent, fontSize: 14, fontWeight: '700' },
   contactInfo: { flex: 1 },
-  contactName: { color: '#FFF', fontSize: 15, fontWeight: '600' },
+  contactName: { color: c.text, fontSize: 15, fontWeight: '600' },
   contactId: { color: c.textDim, fontSize: 12, marginTop: 2 },
   emptyCard: { alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 14, padding: 24, borderWidth: 1, borderColor: 'rgba(74,159,255,0.08)' },
   emptyText: { color: c.textDim, fontSize: 14, marginBottom: 14 },
@@ -478,7 +484,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   historyRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(74,159,255,0.06)' },
   historyDot: { width: 10, height: 10, borderRadius: 5, marginRight: 12 },
   historyInfo: { flex: 1 },
-  historyType: { color: '#FFF', fontSize: 14, fontWeight: '600' },
+  historyType: { color: c.text, fontSize: 14, fontWeight: '600' },
   historyTime: { color: c.textDim, fontSize: 12, marginTop: 2 },
   historyContacts: { color: c.textDim, fontSize: 12 },
 });

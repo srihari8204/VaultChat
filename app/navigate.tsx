@@ -23,7 +23,9 @@ import { type LatLng } from '../lib/nav/geo';
 
 const PROFILES: { key: NavProfile; label: string }[] = [
   { key: 'standard', label: 'Standard' }, { key: 'strong', label: 'Strong' },
-  { key: 'minimal', label: 'Minimal' }, { key: 'rider', label: 'Rider' }, { key: 'custom', label: 'Custom' },
+  { key: 'minimal', label: 'Minimal' }, { key: 'rider', label: 'Rider' },
+  // 'custom' is not offered: there is no editor for it anywhere, and with the
+  // default empty map it vibrates for nothing. Add it back with an editor.
 ];
 // Voice guidance ships with v2 (expo-speech via lib/nav/voiceGuide).
 const MODES: { key: DisplayMode; label: string }[] = [
@@ -53,6 +55,9 @@ export default function NavigateScreen() {
   const [routeSel, setRouteSel] = useState(0);
 
   useEffect(() => { loadNavSettings(); }, []);
+  // A 'custom' profile saved by an earlier build has an empty pattern map, i.e.
+  // silent guidance. Fall back to Standard rather than navigate without a buzz.
+  useEffect(() => { if (s.profile === 'custom') setNavSettings({ profile: 'standard' }); }, [s.profile]);
 
   // Setup preview: as soon as a destination is chosen, show it on the map with
   // your current position and a preview of the route (best-effort; the pin shows
@@ -75,7 +80,10 @@ export default function NavigateScreen() {
       }
     })();
     return () => { cancel = true; };
-  }, [dest, s.costing]);
+  // Keyed on the route options too: toggling Shortest / Avoid tolls during
+  // setup must re-fetch the preview (setRouteOpt reroutes only while active).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dest, s.costing, JSON.stringify(s.routeOpts)]);
   useEffect(() => {
     if (params.lat && params.lng) {
       const c = { lat: Number(params.lat), lng: Number(params.lng) };
@@ -90,14 +98,15 @@ export default function NavigateScreen() {
   useEffect(() => {
     const q = query.trim();
     if (q.length < 3 || /(-?\d+(\.\d+)?)\s*,/.test(q)) { setSugs([]); return; }
+    let stale = false;   // a slow answer to an older query must not overwrite a newer one
     const t = setTimeout(async () => {
       try {
         const near = await Location.getLastKnownPositionAsync().catch(() => null);
         const hits = await geocodeSearch(q, near ? { lat: near.coords.latitude, lng: near.coords.longitude } : null);
-        setSugs(hits);
-      } catch { setSugs([]); }
+        if (!stale) setSugs(hits);
+      } catch { if (!stale) setSugs([]); }
     }, 350);
-    return () => clearTimeout(t);
+    return () => { stale = true; clearTimeout(t); };
   }, [query]);
   const pickSug = (h: GeoHit) => { setSugs([]); setQuery(h.label); setDest({ name: h.name || h.label, coords: { lat: h.lat, lng: h.lng } }); };
 
@@ -123,7 +132,11 @@ export default function NavigateScreen() {
     if (!dest) return;
     setStarting(true);
     try {
-      await startNavigation({ to: dest.coords, profile: s.profile, mode: s.mode, timing: s.timing, costing: s.costing, custom: s.custom, routeOpts: s.routeOpts });
+      // The alternative the user picked is the one driven. Only an alternative
+      // is handed over: the primary keeps being fetched fresh from the current
+      // fix, exactly as before.
+      const chosen = routeSel > 0 ? routes[routeSel] : undefined;
+      await startNavigation({ to: dest.coords, profile: s.profile, mode: s.mode, timing: s.timing, costing: s.costing, custom: s.custom, routeOpts: s.routeOpts, route: chosen });
     } catch (e: any) {
       Alert.alert('Could not start', e?.message ?? 'Check location permission and that the routing engine is up.');
     } finally { setStarting(false); }
@@ -137,6 +150,7 @@ export default function NavigateScreen() {
 
   const Chip = ({ active, label, onPress }: { active: boolean; label: string; onPress: () => void }) => (
     <TouchableOpacity onPress={onPress}
+      accessibilityRole="button" accessibilityState={{ selected: active }}
       style={[st.chip, { borderColor: active ? colors.primary : colors.border, backgroundColor: active ? colors.primary + '1a' : 'transparent' }]}>
       <Text style={{ color: active ? colors.primary : colors.text, fontWeight: active ? '700' : '500', fontSize: 13.5 }}>{label}</Text>
     </TouchableOpacity>
@@ -177,7 +191,7 @@ export default function NavigateScreen() {
               style={[st.rerouteBtn, { borderColor: colors.primary, opacity: banner.rerouting ? 0.5 : 1 }]}>
               <Ionicons name="git-branch" size={16} color={colors.primary} />
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => stopNavigation()} style={[st.endBtn, { backgroundColor: colors.danger }]}>
+            <TouchableOpacity onPress={() => stopNavigation()} accessibilityRole="button" accessibilityLabel="End navigation" style={[st.endBtn, { backgroundColor: colors.danger }]}>
               <Ionicons name="stop" size={16} color="#fff" />
               <Text style={st.endTxt}>End</Text>
             </TouchableOpacity>
@@ -217,12 +231,12 @@ export default function NavigateScreen() {
               style={[st.input, { color: colors.text }]}
             />
             {searching ? <ActivityIndicator size="small" color={colors.primary} />
-              : <TouchableOpacity onPress={search}><Text style={{ color: colors.primary, fontWeight: '700' }}>Find</Text></TouchableOpacity>}
+              : <TouchableOpacity onPress={search} accessibilityRole="button" accessibilityLabel="Find destination" hitSlop={12}><Text style={{ color: colors.primary, fontWeight: '700' }}>Find</Text></TouchableOpacity>}
           </View>
           {sugs.length > 0 && (
             <View style={[st.sugBox, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
               {sugs.map((h, i) => (
-                <TouchableOpacity key={i} onPress={() => pickSug(h)}
+                <TouchableOpacity key={i} onPress={() => pickSug(h)} accessibilityRole="button"
                   style={[st.sugRow, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.glassStroke }]}>
                   <Ionicons name="location-outline" size={16} color={colors.primary} />
                   <Text numberOfLines={1} style={{ color: colors.text, flex: 1, fontSize: 14 }}>{h.label}</Text>
@@ -302,7 +316,8 @@ export default function NavigateScreen() {
             <Chip active={!!s.routeOpts.avoidHighways} label="Avoid highways" onPress={() => setRouteOpt({ avoidHighways: !s.routeOpts.avoidHighways })} />
           </View>
 
-          <TouchableOpacity disabled={!dest || starting} onPress={start}
+          <TouchableOpacity disabled={!dest || starting} onPress={start} accessibilityRole="button"
+            accessibilityState={{ disabled: !dest || starting, busy: starting }}
             style={[st.startBtn, { backgroundColor: dest ? colors.primary : colors.border }]}>
             {starting ? <ActivityIndicator color="#fff" />
               : <><Ionicons name="navigate" size={18} color="#fff" /><Text style={st.startTxt}>Start navigation</Text></>}

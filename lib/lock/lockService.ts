@@ -56,13 +56,16 @@ export interface LockView {
   lastFixAt: number;         // t of the last accepted fix ("updated Ns ago")
   gpsDegraded: boolean;      // sustained poor accuracy (indoors / canyon)
   placeName: string | null;  // saved place this lock is armed on (null = ad-hoc)
+  /** Last ACCEPTED position — the live "you" marker on the lock map (spec:
+   *  "Live lock map"). Device-local; never leaves the engine's view store. */
+  pos: LatLng | null;
 }
 
 const IDLE: LockView = {
   active: false, center: null, radius: 30, armedAt: 0, state: null,
   distance: 0, accuracy: 0, quality: 'good', speedKmh: 0, battery: null, charging: false,
   alarmPhase: 'idle', heading: 0, killSafe: false, navBack: false,
-  lastFixAt: 0, gpsDegraded: false, placeName: null,
+  lastFixAt: 0, gpsDegraded: false, placeName: null, pos: null,
 };
 
 // ── engine event hook (v3): any surface can observe lock transitions without
@@ -251,6 +254,7 @@ async function onFix(loc: Location.LocationObject): Promise<void> {
     battery: bat.level ?? null,
     charging: !!bat.charging,
     lastFixAt: active.snap.t,
+    pos: active.lastPos,
   });
 
   for (const ev of r.events) {
@@ -314,7 +318,7 @@ export async function armLock(center: LatLng, radius: number, opts?: { placeName
     active: true, center, radius, armedAt: fix.t,
     state: active.snap.state, distance: Math.round(active.snap.distance * 10) / 10,
     accuracy: Math.round(fix.accuracy * 10) / 10,
-    alarmPhase: 'idle', killSafe, navBack: false, placeName,
+    alarmPhase: 'idle', killSafe, navBack: false, placeName, pos: fix.pos,
   });
   emitLockEvent('armed', active);
 
@@ -340,7 +344,7 @@ export async function restoreLock(): Promise<boolean> {
     active: true, center: a.center, radius: a.radius, armedAt: a.armedAt,
     state: a.snap.state, distance: Math.round(a.snap.distance * 10) / 10,
     accuracy: Math.round(a.snap.accuracy * 10) / 10,
-    alarmPhase: 'idle', killSafe, navBack: false, placeName: a.placeName ?? null,
+    alarmPhase: 'idle', killSafe, navBack: false, placeName: a.placeName ?? null, pos: a.lastPos ?? null,
   });
 
   // The alarm was live (or due) when the process died → resume it. The

@@ -21,6 +21,7 @@ import {
   applyAlertSettings, testAlarm, useLockView, enableKillSafe, disableKillSafe,
 } from '../lib/lock/lockService';
 import { AppText as Text, AuroraBackground } from '../components/ui';
+import { currentVersionName } from '../lib/appVersion';
 
 const VOLUMES = [0.2, 0.4, 0.6, 0.8, 1];
 const GRACES = [0, 5, 10, 30, 60];
@@ -51,6 +52,7 @@ export default function LockSettingsScreen() {
       <Text style={[st.rowTxt, { color: colors.text }]}>{label}</Text>
       <Switch
         value={!!a[keyName]}
+        accessibilityLabel={label}
         onValueChange={(v) => set({ [keyName]: v } as any)}
         trackColor={{ true: colors.primary + '88', false: colors.border }}
         thumbColor={a[keyName] ? colors.primary : '#999'}
@@ -60,6 +62,7 @@ export default function LockSettingsScreen() {
 
   const Chip = ({ on, label, onPress }: { on: boolean; label: string; onPress: () => void }) => (
     <TouchableOpacity onPress={onPress}
+      accessibilityRole="button" accessibilityState={{ selected: on }}
       style={[st.chip, { borderColor: on ? colors.primary : colors.glassStroke, backgroundColor: on ? colors.glass : colors.glassSoft }]}>
       <Text style={{ color: on ? colors.primary : colors.text, fontWeight: on ? '700' : '500', fontSize: 13 }}>{label}</Text>
     </TouchableOpacity>
@@ -104,10 +107,13 @@ export default function LockSettingsScreen() {
         <View style={[st.row, { borderColor: colors.glassStroke, marginTop: 24 }]}>
           <Ionicons name="shield-half" size={19} color={colors.primary} />
           <Text style={[st.rowTxt, { color: colors.text }]}>
-            Background tracking{lock.active ? '' : ' (arms with the next lock)'}
+            Background tracking{lock.active ? '' : ' (asked for when you lock)'}
           </Text>
           <Switch
-            value={lock.active ? lock.killSafe : true}
+            // Off until a lock is armed: arming can end without background
+            // protection (killSafe false), so a pre-checked "on" was a promise.
+            value={lock.active ? lock.killSafe : false}
+            accessibilityLabel="Background tracking"
             disabled={!lock.active}
             onValueChange={(v) => { (v ? enableKillSafe() : disableKillSafe()).catch(() => {}); }}
             trackColor={{ true: colors.primary + '88', false: colors.border }}
@@ -182,6 +188,7 @@ export default function LockSettingsScreen() {
           <Text style={[st.rowTxt, { color: colors.text }]}>Repeat alarm until back inside</Text>
           <Switch
             value={a.repeat}
+            accessibilityLabel="Repeat alarm until back inside"
             onValueChange={(v) => set({ repeat: v })}
             trackColor={{ true: colors.primary + '88', false: colors.border }}
             thumbColor={a.repeat ? colors.primary : '#999'}
@@ -209,11 +216,15 @@ export default function LockSettingsScreen() {
         {/* ── About ── */}
         <Text style={[st.h, { color: colors.text, marginTop: 28 }]}>About Location Lock</Text>
         <View style={[st.about, { borderColor: colors.glassStroke, backgroundColor: colors.glass }]}>
-          <Text style={{ color: colors.text, fontSize: 13.5, fontWeight: '700' }}>Location Lock · Navigate mini-app</Text>
+          <Text style={{ color: colors.text, fontSize: 13.5, fontWeight: '700' }}>
+            Location Lock · Navigate mini-app{currentVersionName() ? ` · v${currentVersionName()}` : ''}
+          </Text>
           <Text style={{ color: colors.textDim, fontSize: 12.5, marginTop: 6, lineHeight: 18 }}>
-            Geofencing runs entirely on this device. Your coordinates and history never
-            leave it — the only network call is to crazzychat’s own routing engine when
-            you navigate back.
+            Geofencing runs entirely on this device, and your lock history never leaves
+            it. Network use is limited to: crazzychat’s own routing engine when you
+            navigate back; crazzychat’s own search proxy when you search for a place;
+            and map tiles from tiles.openfreemap.org, which sees the area of the map
+            you are viewing (not your exact position).
           </Text>
           <Text style={{ color: colors.textFaint, fontSize: 11.5, marginTop: 8, lineHeight: 16 }}>
             Open-source components: OpenStreetMap data (ODbL) · MapLibre GL (BSD-3) ·

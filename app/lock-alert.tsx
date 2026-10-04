@@ -5,7 +5,7 @@
 // and one-tap navigate-back. Auto-resolves to a green "safe" state on return.
 
 import React, { useEffect, useRef, useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Animated, Alert } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { type Costing } from '../lib/nav/routing';
@@ -46,7 +46,10 @@ export default function LockAlertScreen() {
   const bg = flash.interpolate({ inputRange: [0, 1], outputRange: ['#7F1D1D', '#DC2626'] });
 
   const navBack = (costing: Costing) => {
-    navigateBackToLock(costing).catch(() => {});
+    // Surfaced, not swallowed: a failed route left the user on an empty
+    // Navigate screen with no idea why.
+    navigateBackToLock(costing).catch((e: any) =>
+      Alert.alert('Navigate back', e?.message ?? 'Could not plan a route back to the locked spot.'));
     router.replace('/navigate');
   };
 
@@ -61,6 +64,7 @@ export default function LockAlertScreen() {
           {lock.active ? 'Back inside the locked area.' : 'No active lock.'}
         </Text>
         <TouchableOpacity onPress={() => (router.canGoBack() ? router.back() : router.replace('/location-lock'))}
+          accessibilityRole="button"
           style={[st.btn, { backgroundColor: '#22C55E', marginTop: 34 }]}>
           <Text style={st.btnTxt}>Done</Text>
         </TouchableOpacity>
@@ -72,7 +76,7 @@ export default function LockAlertScreen() {
     <Animated.View style={[st.screen, { backgroundColor: bg }]}>
       <Stack.Screen options={{ headerShown: false }} />
       <Ionicons name="warning" size={92} color="#fff" />
-      <Text style={st.big}>ALERT!</Text>
+      <Text style={st.big} accessibilityLiveRegion="assertive">ALERT!</Text>
       <Text style={st.msg}>You have left the locked area</Text>
 
       <View style={st.distBox}>
@@ -84,12 +88,20 @@ export default function LockAlertScreen() {
       </View>
 
       {lock.alarmPhase === 'alarming' ? (
-        <TouchableOpacity onPress={() => stopLockAlarm()} style={[st.btn, { backgroundColor: c.glassSoft }]}>
+        <TouchableOpacity onPress={() => stopLockAlarm()} accessibilityRole="button" style={[st.btn, { backgroundColor: c.glassSoft }]}>
           <Ionicons name="volume-mute" size={18} color="#DC2626" />
           <Text style={[st.btnTxt, { color: '#DC2626' }]}>Stop Alarm</Text>
         </TouchableOpacity>
       ) : (
-        <Text style={[st.sub, { marginTop: 8 }]}>Alarm starts in moments — head back now</Text>
+        // One line per phase: after Stop Alarm the phase is 'silenced', and
+        // "Alarm starts in moments" was then simply false.
+        <Text style={[st.sub, { marginTop: 8 }]} accessibilityLiveRegion="polite">
+          {lock.alarmPhase === 'grace'
+            ? 'Alarm starts in moments — head back now'
+            : lock.alarmPhase === 'silenced'
+              ? 'Alarm silenced — you are still outside the locked area'
+              : 'You are outside the locked area — head back now'}
+        </Text>
       )}
 
       <Text style={[st.distLabel, { marginTop: 26 }]}>NAVIGATE BACK</Text>
@@ -99,7 +111,7 @@ export default function LockAlertScreen() {
         <NavBtn icon="car" label="Drive" onPress={() => navBack('auto')} />
       </View>
 
-      <TouchableOpacity onPress={() => (router.canGoBack() ? router.back() : router.replace('/location-lock'))} style={{ marginTop: 26 }}>
+      <TouchableOpacity onPress={() => (router.canGoBack() ? router.back() : router.replace('/location-lock'))} accessibilityRole="button" hitSlop={12} style={{ marginTop: 26 }}>
         <Text style={{ color: '#FECACA', fontSize: 13.5, fontWeight: '600' }}>Back to lock screen</Text>
       </TouchableOpacity>
     </Animated.View>
@@ -110,7 +122,7 @@ function NavBtn({ icon, label, onPress }: { icon: any; label: string; onPress: (
   const c = useColors();
   const st = useMemo(() => makeSt(c), [c]);
   return (
-    <TouchableOpacity onPress={onPress} style={st.navBtn}>
+    <TouchableOpacity onPress={onPress} accessibilityRole="button" accessibilityLabel={`Navigate back: ${label}`} style={st.navBtn}>
       <Ionicons name={icon} size={22} color="#fff" />
       <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12.5, marginTop: 3 }}>{label}</Text>
     </TouchableOpacity>

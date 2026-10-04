@@ -59,18 +59,20 @@ export async function registerSharedItem(
  * "I heard this tag, here." The server keeps only the newest sighting, so an
  * out-of-order report from a second phone cannot move the answer backwards.
  *
- * `placeName` is the FINDER's own saved-place name — the coordinate of that
- * place never travels, matching the family reference-distance doctrine.
+ * `placeName` is the FINDER's own saved-place name, and it is ALL that travels:
+ * lat/lng are always sent as null. The finder's coordinates are its own live
+ * position, and family location is end-to-end encrypted — the server must not
+ * receive it in plaintext through a side door. The endpoint accepts null
+ * coordinates (space_items.go), and nothing here reads the shared lat/lng.
  */
 export async function reportSighting(
   chatId: string, bleId: string,
-  pos: { lat: number; lng: number } | null,
   placeName: string | null,
   ts: number = Date.now(),
 ): Promise<void> {
   await call(`/chats/${encodeURIComponent(chatId)}/items/sighting`, {
     method: 'POST',
-    json: { bleId, ts, lat: pos?.lat ?? null, lng: pos?.lng ?? null, placeName },
+    json: { bleId, ts, lat: null, lng: null, placeName },
   });
 }
 

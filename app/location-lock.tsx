@@ -161,6 +161,10 @@ export default function LocationLockScreen() {
           }
         } catch {}
       }
+    } catch (e: any) {
+      // armLock can reject (e.g. no GPS fix in time) — that used to vanish,
+      // leaving the user believing the spot was locked.
+      Alert.alert('Could not lock', e?.message ?? 'Could not read your position. Check GPS and try again.');
     } finally { setArming(false); }
   };
 
@@ -171,9 +175,20 @@ export default function LocationLockScreen() {
     ]);
   };
 
-  const navBack = (costing: Costing) => { navigateBackToLock(costing).catch(() => {}); router.push('/navigate'); };
+  const navBack = (costing: Costing) => {
+    navigateBackToLock(costing).catch((e: any) =>
+      Alert.alert('Navigate back', e?.message ?? 'Could not plan a route back to the locked spot.'));
+    router.push('/navigate');
+  };
 
   const accWarn = accuracy != null && radius < 2 * accuracy;
+  // The live "you" marker comes from the engine's accepted fixes (lock.pos);
+  // myPos — the one-off setup fix — is only the fallback until the first one.
+  // Memoised so the 1 s ticker does not hand NavMap a new object every second.
+  const activeMapData = useMemo(
+    () => ({ shape: [], pos: lock.pos ?? myPos, dest: null, heading: lock.heading }),
+    [lock.pos, myPos, lock.heading],
+  );
   const previewLock = useMemo(
     () => (point ? { center: point.coords, radius: clampRadius(radius), color: '#22C55E' } : null),
     [point, radius],
@@ -181,6 +196,7 @@ export default function LocationLockScreen() {
 
   const Chip = ({ active: on, label, onPress }: { active: boolean; label: string; onPress: () => void }) => (
     <TouchableOpacity onPress={onPress}
+      accessibilityRole="button" accessibilityState={{ selected: on }}
       style={[st.chip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? colors.primary + '1a' : 'transparent' }]}>
       <Text style={{ color: on ? colors.primary : colors.text, fontWeight: on ? '700' : '500', fontSize: 13.5 }}>{label}</Text>
     </TouchableOpacity>
@@ -196,16 +212,22 @@ export default function LocationLockScreen() {
         <Stack.Screen options={{
         headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */  title: 'Location Locked', headerTitleAlign: 'center' }} />
 
-        {(alarming || lock.alarmPhase === 'grace') && (
+        {alarming && (
           <TouchableOpacity
             accessibilityRole="button" accessibilityLabel="Stop alarm"
-            onPress={() => (alarming ? stopLockAlarm() : undefined)}
-            style={[st.alarmBar, { backgroundColor: alarming ? '#DC2626' : '#F97316' }]}>
-            <Ionicons name={alarming ? 'alert-circle' : 'time'} size={18} color="#fff" />
-            <Text style={st.alarmBarTxt}>
-              {alarming ? 'ALARM — you left the locked area. Tap to stop.' : 'Outside the radius — alarm imminent…'}
-            </Text>
+            onPress={() => stopLockAlarm()}
+            style={[st.alarmBar, { backgroundColor: '#DC2626' }]}>
+            <Ionicons name="alert-circle" size={18} color="#fff" />
+            <Text style={st.alarmBarTxt}>ALARM — you left the locked area. Tap to stop.</Text>
           </TouchableOpacity>
+        )}
+        {/* Grace: a status, not a control — there is nothing to stop yet. It
+            used to be announced as a "Stop alarm" button that did nothing. */}
+        {lock.alarmPhase === 'grace' && (
+          <View accessibilityLiveRegion="assertive" style={[st.alarmBar, { backgroundColor: '#F97316' }]}>
+            <Ionicons name="time" size={18} color="#fff" />
+            <Text style={st.alarmBarTxt}>Outside the radius — alarm imminent. Head back now.</Text>
+          </View>
         )}
         {/* boundary prediction (v2.1): how much room is left before the edge */}
         {lock.alarmPhase === 'idle' && (lock.state === 'warning' || lock.state === 'atLimit') && (
@@ -226,7 +248,7 @@ export default function LocationLockScreen() {
         )}
 
         <NavMap
-          data={{ shape: [], pos: myPos, dest: null, heading: lock.heading }}
+          data={activeMapData}
           follow={false}
           lock={{ center: lock.center, radius: lock.radius, color: zc }}
           accuracyM={lock.accuracy}
@@ -284,16 +306,16 @@ export default function LocationLockScreen() {
               <Text style={[st.btnTxt, { color: '#EF4444' }]}>Unlock</Text>
             </TouchableOpacity>
             {alarming && (
-              <TouchableOpacity onPress={() => stopLockAlarm()} style={[st.btn, { backgroundColor: '#DC2626' }]}>
+              <TouchableOpacity onPress={() => stopLockAlarm()} accessibilityRole="button" style={[st.btn, { backgroundColor: '#DC2626' }]}>
                 <Ionicons name="volume-mute" size={16} color="#fff" />
                 <Text style={[st.btnTxt, { color: '#fff' }]}>Stop alarm</Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity onPress={() => router.push('/lock-settings')} style={[st.btn, { borderColor: colors.glassStroke, borderWidth: 1 }]}>
+            <TouchableOpacity onPress={() => router.push('/lock-settings')} accessibilityRole="button" accessibilityLabel="Alert settings" style={[st.btn, { borderColor: colors.glassStroke, borderWidth: 1 }]}>
               <Ionicons name="options" size={16} color={colors.text} />
               <Text style={[st.btnTxt, { color: colors.text }]}>Alerts</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push('/lock-history')} style={[st.btn, { borderColor: colors.glassStroke, borderWidth: 1 }]}>
+            <TouchableOpacity onPress={() => router.push('/lock-history')} accessibilityRole="button" accessibilityLabel="Lock history" style={[st.btn, { borderColor: colors.glassStroke, borderWidth: 1 }]}>
               <Ionicons name="time" size={16} color={colors.text} />
               <Text style={[st.btnTxt, { color: colors.text }]}>History</Text>
             </TouchableOpacity>
@@ -307,15 +329,18 @@ export default function LocationLockScreen() {
   return (
     <View style={st.screen}>
       <AuroraBackground />
-      <Stack.Screen options={{ title: 'Location Lock', headerTitleAlign: 'center' }} />
+      {/* headerShown explicitly, as on the active face: the root stack hides
+          headers app-wide, so without it this face had no back control and
+          sat under the status bar. */}
+      <Stack.Screen options={{ headerShown: true, title: 'Location Lock', headerTitleAlign: 'center' }} />
       <ScrollView contentContainerStyle={st.setup} keyboardShouldPersistTaps="handled">
         <Text style={[st.h, { color: colors.text }]}>Lock point</Text>
         <View style={[st.row, { gap: 8 }]}>
-          <TouchableOpacity onPress={useCurrent} style={[st.srcBtn, { borderColor: colors.glassStroke }]}>
+          <TouchableOpacity onPress={useCurrent} accessibilityRole="button" style={[st.srcBtn, { borderColor: colors.glassStroke }]}>
             <Ionicons name="locate" size={16} color={colors.primary} />
             <Text style={{ color: colors.text, fontSize: 13 }}>Current location</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => setPinMode((v) => !v)}
+          <TouchableOpacity onPress={() => setPinMode((v) => !v)} accessibilityRole="button" accessibilityState={{ selected: pinMode }}
             style={[st.srcBtn, { borderColor: pinMode ? colors.primary : colors.border, backgroundColor: pinMode ? colors.primary + '14' : 'transparent' }]}>
             <Ionicons name="pin" size={16} color={pinMode ? colors.primary : colors.text} />
             <Text style={{ color: pinMode ? colors.primary : colors.text, fontSize: 13 }}>
@@ -332,7 +357,7 @@ export default function LocationLockScreen() {
             style={[st.input, { color: colors.text }]}
           />
           {searching ? <ActivityIndicator size="small" color={colors.primary} />
-            : <TouchableOpacity onPress={search}><Text style={{ color: colors.primary, fontWeight: '700' }}>Find</Text></TouchableOpacity>}
+            : <TouchableOpacity onPress={search} accessibilityRole="button" accessibilityLabel="Find lock point" hitSlop={12}><Text style={{ color: colors.primary, fontWeight: '700' }}>Find</Text></TouchableOpacity>}
         </View>
 
         {/* Saved places (lock type: saved location) — one tap sets both point
@@ -344,6 +369,7 @@ export default function LocationLockScreen() {
               {saved.map((p, i) => (
                 <TouchableOpacity key={`${p.name}-${i}`}
                   onPress={() => { setPoint({ name: p.name, coords: p.coords }); setRadius(clampRadius(p.radiusM)); setCustomR(''); setPinMode(false); }}
+                  accessibilityRole="button" accessibilityState={{ selected: point?.name === p.name }}
                   style={[st.chip, { borderColor: point?.name === p.name ? colors.primary : colors.border, flexDirection: 'row', alignItems: 'center', gap: 5 }]}>
                   <Ionicons name="bookmark" size={12} color={colors.primary} />
                   <Text numberOfLines={1} style={{ color: colors.text, fontSize: 12.5 }}>{p.name}</Text>
@@ -381,6 +407,7 @@ export default function LocationLockScreen() {
           {MODES.map((m) => (
             <TouchableOpacity key={m.key}
               onPress={() => { setLockSettings({ mode: m.key }).then(() => applyAlertSettings()).catch(() => {}); }}
+              accessibilityRole="button" accessibilityState={{ selected: settings.mode === m.key }}
               style={[st.chip, {
                 flexDirection: 'row', alignItems: 'center', gap: 5,
                 borderColor: settings.mode === m.key ? colors.primary : colors.border,
@@ -425,7 +452,7 @@ export default function LocationLockScreen() {
 
         <Text style={[st.h, { color: colors.text, marginTop: 22 }]}>Alerts</Text>
         <View style={[st.row, { gap: 8 }]}>
-          <TouchableOpacity onPress={() => router.push('/lock-settings')} style={[st.srcBtn, { borderColor: colors.glassStroke }]}>
+          <TouchableOpacity onPress={() => router.push('/lock-settings')} accessibilityRole="button" accessibilityHint="Opens alarm and alert settings" style={[st.srcBtn, { borderColor: colors.glassStroke }]}>
             <Ionicons name="options" size={16} color={colors.primary} />
             <Text style={{ color: colors.text, fontSize: 13 }}>
               {[settings.alerts.siren && 'Siren', settings.alerts.vibration && 'Vibration',
@@ -433,7 +460,7 @@ export default function LocationLockScreen() {
                 .filter(Boolean).join(' · ') || 'All off'} · {settings.alerts.graceS}s grace
             </Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => testAlarm()} style={[st.srcBtn, { borderColor: colors.glassStroke }]}>
+          <TouchableOpacity onPress={() => testAlarm()} accessibilityRole="button" accessibilityLabel="Test the alarm" style={[st.srcBtn, { borderColor: colors.glassStroke }]}>
             <Ionicons name="play" size={16} color={colors.primary} />
             <Text style={{ color: colors.text, fontSize: 13 }}>Test</Text>
           </TouchableOpacity>
@@ -446,7 +473,7 @@ export default function LocationLockScreen() {
             : <><Ionicons name="lock-closed" size={18} color="#fff" /><Text style={st.lockTxt}>Lock Location</Text></>}
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={() => router.push('/lock-history')} style={{ alignSelf: 'center', marginTop: 16 }}>
+        <TouchableOpacity onPress={() => router.push('/lock-history')} accessibilityRole="button" hitSlop={12} style={{ alignSelf: 'center', marginTop: 16 }}>
           <Text style={{ color: colors.primary, fontWeight: '600', fontSize: 13.5 }}>History & statistics</Text>
         </TouchableOpacity>
       </ScrollView>
