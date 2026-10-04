@@ -4,7 +4,7 @@
 // via the OS share sheet, and per-session / clear-all deletion. Local-only:
 // these screens make no network requests (spec: lock-history).
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, TouchableOpacity, StyleSheet, FlatList, Alert, Share, TextInput, ActivityIndicator } from 'react-native';
 import { Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,7 +17,7 @@ import {
   exportHistoryJSON, exportHistoryCSV, setSessionNotes,
   type LockSessionRow, type LockEventRow, type HistoryFilter, type LockStats,
 } from '../lib/lock/lockStore';
-import { fmtDistance } from '../lib/lock/format';
+import { fmtDistance, type Units } from '../lib/lock/format';
 import { useLockSettings } from '../lib/lock/lockSettings';
 import { AppText as Text, AuroraBackground } from '../components/ui';
 
@@ -56,16 +56,31 @@ const eventMeta = (type: string, c: Palette): EventMeta => {
   }
 };
 
-/** Filter / range chip. Hoisted: defined inside the screen it was a new
- *  component type on every render. */
+/** Filter / range chip: a radio inside its radiogroup. Hoisted: defined inside
+ *  the screen it was a new component type on every render. */
 function Chip({ on, label, onPress, colors }: { on: boolean; label: string; onPress: () => void; colors: Palette }) {
   return (
     <TouchableOpacity onPress={onPress}
-      accessibilityRole="button" accessibilityState={{ selected: on }}
+      accessibilityRole="radio" accessibilityState={{ checked: on }}
       style={[st.chip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? colors.primary + '1a' : 'transparent' }]}>
       <Text style={{ color: on ? colors.primary : colors.text, fontWeight: on ? '700' : '500', fontSize: 12.5 }}>{label}</Text>
     </TouchableOpacity>
   );
+}
+
+/** Everything the summary shows, spoken: its label replaces the children, so a
+ *  shorter label dropped the radius, duration, alarm time, time outside and note. */
+function sessionLabel(s: LockSessionRow, units: Units): string {
+  const parts = [
+    `Lock session ${fmtT(s.started_at)}`,
+    `radius ${fmtDistance(s.radius, units)}`,
+    s.ended_at ? `lasted ${fmtMs(s.ended_at - s.started_at)}` : 'active',
+    s.exits ? `${s.exits} exit${s.exits > 1 ? 's' : ''}, max ${fmtDistance(s.max_distance, units)}` : 'stayed inside',
+  ];
+  if (s.alarm_ms > 0) parts.push(`alarm ${fmtMs(s.alarm_ms)}`);
+  parts.push(`outside ${fmtMs(s.time_outside_ms)}`);
+  if (s.notes) parts.push(`note: ${s.notes}`);
+  return parts.join(', ');
 }
 
 export default function LockHistoryScreen() {
@@ -80,6 +95,9 @@ export default function LockHistoryScreen() {
   const [events, setEvents] = useState<LockEventRow[]>([]);
   /** The open session's timeline could not be read (not "no events"). */
   const [eventsFailed, setEventsFailed] = useState(false);
+  /** The session whose events are wanted now: a slower read for a session
+   *  toggled earlier must not land under this one. */
+  const openRef = useRef<number | null>(null);
   const [limit, setLimit] = useState(PAGE);
   const [savingNote, setSavingNote] = useState(false);
   const [noteSaved, setNoteSaved] = useState(false);
@@ -102,17 +120,22 @@ export default function LockHistoryScreen() {
   /** Every reload reports into `load`, so a failure is never silent. */
   const refresh = useCallback(
     () => reload().then(() => setLoad('ok'), () => setLoad('error')), [reload]);
-  useEffect(() => { refresh(); }, [refresh]);
+  // A filter, range or "Show more" change reloads: show progress meanwhile.
+  useEffect(() => { setLoad('loading'); refresh(); }, [refresh]);
   const retry = () => { setLoad('loading'); refresh(); };
 
   const toggle = async (id: number) => {
-    if (open === id) { setOpen(null); return; }
+    if (open === id) { openRef.current = null; setOpen(null); return; }
+    openRef.current = id;
     setOpen(id);
     setEvents([]);   // never show the previous session's events under this one
     setEventsFailed(false);
     setNoteSaved(false);
     setNoteDraft(sessions.find((s) => s.id === id)?.notes ?? '');
-    try { setEvents(await getEvents(id)); } catch { setEventsFailed(true); }
+    try {
+      const evs = await getEvents(id);
+      if (openRef.current === id) setEvents(evs);
+    } catch { if (openRef.current === id) setEventsFailed(true); }
   };
 
   const share = async (make: () => Promise<string>, title: string) => {
@@ -142,7 +165,7 @@ export default function LockHistoryScreen() {
     Alert.alert('Delete this session?', undefined, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
-        try { await deleteSession(id); if (open === id) setOpen(null); }
+        try { await deleteSession(id); if (openRef.current === id) { openRef.current = null; setOpen(null); } }
         catch { Alert.alert('Delete failed', 'This session could not be deleted. Try again.'); }
         refresh();
       } },
@@ -164,7 +187,7 @@ export default function LockHistoryScreen() {
   const header = (
     <View>
       {/* statistics */}
-      <View style={[st.chips, { marginTop: 4 }]}>
+      <View style={[st.chips, { marginTop: 4 }]} accessibilityRole="radiogroup" accessibilityLabel="Statistics period">
         {RANGES.map((r) => <Chip key={r.key} on={range === r.key} label={r.label} onPress={() => setRange(r.key)} colors={colors} />)}
       </View>
       {stats && (
@@ -206,7 +229,7 @@ export default function LockHistoryScreen() {
 
       {/* filters + actions */}
       <View style={[st.rowBetween, { marginTop: 16 }]}>
-        <View style={st.chips}>
+        <View style={st.chips} accessibilityRole="radiogroup" accessibilityLabel="Show sessions">
           {FILTERS.map((f) => <Chip key={f.key} on={filter === f.key} label={f.label} onPress={() => setFilter(f.key)} colors={colors} />)}
         </View>
       </View>
@@ -249,13 +272,15 @@ export default function LockHistoryScreen() {
         data={sessions}
         keyExtractor={(s) => String(s.id)}
         ListHeaderComponent={header}
-        ListFooterComponent={sessions.length >= limit ? (
+        ListFooterComponent={sessions.length >= limit ? (load === 'loading' ? (
+          <ActivityIndicator color={colors.primary} style={{ marginTop: 16 }} accessibilityLabel="Loading more sessions" />
+        ) : (
           <TouchableOpacity onPress={() => setLimit((l) => l + PAGE)} accessibilityRole="button"
             accessibilityLabel={`Showing the latest ${sessions.length} sessions. Show more`}
             hitSlop={12} style={{ alignSelf: 'center', marginTop: 16, minHeight: 44, justifyContent: 'center' }}>
             <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 13 }}>Showing the latest {sessions.length} · Show more</Text>
           </TouchableOpacity>
-        ) : null}
+        )) : null}
         contentContainerStyle={st.body}
         ListEmptyComponent={
           load === 'loading' ? (
@@ -280,7 +305,7 @@ export default function LockHistoryScreen() {
           <View style={[st.session, { backgroundColor: colors.glass, borderColor: colors.glassStroke }]}>
             <TouchableOpacity onPress={() => toggle(s.id)} onLongPress={() => removeOne(s.id)}
               accessibilityRole="button"
-              accessibilityLabel={`Lock session ${fmtT(s.started_at)}, ${s.exits ? `${s.exits} exit${s.exits > 1 ? 's' : ''}` : 'stayed inside'}`}
+              accessibilityLabel={sessionLabel(s, settings.units)}
               accessibilityState={{ expanded: open === s.id }}
               accessibilityHint="Shows the event timeline"
               // Long-press stays as a shortcut; screen readers get a named action.
@@ -301,7 +326,10 @@ export default function LockHistoryScreen() {
                 </Text>
               </View>
               {!!s.notes && open !== s.id && (
-                <Text numberOfLines={1} style={{ color: colors.textFaint, fontSize: 12, marginTop: 4 }}>📝 {s.notes}</Text>
+                <View style={[st.linkRow, { marginTop: 4 }]}>
+                  <Ionicons name="document-text-outline" size={12} color={colors.textFaint} accessibilityElementsHidden importantForAccessibility="no" />
+                  <Text numberOfLines={1} style={{ color: colors.textFaint, fontSize: 12, flex: 1 }}>{s.notes}</Text>
+                </View>
               )}
             </TouchableOpacity>
 
@@ -369,7 +397,7 @@ export default function LockHistoryScreen() {
 
 function StatCell({ label, value, colors }: { label: string; value: string; colors: Palette }) {
   return (
-    <View style={st.statCell}>
+    <View style={st.statCell} accessible accessibilityLabel={`${label}: ${value}`}>
       <Text style={{ color: colors.text, fontSize: 16, fontWeight: '800' }}>{value}</Text>
       <Text style={{ color: colors.textDim, fontSize: 11, marginTop: 2 }}>{label}</Text>
     </View>

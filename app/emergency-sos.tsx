@@ -22,9 +22,17 @@ import { useReducedMotion } from '../lib/useReducedMotion';
 
 type SosContact = { uid: string; name: string; vaultId: string };
 
+/** Contacts the push provider accepted the alert for (R4BE C13, written, not
+ *  deployed). Absent or not a number = unknown: callers keep the "alerted" copy. */
+const reachedOf = (r: unknown): number | null => {
+  const v = (r as { contactsReached?: unknown } | null | undefined)?.contactsReached;
+  return typeof v === 'number' ? v : null;
+};
+const plural = (n: number) => `${n} trusted contact${n === 1 ? '' : 's'}`;
+
 function useS() {
-  const { colors, scheme } = useTheme();
-  return useMemo(() => makeStyles(colors, scheme === 'light'), [colors, scheme]);
+  const { colors } = useTheme();
+  return useMemo(() => makeStyles(colors), [colors]);
 }
 
 /**
@@ -81,6 +89,8 @@ export default function EmergencySOSScreen() {
   const knownIds = useRef<Set<string>>(new Set());
   /** The server's own count of contacts it pushed to — not our selection size. */
   const [notified, setNotified] = useState<number | null>(null);
+  /** How many of them the push provider accepted it for; null = server doesn't say. */
+  const [reached, setReached] = useState<number | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
@@ -93,6 +103,7 @@ export default function EmergencySOSScreen() {
   const [history, setHistory] = useState<SOSHistoryItem[]>([]);
   /** History could not be read: not the same as "No SOS activations yet". */
   const [historyFailed, setHistoryFailed] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [shakeEnabled, setShakeEnabled] = useState(true);
 
   // Animations
@@ -100,6 +111,8 @@ export default function EmergencySOSScreen() {
   const countdownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const reduceMotion = useReducedMotion();
   const shakeRef = useRef({ count: 0, lastShake: 0 });
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
 
   // P1.4 (leak fix): the countdown interval was only cleared on natural
   // completion or explicit cancel. Unmounting mid-countdown left it firing
@@ -145,9 +158,11 @@ export default function EmergencySOSScreen() {
   // must reflect what the user changed there when they come back.
   useFocusEffect(useCallback(() => { loadTrustedContacts(); }, [loadTrustedContacts]));
   const loadHistory = useCallback(() => {
+    setHistoryLoading(true);
     listSOSHistory()
-      .then((h) => { setHistory(h); setHistoryFailed(false); })
-      .catch(() => setHistoryFailed(true));
+      .then((h) => { if (mounted.current) { setHistory(h); setHistoryFailed(false); } })
+      .catch(() => { if (mounted.current) setHistoryFailed(true); })
+      .finally(() => { if (mounted.current) setHistoryLoading(false); });
   }, []);
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
@@ -250,8 +265,11 @@ export default function EmergencySOSScreen() {
       // Dispatch via backend — pushes to the selected trusted contacts, or to
       // all of them when the list never loaded (contactIds undefined).
       const res = await sendSOS(lat, lng, isTest, contactIds);
+      // The SOS went out; only this screen's display is skipped if it closed.
+      if (!mounted.current) return;
 
       setNotified(typeof res?.contactsNotified === 'number' ? res.contactsNotified : null);
+      setReached(reachedOf(res));
       setSent(true);
       setSentNoLoc(lat == null);
       Vibration.vibrate([0, 500, 200, 500]);
@@ -259,10 +277,13 @@ export default function EmergencySOSScreen() {
     } catch {
       Alert.alert('Error', 'Failed to send SOS. Please try again.');
     }
-    setSending(false);
+    if (mounted.current) setSending(false);
   };
 
-  shakeGate.current = { busy: countdown !== null || sending || sent, start: startCountdown };
+  // Written after each commit, not during render.
+  useEffect(() => {
+    shakeGate.current = { busy: countdown !== null || sending || sent, start: startCountdown };
+  });
 
   const formatTime = (ts: string | null | undefined) => {
     if (!ts) return 'Unknown';
@@ -282,7 +303,7 @@ export default function EmergencySOSScreen() {
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={8} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={20} color={colors.accent} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Emergency SOS</Text>
+        <Text style={styles.headerTitle} accessibilityRole="header">Emergency SOS</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -322,14 +343,22 @@ export default function EmergencySOSScreen() {
           ) : sent ? (
             // Sent state
             <View style={styles.sentContainer}>
-              <Text style={styles.sentCheck}>✓</Text>
+              <Text style={styles.sentCheck} accessibilityElementsHidden importantForAccessibility="no">✓</Text>
               <Text style={styles.sentText}>{testMode ? 'Test SOS Sent' : 'SOS Sent!'}</Text>
               <Text style={styles.sentSub}>
-                {/* The server's count is who it is ALERTING, not who received it. */}
+                {/* contactsNotified is who the alert was ADDRESSED to; contactsReached
+                    (when the server sends it) is who the push provider accepted it
+                    for — still not proof a phone showed it, so "reached", not "saw". */}
                 {notified == null ? 'Your trusted contacts are being alerted'
                   : notified === 0 ? 'No trusted contacts to alert — add some so an SOS reaches someone.'
-                    : `Alerting ${notified} trusted contact${notified === 1 ? '' : 's'}`}
+                    : reached == null ? `Alerting ${plural(notified)}`
+                      : `Reached ${reached} of ${plural(notified)}`}
               </Text>
+              {notified != null && reached != null && reached < notified && (
+                <Text style={styles.sentWarn}>
+                  {notified - reached} could not be reached (no app or notifications turned off). Call or text them too.
+                </Text>
+              )}
               {sentNoLoc && (
                 <Text style={styles.sentWarn}>
                   Sent without your location — turn on location access so your contacts can find you.
@@ -355,7 +384,10 @@ export default function EmergencySOSScreen() {
                   // A screen-reader user may not be able to perform a hold:
                   // the activate/longpress actions start the same countdown.
                   accessibilityActions={[{ name: 'activate' }, { name: 'longpress' }]}
-                  onAccessibilityAction={() => startCountdown(false)}
+                  onAccessibilityAction={(e) => {
+                    const n = e.nativeEvent.actionName;
+                    if (n === 'activate' || n === 'longpress') startCountdown(false);
+                  }}
                 >
                   <LinearGradient colors={['#FF2D2D', '#CC0000']} style={styles.sosGradient}>
                     <Text style={styles.sosText}>SOS</Text>
@@ -391,7 +423,7 @@ export default function EmergencySOSScreen() {
         {/* Trusted Contacts for SOS */}
         <View style={styles.section}>
           <View style={styles.sectionHead}>
-            <Text style={styles.sectionTitle}>SOS Contacts</Text>
+            <Text style={styles.sectionTitle} accessibilityRole="header">SOS Contacts</Text>
             {trustedContacts.length > 0 && (
               <TouchableOpacity
                 onPress={() => router.push('/trusted-contacts')}
@@ -465,9 +497,13 @@ export default function EmergencySOSScreen() {
               <Text style={[styles.refreshWarn, { flex: 1, marginBottom: 0 }]} accessibilityLiveRegion="polite">
                 Couldn&apos;t load your SOS history.
               </Text>
-              <TouchableOpacity onPress={loadHistory} accessibilityRole="button" accessibilityLabel="Retry loading SOS history" hitSlop={12}>
-                <Text style={styles.editLink}>Retry</Text>
-              </TouchableOpacity>
+              {historyLoading
+                ? <ActivityIndicator size="small" color={colors.accent} accessibilityLabel="Loading SOS history" />
+                : (
+                  <TouchableOpacity onPress={loadHistory} accessibilityRole="button" accessibilityLabel="Retry loading SOS history" hitSlop={12}>
+                    <Text style={styles.editLink}>Retry</Text>
+                  </TouchableOpacity>
+                )}
             </View>
           )}
           {historyFailed && history.length === 0 ? null : history.length === 0 ? (
@@ -482,7 +518,9 @@ export default function EmergencySOSScreen() {
                   </Text>
                   <Text style={styles.historyTime}>{formatTime(item.createdAt)}</Text>
                 </View>
-                <Text style={styles.historyContacts}>{item.contactsNotified} alerted</Text>
+                <Text style={styles.historyContacts}>
+                  {reachedOf(item) == null ? `${item.contactsNotified} alerted` : `reached ${reachedOf(item)} of ${item.contactsNotified}`}
+                </Text>
               </View>
             ))
           )}
@@ -495,10 +533,7 @@ export default function EmergencySOSScreen() {
 }
 
 const SOS_SIZE = 160;
-/** Amber for test-mode and warning text: no theme token carries it. Dark
- *  enough on light ground (#B45309, 4.9:1 on white), bright on dark. */
-const amber = (light: boolean) => (light ? '#B45309' : '#FBBF24');
-const makeStyles = (c: Palette, light: boolean) => StyleSheet.create({
+const makeStyles = (c: Palette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 8, paddingHorizontal: 16, paddingBottom: 14 },
   backBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: brandAlpha(0.08), justifyContent: 'center', alignItems: 'center' },
@@ -511,9 +546,9 @@ const makeStyles = (c: Palette, light: boolean) => StyleSheet.create({
   sosHint: { color: c.textDim, fontSize: 14, marginBottom: 20, textAlign: 'center' },
   sosButton: { width: SOS_SIZE, height: SOS_SIZE, borderRadius: SOS_SIZE / 2, overflow: 'hidden', elevation: 10, shadowColor: c.danger, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.5, shadowRadius: 20 },
   sosGradient: { flex: 1, justifyContent: 'center', alignItems: 'center', borderRadius: SOS_SIZE / 2, borderWidth: 4, borderColor: c.danger + '80' },
-  sosText: { color: '#FFF', fontSize: 48, fontWeight: '900', letterSpacing: 6 },
-  testBtn: { marginTop: 20, paddingHorizontal: 24, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: amber(light) + '4D', backgroundColor: amber(light) + '14' },
-  testBtnText: { color: amber(light), fontSize: 14, fontWeight: '600' },
+  sosText: { color: c.onDanger, fontSize: 48, fontWeight: '900', letterSpacing: 6 },
+  testBtn: { marginTop: 20, paddingHorizontal: 24, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: c.warning + '4D', backgroundColor: c.warning + '14' },
+  testBtnText: { color: c.warning, fontSize: 14, fontWeight: '600' },
 
   // Countdown
   countdownContainer: { alignItems: 'center' },
@@ -532,9 +567,9 @@ const makeStyles = (c: Palette, light: boolean) => StyleSheet.create({
   sentSub: { color: c.textDim, fontSize: 14, marginTop: 4 },
   // Wraps and grows: this line is longer than the others and must stay
   // readable at any width or OS font scale.
-  sentWarn: { color: amber(light), fontSize: 13, marginTop: 8, textAlign: 'center', paddingHorizontal: 20 },
+  sentWarn: { color: c.warning, fontSize: 13, marginTop: 8, textAlign: 'center', paddingHorizontal: 20 },
   resetBtn: { marginTop: 20, backgroundColor: c.accent, paddingHorizontal: 40, paddingVertical: 10, borderRadius: 8 },
-  resetBtnText: { color: '#FFF', fontSize: 15, fontWeight: '700' },
+  resetBtnText: { color: c.onPrimary, fontSize: 15, fontWeight: '700' },
 
   // Shake
   shakeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 14, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: c.hairline },
@@ -561,7 +596,7 @@ const makeStyles = (c: Palette, light: boolean) => StyleSheet.create({
   emptyText: { color: c.textDim, fontSize: 14, marginBottom: 14, textAlign: 'center' },
   refreshWarn: { color: c.textDim, fontSize: 12, marginBottom: 8 },
   setupBtn: { backgroundColor: c.accent, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 },
-  setupBtnText: { color: '#FFF', fontSize: 14, fontWeight: '700' },
+  setupBtnText: { color: c.onPrimary, fontSize: 14, fontWeight: '700' },
 
   // History
   noHistory: { color: c.textDim, fontSize: 13, textAlign: 'center', marginTop: 8 },

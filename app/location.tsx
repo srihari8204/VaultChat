@@ -87,6 +87,9 @@ export default function LocationScreen() {
   // overwrote watchRef — leaking the first one, which kept streaming.
   const startingRef = useRef(false);
   const [startingLive, setStartingLive] = useState(false);
+  /** A live session was announced to the chat (its start message was sent), so
+   *  ending it must tell the peer. Leaving without ever going live sends nothing. */
+  const sessionRef = useRef(false);
   const mountedRef = useRef(true);
   useEffect(() => () => { mountedRef.current = false; }, []);
 
@@ -158,7 +161,10 @@ export default function LocationScreen() {
   const stopLive = useCallback(() => {
     if (watchRef.current) { watchRef.current.remove(); watchRef.current = null; }
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
-    if (chatId) emit('live_location_stop', { chatId }).catch(() => {});
+    if (sessionRef.current) {
+      sessionRef.current = false;
+      if (chatId) emit('live_location_stop', { chatId }).catch(() => {});
+    }
     setLive(false);
     setTimeLeft(0);
     setTrail([]);
@@ -166,6 +172,10 @@ export default function LocationScreen() {
 
   // Leaving the screen ends the live session (the copy says so).
   useEffect(() => stopLive, [stopLive]);
+
+  // The countdown reached zero: end the session (kept out of the state updater,
+  // which must stay free of side effects).
+  useEffect(() => { if (live && timeLeft === 0) stopLive(); }, [live, timeLeft, stopLive]);
 
   const startLive = useCallback(async () => {
     if (startingRef.current || watchRef.current) return;
@@ -189,6 +199,10 @@ export default function LocationScreen() {
         Alert.alert('Could not start', errText(e, 'Try again'));
         return;
       }
+      sessionRef.current = true;
+      // Left the screen while the start message was sending: the unmount
+      // cleanup already ran, so end the session that was just announced.
+      if (!mountedRef.current) { stopLive(); return; }
 
       setLive(true);
       setTimeLeft(dur.seconds);
@@ -215,7 +229,7 @@ export default function LocationScreen() {
         );
         // Left the screen while the watcher was starting: the unmount cleanup
         // already ran, so this one would stream with nothing to stop it.
-        if (!mountedRef.current) { sub.remove(); emit('live_location_stop', { chatId }).catch(() => {}); return; }
+        if (!mountedRef.current) { sub.remove(); stopLive(); return; }
         watchRef.current = sub;
       } catch (e: unknown) {
         Alert.alert('Could not start', errText(e, 'Try again'));
@@ -223,12 +237,7 @@ export default function LocationScreen() {
         return;
       }
 
-      timerRef.current = setInterval(() => {
-        setTimeLeft((t) => {
-          if (t <= 1) { stopLive(); return 0; }
-          return t - 1;
-        });
-      }, 1000);
+      timerRef.current = setInterval(() => { setTimeLeft((t) => Math.max(0, t - 1)); }, 1000);
     } finally { startingRef.current = false; if (mountedRef.current) setStartingLive(false); }
   }, [loc, chatId, selDuration, address, stopLive]);
 
@@ -259,7 +268,7 @@ export default function LocationScreen() {
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={S.title}>Share location</Text>
+        <Text style={S.title} accessibilityRole="header">Share location</Text>
         <View style={{ width: 24 }} />
       </View>
 
@@ -311,23 +320,26 @@ export default function LocationScreen() {
             </View>
             <Text style={S.liveSub}>{fmtClock(timeLeft)} remaining · updates as you move · stops if you leave this screen</Text>
             <TouchableOpacity style={[S.primaryBtn, { backgroundColor: colors.danger, marginTop: 12 }]} onPress={stopLive} accessibilityRole="button">
-              <Text style={S.primaryBtnText}>Stop sharing</Text>
+              <Text style={[S.primaryBtnText, { color: colors.onDanger }]}>Stop sharing</Text>
             </TouchableOpacity>
           </View>
         ) : (
           <>
             {/* Send current location */}
-            <TouchableOpacity style={[S.primaryBtn, sending && { opacity: 0.5 }]} onPress={sendCurrent} disabled={sending || loading}
-              accessibilityRole="button" accessibilityState={{ disabled: sending || loading, busy: sending }}>
-              {sending ? <ActivityIndicator size="small" color="#fff" /> : <Text style={S.primaryBtnText}>Send current location</Text>}
+            {/* No fix yet (still locating, or the GPS failed and Try again is
+                offered above): both actions stay disabled instead of opening a
+                "Still getting your location" alert that isn't true after a failure. */}
+            <TouchableOpacity style={[S.primaryBtn, (sending || !loc) && { opacity: 0.5 }]} onPress={sendCurrent} disabled={sending || loading || !loc}
+              accessibilityRole="button" accessibilityState={{ disabled: sending || loading || !loc, busy: sending }}>
+              {sending ? <ActivityIndicator size="small" color={colors.onPrimary} /> : <Text style={S.primaryBtnText}>Send current location</Text>}
             </TouchableOpacity>
             <Text style={S.note}>
               Sends a pin to {chatName}. In direct chats it’s end-to-end encrypted, just like your messages.
             </Text>
 
             {/* Live location */}
-            <Text style={S.sectionTitle}>SHARE LIVE FOR</Text>
-            <View style={S.durRow}>
+            <Text style={S.sectionTitle} accessibilityRole="header">SHARE LIVE FOR</Text>
+            <View style={S.durRow} accessibilityRole="radiogroup" accessibilityLabel="Share live for">
               {DURATIONS.map((d, i) => (
                 <TouchableOpacity
                   key={d.label}
@@ -342,9 +354,9 @@ export default function LocationScreen() {
               ))}
             </View>
             <TouchableOpacity
-              style={[S.primaryBtn, { backgroundColor: colors.surfaceSolid, borderWidth: 1, borderColor: colors.glassStroke }, startingLive && { opacity: 0.5 }]}
-              onPress={startLive} disabled={loading || startingLive}
-              accessibilityRole="button" accessibilityState={{ disabled: loading || startingLive, busy: startingLive }}
+              style={[S.primaryBtn, { backgroundColor: colors.surfaceSolid, borderWidth: 1, borderColor: colors.glassStroke }, (startingLive || !loc) && { opacity: 0.5 }]}
+              onPress={startLive} disabled={loading || startingLive || !loc}
+              accessibilityRole="button" accessibilityState={{ disabled: loading || startingLive || !loc, busy: startingLive }}
             >
               {startingLive
                 ? <ActivityIndicator size="small" color={colors.primary} />
@@ -376,7 +388,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   mapsBtnText: { color: c.primary, fontSize: 13, fontWeight: '700' },
 
   primaryBtn: { marginTop: 16, backgroundColor: c.primary, paddingVertical: 15, borderRadius: 14, alignItems: 'center' },
-  primaryBtnText: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  primaryBtnText: { color: c.onPrimary, fontSize: 15, fontWeight: '800' },
   note: { color: c.textDim, fontSize: 12.5, lineHeight: 18, marginTop: 8, paddingHorizontal: 4 },
 
   sectionTitle: { color: c.textFaint, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginTop: 26, marginBottom: 10, marginLeft: 4 },

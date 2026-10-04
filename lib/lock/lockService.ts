@@ -363,6 +363,13 @@ export async function restoreLock(): Promise<boolean> {
 }
 
 /** Upgrade a foreground-only lock to kill-safe (asks for "Allow all the time"). */
+/** What to tell the user when enableKillSafe() returns false (the grant was
+ *  refused or the background service would not start). Shared by every caller. */
+export const KILL_SAFE_REFUSED = {
+  title: 'Background tracking is off',
+  body: 'It needs location access set to “Allow all the time”. Without it the lock only works while the app is open.',
+};
+
 export async function enableKillSafe(): Promise<boolean> {
   if (!active) return false;
   if (!await requestBackgroundPermission()) return false;

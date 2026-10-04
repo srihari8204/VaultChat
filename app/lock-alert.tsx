@@ -5,7 +5,7 @@
 // and one-tap navigate-back. Auto-resolves to a green "safe" state on return.
 
 import React, { useEffect, useRef, useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Animated, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Animated, Alert, ActivityIndicator, AccessibilityInfo } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { type Costing } from '../lib/nav/routing';
@@ -16,7 +16,6 @@ import {
 } from '../lib/lock/lockService';
 import type { Palette } from '../constants/theme';
 import { useColors } from '../lib/theme';
-import { useReducedMotion } from '../lib/useReducedMotion';
 import { ALARM } from '../lib/lock/alarmPalette';
 
 export default function LockAlertScreen() {
@@ -26,7 +25,18 @@ export default function LockAlertScreen() {
   const lock = useLockView();
   const settings = useLockSettings();
   const flash = useRef(new Animated.Value(0)).current;
-  const reduceMotion = useReducedMotion();
+  // Null until the Reduce Motion setting is read. lib/useReducedMotion answers
+  // false until then, which let up to one strobe cycle run for a user who asked
+  // for no motion; on this full-screen red flash the loop waits for the answer.
+  const [reduceMotion, setReduceMotion] = useState<boolean | null>(null);
+  useEffect(() => {
+    let alive = true;
+    AccessibilityInfo.isReduceMotionEnabled()
+      .then((v) => { if (alive) setReduceMotion(!!v); })
+      .catch(() => { if (alive) setReduceMotion(false); });
+    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', (v) => setReduceMotion(!!v));
+    return () => { alive = false; sub.remove(); };
+  }, []);
   /** The mode whose route back is being planned. */
   const [planning, setPlanning] = useState<Costing | null>(null);
 
@@ -46,7 +56,7 @@ export default function LockAlertScreen() {
   // untouched.
   const alarming = lock.alarmPhase === 'alarming' || lock.alarmPhase === 'grace';
   useEffect(() => {
-    if (!alarming || !settings.alerts.flash || reduceMotion) { flash.setValue(0); return; }
+    if (!alarming || !settings.alerts.flash || reduceMotion !== false) { flash.setValue(0); return; }
     const loop = Animated.loop(Animated.sequence([
       Animated.timing(flash, { toValue: 1, duration: 350, useNativeDriver: false }),
       Animated.timing(flash, { toValue: 0, duration: 350, useNativeDriver: false }),
@@ -56,6 +66,16 @@ export default function LockAlertScreen() {
   }, [alarming, settings.alerts.flash, reduceMotion, flash]);
 
   const back = lock.state !== 'outside';
+  const alarmFace = lock.active && !back;
+
+  // One spoken announcement when the alarm face first shows (iOS has no live
+  // regions; on Android it front-runs the assertive phase line below).
+  const announced = useRef(false);
+  useEffect(() => {
+    if (!alarmFace || announced.current) return;
+    announced.current = true;
+    AccessibilityInfo.announceForAccessibility('Location Lock alarm. You have left the locked area. Head back now.');
+  }, [alarmFace]);
   const over = Math.max(0, lock.distance - lock.radius);
   const bg = flash.interpolate({ inputRange: [0, 1], outputRange: [ALARM.flashLow, ALARM.flashHigh] });
 
@@ -74,7 +94,7 @@ export default function LockAlertScreen() {
   };
 
   // Safe again (or lock gone) → green confirmation instead of red panic.
-  if (!lock.active || back) {
+  if (!alarmFace) {
     return (
       // Theme ground + green wash: the old white/pink text on a translucent
       // wash was unreadable in light mode.
@@ -140,7 +160,7 @@ export default function LockAlertScreen() {
       </View>
 
       <TouchableOpacity onPress={() => (router.canGoBack() ? router.back() : router.replace('/location-lock'))} accessibilityRole="button" hitSlop={12} style={{ marginTop: 26 }}>
-        <Text style={{ color: ALARM.inkMuted, fontSize: 13.5, fontWeight: '600' }}>Back to lock screen</Text>
+        <Text style={{ color: ALARM.ink, fontSize: 13.5, fontWeight: '600' }}>Back to lock screen</Text>
       </TouchableOpacity>
     </Animated.View>
   );
@@ -173,12 +193,12 @@ const makeSt = (c: Palette) => StyleSheet.create({
   big: { color: ALARM.ink, fontSize: 40, fontWeight: '900', letterSpacing: 2, marginTop: 8 },
   bigSafe: { color: c.text, fontSize: 30, fontWeight: '900', marginTop: 12 },
   safeSub: { color: c.textDim, fontSize: 13.5, marginTop: 8, textAlign: 'center' },
-  msg: { color: ALARM.inkSoft, fontSize: 16.5, fontWeight: '600', marginTop: 6, textAlign: 'center' },
-  sub: { color: ALARM.inkMuted, fontSize: 13.5, marginTop: 8, textAlign: 'center' },
+  msg: { color: ALARM.ink, fontSize: 16.5, fontWeight: '600', marginTop: 6, textAlign: 'center' },
+  sub: { color: ALARM.ink, fontSize: 13.5, marginTop: 8, textAlign: 'center' },
   distBox: { alignItems: 'center', marginTop: 26, marginBottom: 22 },
-  distLabel: { color: ALARM.inkMuted, fontSize: 11.5, fontWeight: '800', letterSpacing: 1.2 },
+  distLabel: { color: ALARM.ink, fontSize: 11.5, fontWeight: '800', letterSpacing: 1.2 },
   dist: { color: ALARM.ink, fontSize: 44, fontWeight: '900', marginTop: 2 },
-  distSub: { color: ALARM.inkMuted, fontSize: 12.5, marginTop: 4 },
+  distSub: { color: ALARM.ink, fontSize: 12.5, marginTop: 4 },
   btn: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 14, paddingHorizontal: 26, minHeight: 52, justifyContent: 'center' },
   btnTxt: { fontSize: 16.5, fontWeight: '800', color: ALARM.ink },
   // flexWrap: three 86dp buttons plus two 12dp gaps need 282dp, and a 320dp

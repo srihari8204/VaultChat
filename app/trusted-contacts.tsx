@@ -7,14 +7,14 @@
 
 import { HEADER_TOP } from '../constants/layout';
 import { brandAlpha, type Palette } from '../constants/theme';
-import React, { useState, useEffect, useCallback , useMemo} from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, FlatList, Alert, ActivityIndicator, TextInput } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { readCache, writeCache } from '../lib/localCache';
 import { listTrustedContacts, addTrustedContact, removeTrustedContact, type TrustedContact } from '../lib/chatService';
-import { AuroraBackground } from '../components/ui';
+import { AuroraBackground, KeyboardSafe } from '../components/ui';
 import { initialOf } from '../lib/format';
 import { isVaultId } from '../lib/vaultIdLink';
 
@@ -40,24 +40,33 @@ export default function TrustedContactsScreen() {
   const [idError, setIdError] = useState<string | null>(null);
   /** A cold load failed: render that, not "No trusted contacts yet". */
   const [loadFailed, setLoadFailed] = useState(false);
+  /** The cached list painted, but the refresh failed: it may be out of date. */
+  const [stale, setStale] = useState(false);
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
 
   const load = useCallback(async (hasCache: boolean) => {
     try {
       const list = await listTrustedContacts();
+      writeCache(CACHE_KEY, list);
+      if (!mounted.current) return;
       setTrusted(list);
       setLoadFailed(false);
-      writeCache(CACHE_KEY, list);
+      setStale(false);
     }
-    // Keep cached contacts if we have them; only flag a cold load.
-    catch { if (!hasCache) setLoadFailed(true); }
-    finally { setLoading(false); }
+    // Keep cached contacts if we have them (and say they may be stale); a cold
+    // load failure gets the error face.
+    catch { if (mounted.current) { if (hasCache) setStale(true); else setLoadFailed(true); } }
+    finally { if (mounted.current) setLoading(false); }
   }, []);
   const retry = () => { setLoading(true); load(false); };
+  const [refreshing, setRefreshing] = useState(false);
+  const retryStale = () => { setRefreshing(true); load(true).finally(() => { if (mounted.current) setRefreshing(false); }); };
 
   useEffect(() => {
     (async () => {
       const cached = await readCache<TrustedContact[]>(CACHE_KEY);
-      if (cached) { setTrusted(cached); setLoading(false); }
+      if (cached && mounted.current) { setTrusted(cached); setLoading(false); }
       await load(!!cached);
     })();
   }, [load]);
@@ -70,14 +79,15 @@ export default function TrustedContactsScreen() {
     setSearching(true);
     try {
       const added = await addTrustedContact(id);
+      if (!mounted.current) return;
       // The cache is what a cold reopen paints first; keep it in step.
       setTrusted(prev => { const next = [...prev, added]; writeCache(CACHE_KEY, next); return next; });
       setSearchId(''); setAdding(false);
       Alert.alert('Added', `${added.name || id} is now a trusted contact.`);
     } catch (e: unknown) {
-      Alert.alert('Could not add', errText(e, 'Try again'));
+      if (mounted.current) Alert.alert('Could not add', errText(e, 'Try again'));
     } finally {
-      setSearching(false);
+      if (mounted.current) setSearching(false);
     }
   };
 
@@ -107,7 +117,10 @@ export default function TrustedContactsScreen() {
         <View style={{ width: 40 }} />
       </View>
 
-      <View style={s.body}>
+      {/* KeyboardSafe: the autoFocus VaultID field sits low on a non-scrolling
+          screen, and edge-to-edge Android never resizes the window for the
+          keyboard; the list shrinks so the form stays above it. */}
+      <KeyboardSafe style={s.body}>
         <View style={s.infoCard}>
           <Ionicons name="shield-checkmark" size={26} color={colors.primary} />
           <Text style={s.infoTitle}>Emergency Contacts</Text>
@@ -116,6 +129,21 @@ export default function TrustedContactsScreen() {
           </Text>
           <Text style={s.infoStat}>{trusted.length}/{MAX_TRUSTED} contacts set</Text>
         </View>
+
+        {stale && !loading && (
+          <View style={s.staleRow} accessibilityLiveRegion="polite">
+            <Text style={[s.emptySub, { flex: 1, marginTop: 0 }]}>
+              Couldn&apos;t refresh. Showing the list saved on this phone, which may be out of date.
+            </Text>
+            {refreshing
+              ? <ActivityIndicator size="small" color={colors.primary} accessibilityLabel="Refreshing trusted contacts" />
+              : (
+                <TouchableOpacity onPress={retryStale} accessibilityRole="button" accessibilityLabel="Retry refreshing trusted contacts" hitSlop={12}>
+                  <Text style={s.addBtnTxt}>Retry</Text>
+                </TouchableOpacity>
+              )}
+          </View>
+        )}
 
         {loading ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: 30 }} />
@@ -183,7 +211,7 @@ export default function TrustedContactsScreen() {
               />
               <TouchableOpacity style={s.addConfirm} onPress={addByVaultId} disabled={searching}
                 accessibilityRole="button" accessibilityLabel="Add trusted contact" accessibilityState={{ busy: searching }}>
-                {searching ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={s.addConfirmTxt}>Add</Text>}
+                {searching ? <ActivityIndicator color={colors.onPrimary} size="small" /> : <Text style={s.addConfirmTxt}>Add</Text>}
               </TouchableOpacity>
             </View>
             {idError && <Text style={s.idError} accessibilityLiveRegion="polite">{idError}</Text>}
@@ -196,10 +224,16 @@ export default function TrustedContactsScreen() {
 
         <View style={s.alertInfo}>
           <Text style={s.alertTitle}>What trusted contacts receive:</Text>
-          <Text style={s.alertItem}>🆘 Emergency SOS — a push alert with a map link to where you are</Text>
-          <Text style={s.alertItem}>🧪 Test SOS — the same alert, clearly marked as a test</Text>
+          <View style={s.alertRow}>
+            <Ionicons name="alert-circle" size={14} color={colors.danger} accessibilityElementsHidden importantForAccessibility="no" />
+            <Text style={s.alertItem}>Emergency SOS — a push alert with a map link to where you are</Text>
+          </View>
+          <View style={s.alertRow}>
+            <Ionicons name="flask-outline" size={14} color={colors.textDim} accessibilityElementsHidden importantForAccessibility="no" />
+            <Text style={s.alertItem}>Test SOS — the same alert, clearly marked as a test</Text>
+          </View>
         </View>
-      </View>
+      </KeyboardSafe>
     </View>
   );
 }
@@ -216,7 +250,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   infoStat: { color: c.primary, fontSize: 13, fontWeight: '700', marginTop: 12 },
   contactRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: c.glassStroke },
   contactAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: c.primary, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  contactAvatarTxt: { color: '#FFFFFF', fontWeight: '900', fontSize: 18 },
+  contactAvatarTxt: { color: c.onPrimary, fontWeight: '900', fontSize: 18 },
   contactName: { color: c.text, fontSize: 15, fontWeight: '700' },
   contactId: { color: c.textDim, fontSize: 12, marginTop: 2 },
   statusDot: { width: 8, height: 8, borderRadius: 4, marginRight: 12 },
@@ -229,12 +263,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   addRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   addInput: { flex: 1, backgroundColor: c.glassSoft, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, color: c.text, fontSize: 15, borderWidth: 1, borderColor: c.glassStroke },
   addConfirm: { backgroundColor: c.primary, borderRadius: 10, paddingHorizontal: 20, paddingVertical: 11 },
-  addConfirmTxt: { color: '#FFFFFF', fontWeight: '800' },
+  addConfirmTxt: { color: c.onPrimary, fontWeight: '800' },
   cancelTxt: { color: c.textDim, textAlign: 'center', marginTop: 12 },
   idError: { color: c.danger, fontSize: 12.5, marginTop: 8 },
   emptyTxt: { color: c.textDim, fontSize: 14 },
   emptySub: { color: c.textFaint, fontSize: 12, marginTop: 4 },
   alertInfo: { marginTop: 20, backgroundColor: c.glassSoft, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: c.glassStroke },
   alertTitle: { color: c.textDim, fontSize: 12, fontWeight: '700', marginBottom: 10 },
-  alertItem: { color: c.textDim, fontSize: 12, lineHeight: 22 },
+  alertRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  alertItem: { color: c.textDim, fontSize: 12, lineHeight: 22, flex: 1 },
+  staleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
 });

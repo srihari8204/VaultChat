@@ -52,9 +52,11 @@ export default function NavBanner() {
           <Text numberOfLines={1} accessibilityLiveRegion="polite" style={[styles.instruction, { color: colors.text }]}>
             {line}
           </Text>
-          <Text numberOfLines={1} style={[styles.sub, { color: dim }]}>
-            {b.roadName ? `${b.roadName} · ` : ''}{fmtDist(b.remainingM)} left
-          </Text>
+          {/* The trip's remaining distance lives in the screen's bottom sheet;
+              repeating it here had it read twice. */}
+          {!!b.roadName && (
+            <Text numberOfLines={1} style={[styles.sub, { color: dim }]}>{b.roadName}</Text>
+          )}
         </View>
         <View style={styles.right}>
           {b.rerouting

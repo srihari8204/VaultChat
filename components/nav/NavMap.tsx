@@ -335,17 +335,19 @@ export default function NavMap({
     if (js) ref.current.injectJavaScript(js + 'true;');
   }, [ready, geo, follow, accuracyM]);
 
-  // Lock circle — zone color changes ride the same bridge.
+  // Lock circle — zone color changes ride the same bridge. Keyed on the
+  // primitives, so a fresh `lock` object with the same values re-injects nothing.
+  const lockLat = lock?.center.lat, lockLng = lock?.center.lng, lockR = lock?.radius, lockColor = lock?.color;
   useEffect(() => {
     if (!ready || !ref.current) return;
-    if (lock) {
+    if (lockLat != null && lockLng != null && lockR != null) {
       ref.current.injectJavaScript(
-        `setLock(${lock.center.lat},${lock.center.lng},${lock.radius},'${lock.color}',1);true;`,
+        `setLock(${lockLat},${lockLng},${lockR},'${lockColor}',1);true;`,
       );
     } else {
       ref.current.injectJavaScript('clearLock();true;');
     }
-  }, [ready, lock?.center.lat, lock?.center.lng, lock?.radius, lock?.color]);
+  }, [ready, lockLat, lockLng, lockR, lockColor]);
 
   // Compass + heading (throttled upstream to ~4 Hz by the heading watcher).
   useEffect(() => {
@@ -366,11 +368,12 @@ export default function NavMap({
     if (!ready || !ref.current) return;
     ref.current.injectJavaScript(`setPinMode(${pinMode ? 1 : 0});true;`);
   }, [ready, pinMode]);
+  const pinLat = pin?.lat, pinLng = pin?.lng;
   useEffect(() => {
     if (!ready || !ref.current) return;
-    if (pin) ref.current.injectJavaScript(`setPin(${pin.lat},${pin.lng});true;`);
+    if (pinLat != null && pinLng != null) ref.current.injectJavaScript(`setPin(${pinLat},${pinLng});true;`);
     else ref.current.injectJavaScript('clearPin();true;');
-  }, [ready, pin?.lat, pin?.lng]);
+  }, [ready, pinLat, pinLng]);
 
   // Camera mode → MapLibre only (no-op string on Leaflet, which lacks setCamera).
   useEffect(() => {

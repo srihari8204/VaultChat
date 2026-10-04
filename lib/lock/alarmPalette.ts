@@ -19,10 +19,10 @@ export const ALARM = {
   /** Boundary prediction bars while still inside. */
   nearEdge: '#A16207',
   atLimit: '#C2410C',
-  /** Text and icons on the alarm grounds above. */
+  /** Text and icons on the alarm grounds above. Every line uses it: white is
+   *  4.83:1 on the bright flash end (#DC2626), and the softer pinks it replaced
+   *  (#FEE2E2 3.95:1, #FECACA 3.34:1) failed 4.5:1 for the secondary lines. */
   ink: '#FFFFFF',
-  inkSoft: '#FEE2E2',
-  inkMuted: '#FECACA',
   /** Secondary controls sitting on the alarm ground. */
   controlFill: 'rgba(255,255,255,.14)',
   controlStroke: 'rgba(255,255,255,.35)',

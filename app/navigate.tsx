@@ -81,8 +81,10 @@ export default function NavigateScreen() {
       }
       let rts: Route[] = [];
       if (pos) {
-        try { rts = await fetchRoutes(pos, dest.coords, s.costing, s.routeOpts); }
-        catch { note = 'Couldn’t preview a route right now. You can still start; the route is fetched again then.'; }
+        try {
+          rts = await fetchRoutes(pos, dest.coords, s.costing, s.routeOpts);
+          if (!rts.length) note = 'No route was found to this destination for this travel mode. Try another travel mode or a nearby point.';
+        } catch { note = 'Couldn’t preview a route right now. You can still start; the route is fetched again then.'; }
       }
       if (!cancel) {
         setRoutes(rts);
@@ -100,6 +102,7 @@ export default function NavigateScreen() {
     if (params.lat && params.lng) {
       const c = { lat: Number(params.lat), lng: Number(params.lng) };
       if (inLatLngRange(c.lat, c.lng)) setDest({ name: params.name || 'Destination', coords: c });
+      else Alert.alert('Not a valid position', 'The link’s destination isn’t a valid position. Search for the place instead.');
     }
   }, [params.lat, params.lng, params.name]);
 
@@ -189,12 +192,13 @@ export default function NavigateScreen() {
               {/* The next instruction and road live in NavBanner (with its live
                   region); repeating them here made screen readers read each
                   turn twice. The sheet carries the trip summary. */}
+              {/* The remaining distance and the ETA are shown once each: the
+                  distance here, the ETA in NavBanner. */}
               <Text numberOfLines={1} style={[st.sheetInstr, { color: colors.text }]}>
                 {banner.remainingM >= 1000 ? `${(banner.remainingM / 1000).toFixed(1)} km` : `${Math.round(banner.remainingM)} m`} to go
               </Text>
               <Text numberOfLines={1} style={{ color: colors.textDim, fontSize: 12.5, marginTop: 2 }}>
                 {dest ? dest.name : 'Navigating'}
-                {banner.etaEpochMs > 0 ? ` · ETA ${new Date(banner.etaEpochMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
               </Text>
             </View>
             <TouchableOpacity accessibilityRole="button" accessibilityLabel="Find a new route" onPress={() => forceReroute()} disabled={banner.rerouting}
@@ -202,8 +206,8 @@ export default function NavigateScreen() {
               <Ionicons name="git-branch" size={16} color={colors.primary} />
             </TouchableOpacity>
             <TouchableOpacity onPress={() => stopNavigation()} accessibilityRole="button" accessibilityLabel="End navigation" style={[st.endBtn, { backgroundColor: colors.danger }]}>
-              <Ionicons name="stop" size={16} color="#fff" />
-              <Text style={st.endTxt}>End</Text>
+              <Ionicons name="stop" size={16} color={colors.onDanger} />
+              <Text style={[st.endTxt, { color: colors.onDanger }]}>End</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -237,11 +241,12 @@ export default function NavigateScreen() {
           )}
 
           {/* destination */}
-          <Text style={[st.h, { color: colors.text }]}>Destination</Text>
+          <Text style={[st.h, { color: colors.text }]} accessibilityRole="header">Destination</Text>
           <View style={[st.searchRow, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
             <Ionicons name="search" size={18} color={colors.text + '99'} />
             <TextInput
               value={query} onChangeText={setQuery} onSubmitEditing={search} returnKeyType="search"
+              accessibilityLabel="Destination" accessibilityHint='Type an address or place, or "lat, lng"'
               placeholder='Address or "lat, lng"' placeholderTextColor={colors.text + '66'}
               style={[st.input, { color: colors.text }]}
             />
@@ -286,10 +291,11 @@ export default function NavigateScreen() {
                 {' · ETA '}{new Date(Date.now() + routes[routeSel].timeS * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </Text>
               {routes.length > 1 && (
-                <View style={[st.chips, { marginTop: 8 }]}>
+                <View style={[st.chips, { marginTop: 8 }]} accessibilityRole="radiogroup" accessibilityLabel="Route">
                   {routes.map((r, i) => (
                     <Chip
                       key={i}
+                      role="radio"
                       active={routeSel === i}
                       label={`${i === 0 ? 'Fastest' : `Alt ${i}`} · ${Math.round(r.timeS / 60)} min`}
                       onPress={() => {
@@ -304,41 +310,43 @@ export default function NavigateScreen() {
           )}
 
           {/* Direction Lock — locked for the trip once you start */}
-          <Text style={[st.h, { color: colors.text, marginTop: 22 }]}>Direction Lock (vibration profile)</Text>
-          <View style={st.chips}>
-            {PROFILES.map((p) => <Chip key={p.key} active={s.profile === p.key} label={p.label} onPress={() => setNavSettings({ profile: p.key })} />)}
+          <Text style={[st.h, { color: colors.text, marginTop: 22 }]} accessibilityRole="header">Direction Lock (vibration profile)</Text>
+          <View style={st.chips} accessibilityRole="radiogroup" accessibilityLabel="Vibration profile">
+            {PROFILES.map((p) => <Chip key={p.key} role="radio" active={s.profile === p.key} label={p.label} onPress={() => setNavSettings({ profile: p.key })} />)}
           </View>
 
           {/* guidance mode */}
-          <Text style={[st.h, { color: colors.text, marginTop: 22 }]}>Guidance</Text>
-          <View style={st.chips}>
-            {MODES.map((m) => <Chip key={m.key} active={s.mode === m.key} label={m.label} onPress={() => setNavSettings({ mode: m.key })} />)}
+          <Text style={[st.h, { color: colors.text, marginTop: 22 }]} accessibilityRole="header">Guidance</Text>
+          <View style={st.chips} accessibilityRole="radiogroup" accessibilityLabel="Guidance">
+            {MODES.map((m) => <Chip key={m.key} role="radio" active={s.mode === m.key} label={m.label} onPress={() => setNavSettings({ mode: m.key })} />)}
           </View>
 
           {/* timing + travel mode */}
-          <Text style={[st.h, { color: colors.text, marginTop: 22 }]}>Alert timing</Text>
-          <View style={st.chips}>
-            {(['early', 'normal', 'late'] as const).map((t) => <Chip key={t} active={s.timing === t} label={t[0].toUpperCase() + t.slice(1)} onPress={() => setNavSettings({ timing: t })} />)}
+          <Text style={[st.h, { color: colors.text, marginTop: 22 }]} accessibilityRole="header">Alert timing</Text>
+          <View style={st.chips} accessibilityRole="radiogroup" accessibilityLabel="Alert timing">
+            {(['early', 'normal', 'late'] as const).map((t) => <Chip key={t} role="radio" active={s.timing === t} label={t[0].toUpperCase() + t.slice(1)} onPress={() => setNavSettings({ timing: t })} />)}
           </View>
-          <Text style={[st.h, { color: colors.text, marginTop: 22 }]}>Travel mode</Text>
-          <View style={st.chips}>
-            {(['auto', 'motorcycle', 'bicycle', 'pedestrian', 'truck'] as const).map((c) => <Chip key={c} active={s.costing === c} label={c === 'auto' ? 'Car' : c[0].toUpperCase() + c.slice(1)} onPress={() => setNavSettings({ costing: c })} />)}
+          <Text style={[st.h, { color: colors.text, marginTop: 22 }]} accessibilityRole="header">Travel mode</Text>
+          <View style={st.chips} accessibilityRole="radiogroup" accessibilityLabel="Travel mode">
+            {(['auto', 'motorcycle', 'bicycle', 'pedestrian', 'truck'] as const).map((c) => <Chip key={c} role="radio" active={s.costing === c} label={c === 'auto' ? 'Car' : c[0].toUpperCase() + c.slice(1)} onPress={() => setNavSettings({ costing: c })} />)}
           </View>
 
           {/* route preferences (v2) — forwarded to Valhalla costing_options */}
-          <Text style={[st.h, { color: colors.text, marginTop: 22 }]}>Route options</Text>
+          <Text style={[st.h, { color: colors.text, marginTop: 22 }]} accessibilityRole="header">Route options</Text>
           <View style={st.chips}>
-            <Chip active={!s.routeOpts.shortest} label="Fastest" onPress={() => setRouteOpt({ shortest: false })} />
-            <Chip active={!!s.routeOpts.shortest} label="Shortest" onPress={() => setRouteOpt({ shortest: true })} />
-            <Chip active={!!s.routeOpts.avoidTolls} label="Avoid tolls" onPress={() => setRouteOpt({ avoidTolls: !s.routeOpts.avoidTolls })} />
-            <Chip active={!!s.routeOpts.avoidHighways} label="Avoid highways" onPress={() => setRouteOpt({ avoidHighways: !s.routeOpts.avoidHighways })} />
+            <View style={st.chips} accessibilityRole="radiogroup" accessibilityLabel="Route preference">
+              <Chip role="radio" active={!s.routeOpts.shortest} label="Fastest" onPress={() => setRouteOpt({ shortest: false })} />
+              <Chip role="radio" active={!!s.routeOpts.shortest} label="Shortest" onPress={() => setRouteOpt({ shortest: true })} />
+            </View>
+            <Chip role="checkbox" active={!!s.routeOpts.avoidTolls} label="Avoid tolls" onPress={() => setRouteOpt({ avoidTolls: !s.routeOpts.avoidTolls })} />
+            <Chip role="checkbox" active={!!s.routeOpts.avoidHighways} label="Avoid highways" onPress={() => setRouteOpt({ avoidHighways: !s.routeOpts.avoidHighways })} />
           </View>
 
           <TouchableOpacity disabled={!dest || starting} onPress={start} accessibilityRole="button"
             accessibilityState={{ disabled: !dest || starting, busy: starting }}
             style={[st.startBtn, { backgroundColor: dest ? colors.primary : colors.border }]}>
-            {starting ? <ActivityIndicator color="#fff" />
-              : <><Ionicons name="navigate" size={18} color="#fff" /><Text style={st.startTxt}>Start navigation</Text></>}
+            {starting ? <ActivityIndicator color={colors.onPrimary} />
+              : <><Ionicons name="navigate" size={18} color={colors.onPrimary} /><Text style={[st.startTxt, { color: colors.onPrimary }]}>Start navigation</Text></>}
           </TouchableOpacity>
           {Platform.OS === 'ios' && <Text style={{ color: colors.text + '77', fontSize: 12, textAlign: 'center', marginTop: 10 }}>iOS plays intensity accents; Android plays the full vibration patterns.</Text>}
         </ScrollView>
@@ -349,11 +357,12 @@ export default function NavigateScreen() {
 
 // Hoisted: defined inside the screen it was a new component type every render,
 // so React remounted every chip on each GPS/banner update.
-function Chip({ active, label, onPress }: { active: boolean; label: string; onPress: () => void }) {
+// Single-choice groups use radios (inside a radiogroup), on/off options checkboxes.
+function Chip({ active, label, onPress, role }: { active: boolean; label: string; onPress: () => void; role: 'radio' | 'checkbox' }) {
   const { colors } = useTheme();
   return (
     <TouchableOpacity onPress={onPress}
-      accessibilityRole="button" accessibilityState={{ selected: active }}
+      accessibilityRole={role} accessibilityState={{ checked: active }}
       style={[st.chip, { borderColor: active ? colors.primary : colors.border, backgroundColor: active ? colors.primary + '1a' : 'transparent' }]}>
       <Text style={{ color: active ? colors.primary : colors.text, fontWeight: active ? '700' : '500', fontSize: 13.5 }}>{label}</Text>
     </TouchableOpacity>
@@ -378,10 +387,10 @@ const st = StyleSheet.create({
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
   startBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 52, paddingVertical: 10, borderRadius: 14, marginTop: 30 },
-  startTxt: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  startTxt: { fontSize: 16, fontWeight: '800' },
   sheet: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14, paddingBottom: 22, borderTopWidth: StyleSheet.hairlineWidth },
   sheetInstr: { fontSize: 17, fontWeight: '800' },
   endBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44, paddingVertical: 8, paddingHorizontal: 18, borderRadius: 12 },
   rerouteBtn: { alignItems: 'center', justifyContent: 'center', width: 44, height: 44, borderRadius: 12, borderWidth: 1.5 },
-  endTxt: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  endTxt: { fontSize: 14, fontWeight: '800' },
 });

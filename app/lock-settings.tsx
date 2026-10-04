@@ -18,7 +18,7 @@ import {
 } from '../lib/lock/lockSettings';
 import { type LockMode } from '../lib/lock/zoneMachine';
 import {
-  applyAlertSettings, testAlarm, useLockView, enableKillSafe, disableKillSafe,
+  applyAlertSettings, testAlarm, useLockView, enableKillSafe, disableKillSafe, KILL_SAFE_REFUSED,
 } from '../lib/lock/lockService';
 import { AppText as Text, AuroraBackground } from '../components/ui';
 import { currentVersionName } from '../lib/appVersion';
@@ -40,16 +40,22 @@ type ChannelKey = { [K in keyof LockAlertSettings]: LockAlertSettings[K] extends
 /** Persist, then hand the change to an armed lock, and SAY when either fails.
  *  Both used to end in .catch(() => {}): an alarm setting that silently did
  *  not stick, or did not reach the running lock, is a safety gap. */
-function save(write: Promise<void>): void {
-  write
-    .catch(() => {
-      Alert.alert('Setting not saved', 'This change applies now, but it could not be saved and will reset when the app restarts. Try again.');
-    })
-    .then(() => applyAlertSettings())
-    .catch(() => {
-      Alert.alert('Not applied to the active lock', 'The running lock could not pick up this change. Unlock and lock again to apply it.');
-    });
+/** One alert, even when both steps fail (it used to show two back to back). */
+async function save(write: Promise<void>): Promise<void> {
+  const saved = await write.then(() => true, () => false);
+  const applied = await applyAlertSettings().then(() => true, () => false);
+  if (!saved && !applied) {
+    Alert.alert('Setting not saved or applied', 'This change could not be saved (it will reset when the app restarts), and the running lock could not pick it up. Try again, or unlock and lock again.');
+  } else if (!saved) {
+    Alert.alert('Setting not saved', 'This change applies now, but it could not be saved and will reset when the app restarts. Try again.');
+  } else if (!applied) {
+    Alert.alert('Not applied to the active lock', 'The running lock could not pick up this change. Unlock and lock again to apply it.');
+  }
 }
+
+/** A failed test of an alarm channel must say so: silence here reads as "works". */
+const testFailed = (channel: string) =>
+  Alert.alert(`${channel} test failed`, `This device could not play the ${channel.toLowerCase()} test, so that alarm channel may not work. Check the system sound and vibration settings.`);
 
 // Hoisted out of the screen: defined inside it, each was a new component type
 // on every render, so React remounted every row and chip on each change.
@@ -73,16 +79,16 @@ function Row({ icon, label, keyName, on, onChange, colors }: {
   );
 }
 
-/** A choice chip when `on` is given; a plain action (no selected state) when
- *  it is not — "Test voice" is a button, not an option that can be selected. */
-function Chip({ on, label, a11yLabel, onPress, colors }: {
-  on?: boolean; label: string; a11yLabel?: string; onPress: () => void; colors: Palette;
+/** A radio (inside a radiogroup) when `on` is given; a plain action (no
+ *  checked state) when it is not — "Test voice" is a button, not an option. */
+function Chip({ on, label, onPress, colors }: {
+  on?: boolean; label: string; onPress: () => void; colors: Palette;
 }) {
   const lit = !!on;
   return (
     <TouchableOpacity onPress={onPress}
-      accessibilityRole="button" accessibilityLabel={a11yLabel}
-      accessibilityState={on === undefined ? undefined : { selected: on }}
+      accessibilityRole={on === undefined ? 'button' : 'radio'}
+      accessibilityState={on === undefined ? undefined : { checked: on }}
       style={[st.chip, { borderColor: lit ? colors.primary : colors.glassStroke, backgroundColor: lit ? colors.glass : colors.glassSoft }]}>
       <Text style={{ color: lit ? colors.primary : colors.text, fontWeight: lit ? '700' : '500', fontSize: 13 }}>{label}</Text>
     </TouchableOpacity>
@@ -95,8 +101,8 @@ export default function LockSettingsScreen() {
   const lock = useLockView();
   const a = s.alerts;
 
-  const set = (patch: Partial<LockAlertSettings>) => save(setLockAlerts(patch));
-  const setGeneral = (patch: Parameters<typeof setLockSettings>[0]) => save(setLockSettings(patch));
+  const set = (patch: Partial<LockAlertSettings>) => { void save(setLockAlerts(patch)); };
+  const setGeneral = (patch: Parameters<typeof setLockSettings>[0]) => { void save(setLockSettings(patch)); };
   const [killBusy, setKillBusy] = React.useState(false);
 
   const toggleKillSafe = async (v: boolean) => {
@@ -106,9 +112,7 @@ export default function LockSettingsScreen() {
       if (v) {
         // false = the "Allow all the time" grant was refused or the background
         // service would not start; the switch stays off, and now says why.
-        if (!await enableKillSafe()) {
-          Alert.alert('Background tracking is off', 'It needs location access set to “Allow all the time”. Without it the lock only works while the app is open.');
-        }
+        if (!await enableKillSafe()) Alert.alert(KILL_SAFE_REFUSED.title, KILL_SAFE_REFUSED.body);
       } else {
         await disableKillSafe();
       }
@@ -134,24 +138,24 @@ export default function LockSettingsScreen() {
       <ScrollView contentContainerStyle={st.body}>
         {/* ── General ── */}
         <Text style={[st.h, { color: colors.text }]} accessibilityRole="header">General · Units</Text>
-        <View style={st.chips}>
+        <View style={st.chips} accessibilityRole="radiogroup" accessibilityLabel="Units">
           <Chip on={s.units === 'metric'} label="Metric (m, km)" colors={colors} onPress={() => setGeneral({ units: 'metric' })} />
           <Chip on={s.units === 'imperial'} label="Imperial (ft, mi)" colors={colors} onPress={() => setGeneral({ units: 'imperial' })} />
         </View>
 
         <Text style={[st.h, { color: colors.text, marginTop: 20 }]} accessibilityRole="header">General · Monitoring mode</Text>
-        <View style={st.chips}>
+        <View style={st.chips} accessibilityRole="radiogroup" accessibilityLabel="Monitoring mode">
           {MODES.map((m) => <Chip key={m.key} on={s.mode === m.key} label={m.label} colors={colors} onPress={() => setGeneral({ mode: m.key })} />)}
         </View>
         {s.mode === 'custom' && (
           <View style={{ marginTop: 10 }}>
             <Text style={{ color: colors.textDim, fontSize: 12.5, marginBottom: 6 }}>Warning band (m inside the boundary)</Text>
-            <View style={st.chips}>
+            <View style={st.chips} accessibilityRole="radiogroup" accessibilityLabel="Warning band">
               {BANDS.map((b) => <Chip key={b} on={s.customSensitivity.warningBand === b} label={`${b} m`}
                 colors={colors} onPress={() => setGeneral({ customSensitivity: { ...s.customSensitivity, warningBand: b } })} />)}
             </View>
             <Text style={{ color: colors.textDim, fontSize: 12.5, marginVertical: 6 }}>Hysteresis (m past the boundary before alarm)</Text>
-            <View style={st.chips}>
+            <View style={st.chips} accessibilityRole="radiogroup" accessibilityLabel="Hysteresis">
               {HYSTS.map((h) => <Chip key={h} on={s.customSensitivity.hysteresis === h} label={`${h} m`}
                 colors={colors} onPress={() => setGeneral({ customSensitivity: { ...s.customSensitivity, hysteresis: h } })} />)}
             </View>
@@ -192,7 +196,7 @@ export default function LockSettingsScreen() {
           </TouchableOpacity>
         )}
         <Text style={[st.h, { color: colors.text, marginTop: 20 }]} accessibilityRole="header">Tracking frequency</Text>
-        <View style={st.chips}>
+        <View style={st.chips} accessibilityRole="radiogroup" accessibilityLabel="Tracking frequency">
           <Chip on={s.cadence === 'auto'} label="Adaptive (recommended)" colors={colors} onPress={() => setGeneral({ cadence: 'auto' })} />
           <Chip on={s.cadence === 'saver'} label="Battery saver" colors={colors} onPress={() => setGeneral({ cadence: 'saver' })} />
           <Chip on={s.cadence === 'high'} label="High precision" colors={colors} onPress={() => setGeneral({ cadence: 'high' })} />
@@ -210,7 +214,7 @@ export default function LockSettingsScreen() {
         <Row icon="flashlight" label="Flash screen + full-screen alert" keyName="flash" on={a.flash} onChange={set} colors={colors} />
 
         <Text style={[st.h, { color: colors.text, marginTop: 24 }]} accessibilityRole="header">Alarm volume</Text>
-        <View style={st.chips}>
+        <View style={st.chips} accessibilityRole="radiogroup" accessibilityLabel="Alarm volume">
           {VOLUMES.map((v) => <Chip key={v} on={Math.abs(a.volume - v) < 0.01} label={`${Math.round(v * 100)}%`} colors={colors} onPress={() => set({ volume: v })} />)}
         </View>
         {Platform.OS === 'ios' && (
@@ -220,20 +224,20 @@ export default function LockSettingsScreen() {
         )}
 
         <Text style={[st.h, { color: colors.text, marginTop: 24 }]} accessibilityRole="header">Tone</Text>
-        <View style={st.chips}>
+        <View style={st.chips} accessibilityRole="radiogroup" accessibilityLabel="Tone">
           <Chip on={a.tone === 'siren'} label="Siren" colors={colors} onPress={() => set({ tone: 'siren' })} />
           <Chip on={a.tone === 'beep'} label="Beep" colors={colors} onPress={() => set({ tone: 'beep' })} />
         </View>
 
         <Text style={[st.h, { color: colors.text, marginTop: 24 }]} accessibilityRole="header">Vibration pattern</Text>
-        <View style={st.chips}>
+        <View style={st.chips} accessibilityRole="radiogroup" accessibilityLabel="Vibration pattern">
           <Chip on={a.vibePattern === 'strong'} label="Strong" colors={colors} onPress={() => set({ vibePattern: 'strong' })} />
           <Chip on={a.vibePattern === 'medium'} label="Medium" colors={colors} onPress={() => set({ vibePattern: 'medium' })} />
           <Chip on={a.vibePattern === 'pulse'} label="Pulse" colors={colors} onPress={() => set({ vibePattern: 'pulse' })} />
         </View>
 
         <Text style={[st.h, { color: colors.text, marginTop: 24 }]} accessibilityRole="header">Start alarm after</Text>
-        <View style={st.chips}>
+        <View style={st.chips} accessibilityRole="radiogroup" accessibilityLabel="Start alarm after">
           {GRACES.map((g) => <Chip key={g} on={a.graceS === g} label={g === 0 ? 'Instantly' : `${g} s`} colors={colors} onPress={() => set({ graceS: g })} />)}
         </View>
         <Text style={{ color: colors.textDim, fontSize: 12, marginTop: 6 }}>
@@ -252,19 +256,23 @@ export default function LockSettingsScreen() {
           />
         </View>
         {a.repeat && (
-          <View style={[st.chips, { marginTop: 10 }]}>
+          <View style={[st.chips, { marginTop: 10 }]} accessibilityRole="radiogroup" accessibilityLabel="Repeat interval">
             {REPEAT_GAPS.map((g) => <Chip key={g} on={a.repeatIntervalS === g} label={`every ${g} s`} colors={colors} onPress={() => set({ repeatIntervalS: g })} />)}
           </View>
         )}
 
         <TouchableOpacity onPress={() => testAlarm()} accessibilityRole="button" accessibilityLabel="Test the full alarm"
           style={[st.testBtn, { backgroundColor: colors.primary }]}>
-          <Ionicons name="play" size={17} color="#fff" />
-          <Text style={st.testTxt}>Test Alarm</Text>
+          <Ionicons name="play" size={17} color={colors.onPrimary} />
+          <Text style={[st.testTxt, { color: colors.onPrimary }]}>Test Alarm</Text>
         </TouchableOpacity>
         <View style={[st.chips, { marginTop: 8, justifyContent: 'center' }]}>
-          <Chip label="🗣 Test voice" a11yLabel="Test voice" colors={colors} onPress={() => { try { Speech.stop(); Speech.speak(VOICE.outside, { rate: 1.0 }); } catch {} }} />
-          <Chip label="〰 Test vibration" a11yLabel="Test vibration" colors={colors} onPress={() => { try { Vibration.vibrate(VIBE_PATTERN[a.vibePattern], false); } catch {} }} />
+          <Chip label="Test voice" colors={colors} onPress={() => {
+            try { Speech.stop(); Speech.speak(VOICE.outside, { rate: 1.0, onError: () => testFailed('Voice') }); } catch { testFailed('Voice'); }
+          }} />
+          <Chip label="Test vibration" colors={colors} onPress={() => {
+            try { Vibration.vibrate(VIBE_PATTERN[a.vibePattern], false); } catch { testFailed('Vibration'); }
+          }} />
         </View>
         <Text style={{ color: colors.textDim, fontSize: 12, textAlign: 'center', marginTop: 8 }}>
           Plays the enabled channels for a few seconds. Nothing is written to history.
@@ -306,6 +314,6 @@ const st = StyleSheet.create({
   // pinned 48 and the label lost its bottom. 48 is the tap floor, and 19 of line
   // box + 2×14 padding leaves it looking exactly as it did at scale 1.0.
   testBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 48, paddingVertical: 14, borderRadius: 12, marginTop: 30 },
-  testTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  testTxt: { fontSize: 15, fontWeight: '800' },
   about: { borderWidth: 1, borderRadius: 12, padding: 14 },
 });

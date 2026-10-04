@@ -22,7 +22,7 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { getCurrentSnapshot } from '../services/security/deviceSecurity/postureStore';
 import { runMonitoringScan } from '../services/security/deviceSecurity/monitorService';
-import { buildDashboardViewModel, type DashboardVM } from '../services/security/deviceSecurity/viewModel';
+import { buildDashboardViewModel, STATUS_META, type DashboardVM } from '../services/security/deviceSecurity/viewModel';
 import { AuroraBackground } from '../components/ui';
 
 const STATUS_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
@@ -43,6 +43,8 @@ export default function SecurityHubScreen() {
   const [scanning, setScanning] = useState(false);
   /** The stored scan could not be read: the view on screen may be stale. */
   const [readFailed, setReadFailed] = useState(false);
+  /** Summary of the scan just run, shown in-screen (the actions themselves are listed below). */
+  const [scanResult, setScanResult] = useState<{ title: string; body: string } | null>(null);
 
   // Never rejects: a secure-store read failure used to surface as an unhandled
   // rejection. The last rendered view stays, and a notice says it may be stale.
@@ -65,18 +67,23 @@ export default function SecurityHubScreen() {
       const { outcome } = await runMonitoringScan('manual');
       const snapshot = outcome?.snapshot ?? (await getCurrentSnapshot());
       const view = buildDashboardViewModel(snapshot, Date.now());
+      // The scan produced a fresh snapshot: no reload, which could otherwise
+      // pair "Scan complete" with a stale-read notice.
       setVm(view);
-      Alert.alert(
-        `Scan complete — ${view.bandLabel}`,
-        view.actions.length
-          ? view.actions.map((a) => `• ${a.text}`).join('\n')
-          : 'No security indicators were found.\n\nNote: a sandboxed app cannot detect kernel-level implants, so clean does not guarantee safety.',
-      );
+      setReadFailed(false);
+      const n = view.actions.length;
+      setScanResult({
+        title: `Scan complete — ${view.bandLabel}`,
+        body: n
+          ? `${n} recommended action${n === 1 ? '' : 's'} listed below.`
+          : 'No security indicators were found. A sandboxed app cannot detect kernel-level implants, so clean does not guarantee safety.',
+      });
     } catch {
+      setScanResult(null);
       Alert.alert('Scan failed', 'The device scan could not complete. Please try again.');
+      load();
     } finally {
       setScanning(false);
-      load();
     }
   }, [scanning, load]);
 
@@ -116,9 +123,17 @@ export default function SecurityHubScreen() {
 
         <TouchableOpacity style={S.scanBtn} onPress={onScan} disabled={scanning} activeOpacity={0.85}
           accessibilityRole="button" accessibilityState={{ busy: scanning, disabled: scanning }}>
-          {scanning ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="shield-checkmark" size={18} color="#fff" />}
+          {scanning ? <ActivityIndicator size="small" color={colors.onPrimary} /> : <Ionicons name="shield-checkmark" size={18} color={colors.onPrimary} />}
           <Text style={S.scanBtnText}>{scanning ? 'Scanning device…' : 'Run device scan'}</Text>
         </TouchableOpacity>
+
+        {scanResult && (
+          <View style={[S.card, S.resultCard]} accessible accessibilityLiveRegion="polite"
+            accessibilityLabel={`${scanResult.title}. ${scanResult.body}`}>
+            <Text style={[S.resultTitle, { color: vm.bandColor }]}>{scanResult.title}</Text>
+            <Text style={S.resultBody}>{scanResult.body}</Text>
+          </View>
+        )}
 
         {/* Recommended actions (only when there are any). */}
         {vm.actions.length > 0 && (
@@ -131,9 +146,7 @@ export default function SecurityHubScreen() {
                     <Ionicons
                       name={a.severity === 'critical' ? 'alert-circle' : 'warning'}
                       size={20}
-                      // ponytail: same hexes as viewModel's STATUS_META (critical/warning),
-                      // which is not exported; move to an action `color` field there.
-                      color={a.severity === 'critical' ? '#EF4444' : '#F59E0B'}
+                      color={STATUS_META[a.severity].color}
                     />
                     <Text style={S.actionText}>{a.text}</Text>
                   </View>
@@ -207,7 +220,10 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   lastScan: { color: c.textFaint, fontSize: 11.5, marginTop: 2 },
 
   scanBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginHorizontal: 16, backgroundColor: c.primary, paddingVertical: 15, borderRadius: 14 },
-  scanBtnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
+  scanBtnText: { color: c.onPrimary, fontWeight: '800', fontSize: 15 },
+  resultCard: { marginTop: 12, padding: 14, gap: 4 },
+  resultTitle: { fontSize: 14.5, fontWeight: '800' },
+  resultBody: { color: c.textDim, fontSize: 13, lineHeight: 19 },
 
   sectionTitle: { color: c.textFaint, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginTop: 24, marginBottom: 8, marginLeft: 20 },
   card: { marginHorizontal: 16, backgroundColor: c.glassSoft, borderRadius: 16, borderWidth: 1, borderColor: c.glassStroke, overflow: 'hidden' },
