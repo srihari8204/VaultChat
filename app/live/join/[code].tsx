@@ -79,7 +79,7 @@ export default function LiveJoinScreen() {
   const [busy, setBusy] = useState(false);
   // Every "Cancel"/"Done" lands on the chats tab, as Cancel always did.
   // replace, not back: an invite-link arrival has no history to go back to.
-  const leave = useCallback(() => router.replace('/(tabs)/chats' as any), [router]);
+  const leave = useCallback(() => router.replace('/(tabs)/chats'), [router]);
 
   // Prefill the name from the profile. Failure is not worth surfacing — the
   // field is editable and the server falls back to the profile name anyway.
@@ -105,7 +105,7 @@ export default function LiveJoinScreen() {
       const res = await redeemInviteLink(code, { passcode: pc, displayName: name });
       if (res.ok) {
         // replace, not push, so Back does not bounce through the redeem flow.
-        router.replace({ pathname: '/live-view', params: { id: res.broadcastId } } as any);
+        router.replace({ pathname: '/live-view', params: { id: res.broadcastId } });
         return;
       }
       if (res.reason === 'passcode') { setPhase({ kind: 'passcode', wrong: showWrong }); return; }
@@ -186,7 +186,7 @@ export default function LiveJoinScreen() {
             accessibilityState={{ disabled: !ready, busy }}
           >
             {busy
-              ? <ActivityIndicator color="#fff" />
+              ? <ActivityIndicator color={colors.onPrimary} />
               : <Text style={s.ctaText}>Join</Text>}
           </TouchableOpacity>
 
@@ -299,7 +299,7 @@ export default function LiveJoinScreen() {
           accessibilityState={{ disabled: !canSubmit, busy }}
         >
           {busy
-            ? <ActivityIndicator color="#fff" />
+            ? <ActivityIndicator color={colors.onPrimary} />
             : <Text style={s.ctaText}>Join live</Text>}
         </TouchableOpacity>
 
@@ -330,7 +330,7 @@ function useS(colors: Palette) {
       paddingHorizontal: 32, marginTop: 24, minWidth: 200, alignItems: 'center',
     },
     ctaOff: { opacity: 0.5 },
-    ctaText: { color: '#fff', fontSize: 16, fontWeight: '700' }, // on the primary fill in both themes
+    ctaText: { color: colors.onPrimary, fontSize: 16, fontWeight: '700' }, // on the primary fill
     cancel: { color: colors.textDim, fontSize: 14, marginTop: 18 },
   }), [colors]);
 }

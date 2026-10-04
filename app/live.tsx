@@ -75,9 +75,8 @@ export default function LiveScreen() {
     setJoinOpen(false);
     setJoinCode('');
     // The join screen owns the name + passcode prompt and the redeem itself, so
-    // this only has to get the code there. `as any`: expo-router's generated
-    // route union is written at build time.
-    router.push(`/live/join/${encodeURIComponent(code)}` as any);
+    // this only has to get the code there.
+    router.push(`/live/join/${encodeURIComponent(code)}`);
   }, [joinCode, router]);
 
   const load = useCallback(async () => {
@@ -108,10 +107,7 @@ export default function LiveScreen() {
       // The host's readable passcode goes to live-view through memory, not the
       // route params: params land in the navigation state and the URL.
       if (pc) rememberHostPasscode(b.id, pc);
-      router.push({ // `as any`: expo-router's generated route union is written at build time and
-// does not yet know a route added in the same change. Matches how the call
-// screens reference /group-call-active.
-pathname: '/live-view' as any, params: {
+      router.push({ pathname: '/live-view', params: {
         id: b.id, host: '1',
         // The pre-live choices, applied at join rather than after it.
         cam: cam ? '1' : '0', mic: mic ? '1' : '0',
@@ -278,7 +274,7 @@ pathname: '/live-view' as any, params: {
                     activeOpacity={0.85}
                   >
                     <Ionicons
-                      name={(on ? onIcon : offIcon) as any}
+                      name={on ? onIcon : offIcon}
                       size={16}
                       color={on ? colors.text : colors.textFaint}
                     />
@@ -368,7 +364,7 @@ pathname: '/live-view' as any, params: {
                     accessibilityRole="button"
                     accessibilityState={{ disabled: !joinCode.trim() }}
                   >
-                    <AppText style={{ color: '#fff', fontWeight: '700' }}>Continue</AppText>
+                    <AppText style={{ color: colors.onPrimary, fontWeight: '700' }}>Continue</AppText>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -386,7 +382,21 @@ pathname: '/live-view' as any, params: {
           </>
         )}
 
-        <AppText style={[S.section, { color: colors.textDim }]}>LIVE NOW</AppText>
+        <AppText style={[S.section, { color: colors.textDim }]} accessibilityRole="header">LIVE NOW</AppText>
+
+        {/* A failed refresh over a list already shown keeps the list, and says
+            it may be out of date (the empty case has its own state below). */}
+        {!loading && loadError && live.length > 0 && (
+          <TouchableOpacity
+            onPress={refresh} accessibilityRole="button" style={S.stale}
+            accessibilityLabel="Could not refresh live broadcasts. This list may be out of date. Try again"
+          >
+            <Ionicons name="cloud-offline-outline" size={14} color={colors.danger} />
+            <AppText style={[S.staleText, { color: colors.textDim }]}>
+              Couldn’t refresh — this list may be out of date. <AppText style={{ color: colors.primary, fontWeight: '600' }}>Try again</AppText>
+            </AppText>
+          </TouchableOpacity>
+        )}
 
         {loading ? (
           <ActivityIndicator style={{ marginTop: SPACING.xl }} color={colors.textDim} />
@@ -411,10 +421,7 @@ pathname: '/live-view' as any, params: {
           live.map(b => (
             <TouchableOpacity
               key={b.id}
-              onPress={() => router.push({ // `as any`: expo-router's generated route union is written at build time and
-// does not yet know a route added in the same change. Matches how the call
-// screens reference /group-call-active.
-pathname: '/live-view' as any, params: { id: b.id } })}
+              onPress={() => router.push({ pathname: '/live-view', params: { id: b.id } })}
               style={[S.card, { backgroundColor: colors.glassSoft }]}
               activeOpacity={0.85}
               accessibilityRole="button"
@@ -422,7 +429,7 @@ pathname: '/live-view' as any, params: { id: b.id } })}
             >
               <View style={S.cardTop}>
                 <View style={S.liveDot} />
-                <AppText style={[S.liveLabel]}>LIVE</AppText>
+                <AppText style={[S.liveLabel, { color: colors.danger }]}>LIVE</AppText>
                 {/* A private stream only reaches this list for its host and the
                     people invited to it, so the badge explains WHY it is here
                     rather than flagging something unusual. From the server's
@@ -473,7 +480,9 @@ const S = StyleSheet.create({
   cardTop: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, marginBottom: SPACING.sm },
   // The LIVE dot/label are the same fixed "on air" red as the Go Live gradient.
   liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#EF4444' },
-  liveLabel: { color: '#EF4444', fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
+  // The label takes the theme's danger red: the fixed #EF4444 is ~3.3:1 on the
+  // light glass card, below AA for 12 pt text. Dark danger is the same #EF4444.
+  liveLabel: { fontSize: 12, fontWeight: '800', letterSpacing: 0.5 },
   viewers: { fontSize: 12, marginLeft: 'auto' },
   title: { fontSize: 16, fontWeight: '600' },
   notEncrypted: { fontSize: 11, marginTop: SPACING.xs },
@@ -497,5 +506,7 @@ const S = StyleSheet.create({
   btnGrad: { paddingVertical: SPACING.md, alignItems: 'center' },
   btnPrimaryText: { color: '#fff', fontWeight: '700' },
   empty: { alignItems: 'center', gap: SPACING.md, paddingVertical: SPACING.xxl },
+  stale: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, marginBottom: SPACING.md, minHeight: 44 },
+  staleText: { flex: 1, fontSize: 13 },
   emptyText: { fontSize: 14 },
 });

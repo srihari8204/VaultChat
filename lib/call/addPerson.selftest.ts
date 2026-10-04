@@ -138,5 +138,23 @@ for (const rel of ['app/voicecall.tsx', 'app/videocall.tsx']) {
     `6b. ${name} does not cast the chat to any — that cast is what hid 6a from tsc`);
 }
 
+// ── 7. a refused ring is reported as refused, never inferred ──────────
+//
+// inviteToCall used to turn ANY rang === 0 into 'rate_limited', and a 409 (the
+// call has ended) came back from ringCallGroup as null, so the socket loop
+// "rang" the targets and the screen said "Calling X". Each server answer now
+// has its own outcome, and neither falls back to the loop.
+{
+  const cs = readFileSync(join(ROOT, 'lib/callSession.ts'), 'utf8');
+  const i = cs.indexOf('export async function ringCallGroup');
+  const ring = cs.slice(i, i + 1400);
+  A(/status === 429\) return 'rate_limited'/.test(ring), '7. ringCallGroup maps 429 to rate_limited');
+  A(/status === 409\) return 'ended'/.test(ring), '7a. ringCallGroup maps 409 to ended (no socket fallback)');
+  const eng = readFileSync(join(ROOT, 'lib/call/engine.ts'), 'utf8');
+  const j = eng.indexOf('export async function inviteToCall');
+  A(j >= 0 && !/=== 0 \? 'rate_limited'/.test(eng.slice(j, j + 1600)),
+    '7b. inviteToCall no longer infers a rate limit from a 0');
+}
+
 console.log(failed === 0 ? '\naddPerson: all checks passed' : `\naddPerson: ${failed} FAILED`);
 if (failed > 0) process.exit(1);

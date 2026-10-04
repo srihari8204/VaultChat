@@ -309,7 +309,7 @@ function VideoCallEngine() {
       // and still leaves crazzychat itself unusable. Minimising in-app leaves
       // the call running behind <CallBar/> and hands the app back.
       engine.minimizeScreen();
-      if (router.canGoBack()) router.back(); else router.replace('/(tabs)/chats' as any);
+      if (router.canGoBack()) router.back(); else router.replace('/(tabs)/chats');
       return true;
     });
     return () => sub.remove();
@@ -340,7 +340,7 @@ function VideoCallEngine() {
     // no way out but the app switcher — reported on device.
     const t = setTimeout(() => {
       if (router.canGoBack()) router.back();
-      else router.replace('/' as any);
+      else router.replace('/');
     }, 200);
     return () => clearTimeout(t);
   }, [status, router]);
@@ -379,7 +379,12 @@ function VideoCallEngine() {
   //
   // Contacts are loaded when the sheet opens, not held in state: the list must
   // reflect who is reachable now, and this screen may sit open for a long time.
-  const [addSheet, setAddSheet] = useState<{ title: string; message?: string; actions: SheetAction[] } | null>(null);
+  const [addSheet, setAddSheetState] = useState<{ title: string; message?: string; actions: SheetAction[] } | null>(null);
+  // The contacts load and the invite resolve after a round trip; drop the
+  // result if the call ended and this screen left meanwhile (see voicecall).
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const setAddSheet = useCallback((v: typeof addSheet) => { if (mounted.current) setAddSheetState(v); }, []);
   const addPerson = useCallback(async () => {
     try {
       const { listChats } = await import('../lib/chatService');
@@ -419,7 +424,7 @@ function VideoCallEngine() {
     } catch {
       setAddSheet({ title: 'Add to call', message: 'Could not load contacts just now.', actions: [] });
     }
-  }, [peerUid]);
+  }, [peerUid, setAddSheet]);
 
 
   return (
@@ -456,7 +461,7 @@ function VideoCallEngine() {
             badge on any inset — a fixed top:110 sat under them on a tall notch. */}
         {(sharing || peerSharing) && (
           <View style={S.shareBannerInline}>
-            <Ionicons name="phone-portrait" size={14} color="#fff" />
+            <Ionicons name="phone-portrait" size={14} color={CALL.text} />
             <Text style={S.shareBannerTxt}>
               {sharing ? "You're sharing your screen"
                 : `${peerName || 'They'} ${peerName ? 'is' : 'are'} sharing their screen`}
@@ -476,7 +481,7 @@ function VideoCallEngine() {
         accessibilityRole="button"
         accessibilityLabel="Add people to this call"
       >
-        <Ionicons name="person-add" size={20} color="#fff" />
+        <Ionicons name="person-add" size={20} color={CALL.text} />
       </TouchableOpacity>
 
       {localUrl && (!cameraOff || sharing) && (
@@ -1111,7 +1116,7 @@ function makeStyles() { return StyleSheet.create({
                 alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.16)' },
   shareBanner:{ position: 'absolute', top: 110, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(157,111,208,0.92)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
   shareBannerInline: { marginTop: 6, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(157,111,208,0.92)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
-  shareBannerTxt: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  shareBannerTxt: { color: CALL.text, fontSize: 12, fontWeight: '700' },
   name:       { color: CALL.text, fontSize: 22, fontWeight: '700', ...CALL_TEXT_SHADOW },
   status:     { color: CALL.textDim, fontSize: 14, ...CALL_TEXT_SHADOW },
   errorTxt:   { color: CALL.danger, fontSize: 13, marginTop: 4, ...CALL_TEXT_SHADOW },

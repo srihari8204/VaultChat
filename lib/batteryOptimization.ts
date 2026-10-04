@@ -88,17 +88,22 @@ export async function isPowerSaveMode(): Promise<boolean> {
   } catch { return false; }
 }
 
-/** Ask the OS to exempt the app from battery optimization (system dialog). */
-export async function requestIgnoreBatteryOptimizations(): Promise<void> {
-  if (Platform.OS !== 'android') return;
+/**
+ * Ask the OS to exempt the app from battery optimization (system dialog).
+ * Resolves true when a settings screen opened, false when neither the direct
+ * request nor the list could be opened (never rejects).
+ */
+export async function requestIgnoreBatteryOptimizations(): Promise<boolean> {
+  if (Platform.OS !== 'android') return false;
   try {
     await IntentLauncher.startActivityAsync(
       'android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
       { data: `package:${APP_PACKAGE}` },
     );
+    return true;
   } catch {
     // Fall back to the battery-optimization list if the direct request is blocked.
-    try { await IntentLauncher.startActivityAsync('android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS'); } catch {}
+    try { await IntentLauncher.startActivityAsync('android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS'); return true; } catch { return false; }
   }
 }
 

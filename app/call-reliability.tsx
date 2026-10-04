@@ -40,10 +40,18 @@ export default function CallReliabilityScreen() {
     oemInstructions().then(setOem).catch(() => setOemFailed(true));
     AsyncStorage.getItem(DONE_KEY).then(v => setAutoOk(v === '1')).catch(() => {});
   }, []);
+  // A failed write is put back and said, or the tick would vanish next visit.
+  const [doneSaveFailed, setDoneSaveFailed] = useState(false);
   const markAutoStart = (done: boolean) => {
     setAutoOk(done);
-    AsyncStorage.setItem(DONE_KEY, done ? '1' : '0').catch(() => {});
+    setDoneSaveFailed(false);
+    AsyncStorage.setItem(DONE_KEY, done ? '1' : '0').catch(() => { setAutoOk(!done); setDoneSaveFailed(true); });
   };
+  // Which "Open settings" button could not open its page, if any. Each opener
+  // resolves false instead of throwing; without this a tap did nothing visible.
+  const [openFailed, setOpenFailed] = useState<null | 'fsi' | 'battery' | 'autostart'>(null);
+  const noteOpened = (which: 'fsi' | 'battery' | 'autostart', ok: boolean) => setOpenFailed(ok ? null : which);
+  const openFailedTxt = 'Couldn’t open this setting. Open your phone’s Settings, then Apps, then crazzychat, and change it there.';
 
   // Android 14 turned USE_FULL_SCREEN_INTENT into a user-granted permission for
   // anything that is not the default dialer. Declaring it in the manifest is no
@@ -71,7 +79,7 @@ export default function CallReliabilityScreen() {
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <View style={S.header}>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => (router.canGoBack() ? router.back() : router.replace('/settings' as any))} hitSlop={8} style={S.hBtn}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => (router.canGoBack() ? router.back() : router.replace('/settings'))} hitSlop={8} style={S.hBtn}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
         <Text style={S.title} accessibilityRole="header">Call reliability</Text>
       </View>
 
@@ -95,9 +103,10 @@ export default function CallReliabilityScreen() {
               Without this, an incoming call shows a small banner instead of taking over the
               screen — easy to miss when the phone is locked.
             </Text>
-            <TouchableOpacity style={S.btn} onPress={() => { openFullScreenIntentSettings(); }} accessibilityRole="button" accessibilityLabel="Open full-screen call setting">
+            <TouchableOpacity style={S.btn} onPress={() => { void openFullScreenIntentSettings().then(ok => noteOpened('fsi', ok)); }} accessibilityRole="button" accessibilityLabel="Open full-screen call setting">
               <Text style={S.btnTxt}>Open setting</Text>
             </TouchableOpacity>
+            {openFailed === 'fsi' && <Text style={S.errTxt} accessibilityLiveRegion="polite">{openFailedTxt}</Text>}
           </View>
         )}
 
@@ -119,12 +128,13 @@ export default function CallReliabilityScreen() {
           </Text>
           <TouchableOpacity
             style={S.btn}
-            onPress={async () => { await requestIgnoreBatteryOptimizations(); refresh(); }}
+            onPress={async () => { noteOpened('battery', await requestIgnoreBatteryOptimizations()); refresh(); }}
             accessibilityRole="button"
             accessibilityLabel={battOk === null ? 'Open battery settings' : 'Allow crazzychat to ignore battery optimization'}
           >
             <Text style={S.btnTxt}>{battOk === true ? 'Open again' : battOk === null ? 'Open battery settings' : 'Allow'}</Text>
           </TouchableOpacity>
+          {openFailed === 'battery' && <Text style={S.errTxt} accessibilityLiveRegion="polite">{openFailedTxt}</Text>}
         </View>
         )}
 
@@ -145,9 +155,10 @@ export default function CallReliabilityScreen() {
                 <Text style={S.stepTxt}>{s}</Text>
               </View>
             ))}
-            <TouchableOpacity style={S.btn} onPress={async () => { await openAutoStartSettings(); }} accessibilityRole="button" accessibilityLabel="Open auto-start settings">
+            <TouchableOpacity style={S.btn} onPress={async () => { noteOpened('autostart', await openAutoStartSettings()); }} accessibilityRole="button" accessibilityLabel="Open auto-start settings">
               <Text style={S.btnTxt}>Open settings</Text>
             </TouchableOpacity>
+            {openFailed === 'autostart' && <Text style={S.errTxt} accessibilityLiveRegion="polite">{openFailedTxt}</Text>}
             <TouchableOpacity
               style={[S.btn, S.btnGhost]} onPress={() => markAutoStart(!autoOk)}
               accessibilityRole="checkbox" accessibilityState={{ checked: autoOk }}
@@ -155,6 +166,7 @@ export default function CallReliabilityScreen() {
             >
               <Text style={[S.btnTxt, { color: colors.primary }]}>{autoOk ? 'Done ✓ (tap to undo)' : 'I’ve done this'}</Text>
             </TouchableOpacity>
+            {doneSaveFailed && <Text style={S.errTxt} accessibilityLiveRegion="polite">Could not save this on your phone. Try again.</Text>}
           </View>
         )}
 
@@ -184,7 +196,7 @@ export default function CallReliabilityScreen() {
               trackColor={{ true: colors.primary }}
             />
           </View>
-          {lowDataFailed && <Text style={[S.cardBody, { color: colors.danger }]}>Could not save this setting. Try again.</Text>}
+          {lowDataFailed && <Text style={S.errTxt} accessibilityLiveRegion="polite">Could not save this setting. Try again.</Text>}
           <Text style={S.cardBody}>
             Uses far less mobile data on calls, and less battery. Video stays on but at a lower
             quality ceiling; if the connection gets bad enough, video pauses so the audio keeps
@@ -211,7 +223,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   stepTxt: { color: c.text, fontSize: 13, lineHeight: 18, flex: 1 },
   btn: { marginTop: 6, backgroundColor: c.primary, borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
   btnGhost: { backgroundColor: 'transparent' },
-  btnTxt: { color: '#fff', fontSize: 15, fontWeight: '800' }, // on the primary fill in both themes
+  btnTxt: { color: c.onPrimary, fontSize: 15, fontWeight: '800' }, // on the primary fill
+  errTxt: { color: c.danger, fontSize: 13, lineHeight: 18, marginTop: 8 },
   okBar: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, borderRadius: 12, backgroundColor: c.glassSoft, borderWidth: StyleSheet.hairlineWidth, borderColor: c.online },
   okTxt: { color: c.text, fontSize: 13, flex: 1 },
 });

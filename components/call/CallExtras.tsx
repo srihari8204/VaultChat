@@ -18,6 +18,7 @@ import { memo, useCallback, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { CallChatSheet } from './CallChatSheet';
+import { CALL } from '../../constants/callTheme';
 import { ReactionOverlay, ReactionPicker } from './CallReactions';
 import { useCallChat, useCallChatUnread, useCallReactions } from '../../hooks/useCall';
 import * as engine from '../../lib/call/engine';
@@ -59,7 +60,7 @@ function CallExtrasImpl({ bottom }: CallExtrasProps) {
             onPress={openChat} style={S.btn} hitSlop={8} accessibilityRole="button"
             accessibilityLabel={unread > 0 ? `In-call chat, ${unread} unread` : 'In-call chat'}
           >
-            <Ionicons name="chatbubble-ellipses" size={20} color="#fff" />
+            <Ionicons name="chatbubble-ellipses" size={20} color={CALL.text} />
             {unread > 0 && (
               <View style={S.badge}>
                 <Text style={S.badgeTxt}>{unread > 9 ? '9+' : unread}</Text>
@@ -74,7 +75,7 @@ function CallExtrasImpl({ bottom }: CallExtrasProps) {
             accessibilityLabel="Send a reaction"
             accessibilityState={{ expanded: pickerOpen }}
           >
-            <Ionicons name="happy" size={20} color="#fff" />
+            <Ionicons name="happy" size={20} color={CALL.text} />
           </TouchableOpacity>
         </View>
       </View>
@@ -93,8 +94,8 @@ const S = StyleSheet.create({
                backgroundColor: 'rgba(255,255,255,0.14)' },
   btnActive: { backgroundColor: 'rgba(255,255,255,0.30)' },
   badge:     { position: 'absolute', top: -2, right: -2, minWidth: 18, height: 18, borderRadius: 9,
-               paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center', backgroundColor: '#E5484D' },
-  badgeTxt:  { color: '#fff', fontSize: 10, fontWeight: '800' },
+               paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center', backgroundColor: CALL.danger },
+  badgeTxt:  { color: CALL.text, fontSize: 10, fontWeight: '800' },
 });
 
 export default CallExtras;

@@ -19,7 +19,7 @@ import { CALL } from '../../constants/callTheme';
 export type CallControlVariant = 'voice' | 'video';
 
 export interface CallControlButtonProps {
-  icon: string;
+  icon: React.ComponentProps<typeof Ionicons>['name'];
   label: string;
   onPress: () => void;
   /** Armed/engaged state — mute on, speaker on, sharing, filter open. */
@@ -47,7 +47,7 @@ function CallControlButtonImpl({
       // `active` (Flip, End) is not a toggle and announces no state.
       accessibilityState={active === undefined ? undefined : { selected: active }}
     >
-      <Ionicons name={icon as any} size={variant === 'video' ? 22 : 24} color="#fff" style={S.btnIcon} />
+      <Ionicons name={icon} size={variant === 'video' ? 22 : 24} color={CALL.text} style={S.btnIcon} />
       <Text style={S.btnLabel} numberOfLines={variant === 'video' ? 1 : undefined}>{label}</Text>
     </TouchableOpacity>
   );

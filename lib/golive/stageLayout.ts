@@ -212,8 +212,40 @@ export function clampPip(
   };
 }
 
+/**
+ * The next corner, clockwise, for moving the corner preview WITHOUT dragging —
+ * a button in the chrome, or a screen reader's action on the preview itself.
+ *
+ * Which corner it is in now is read from its centre, so a preview the viewer
+ * dragged to the middle-left still moves predictably. Top corners sit at
+ * `topY` (the caller's home row, clear of the status pill); bottom corners and
+ * the sides go as far as clampPip allows, so the result is always on the panel.
+ */
+export function nextPipCorner(
+  at: { x: number; y: number },
+  winW: number,
+  winH: number,
+  pipW: number,
+  pipH: number,
+  topY: number,
+  topInset = 0,
+  bottomInset = 0,
+  leftInset = 0,
+  rightInset = 0,
+): { x: number; y: number } {
+  const right = at.x + pipW / 2 > winW / 2;
+  const bottom = at.y + pipH / 2 > winH / 2;
+  // top-left -> top-right -> bottom-right -> bottom-left -> top-left
+  const toRight = !bottom;
+  const toBottom = right;
+  return clampPip(
+    toRight ? winW : 0, toBottom ? winH : topY,
+    winW, winH, pipW, pipH, topInset, bottomInset, leftInset, rightInset,
+  );
+}
+
 export default {
-  pickStage, pipSize, pickFit, clampPip, clampZoom, clampZoomPan,
+  pickStage, pipSize, pickFit, clampPip, nextPipCorner, clampZoom, clampZoomPan,
   PIP_MIN, PIP_MAX, PIP_MARGIN, SCREEN_CROP_BUDGET, ZOOM_MAX,
 };
 

@@ -15,6 +15,7 @@
 // state says so outright.
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { CALL } from '../../constants/callTheme';
 import {
   FlatList, Keyboard, Modal, Platform, Pressable, StyleSheet,
   Text, TextInput, TouchableOpacity, View,
@@ -124,7 +125,7 @@ function CallChatSheetImpl({ visible, onClose, messages, onSend }: CallChatSheet
             accessibilityState={{ disabled: !draft.trim() }}
             onPress={send} disabled={!draft.trim()} style={S.send} hitSlop={8}
           >
-            <Ionicons name="send" size={20} color={draft.trim() ? '#fff' : 'rgba(255,255,255,0.3)'} />
+            <Ionicons name="send" size={20} color={draft.trim() ? CALL.text : 'rgba(255,255,255,0.3)'} />
           </TouchableOpacity>
         </View>
       </View>
@@ -142,7 +143,7 @@ const S = StyleSheet.create({
                backgroundColor: 'rgba(255,255,255,0.25)' },
   head:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
                paddingHorizontal: 18, paddingTop: 12, paddingBottom: 6 },
-  title:     { color: '#fff', fontSize: 16, fontWeight: '700' },
+  title:     { color: CALL.text, fontSize: 16, fontWeight: '700' },
   list:      { paddingHorizontal: 14, paddingVertical: 8, flexGrow: 1 },
   empty:     { color: 'rgba(255,255,255,0.45)', fontSize: 13, textAlign: 'center',
                paddingHorizontal: 30, paddingTop: 40, lineHeight: 19 },
@@ -150,10 +151,10 @@ const S = StyleSheet.create({
   mine:      { alignSelf: 'flex-end', backgroundColor: '#2F6BFF' },
   theirs:    { alignSelf: 'flex-start', backgroundColor: 'rgba(255,255,255,0.10)' },
   who:       { color: 'rgba(255,255,255,0.6)', fontSize: 11, fontWeight: '700', marginBottom: 2 },
-  text:      { color: '#fff', fontSize: 15, lineHeight: 20 },
+  text:      { color: CALL.text, fontSize: 15, lineHeight: 20 },
   composer:  { flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingHorizontal: 14,
                paddingTop: 8, paddingBottom: 26 },
-  input:     { flex: 1, maxHeight: 110, color: '#fff', fontSize: 15, paddingHorizontal: 14,
+  input:     { flex: 1, maxHeight: 110, color: CALL.text, fontSize: 15, paddingHorizontal: 14,
                paddingVertical: 10, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.10)' },
   send:      { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center',
                backgroundColor: 'rgba(255,255,255,0.12)' },

@@ -23,6 +23,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter, usePathname } from 'expo-router';
 import { deriveLayout } from '../constants/layoutMath';
 import { getSnapshot, subscribe } from '../lib/call/store';
+import { CALL } from '../constants/callTheme';
 
 /** mm:ss, and h:mm:ss once a call runs past the hour. */
 function elapsed(connectedAt: number, now: number): string {
@@ -81,13 +82,13 @@ export function CallBar() {
     if (!snap.chatId) return;
     if (!snap.peerUid) {
       router.push({
-        pathname: '/group-call-active' as any,
+        pathname: '/group-call-active',
         params: { chatId: snap.chatId, video: kind === 'video' ? '1' : '0', name: snap.peerName },
       });
       return;
     }
     router.push({
-      pathname: (kind === 'video' ? '/videocall' : '/voicecall') as any,
+      pathname: kind === 'video' ? '/videocall' : '/voicecall',
       params: {
         chatId: snap.chatId,
         peerUid: snap.peerUid,
@@ -109,7 +110,7 @@ export function CallBar() {
         accessibilityRole="button"
         accessibilityLabel={`Return to ${kind} call with ${name}, ${elapsed(snap.connectedAt, now)}`}
       >
-        <Ionicons name={kind === 'video' ? 'videocam' : 'call'} size={16} color="#fff" />
+        <Ionicons name={kind === 'video' ? 'videocam' : 'call'} size={16} color={CALL.text} />
         <Text style={styles.name} numberOfLines={1}>{name}</Text>
         <Text style={styles.timer} numberOfLines={1} maxFontSizeMultiplier={1.2}>
           {elapsed(snap.connectedAt, now)}
@@ -126,7 +127,7 @@ export function CallBar() {
         accessibilityLabel="End call"
         hitSlop={8}
       >
-        <Ionicons name="call" size={15} color="#fff" style={{ transform: [{ rotate: '135deg' }] }} />
+        <Ionicons name="call" size={15} color={CALL.text} style={{ transform: [{ rotate: '135deg' }] }} />
       </TouchableOpacity>
     </View>
   );
@@ -145,7 +146,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   tap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, minWidth: 0 },
-  name: { color: '#fff', fontSize: 14, fontWeight: '700', flexShrink: 1, minWidth: 0 },
+  name: { color: CALL.text, fontSize: 14, fontWeight: '700', flexShrink: 1, minWidth: 0 },
   timer: {
     color: 'rgba(255,255,255,0.95)',
     fontSize: 13,

@@ -117,11 +117,14 @@ export async function openCallSession(
  * `userIds` narrows it to named people (the in-call invite). Omitted, it rings
  * the chat's members up to the seat count.
  *
- * Returns how many were rung, or NULL when the server could not do it — an
- * older binary with no such route, or a network failure. Null means "fall back
- * and ring the old way", and the caller must, or nobody's phone rings at all.
+ * Returns how many were rung, 'rate_limited' (429) or 'ended' (409: the call
+ * is over), or NULL when the server could not do it — an older binary with no
+ * such route, or a network failure. Null means "fall back and ring the old
+ * way", and the caller must, or nobody's phone rings at all.
  */
-export async function ringCallGroup(callId: string, userIds?: string[]): Promise<number | null> {
+export type RingOutcome = number | 'rate_limited' | 'ended';
+
+export async function ringCallGroup(callId: string, userIds?: string[]): Promise<RingOutcome | null> {
   if (!CALL_SESSIONS || !callId) return null;
   try {
     const res: any = await api(`/calls/${callId}/ring`, {
@@ -129,11 +132,13 @@ export async function ringCallGroup(callId: string, userIds?: string[]): Promise
     });
     return typeof res?.rang === 'number' ? res.rang : 0;
   } catch (e: any) {
-    // 429 is the server saying "you are ringing too fast", and it MUST NOT fall
-    // back to the socket loop — that would spend 63 more units of the very
-    // budget that just refused one, and ring everyone anyway. Every other
-    // failure is "this server cannot do it", which the loop can.
-    if (e?.status === 429) return 0;
+    // 429 and 409 are answers, not "this server cannot do it", and neither may
+    // fall back to the socket loop. 429: the loop would spend 63 more units of
+    // the very budget that just refused one, and ring everyone anyway. 409: the
+    // call has ended, so ringing would wake phones for a call nobody can join.
+    // Every other failure is "this server cannot do it", which the loop can.
+    if (e?.status === 429) return 'rate_limited';
+    if (e?.status === 409) return 'ended';
     return null;
   }
 }

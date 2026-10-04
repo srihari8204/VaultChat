@@ -140,7 +140,7 @@ export default function IncomingCallScreen() {
   // notification launch has no history, and router.back() is then a no-op).
   // Used by the caller-hangup listener below as well as by decline.
   const leaveRef = useRef(() => {});
-  leaveRef.current = () => { if (router.canGoBack()) router.back(); else router.replace('/' as any); };
+  leaveRef.current = () => { if (router.canGoBack()) router.back(); else router.replace('/'); };
 
   // Listen for caller-side hangup before answer
   const decidedRef = useRef(false);
@@ -178,10 +178,10 @@ export default function IncomingCallScreen() {
     stopRingtone();
     if (isWaiting) holdActiveCall();   // put the call we're on now on hold
     if (isGroup) {
-      router.replace({ pathname: '/group-call-active' as any, params: { chatId, video: type === 'video' ? '1' : '0', name: groupName || peerName } });
+      router.replace({ pathname: '/group-call-active', params: { chatId, video: type === 'video' ? '1' : '0', name: groupName || peerName } });
       return;
     }
-    const route = type === 'video' ? '/videocall' : '/voicecall';
+    const route = type === 'video' ? '/videocall' as const : '/voicecall' as const;
     // The LIVE offer wins over the route param. They are the same envelope until
     // the caller re-seals, and after a re-seal the param is the one the callee
     // has already proven it cannot open — see the listener above.
@@ -200,7 +200,7 @@ export default function IncomingCallScreen() {
     // answer that beats the ring is simply an answer.
     callStage(offerTag(answering), 'accepted', type === 'video' ? 'video' : 'audio');
     router.replace({
-      pathname: route as any,
+      pathname: route,
       params: { chatId, peerUid, peerName: routableName, isIncoming: 'true', initialOffer: answering },
     });
   };
@@ -223,9 +223,16 @@ export default function IncomingCallScreen() {
     // live participants (lib/call/engine.ts `accept`), so a decliner's end is
     // ignored there by design and the call carries on for everyone else.
     // Sent anyway for older builds; a failure is not worth an alert.
-    if (await sendDecline(peerUid, chatId, 1)) { leave(); return; }
+    //
+    // BOUNDED: the first try waits at most DECLINE_WAIT_MS. getSocket() on a
+    // hung connect only gives up when lib/socket.ts abandons it, and the ring
+    // screen must not sit there that long after a tap on Decline. A first try
+    // still in flight keeps going and counts if it lands.
+    const first = sendDecline(peerUid, chatId, 1);
+    const inTime = await Promise.race([first, new Promise<false>(r => setTimeout(() => r(false), DECLINE_WAIT_MS))]);
     leave();
-    const told = await sendDecline(peerUid, chatId, 2, 1500);
+    if (inTime) return;
+    const told = (await first) || await sendDecline(peerUid, chatId, 2, 1500);
     if (!told && !isGroup) {
       Alert.alert('Could not reach the caller', `${displayName} may keep hearing it ring until their call times out.`);
     }
@@ -262,7 +269,7 @@ export default function IncomingCallScreen() {
 
       <View style={[S.controls, { paddingBottom: insets.bottom + 32 }]}>
         <TouchableOpacity style={[S.btn, S.btnDecline]} onPress={decline} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel="Decline call">
-          <Ionicons name="call" size={28} color="#fff" style={{ transform: [{ rotate: '135deg' }] }} />
+          <Ionicons name="call" size={28} color={CALL.text} style={{ transform: [{ rotate: '135deg' }] }} />
           <Text style={S.btnLabel}>Decline</Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -272,7 +279,7 @@ export default function IncomingCallScreen() {
           accessibilityRole="button"
           accessibilityLabel={isWaiting ? 'Hold current call and accept' : 'Accept call'}
         >
-          <Ionicons name={type === 'video' ? 'videocam' : 'call'} size={28} color="#fff" />
+          <Ionicons name={type === 'video' ? 'videocam' : 'call'} size={28} color={CALL.text} />
           <Text style={S.btnLabel}>{isWaiting ? 'Hold & accept' : 'Accept'}</Text>
         </TouchableOpacity>
       </View>
@@ -280,6 +287,13 @@ export default function IncomingCallScreen() {
   );
 }
 
+/** How long Decline waits for the first send before leaving the ring screen anyway. */
+const DECLINE_WAIT_MS = 2500;
+
+// ponytail: "sent" means emitted on a connected socket, not received. The server
+// relays webrtc_end without an acknowledgement (vaultchat-backend-go
+// internal/realtime/handlers.go `relay`), so an acked emit would always time
+// out. Switch to socket.emitWithAck once the relay calls the ack.
 /** Send the decline, waiting `delayMs` before each attempt. True once sent. */
 async function sendDecline(peerUid: string, chatId: string, attempts: number, delayMs = 0): Promise<boolean> {
   for (let i = 0; i < attempts; i++) {
@@ -298,7 +312,7 @@ function makeStyles() { return StyleSheet.create({
   body:      { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 14 },
   label:     { color: CALL.textDim, fontSize: 14, letterSpacing: 1.5, textTransform: 'uppercase' },
   avatar:    { width: 160, height: 160, borderRadius: 80, backgroundColor: CALL.active, alignItems: 'center', justifyContent: 'center', marginTop: 12, shadowColor: CALL.active, shadowOpacity: 0.6, shadowRadius: 30 },
-  avatarTxt: { color: '#fff', fontSize: 64, fontWeight: '800' },
+  avatarTxt: { color: CALL.text, fontSize: 64, fontWeight: '800' },
   name:      { color: CALL.text, fontSize: 26, fontWeight: '700' },
 
   controls:  { flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 32 },
@@ -306,5 +320,5 @@ function makeStyles() { return StyleSheet.create({
   btnAccept: { backgroundColor: CALL.active },
   btnDecline:{ backgroundColor: CALL.danger },
   btnIcon:   { fontSize: 28 },
-  btnLabel:  { color: '#fff', fontSize: 13, fontWeight: '700' },
+  btnLabel:  { color: CALL.text, fontSize: 13, fontWeight: '700' },
 }); }

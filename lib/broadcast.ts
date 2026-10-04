@@ -274,12 +274,17 @@ export async function votePoll(
   } catch { return null; }
 }
 
-/** Host only. Idempotent: closing a closed poll is success, not an error. */
-export async function closePoll(broadcastId: string, pollId: number): Promise<void> {
+/**
+ * Host only. Idempotent: closing a closed poll is success, not an error (the
+ * server answers 200 alreadyClosed). Resolves false when the request failed —
+ * offline or a server error — so the poll is still open for viewers.
+ */
+export async function closePoll(broadcastId: string, pollId: number): Promise<boolean> {
   try {
     await api(`/broadcasts/${encodeURIComponent(broadcastId)}/polls/${pollId}/close`,
       { method: 'POST', json: {} });
-  } catch { /* already closed, or offline */ }
+    return true;
+  } catch { return false; }
 }
 
 // ── private invitations ───────────────────────────────────────────────

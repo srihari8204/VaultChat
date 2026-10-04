@@ -29,11 +29,19 @@
 //
 //   npx tsx lib/golive/immersiveStage.selftest.ts
 
-import { readFileSync } from 'fs';
+import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 
 const ROOT = join(__dirname, '..', '..');
-const SRC = readFileSync(join(ROOT, 'app', 'live-view.tsx'), 'utf8');
+// The screen was split (round 4): its hooks and panels live in components/live/.
+// The properties below are about the SCREEN, wherever its code now sits, so the
+// checks read the route file and every part it is built from as one source.
+const PARTS = join(ROOT, 'components', 'live');
+const SRC = [
+  readFileSync(join(ROOT, 'app', 'live-view.tsx'), 'utf8'),
+  ...readdirSync(PARTS).filter(f => /\.tsx?$/.test(f) && !/\.selftest\./.test(f)).sort()
+    .map(f => readFileSync(join(PARTS, f), 'utf8')),
+].join('\n');
 
 /** Strip comments, so prose about an offset cannot satisfy — or fail — a check. */
 const code = SRC
@@ -45,7 +53,7 @@ const A = (ok: boolean, what: string): void => {
   if (!ok) { failures++; console.error('  FAIL', what); } else console.log('  ok  ', what);
 };
 
-console.log('\nGo Live immersive stage — app/live-view.tsx\n');
+console.log('\nGo Live immersive stage — app/live-view.tsx + components/live/\n');
 
 // ── ADAPTIVE, not measured ─────────────────────────────────────────
 A(!/(top|bottom):\s*\d{2,}/.test(code),
@@ -217,6 +225,17 @@ A(/pinned\s*=\s*chatOpen \|\| inviteOpen \|\| pollDraft !== null/.test(code),
 for (const kept of ['sendBroadcastChat', 'votePoll', 'createPoll', 'closePoll', 'makeInvite']) {
   A(SRC.includes(kept), `29. ${kept} survived the rework`);
 }
+
+// ── round 4: what the split also fixed ─────────────────────────────
+A(/if \(await closePoll\(/.test(code) && /closed: false/.test(code),
+  '30. ending a poll waits for the server, and a failed close puts the poll back');
+A(/if \(atBottom\.current\) chatScroll\.current\?\.scrollToEnd/.test(code),
+  '31. chat follows new messages only while the reader is at the bottom');
+A(/accessibilityLabel=\{`\$\{nameOf\(uid\)/.test(code),
+  '32. every stage-strip tile is named for a screen reader');
+A(/nextPipCorner\(/.test(code) && /onMovePip=\{movePipToNextCorner\}/.test(code)
+  && /a === 'move'\) movePipToNextCorner\(\)/.test(code),
+  '33. the camera corner moves without a drag — a chrome button and a screen-reader action');
 
 console.log(failures === 0
   ? '\nALL IMMERSIVE-STAGE CHECKS PASSED ✓  (device verification separate)\n'

@@ -28,7 +28,7 @@
 
 import { getCachedUser } from '../api';
 import { CALL_SESSIONS } from '../../constants/flags';
-import { leaveCallSession, openCallSession, ringCallGroup, setCallRole, setHandRaised, type CallRole } from '../callSession';
+import { leaveCallSession, openCallSession, ringCallGroup, setCallRole, setHandRaised, type CallRole, type RingOutcome } from '../callSession';
 import { addCallLog } from '../callLog';
 import { setSecure } from '../screenGuard';
 import { nativeCall } from './native';
@@ -930,28 +930,25 @@ export function markChatRead(): void { dispatch({ type: 'chat_read' }); }
  * can fill up and one that cannot.
  *
  * Rings ONLY the uids given, and only while a group call is live: an invite is
- * a deliberate act aimed at named people, not a re-broadcast. Returns how many
- * were rung so the caller can say so: 0 when there was nobody to ring (already
- * here, or no live call), or 'rate_limited' when the server refused the ring.
+ * a deliberate act aimed at named people, not a re-broadcast. Returns what
+ * happened so the caller can say so: how many were rung (0 when everyone named
+ * is already here), 'rate_limited' when the server refused the ring, or 'ended'
+ * when there is no live call to invite into.
  */
-export async function inviteToCall(uids: string[]): Promise<number | 'rate_limited'> {
+export async function inviteToCall(uids: string[]): Promise<RingOutcome> {
   const s = session;
   // 1:1 IS ALLOWED NOW. This used to return early on s.peerUid, which meant a
   // two-person call had no way to become a three-person one — the "add person"
   // every other messenger has simply did not exist here. The server grants an
   // invite scoped to this one call (migration 123 call_invites), so the person
   // added never joins the chat, only the call.
-  if (!s || s.disposed) return 0;
+  if (!s || s.disposed) return 'ended';
   const live = getSnapshot().participants;
   // Never ring someone already here. Their phone would ring while they are
   // looking at the call it is ringing about.
   const targets = uids.filter(u => u && u !== s.meId && !live[u]);
   if (!targets.length) return 0;
-  const rang = await ringTheGroup(s, targets, targets);
-  // For a non-empty named list the server rings at least one person (it grants
-  // non-members a call invite), so 0 here is ringCallGroup's 429 mapping: the
-  // ring budget refused it and nobody's phone rang.
-  return rang === 0 ? 'rate_limited' : rang;
+  return ringTheGroup(s, targets, targets);
 }
 
 /**
@@ -966,8 +963,10 @@ export async function inviteToCall(uids: string[]): Promise<number | 'rate_limit
  * `fallback` is the uid list the loop needs; the server needs only the call id
  * (and, for an invite, who to narrow to).
  */
-async function ringTheGroup(s: Session, only: string[] | undefined, fallback: string[]): Promise<number> {
+async function ringTheGroup(s: Session, only: string[] | undefined, fallback: string[]): Promise<RingOutcome> {
   const rang = await ringCallGroup(s.serverCallId, only);
+  // 'rate_limited' and 'ended' are the server's answer, not a missing route:
+  // ringCallGroup explains why neither may fall through to the loop.
   if (rang !== null) return rang;
   await signal.ringPeers(fallback, s.meId, s.chatId, s.peerName || '', s.kind === 'video');
   return fallback.length;
@@ -998,11 +997,19 @@ export async function raiseHand(up: boolean): Promise<void> {
   await setHandRaised(s.serverCallId, up).catch(() => {});
 }
 
-export async function lowerPeerHand(uid: string): Promise<void> {
+/**
+ * Lower someone else's hand (host/cohost). Resolves false when the server
+ * refused or could not be reached; the hand is then put back up, so the host's
+ * queue does not show a request as handled when it was not.
+ */
+export async function lowerPeerHand(uid: string): Promise<boolean> {
   const s = session;
-  if (!s?.serverCallId) return;
+  if (!s?.serverCallId) return false;
+  const prev = getSnapshot().participants[uid]?.handRaisedAt || 0;
   dispatch({ type: 'hand', uid, at: 0 });
-  await setHandRaised(s.serverCallId, false, uid).catch(() => {});
+  const ok = await setHandRaised(s.serverCallId, false, uid).catch(() => false);
+  if (!ok && prev && session === s) dispatch({ type: 'hand', uid, at: prev });
+  return ok;
 }
 
 export async function setRole(uid: string, role: CallRole): Promise<boolean> {

@@ -24,6 +24,7 @@ import { mediaDevices, RTCIceCandidate, RTCPeerConnection, RTCSessionDescription
 import InCallManager from 'react-native-incall-manager';
 import { type Palette } from '../constants/theme';
 import { CALL_ENGINE_V2 } from '../constants/flags';
+import { CALL } from '../constants/callTheme';
 // The seat count comes from the same module the rest of the call rules live in,
 // so the UI and the policy cannot drift. The SERVER is the authority (it refuses
 // the join); this is only what the screen shows.
@@ -72,7 +73,7 @@ export default function GroupCallActive() {
  *  re-renders when that peer's stream changes and not when anyone else's does. */
 const ParticipantTile = memo(function ParticipantTile(
   { uid, width, isVideo, onModerate }: {
-    uid: string; width: string; isVideo: boolean; onModerate?: (uid: string, name: string) => void;
+    uid: string; width: `${number}%`; isVideo: boolean; onModerate?: (uid: string, name: string) => void;
   },
 ) {
   const { colors } = useTheme();
@@ -82,7 +83,7 @@ const ParticipantTile = memo(function ParticipantTile(
   const name = p?.name || (url ? 'Connected' : 'Connecting…');
   return (
     <TouchableOpacity
-      style={[S.tile, { width: width as any }]}
+      style={[S.tile, { width }]}
       activeOpacity={onModerate ? 0.7 : 1}
       disabled={!onModerate}
       onPress={() => onModerate?.(uid, name)}
@@ -98,7 +99,7 @@ const ParticipantTile = memo(function ParticipantTile(
         ? <RTCView streamURL={url} style={S.video} objectFit="cover" />
         : <View style={S.audioTile}>
             {url ? <RTCView streamURL={url} style={{ width: 1, height: 1 }} /> : null}
-            <Ionicons name="person" size={34} color="#fff" />
+            <Ionicons name="person" size={34} color={CALL.text} />
           </View>}
       {/* A raised hand has to be visible on the tile, not only in a list a host
           might not have open — the whole point is that it interrupts. */}
@@ -106,7 +107,7 @@ const ParticipantTile = memo(function ParticipantTile(
         <View style={S.handBadge} accessibilityLabel="Hand raised"><Text style={S.handBadgeTxt}>✋</Text></View>
       )}
       {p?.role === 'audience' && (
-        <View style={S.roleBadge}><Ionicons name="eye-outline" size={11} color="#fff" /></View>
+        <View style={S.roleBadge}><Ionicons name="eye-outline" size={11} color={CALL.text} /></View>
       )}
       <Text style={S.tileName} numberOfLines={1}>{name}</Text>
     </TouchableOpacity>
@@ -170,6 +171,13 @@ function GroupCallEngine() {
     try { ok = await engine.setRole(uid, role); } catch { ok = false; }
     if (!ok) setSheet({ title: name, message: 'Could not change their role. Check your connection, or whether you are still a host.', actions: [] });
   }, []);
+  // Same contract as changeRole: a refused lower is reported, and the engine
+  // puts the hand back up so the queue stays true.
+  const lowerHand = useCallback(async (uid: string, name: string) => {
+    let ok = false;
+    try { ok = await engine.lowerPeerHand(uid); } catch { ok = false; }
+    if (!ok) setSheet({ title: name, message: 'Could not lower their hand. Check your connection, or whether you are still a host.', actions: [] });
+  }, []);
   const moderate = useCallback((uid: string, name: string) => {
     setSheet({
       title: name,
@@ -184,10 +192,10 @@ function GroupCallEngine() {
           [{ text: 'Cancel', style: 'cancel' },
            { text: 'Move', style: 'destructive', onPress: () => { void changeRole(uid, name, 'audience'); } }],
         ) },
-        { label: 'Lower hand', icon: 'hand-left-outline', onPress: () => { void engine.lowerPeerHand(uid); } },
+        { label: 'Lower hand', icon: 'hand-left-outline', onPress: () => { void lowerHand(uid, name); } },
       ],
     });
-  }, [changeRole]);
+  }, [changeRole, lowerHand]);
   const toggleHand = useCallback(() => engine.raiseHand(!handUp), [handUp]);
 
   // ── invite: how a call actually fills up ────────────────────────────
@@ -314,7 +322,7 @@ function GroupCallEngine() {
     // A call answered from a notification has no history to go back to.
     const t = setTimeout(() => {
       if (router.canGoBack()) router.back();
-      else router.replace('/' as any);
+      else router.replace('/');
     }, 200);
     return () => clearTimeout(t);
   }, [status, router]);
@@ -372,14 +380,14 @@ function GroupCallEngine() {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
       if (status !== 'connected') { engine.hangUp('local_hangup', true); return false; }
       engine.minimizeScreen();
-      if (router.canGoBack()) router.back(); else router.replace('/(tabs)/chats' as any);
+      if (router.canGoBack()) router.back(); else router.replace('/(tabs)/chats');
       return true;
     });
     return () => sub.remove();
   }, [status, router]);
 
   const cols = shown.length + 1 <= 1 ? 1 : shown.length + 1 <= 4 ? 2 : 3;
-  const tileW = `${100 / cols - 2}%`;
+  const tileW = `${100 / cols - 2}%` as const;
 
   return (
     <View style={S.screen}>
@@ -408,7 +416,7 @@ function GroupCallEngine() {
             onPress={invite} activeOpacity={0.7} style={S.addPeoplePill}
             accessibilityRole="button" accessibilityLabel={`Add people, ${tiles} of ${CALL_MAX} seats used`}
           >
-            <Ionicons name="person-add" size={13} color="#fff" />
+            <Ionicons name="person-add" size={13} color={CALL.text} />
             <Text style={S.addPeopleTxt}>Add · {tiles}/{CALL_MAX}</Text>
           </TouchableOpacity>
         )}
@@ -427,7 +435,7 @@ function GroupCallEngine() {
           why participants carry their own `sharing`. */}
       {sharer ? (
         <View style={S.shareBanner} pointerEvents="none">
-          <Ionicons name="phone-portrait" size={13} color="#fff" />
+          <Ionicons name="phone-portrait" size={13} color={CALL.text} />
           <Text style={S.shareBannerTxt} numberOfLines={1}>
             {sharer.name} is sharing their screen
           </Text>
@@ -437,10 +445,10 @@ function GroupCallEngine() {
       {error ? <Text style={S.err}>{error}</Text> : null}
 
       <ScrollView contentContainerStyle={S.grid}>
-        <View style={[S.tile, { width: tileW as any }]}>
+        <View style={[S.tile, { width: tileW }]}>
           {isVideo && !camOff && localUrl
             ? <RTCView streamURL={localUrl} style={S.video} objectFit="cover" mirror />
-            : <View style={S.audioTile}><Ionicons name="person" size={34} color="#fff" /></View>}
+            : <View style={S.audioTile}><Ionicons name="person" size={34} color={CALL.text} /></View>}
           <Text style={S.tileName}>You{muted ? ' 🔇' : ''}</Text>
         </View>
         {shown.map(uid => (
@@ -460,7 +468,7 @@ function GroupCallEngine() {
             style={S.pagerBtn} disabled={page === 0}
             onPress={() => setPage(p => Math.max(0, p - 1))}
           >
-            <Ionicons name="chevron-back" size={20} color={page === 0 ? '#555' : '#fff'} />
+            <Ionicons name="chevron-back" size={20} color={page === 0 ? '#555' : CALL.text} />
           </TouchableOpacity>
           <Text style={S.pagerLabel}>
             {page === 0 ? 'Speaking' : `Page ${page + 1} of ${pages}`}
@@ -470,7 +478,7 @@ function GroupCallEngine() {
             style={S.pagerBtn} disabled={page >= pages - 1}
             onPress={() => setPage(p => Math.min(pages - 1, p + 1))}
           >
-            <Ionicons name="chevron-forward" size={20} color={page >= pages - 1 ? '#555' : '#fff'} />
+            <Ionicons name="chevron-forward" size={20} color={page >= pages - 1 ? '#555' : CALL.text} />
           </TouchableOpacity>
         </View>
       )}
@@ -825,8 +833,8 @@ function CtrlBtn({ icon, onPress, active, danger, colors, label }: {
       accessibilityLabel={label}
       // Only toggles carry a state; End and Switch camera are plain actions.
       accessibilityState={active === undefined ? undefined : { selected: active }}
-      style={{ width: 60, height: 60, borderRadius: 30, alignItems: 'center', justifyContent: 'center', backgroundColor: danger ? colors.danger : active ? colors.primary : 'rgba(255,255,255,0.12)' }}>
-      <Ionicons name={icon} size={26} color="#fff" />
+      style={{ width: 60, height: 60, borderRadius: 30, alignItems: 'center', justifyContent: 'center', backgroundColor: danger ? colors.danger : active ? colors.primary : CALL.ctrl }}>
+      <Ionicons name={icon} size={26} color={CALL.text} />
     </TouchableOpacity>
   );
 }
@@ -836,14 +844,14 @@ function CtrlBtn({ icon, onPress, active, danger, colors, label }: {
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen:    { flex: 1, backgroundColor: '#0B0B10' },
   topBar:    { paddingTop: HEADER_TOP, paddingHorizontal: 20, paddingBottom: 8, alignItems: 'center' },
-  title:     { color: '#fff', fontSize: 18, fontWeight: '800' },
+  title:     { color: CALL.text, fontSize: 18, fontWeight: '800' },
   sub:       { color: 'rgba(255,255,255,0.6)', fontSize: 13, marginTop: 2 },
   err:       { color: '#FCA5A5', textAlign: 'center', fontSize: 13, paddingHorizontal: 20 },
   grid:      { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', paddingHorizontal: 6, paddingTop: 8 },
   tile:      { aspectRatio: 0.8, marginHorizontal: '1%', marginBottom: 10, borderRadius: 14, overflow: 'hidden', backgroundColor: '#1A1A22', justifyContent: 'flex-end' },
-  video:     { ...StyleSheet.absoluteFillObject, backgroundColor: '#000' },
+  video:     { ...StyleSheet.absoluteFillObject, backgroundColor: CALL.video },
   audioTile: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: c.primary },
-  tileName:  { color: '#fff', fontSize: 12, fontWeight: '600', padding: 6, backgroundColor: 'rgba(0,0,0,0.4)' },
+  tileName:  { color: CALL.text, fontSize: 12, fontWeight: '600', padding: 6, backgroundColor: 'rgba(0,0,0,0.4)' },
   handBadge: { position: 'absolute', top: 6, left: 6, width: 26, height: 26, borderRadius: 13,
                alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.55)' },
   handBadgeTxt: { fontSize: 14 },
@@ -855,13 +863,13 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     marginTop: 6, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 14,
     backgroundColor: 'rgba(157,110,255,0.30)',
   },
-  shareBannerTxt: { color: '#fff', fontSize: 12, fontWeight: '700', maxWidth: 260 },
+  shareBannerTxt: { color: CALL.text, fontSize: 12, fontWeight: '700', maxWidth: 260 },
   addPeoplePill: {
     flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'center',
     marginTop: 6, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 14,
     backgroundColor: 'rgba(255,255,255,0.16)',
   },
-  addPeopleTxt: { color: '#fff', fontSize: 12, fontWeight: '600' },
+  addPeopleTxt: { color: CALL.text, fontSize: 12, fontWeight: '600' },
   pager:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 18, paddingBottom: 4 },
   pagerBtn:   { padding: 8 },
   pagerLabel: { color: '#bbb', fontSize: 12, minWidth: 110, textAlign: 'center' },

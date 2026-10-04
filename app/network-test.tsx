@@ -2,8 +2,9 @@
 // Download/upload speed, ping/latency, jitter, animated gauge
 // Connection type from NetInfo, history in AsyncStorage
 //
-// The test runs against Cloudflare's public speed endpoints (TEST_HOST), not a
-// crazzychat server, so the screen says so: Cloudflare sees this device's IP
+// The test runs against crazzychat's own speed endpoints when the server has
+// them, and otherwise against Cloudflare's public ones, as before they existed
+// (lib/speedTarget.ts). The screen says which: Cloudflare sees this device's IP
 // address. Only requests that succeeded are measured (lib/speedTest.ts); a run
 // where nothing got through shows as failed instead of an invented speed.
 
@@ -20,14 +21,14 @@ import NetInfo from '@react-native-community/netinfo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AuroraBackground } from '../components/ui';
 import { pingStats, throughputMbps, type TransferSample } from '../lib/speedTest';
+import { appTarget, cloudflareTarget, probeVerdict, rateLimitMessage, type SpeedTarget } from '../lib/speedTarget';
+import { getAccessToken } from '../lib/api';
+import { SERVER_URL } from '../constants/server';
 
 
 const STORAGE_KEY = 'vaultchat_speedtest_history';
 const GAUGE_SIZE = 220;
 const GAUGE_STROKE = 12;
-const TEST_HOST = 'speed.cloudflare.com';
-const UPLOAD_URL = `https://${TEST_HOST}/__up`;
-const DOWN_URL = (bytes: number) => `https://${TEST_HOST}/__down?bytes=${bytes}`;
 
 type TestResult = {
   id: string;
@@ -70,6 +71,12 @@ export default function NetworkTestScreen() {
   // A history that could not be read is not "No previous tests".
   const [historyError, setHistoryError] = useState(false);
   const [serverOnline, setServerOnline] = useState<boolean | null>(null);
+  // Where the test runs; null until the probe has answered (or after a 429).
+  const [target, setTarget] = useState<SpeedTarget | null>(null);
+  // Set by a 429 from our own endpoint: the sentence saying when to try again.
+  const [limitMsg, setLimitMsg] = useState<string | null>(null);
+  // A 429 seen mid-run, so the run can end with that sentence.
+  const limitHit = useRef<string | null>(null);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   // Async test steps keep resolving after the user leaves; nothing may set
@@ -102,50 +109,98 @@ export default function NetworkTestScreen() {
     return details;
   };
 
-  const checkServerStatus = async () => {
+  /**
+   * Pick the server: ours when /net/speed answers, Cloudflare otherwise
+   * (lib/speedTarget.ts). Returns null when ours refused with a 429 — the test
+   * then waits rather than moving to a third party.
+   */
+  const checkServerStatus = async (): Promise<SpeedTarget | null> => {
+    const token = await getAccessToken().catch(() => null);
+    if (token) {
+      const app = appTarget(SERVER_URL, token);
+      let status: number | null = null;
+      let retryAfter: string | null = null;
+      const start = Date.now();
+      try {
+        const resp = await fetch(app.downUrl(0), { method: 'HEAD', headers: app.headers, signal: signal() });
+        status = resp.status;
+        retryAfter = resp.headers.get('Retry-After');
+      } catch { /* no answer: fall back below */ }
+      const verdict = probeVerdict(status);
+      if (verdict === 'rate_limited') {
+        limitHit.current = rateLimitMessage(retryAfter);
+        if (mounted.current) { setTarget(null); setLimitMsg(limitHit.current); setServerOnline(true); }
+        return null;
+      }
+      if (verdict === 'app') {
+        if (mounted.current) { setTarget(app); setLimitMsg(null); setServerOnline(Date.now() - start < 5000); }
+        return app;
+      }
+    }
+    const cf = cloudflareTarget();
+    if (mounted.current) { setTarget(cf); setLimitMsg(null); }
     try {
       const start = Date.now();
-      const resp = await fetch(DOWN_URL(1), { method: 'HEAD', signal: signal() });
+      const resp = await fetch(cf.downUrl(1), { method: 'HEAD', signal: signal() });
       const elapsed = Date.now() - start;
       if (mounted.current) setServerOnline(resp.ok && elapsed < 5000);
     } catch {
       if (mounted.current) setServerOnline(false);
     }
+    return cf;
   };
+
+  /** Notes a 429 from our endpoint mid-run; the run then ends with that sentence. */
+  const noteLimit = (resp: Response) => {
+    if (resp.status === 429) limitHit.current = rateLimitMessage(resp.headers.get('Retry-After'));
+  };
+
+  // The list as last loaded or saved. runTest's closure holds `history` as it
+  // was when the run STARTED, so saving builds on this ref instead, and the
+  // write happens here rather than inside a state updater (which may run twice).
+  const historyRef = useRef<TestResult[]>([]);
+  const historyUnreadable = useRef(false);
+  // Set when a result could not be written; cleared by the next good write.
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const loadHistory = async () => {
     try {
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
       const parsed = raw ? JSON.parse(raw) : [];
       if (!mounted.current) return;
-      setHistory(Array.isArray(parsed) ? parsed : []);
+      historyRef.current = Array.isArray(parsed) ? parsed : [];
+      historyUnreadable.current = false;
+      setHistory(historyRef.current);
       setHistoryError(false);
     } catch {
+      historyUnreadable.current = true;
       if (mounted.current) setHistoryError(true);
     }
   };
 
-  // Functional update: `history` captured by runTest's closure is the list as
-  // it was when the run STARTED, so building on it could drop a result that
-  // landed in between. Persisted from the same list the state holds.
   const saveHistory = (result: TestResult) => {
-    setHistory(prev => {
-      const updated = [result, ...prev].slice(0, 20);
-      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
-      return updated;
-    });
+    // An unreadable stored list must not be overwritten by a list of one.
+    if (historyUnreadable.current) { setSaveError('This result was not saved, because past results could not be read.'); return; }
+    const updated = [result, ...historyRef.current].slice(0, 20);
+    historyRef.current = updated;
+    setHistory(updated);
+    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated)).then(
+      () => { if (mounted.current) setSaveError(null); },
+      () => { if (mounted.current) setSaveError('This result could not be saved on your phone.'); },
+    );
   };
 
   const running = phase !== 'idle' && phase !== 'done' && phase !== 'failed';
   const progressTo = (p: number) => { if (mounted.current) setProgress(p); };
 
   // ── Ping Test ── (a failed request is not a round trip)
-  const testPing = async () => {
+  const testPing = async (t: SpeedTarget) => {
     const trips: (number | null)[] = [];
     for (let i = 0; i < 5; i++) {
       const start = Date.now();
       try {
-        const resp = await fetch(DOWN_URL(1), { cache: 'no-store', signal: signal() });
+        const resp = await fetch(t.pingUrl, { cache: 'no-store', headers: t.headers, signal: signal() });
+        noteLimit(resp);
         trips.push(resp.ok ? Date.now() - start : null);
       } catch { trips.push(null); }
       progressTo((i + 1) / 5 * 100);
@@ -154,13 +209,14 @@ export default function NetworkTestScreen() {
   };
 
   // ── Download Test ── (only bytes actually received count)
-  const testDownload = async (): Promise<number | null> => {
+  const testDownload = async (t: SpeedTarget): Promise<number | null> => {
     const sizes = [1000000, 2000000, 5000000]; // 1MB, 2MB, 5MB
     const samples: TransferSample[] = [];
     for (let i = 0; i < sizes.length; i++) {
       const start = Date.now();
       try {
-        const resp = await fetch(DOWN_URL(sizes[i]), { cache: 'no-store', signal: signal() });
+        const resp = await fetch(t.downUrl(sizes[i]), { cache: 'no-store', headers: t.headers, signal: signal() });
+        noteLimit(resp);
         const blob = await resp.blob();
         samples.push({ ok: resp.ok, bytes: blob.size, ms: Date.now() - start });
       } catch {
@@ -174,19 +230,20 @@ export default function NetworkTestScreen() {
   };
 
   // ── Upload Test ── (an upload counts only if the server accepted it)
-  const testUpload = async (): Promise<number | null> => {
+  const testUpload = async (t: SpeedTarget): Promise<number | null> => {
     const sizes = [100000, 500000, 1000000]; // 100KB, 500KB, 1MB
     const samples: TransferSample[] = [];
     for (let i = 0; i < sizes.length; i++) {
       const data = new Uint8Array(sizes[i]);
       const start = Date.now();
       try {
-        const resp = await fetch(UPLOAD_URL, {
+        const resp = await fetch(t.upUrl, {
           method: 'POST',
           body: data,
-          headers: { 'Content-Type': 'application/octet-stream' },
+          headers: { ...t.headers, 'Content-Type': 'application/octet-stream' },
           signal: signal(),
         });
+        noteLimit(resp);
         samples.push({ ok: resp.ok, bytes: sizes[i], ms: Date.now() - start });
       } catch {
         samples.push({ ok: false, bytes: 0, ms: Date.now() - start });
@@ -206,22 +263,31 @@ export default function NetworkTestScreen() {
     setDownload(0);
     setUpload(0);
     setProgress(0);
+    limitHit.current = null;
 
     try {
       const connection = await checkConnection();
+      // Re-probed only when there is no target yet, or the last probe was a 429.
+      const t = target ?? await checkServerStatus();
+      if (!mounted.current) return;
+      if (!t) { setRunError(limitHit.current ?? 'Too many speed tests. Try again later.'); setPhase('failed'); return; }
 
-      const pg = await testPing();
+      const pg = await testPing(t);
       if (!mounted.current) return;
 
       setPhase('download');
       setProgress(0);
-      const dl = await testDownload();
+      const dl = await testDownload(t);
       if (!mounted.current) return;
 
       setPhase('upload');
       setProgress(0);
-      const ul = await testUpload();
+      const ul = await testUpload(t);
       if (!mounted.current) return;
+
+      // Our own budget refused part of the run: the figures are incomplete,
+      // so say when to try again instead of showing them.
+      if (limitHit.current) { setRunError(limitHit.current); setPhase('failed'); return; }
 
       const result: Outcome = { download: dl, upload: ul, ping: pg?.ping ?? null, jitter: pg?.jitter ?? null };
       setOutcome(result);
@@ -331,10 +397,13 @@ export default function NetworkTestScreen() {
 
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity
+          accessibilityRole="button" accessibilityLabel="Back" hitSlop={8} style={styles.backBtn}
+          onPress={() => (router.canGoBack() ? router.back() : router.replace('/settings'))}
+        >
           <Ionicons name="arrow-back" size={20} color={colors.accent} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Speed Test</Text>
+        <Text style={styles.headerTitle} accessibilityRole="header">Speed Test</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -352,7 +421,11 @@ export default function NetworkTestScreen() {
           </Text>
         </View>
         <Text style={styles.disclosure}>
-          Tests run against {TEST_HOST} (Cloudflare), not crazzychat. Cloudflare sees this device&apos;s IP address while the test runs.
+          {target?.kind === 'app'
+            ? `Tests run against crazzychat's own server (${target.host}). Nothing is sent to a third party.`
+            : target
+              ? `Tests run against ${target.host} (Cloudflare), not crazzychat. Cloudflare sees this device's IP address while the test runs.`
+              : limitMsg ?? 'Choosing a test server…'}
         </Text>
 
         {/* Gauge */}
@@ -391,7 +464,7 @@ export default function NetworkTestScreen() {
           <View style={styles.failedBox} accessibilityRole="alert">
             <Text style={styles.failedTitle}>Test failed</Text>
             <Text style={styles.failedText}>
-              {runError ?? `No request reached ${TEST_HOST}. Check your connection and try again.`}
+              {runError ?? `No request reached ${target?.host ?? 'the test server'}. Check your connection and try again.`}
             </Text>
           </View>
         )}
@@ -419,7 +492,8 @@ export default function NetworkTestScreen() {
 
         {/* History */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>History</Text>
+          <Text style={styles.sectionTitle} accessibilityRole="header">History</Text>
+          {saveError && <Text style={styles.saveError} accessibilityLiveRegion="polite">{saveError}</Text>}
           {historyError ? (
             <TouchableOpacity onPress={loadHistory} accessibilityRole="button" accessibilityLabel="Past results could not be read. Try again">
               <Text style={styles.noHistory}>Past results could not be read. Tap to try again.</Text>
@@ -521,6 +595,7 @@ const makeStyles = (c: Palette, SW: number) => StyleSheet.create({
   section: { marginTop: 20 },
   sectionTitle: { color: c.text, fontSize: 16, fontWeight: '700', marginBottom: 12 },
   noHistory: { color: c.textDim, fontSize: 13, textAlign: 'center', marginTop: 8 },
+  saveError: { color: c.danger, fontSize: 13, marginBottom: 8 },
   historyRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: c.hairline },
   historyLeft: { flex: 1 },
   historyDate: { color: c.text, fontSize: 13, fontWeight: '600' },

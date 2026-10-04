@@ -205,7 +205,7 @@ function VoiceCallEngine() {
       // and still leaves crazzychat itself unusable. Minimising in-app leaves
       // the call running behind <CallBar/> and hands the app back.
       engine.minimizeScreen();
-      if (router.canGoBack()) router.back(); else router.replace('/(tabs)/chats' as any);
+      if (router.canGoBack()) router.back(); else router.replace('/(tabs)/chats');
       return true;
     });
     return () => sub.remove();
@@ -230,7 +230,7 @@ function VoiceCallEngine() {
     // no way out but the app switcher — reported on device.
     const t = setTimeout(() => {
       if (router.canGoBack()) router.back();
-      else router.replace('/' as any);
+      else router.replace('/');
     }, 200);
     return () => clearTimeout(t);
   }, [status, router]);
@@ -253,7 +253,13 @@ function VoiceCallEngine() {
   //
   // Contacts are loaded when the sheet opens, not held in state: the list must
   // reflect who is reachable now, and this screen may sit open for a long time.
-  const [addSheet, setAddSheet] = useState<{ title: string; message?: string; actions: SheetAction[] } | null>(null);
+  const [addSheet, setAddSheetState] = useState<{ title: string; message?: string; actions: SheetAction[] } | null>(null);
+  // The contacts load and the invite both resolve after a network round trip,
+  // by which time the call may have ended and this screen left. Drop the
+  // result then rather than set state on an unmounted screen.
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const setAddSheet = useCallback((v: typeof addSheet) => { if (mounted.current) setAddSheetState(v); }, []);
   const addPerson = useCallback(async () => {
     try {
       const { listChats } = await import('../lib/chatService');
@@ -300,7 +306,7 @@ function VoiceCallEngine() {
     } catch {
       setAddSheet({ title: 'Add to call', message: 'Could not load contacts just now.', actions: [] });
     }
-  }, [peerUid]);
+  }, [peerUid, setAddSheet]);
 
 
   return (
@@ -316,7 +322,7 @@ function VoiceCallEngine() {
         accessibilityRole="button"
         accessibilityLabel="Add people to this call"
       >
-        <Ionicons name="person-add" size={20} color="#fff" />
+        <Ionicons name="person-add" size={20} color={CALL.text} />
       </TouchableOpacity>
       <View style={S.body}>
         {/* Decorative: the name below says who it is. */}
@@ -747,7 +753,7 @@ function makeStyles() { return StyleSheet.create({
   body:       { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24, gap: 16 },
   avatarWrap: { marginBottom: 16 },
   avatar:     { width: 140, height: 140, borderRadius: 70, backgroundColor: CALL.active, alignItems: 'center', justifyContent: 'center', shadowColor: CALL.active, shadowOpacity: 0.6, shadowRadius: 30 },
-  avatarTxt:  { color: '#fff', fontSize: 56, fontWeight: '800' },
+  avatarTxt:  { color: CALL.text, fontSize: 56, fontWeight: '800' },
   name:       { color: CALL.text, fontSize: 26, fontWeight: '700', textAlign: 'center' },
   status:     { color: CALL.textDim, fontSize: 16 },
   errorTxt:   { color: CALL.danger, fontSize: 13, marginTop: 8 },
