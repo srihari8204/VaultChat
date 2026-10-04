@@ -71,7 +71,7 @@ import GifPicker from '../components/GifPicker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { getWallpaper, type WallpaperConfig } from './chat-wallpaper';
 import { getBubbleColors } from './chat-themes';
-import { getLock, verifyBiometric, verifyPin, type LockedChat } from '../lib/chatLock';
+import { getLock, pinRetryAfterMs, verifyBiometric, verifyPin, type LockedChat } from '../lib/chatLock';
 import { permissionDenied } from '../lib/permissionDenied';
 import { preloadViewedOnce } from '../lib/viewOnceStore';
 import { preloadRevoked, wipeRevokedMedia } from '../lib/protectedMedia';
@@ -1509,7 +1509,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     }
     if (typingIdleTimer.current) clearTimeout(typingIdleTimer.current);
     typingIdleTimer.current = setTimeout(stopTypingIfActive, TYPING_IDLE_MS);
-  }, [chatId, meId, stopTypingIfActive]);
+  }, [chatId, meId, stopTypingIfActive, chat?.type]);
 
   // Insert a picked @mention: replace the trailing "@query" with "@Name ".
   const pickMention = useCallback((mem: ChatMember) => {
@@ -1662,6 +1662,8 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   const buildSheetActions = useCallback((msg: DisplayMessage, plain: string): SheetAction[] => {
     const isMine = msg.senderId === meId;
     const isPinned = pinnedId === String(msg.id);
+    // View-once and Invisible Ink are meant to be seen in place only.
+    const protectedMsg = !!(msg.meta?.viewOnce || msg.meta?.invisibleInk);
     const acts: SheetAction[] = [
       { key: 'reply',   label: 'Reply',   icon: 'arrow-undo', onPress: () => setReplyTo(msg) },
       { key: 'pin',     label: isPinned ? 'Unpin' : 'Pin', icon: 'pin', onPress: async () => {
@@ -1676,7 +1678,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         } },
       // View-once and Invisible Ink are meant to be seen in place only, so they
       // are never copied out or forwarded on.
-      ...(msg.meta?.viewOnce || msg.meta?.invisibleInk ? [] : [
+      ...(protectedMsg ? [] : [
         { key: 'forward', label: 'Forward', icon: 'arrow-redo', onPress: () => openForward(msg) },
         { key: 'copy',    label: 'Copy',    icon: 'copy-outline', onPress: () => copyAndAutoClear(plain) },
       ] as SheetAction[]),
@@ -1685,12 +1687,13 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           // server reclaims a bookmarked message's ciphertext like any other —
           // exempting it would make bookmarks a permanent server archive — so
           // this snapshot is what keeps the saved message readable afterwards.
-          try { await addBookmark(msg.id, null, plain || null); }
+          // View-once / Invisible Ink keep no readable copy outside the bubble.
+          try { await addBookmark(msg.id, null, protectedMsg ? null : (plain || null)); }
           catch (e: any) { Alert.alert('Could not save', e?.message ?? 'Try again'); }
         } },
       { key: 'remind',  label: 'Remind',  icon: 'alarm-outline', onPress: () => router.push({
           pathname: '/message-reminder' as any,
-          params: { chatId, messageId: String(msg.id), preview: (plain || msg.type).slice(0, 200) },
+          params: { chatId, messageId: String(msg.id), preview: protectedMsg ? 'Protected message' : (plain || msg.type).slice(0, 200) },
         }) },
     ];
     if (isMine && msg.id > 0 && !msg.deletedAt) {
@@ -2027,6 +2030,16 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         onPress: () => setSearchOpen(true),
       },
       {
+        // The only in-app entry to /chat-export. That screen re-checks this
+        // chat's own lock (PIN/biometric) before writing anything.
+        label: 'Export chat',
+        icon: 'share-outline',
+        onPress: () => router.push({
+          pathname: '/chat-export' as any,
+          params: { chatId, peerName: peer?.name || peer?.email || chat.name || '' },
+        }),
+      },
+      {
         label: isMuted ? 'Unmute notifications' : 'Mute notifications',
         icon: isMuted ? 'notifications-outline' : 'notifications-off-outline',
         onPress: async () => {
@@ -2204,7 +2217,9 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
                   // setHidden is an absolute SET, so Clear again is a safe retry.
                   await setHidden(chatId, true);
                   setMessages([]);
-                  router.back();
+                  // A split-view pane has no screen of its own: back would pop
+                  // the whole split screen (same reason as the hidden Back).
+                  if (!embedded) router.back();
                 } catch (e: any) { Alert.alert('Could not clear', e?.message ?? 'Try again'); }
               } },
           ],
@@ -2223,7 +2238,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
                 try {
                   await blockUser(peer.userId);
                   Alert.alert('Blocked', `${peer.name || peer.email || 'User'} can no longer message you.`);
-                  router.back();
+                  if (!embedded) router.back();
                 } catch (e: any) { Alert.alert('Block failed', e?.message ?? 'Try again'); }
               } },
           ],
@@ -2232,7 +2247,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     }
 
     setOverflowMenu({ title: chat.name || (peer?.name ?? 'Chat'), actions });
-  }, [chat, meId, chatId, router, compactHeader, activeProfile, setActiveProfile]);
+  }, [chat, meId, chatId, router, compactHeader, embedded, activeProfile, setActiveProfile]);
 
   // ── React / Reply / Forward handlers ──────────────────────
   const toggleReaction = useCallback(async (msg: DisplayMessage, emoji: string) => {
@@ -3285,7 +3300,14 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   }, [chatId]));
 
   const submitLockPin = useCallback(() => {
-    if (!lockInfo || !verifyPin(lockInfo, lockPin)) { setLockErr('Incorrect PIN'); return; }
+    if (!lockInfo) return;
+    if (!verifyPin(lockInfo, lockPin)) {
+      // verifyPin also returns false, unchecked, while a wrong-PIN backoff runs.
+      const wait = pinRetryAfterMs(lockInfo);
+      setLockPin('');
+      setLockErr(wait > 0 ? `Too many attempts. Try again in ${Math.ceil(wait / 1000)} s.` : 'Incorrect PIN');
+      return;
+    }
     // The PIN is the SECOND factor on a 'both' chat, never the only one — a
     // correct PIN on its own used to open it (2026-09-17).
     if (lockInfo.lockMethod === 'both' && !lockBio) {
@@ -3724,7 +3746,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       )}
 
       {/* Memory Bubble — anniversary of a past message in this chat */}
-      {memoryBubble && (
+      {memoryBubble && lockState === 'open' && (
         <TouchableOpacity
           style={S.memoryBubble}
           onPress={() => setDismissedMemoryIds(prev => {
@@ -3773,7 +3795,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       )}
 
       {/* Pinned-message bar (W15) — tap to jump, × to unpin. */}
-      {pinnedId && (() => {
+      {pinnedId && lockState === 'open' && (() => {
         const pm = messages.find(m => String(m.id) === pinnedId);
         const label = !pm ? 'Message'
           : pm.type === 'image' ? '📷 Photo' : pm.type === 'video' ? '🎥 Video'
@@ -3781,6 +3803,9 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           : pm.type === 'vaultbeam' ? '📦 File'
           : pm.type === 'location' ? '📍 Location' : pm.type === 'poll' ? '📊 Poll'
           : pm.type === 'game_invite' ? '🎮 Game invite'
+          // Invisible Ink stays hidden here as it does in the bubble
+          // (MessageBubble obscureForInk): no text, not even in the a11y label.
+          : pm.meta?.invisibleInk ? 'Invisible Ink message'
           : pm.type === 'text' && pm.content && !looksEncrypted(pm.content) ? pm.content
           : 'Message';
         return (
@@ -3817,10 +3842,15 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         );
       })()}
 
-      {/* Messages (inverted — newest at top of the array, visually at bottom) */}
+      {/* Messages (inverted — newest at top of the array, visually at bottom).
+          Hidden from screen readers until the lock veil is lifted. The rows stay
+          mounted on purpose: a pending jump (search result, bookmark) consumed
+          while the chat is still veiled needs them to scroll to. */}
       <FlatList
         ref={listRef}
         data={renderMessages}
+        importantForAccessibility={lockState === 'open' ? 'auto' : 'no-hide-descendants'}
+        accessibilityElementsHidden={lockState !== 'open'}
         keyExtractor={(m) => m._tempId ?? String(m.id)}
         inverted
         contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 8 }}
@@ -4578,7 +4608,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           the veil is up. The `&& lockInfo` that used to be here is exactly what
           rendered the chat in full when getLock threw. */}
       {lockState !== 'open' && (
-        <View style={S.lockGate}>
+        <View style={S.lockGate} accessibilityViewIsModal>
           {lockState === 'locked' && (<>
           <Ionicons name="lock-closed" size={56} color={colors.primary} />
           <Text style={S.lockGateTitle}>Chat locked</Text>

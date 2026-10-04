@@ -34,15 +34,27 @@ import {
 import { readCache, writeCache } from '../lib/localCache';
 import { bookmarkBody, hasBodies, withoutBodies } from '../lib/bookmarkBodies';
 import { setPendingJump } from '../lib/chatJump';
+import { isChatLocked } from '../lib/chatLock';
 import { AuroraBackground } from '../components/ui';
 import { AppText as Text } from '../components/ui/Text';
 
+/** Shown instead of the body of a bookmark from a locked chat. */
+const LOCKED_TEXT = '🔒 Locked chat';
+
 // Fill each row's body from the sealed local snapshot (or a non-ciphertext
 // server body). Rows whose body is unreadable show their type label instead.
+// A locked chat's body is not shown here without unlocking it; an unreadable
+// lock table counts as locked (lib/chatLock fails closed).
 async function withBodies(rows: BookmarkRow[]): Promise<BookmarkRow[]> {
+  const chatIds = [...new Set(rows.flatMap(b => (b.message ? [b.message.chatId] : [])))];
+  const lockedIds = new Set<string>();
+  await Promise.all(chatIds.map(async id => {
+    if (await isChatLocked(id).catch(() => true)) lockedIds.add(id);
+  }));
   return Promise.all(rows.map(async (b) => {
     const id = Number(b.message?.id ?? 0);
     if (!b.message || !id) return b;
+    if (lockedIds.has(b.message.chatId)) return { ...b, message: { ...b.message, content: LOCKED_TEXT } };
     const local = await getBookmarkPlaintext(id);
     return { ...b, message: { ...b.message, content: bookmarkBody(b.message.content, local, looksEncrypted) } };
   }));

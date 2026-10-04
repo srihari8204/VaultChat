@@ -152,13 +152,13 @@ async function main() {
     // matched `lockInfo.lockMethod === 'both' && !lockBio` as a STRING, which
     // says nothing about what that branch then does.
     const submit = compile(
-      ['lockInfo', 'lockPin', 'lockBio', 'verifyPin', 'setLockErr', 'setLockState', 'setLockPin'],
+      ['lockInfo', 'lockPin', 'lockBio', 'verifyPin', 'setLockErr', 'setLockState', 'setLockPin', 'pinRetryAfterMs'],
       bodyAt(c, 'const submitLockPin = useCallback('),
     );
     const onPin = (method: string, pin: string, banked: boolean) => {
       let state = 'locked';
       submit({ lockMethod: method, pinHash: 'h' }, pin, banked,
-        (_l: any, p: string) => p === '1234', () => {}, (s: string) => { state = s; }, () => {});
+        (_l: any, p: string) => p === '1234', () => {}, (s: string) => { state = s; }, () => {}, () => 0);
       return state === 'open';
     };
     check('a correct PIN alone does NOT open a "both" chat', onPin('both', '1234', false) === false);

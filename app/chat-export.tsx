@@ -20,7 +20,7 @@ import { getChat, getMessages, hydrateMessages, looksEncrypted, type Message } f
 import { unionWithLocalHistoryAsc } from '../lib/messageHistory';
 import { exportBody } from '../lib/chatExportFormat';
 import { getCurrentUserAsync } from './(constants)/authService';
-import { getLock, verifyBiometric, verifyPin, type LockedChat } from '../lib/chatLock';
+import { getLock, pinRetryAfterMs, verifyBiometric, verifyPin, type LockedChat } from '../lib/chatLock';
 import { AuroraBackground } from '../components/ui';
 import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 
@@ -117,20 +117,25 @@ export default function ChatExportScreen() {
   // plus a confirm.
   const [pinPrompt, setPinPrompt] = useState<LockedChat | null>(null);
   const [pin, setPin] = useState('');
-  const [pinErr, setPinErr] = useState(false);
+  // The message, not a flag: during the wrong-PIN backoff verifyPin refuses
+  // even a correct PIN, and "Incorrect PIN" would be untrue then.
+  const [pinErr, setPinErr] = useState<string | null>(null);
   const pinResolve = useRef<((ok: boolean) => void) | null>(null);
 
   const askPin = (lock: LockedChat) => new Promise<boolean>(resolve => {
     pinResolve.current = resolve;
-    setPin(''); setPinErr(false); setPinPrompt(lock);
+    setPin(''); setPinErr(null); setPinPrompt(lock);
   });
   const closePin = (ok: boolean) => {
-    setPinPrompt(null); setPin(''); setPinErr(false);
+    setPinPrompt(null); setPin(''); setPinErr(null);
     pinResolve.current?.(ok); pinResolve.current = null;
   };
   const submitPin = () => {
-    if (pinPrompt && verifyPin(pinPrompt, pin)) closePin(true);
-    else setPinErr(true);
+    if (!pinPrompt) return;
+    if (verifyPin(pinPrompt, pin)) { closePin(true); return; }
+    const wait = pinRetryAfterMs(pinPrompt);
+    setPin('');
+    setPinErr(wait > 0 ? `Too many attempts. Try again in ${Math.ceil(wait / 1000)} s.` : 'Incorrect PIN.');
   };
 
   const confirm = (title: string, message: string) => new Promise<boolean>(resolve => {
@@ -320,9 +325,9 @@ export default function ChatExportScreen() {
             <Text style={s.pinTitle}>Chat locked</Text>
             <Text style={s.pinDesc}>Enter this chat&apos;s PIN to export it.</Text>
             <TextInput
-              style={[s.pinInput, pinErr && { borderColor: colors.danger }]}
+              style={[s.pinInput, !!pinErr && { borderColor: colors.danger }]}
               value={pin}
-              onChangeText={(t) => { setPin(t); setPinErr(false); }}
+              onChangeText={(t) => { setPin(t); setPinErr(null); }}
               keyboardType="number-pad"
               secureTextEntry
               maxLength={12}
@@ -330,7 +335,7 @@ export default function ChatExportScreen() {
               accessibilityLabel="Chat lock PIN"
               onSubmitEditing={submitPin}
             />
-            {pinErr && <Text style={{ color: colors.danger, fontSize: 11, marginBottom: 8 }}>Incorrect PIN.</Text>}
+            {!!pinErr && <Text style={{ color: colors.danger, fontSize: 11, marginBottom: 8 }} accessibilityLiveRegion="polite">{pinErr}</Text>}
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <TouchableOpacity style={s.pinCancel} onPress={() => closePin(false)} accessibilityRole="button">
                 <Text style={{ color: colors.textDim, fontWeight: '700' }}>Cancel</Text>

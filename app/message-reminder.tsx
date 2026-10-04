@@ -27,6 +27,7 @@ import { permissionDenied } from '../lib/permissionDenied';
 import { getNotifPreview, notifContent } from '../lib/privacyPrefs';
 import { getCachedMessagesByIds } from '../lib/localDb';
 import { looksEncrypted } from '../lib/chatService';
+import { isChatLocked } from '../lib/chatLock';
 
 type Router = ReturnType<typeof useRouter>;
 
@@ -93,6 +94,9 @@ async function cachedText(r: ReminderRow): Promise<string | null> {
     return t && !looksEncrypted(t) ? t : null;
   } catch { return null; }
 }
+
+/** Shown instead of the message text for a reminder in a locked chat. */
+const LOCKED_TEXT = '🔒 Locked chat';
 
 async function saveReminders(list: ReminderRow[]): Promise<void> {
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(list));
@@ -245,7 +249,15 @@ function RemindersList({ router }: { router: Router }) {
   const load = useCallback(async () => {
     const list = await loadReminders();
     setRows(list.sort((a, b) => new Date(a.when).getTime() - new Date(b.when).getTime()));
-    const pairs = await Promise.all(list.map(async r => [r.id, await cachedText(r)] as const));
+    // A locked chat's text is not shown here without unlocking it. An
+    // unreadable lock table counts as locked (lib/chatLock fails closed).
+    const chatIds = [...new Set(list.map(r => r.chatId))];
+    const lockedIds = new Set<string>();
+    await Promise.all(chatIds.map(async id => {
+      if (await isChatLocked(id).catch(() => true)) lockedIds.add(id);
+    }));
+    const pairs = await Promise.all(list.map(async r =>
+      [r.id, lockedIds.has(r.chatId) ? LOCKED_TEXT : await cachedText(r)] as const));
     setTexts(Object.fromEntries(pairs));
   }, []);
 

@@ -56,16 +56,22 @@ export interface CallLogEntry {
 export const callLogKey = (e: Pick<CallLogEntry, 'peerUid' | 'chatId' | 'group'>): string =>
   e.group ? `g:${e.chatId}` : e.peerUid;
 
+// Throws when the log cannot be read. A read-modify-write must not treat that
+// as an empty log, or it would write [] over the whole history.
+async function readCallLog(): Promise<CallLogEntry[]> {
+  const raw = await AsyncStorage.getItem(KEY);
+  return raw ? (JSON.parse(raw) as CallLogEntry[]) : [];
+}
+
 export async function getCallLog(): Promise<CallLogEntry[]> {
-  try {
-    const raw = await AsyncStorage.getItem(KEY);
-    return raw ? (JSON.parse(raw) as CallLogEntry[]) : [];
-  } catch { return []; }
+  try { return await readCallLog(); } catch { return []; }
 }
 
 export async function addCallLog(e: Omit<CallLogEntry, 'id'>): Promise<void> {
   try {
-    const list = await getCallLog();
+    // readCallLog, not getCallLog: an unreadable log must not be overwritten
+    // with just this one entry.
+    const list = await readCallLog();
     const key = callLogKey(e);
     const entry: CallLogEntry = { ...e, id: `${e.at}-${Math.round(e.durationSec)}-${key}` };
     // De-dupe a rapid double-log of the same call (same peer/group within 3s).
@@ -76,16 +82,17 @@ export async function addCallLog(e: Omit<CallLogEntry, 'id'>): Promise<void> {
   } catch {}
 }
 
+// Remove/clear/hide REJECT on a storage failure, so the calls tab keeps the
+// row and says so instead of showing it gone while it is still stored.
 export async function removeCallLog(ids: string[]): Promise<void> {
-  try {
-    const set = new Set(ids);
-    const list = await getCallLog();
-    await AsyncStorage.setItem(KEY, JSON.stringify(list.filter(e => !set.has(e.id))));
-  } catch {}
+  if (!ids.length) return;
+  const set = new Set(ids);
+  const list = await readCallLog();
+  await AsyncStorage.setItem(KEY, JSON.stringify(list.filter(e => !set.has(e.id))));
 }
 
 export async function clearCallLog(): Promise<void> {
-  try { await AsyncStorage.removeItem(KEY); } catch {}
+  await AsyncStorage.removeItem(KEY);
 }
 
 // ── dismissed server calls ────────────────────────────────────────────
@@ -102,20 +109,22 @@ export async function clearCallLog(): Promise<void> {
 const HIDDEN_KEY = 'vc_call_log_hidden_v1';
 const HIDDEN_MAX = 1000;
 
+async function readHiddenServerCalls(): Promise<Set<string>> {
+  const raw = await AsyncStorage.getItem(HIDDEN_KEY);
+  return new Set<string>(raw ? JSON.parse(raw) : []);
+}
+
 export async function getHiddenServerCalls(): Promise<Set<string>> {
-  try {
-    const raw = await AsyncStorage.getItem(HIDDEN_KEY);
-    return new Set<string>(raw ? JSON.parse(raw) : []);
-  } catch { return new Set(); }
+  try { return await readHiddenServerCalls(); } catch { return new Set(); }
 }
 
 export async function hideServerCalls(callIds: string[]): Promise<void> {
   const ids = callIds.filter(Boolean);
   if (!ids.length) return;
-  try {
-    const set = await getHiddenServerCalls();
-    for (const id of ids) set.add(id);
-    // Bounded like the log itself: the newest dismissals win if it ever grows.
-    await AsyncStorage.setItem(HIDDEN_KEY, JSON.stringify([...set].slice(-HIDDEN_MAX)));
-  } catch {}
+  // The throwing reader: an unreadable set must not be rewritten as just `ids`,
+  // which would un-hide every earlier dismissal.
+  const set = await readHiddenServerCalls();
+  for (const id of ids) set.add(id);
+  // Bounded like the log itself: the newest dismissals win if it ever grows.
+  await AsyncStorage.setItem(HIDDEN_KEY, JSON.stringify([...set].slice(-HIDDEN_MAX)));
 }

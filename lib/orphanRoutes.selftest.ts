@@ -86,6 +86,8 @@ const blockAt = (src: string, from: number) => {
 const settings = code('app/settings.tsx');
 ok('App permissions is reachable from Settings', /['"`]\/permissions\?from=settings/.test(settings));
 ok('Network test is reachable from Settings', refsTo('/network-test').includes('app/settings.tsx'));
+// Its only entry used to live in a screen that was itself unreachable.
+ok('Export chat is reachable from the chat menu', refsTo('/chat-export').includes('app/chat.tsx'));
 ok('Device-to-device status is reachable from Settings', refsTo('/d2de-status').includes('app/settings.tsx'));
 
 // permissions.tsx must come BACK to Settings, not fall into the old

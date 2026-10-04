@@ -3,8 +3,8 @@
 // Reads the on-device call history (lib/callLog) recorded by the voice/video
 // call screens. Consecutive calls with the same person are grouped with a count
 // (like WhatsApp); each row shows the contact photo, direction arrow (missed in
-// red), audio/video kind, time + duration. Tap = redial; long-press = menu;
-// the info button opens a call detail. A FAB starts a new call.
+// red), audio/video kind, time + duration. Tap = call info; the call button
+// redials; long-press = menu. A FAB starts a new call.
 
 import { useAuthHeader } from '../../hooks/useAuthHeader';
 import { HEADER_TOP, TAB_BAR_SPACE } from '../../constants/layout';
@@ -144,9 +144,16 @@ export default function CallsScreen() {
   // the device log; server-only ones have nothing to delete, so their callId is
   // remembered as dismissed — otherwise the row would disappear and come
   // straight back on the next sync.
+  // The row is dropped only once both writes succeeded; a failed write keeps
+  // it on screen and says so (both writes are safe to retry).
   const removeGroup = useCallback(async (g: CallGroup) => {
-    await removeCallLog(g.entries.filter(e => !e.remote).map(e => e.id));
-    await hideServerCalls(g.entries.filter(e => e.remote && e.callId).map(e => e.callId!));
+    try {
+      await removeCallLog(g.entries.filter(e => !e.remote).map(e => e.id));
+      await hideServerCalls(g.entries.filter(e => e.remote && e.callId).map(e => e.callId!));
+    } catch {
+      Alert.alert('Could not remove', 'The call is still in your call history. Try again.');
+      return;
+    }
     setLog(prev => prev.filter(e => !g.entries.some(x => x.id === e.id)));
   }, []);
 
@@ -177,10 +184,15 @@ export default function CallsScreen() {
       { text: 'Clear', style: 'destructive', onPress: async () => {
         // Synced rows have to be dismissed too, or "clear" would leave the list
         // repopulating itself from the server a moment later.
-        await Promise.all([
-          clearCallLog(),
-          hideServerCalls(log.filter(e => e.remote && e.callId).map(e => e.callId!)),
-        ]);
+        try {
+          await Promise.all([
+            clearCallLog(),
+            hideServerCalls(log.filter(e => e.remote && e.callId).map(e => e.callId!)),
+          ]);
+        } catch {
+          Alert.alert('Could not clear', 'Some calls may still be in your call history. Try again.');
+          return;
+        }
         setLog([]);
       } },
     ]);

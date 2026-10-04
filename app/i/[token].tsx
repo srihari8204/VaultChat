@@ -11,7 +11,7 @@
 // The token is a forwardable credential (lib/chatService.ts redeemInvitation),
 // so opening the link only ASKS; joining happens on an explicit tap.
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -29,16 +29,23 @@ export default function InviteTokenScreen() {
   const router = useRouter();
   const { token } = useLocalSearchParams<{ token: string }>();
   const [phase, setPhase] = useState<Phase>({ kind: 'confirm' });
+  // Set by Cancel (and on unmount). The request cannot be recalled once sent,
+  // but its result must not pull the user back into the chat they left for.
+  const cancelledRef = useRef(false);
+  useEffect(() => () => { cancelledRef.current = true; }, []);
 
   const redeem = useCallback(async () => {
     const t = String(token ?? '').trim();
     if (!t) { setPhase({ kind: 'error', message: 'This invitation link is missing its code.' }); return; }
+    cancelledRef.current = false;
     setPhase({ kind: 'redeeming' });
     try {
       const res = await redeemInvitation(t);
+      if (cancelledRef.current) return;
       // Replace, so Back does not bounce the user through the redeem screen.
       router.replace({ pathname: '/chat', params: { id: res.chatId } } as any);
     } catch (e: any) {
+      if (cancelledRef.current) return;
       setPhase({
         kind: 'error',
         // The server distinguishes expired / superseded / full; surface its
@@ -78,7 +85,12 @@ export default function InviteTokenScreen() {
         <>
           <ActivityIndicator color={colors.primary} size="large" />
           <Text style={[st.msg, { color: colors.textDim }]}>Joining…</Text>
-          <TouchableOpacity onPress={goChats} style={st.link} accessibilityRole="button">
+          <TouchableOpacity
+            onPress={() => { cancelledRef.current = true; goChats(); }}
+            style={st.link}
+            accessibilityRole="button"
+            accessibilityHint="Stops waiting and goes to chats. A join the server already accepted still completes."
+          >
             <Text style={{ color: colors.textDim, fontWeight: '600' }}>Cancel</Text>
           </TouchableOpacity>
         </>

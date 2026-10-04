@@ -17,6 +17,7 @@ import * as MediaLibrary from 'expo-media-library';
 import { getMedia } from '../lib/mediaStore';
 import { viewerRouteFor } from '../lib/docOpen';
 import { getAccessToken } from '../lib/api';
+import { isOwnServerUrl } from '../lib/serverOrigin';
 import { attachmentUrl, markAttachmentViewed, reportScreenshotCaptured } from '../lib/chatService';
 import { getCurrentUserAsync } from './(constants)/authService';
 import ProtectedMediaView from '../components/ProtectedMediaView';
@@ -189,7 +190,8 @@ function CodeViewer({ fileUri, fileName, needsAuth, onLoaded, onOpenHighlighted 
         let text: string;
         if (fileUri.startsWith('http')) {
           lp = FileSystem.cacheDirectory + VIEWER_TEMP_PREFIX + 'prev_' + Date.now();
-          const token = needsAuth ? await getAccessToken() : null;
+          // The URL comes from route params: the token goes to our server only.
+          const token = needsAuth && isOwnServerUrl(fileUri) ? await getAccessToken() : null;
           const res = await FileSystem.downloadAsync(fileUri, lp,
             token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
           if (res.status >= 400) throw new Error('GET ' + res.status);
@@ -304,7 +306,9 @@ function MediaViewerScreen() {
   // load failure, and it looks like a broken player rather than a missing
   // header. Images kept working, which is exactly what makes this read as "the
   // video player is broken" rather than "the request was unauthenticated".
-  const remoteNeedsAuth = !!needsAuth && /^https?:\/\//i.test(fileUri);
+  // fileUri comes from route params (deep links too), so the token is attached
+  // only for our own server, never for whatever host the link names.
+  const remoteNeedsAuth = !!needsAuth && isOwnServerUrl(fileUri);
   // Memoised: a new source object on every render would make expo-av reload.
   const source = useMemo(
     () => (remoteNeedsAuth && authHeaders ? { uri: fileUri, headers: authHeaders } : { uri: fileUri }),
@@ -431,7 +435,7 @@ function MediaViewerScreen() {
       let localPath = fileUri;
       if (/^https?:\/\//i.test(fileUri)) {
         localPath = FileSystem.cacheDirectory + 'vc_' + Date.now() + '.' + ext;
-        const token = await getAccessToken();
+        const token = isOwnServerUrl(fileUri) ? await getAccessToken() : null;
         const res = await FileSystem.downloadAsync(fileUri, localPath,
           token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
         if (res.status >= 400) throw new Error(`Download failed (${res.status})`);

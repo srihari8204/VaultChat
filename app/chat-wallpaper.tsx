@@ -21,6 +21,7 @@ import { type Palette } from '../constants/theme';
 import { AuroraBackground } from '../components/ui';
 import { permissionDenied } from '../lib/permissionDenied';
 import { resolveScoped, SCOPED_DEFAULT } from '../lib/scopedChoice';
+import { replacedWallpaperFile } from '../lib/wallpaperFile';
 
 
 // WhatsApp-style solid wallpapers — a bright row then a dark row.
@@ -89,23 +90,34 @@ export default function ChatWallpaperScreen() {
   }, [storageKey]);
 
   const save = async () => {
+    const dir = FileSystem.documentDirectory ? FileSystem.documentDirectory + 'wallpapers/' : '';
+    let copied: string | null = null;
     try {
       let toSave = selected;
       // The picker returns a cache URI the OS may evict; keep our own copy.
-      if (toSave?.type === 'image' && FileSystem.documentDirectory
+      if (toSave?.type === 'image' && dir && FileSystem.documentDirectory
           && !toSave.value.startsWith(FileSystem.documentDirectory)) {
-        const dir = FileSystem.documentDirectory + 'wallpapers/';
         await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
         const dest = `${dir}${chatId || 'default'}_${Date.now()}.jpg`;
         await FileSystem.copyAsync({ from: toSave.value, to: dest });
+        copied = dest;
         toSave = { ...toSave, value: dest };
       }
+      const prevRaw = await AsyncStorage.getItem(storageKey).catch(() => null);
       if (toSave) await AsyncStorage.setItem(storageKey, JSON.stringify(toSave));
       // Per-chat Default must beat a global wallpaper, so it is stored, not removed.
       else if (chatId) await AsyncStorage.setItem(storageKey, SCOPED_DEFAULT);
       else await AsyncStorage.removeItem(storageKey);
+      // Only once the new choice is stored: drop the photo copy it replaced,
+      // or every change leaves another full-size file in documents.
+      const stale = replacedWallpaperFile(prevRaw, toSave?.type === 'image' ? toSave.value : null, dir);
+      if (stale) FileSystem.deleteAsync(stale, { idempotent: true }).catch(() => {});
       router.back();
-    } catch { Alert.alert('Error', 'Failed to save wallpaper.'); }
+    } catch {
+      // Not stored: the fresh copy is referenced by nothing.
+      if (copied) FileSystem.deleteAsync(copied, { idempotent: true }).catch(() => {});
+      Alert.alert('Error', 'Failed to save wallpaper.');
+    }
   };
 
   const reset = () => setSelected(null);

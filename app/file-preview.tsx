@@ -11,7 +11,7 @@ import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import * as FileSystem from 'expo-file-system/legacy';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
 import { getAccessToken } from '../lib/api';
-import { SERVER_URL } from '../constants/server';
+import { isOwnServerUrl } from '../lib/serverOrigin';
 import { VIEWER_TEMP_PREFIX } from '../lib/mediaCacheGC';
 
 /** Whole-file read + tokenised lines: past this, the windowed file-viewer reads it. */
@@ -167,7 +167,7 @@ export default function FilePreviewScreen() {
           // Our attachment endpoints need the bearer token; never send it to
           // any other host.
           tmp = FileSystem.cacheDirectory + VIEWER_TEMP_PREFIX + 'preview_' + Date.now() + '.' + ext;
-          const token = fileUri.startsWith(SERVER_URL) ? await getAccessToken() : null;
+          const token = isOwnServerUrl(fileUri) ? await getAccessToken() : null;
           const res = await FileSystem.downloadAsync(fileUri, tmp,
             token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
           if (res.status >= 400) throw new Error('GET ' + res.status);
