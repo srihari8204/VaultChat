@@ -463,8 +463,8 @@ export default function CameraScreen() {
       {isNote && <View pointerEvents="none" style={s.noteFrame} />}
 
       {/* Top rail — over the preview, no bar background. */}
-      {/* While the review sheet is open the rails behind it are hidden from
-          screen readers (Android here; iOS via accessibilityViewIsModal below). */}
+      {/* While the review sheet is open the rails (and the notice) behind it are
+          hidden from screen readers (Android here; iOS via accessibilityViewIsModal below). */}
       <View style={[s.rail, { top: Math.max(insets.top, SPACING.md) }]}
         importantForAccessibility={reviewing ? 'no-hide-descendants' : 'auto'}>
         <Pressable onPress={() => leave()} style={s.railBtn} hitSlop={8}
@@ -487,7 +487,8 @@ export default function CameraScreen() {
       </View>
 
       {notice && (
-        <View style={[s.notice, { bottom: FOOTER_H + insets.bottom + SPACING.md }]}>
+        <View style={[s.notice, { bottom: FOOTER_H + insets.bottom + SPACING.md }]}
+          importantForAccessibility={reviewing ? 'no-hide-descendants' : 'auto'}>
           <Ionicons name="alert-circle-outline" size={16} color={AuroraDark.text} />
           <Text variant="callout" color={AuroraDark.text} style={s.flex}>{notice}</Text>
         </View>

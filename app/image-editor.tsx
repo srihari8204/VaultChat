@@ -15,7 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
   View, TouchableOpacity, StyleSheet, Image, ScrollView, PixelRatio,
-  PanResponder, type PanResponderInstance, TextInput, Alert, ActivityIndicator,
+  PanResponder, type PanResponderInstance, TextInput, Alert, ActivityIndicator, AccessibilityInfo,
   useWindowDimensions, type ImageStyle, type StyleProp } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { FilterImage } from 'react-native-svg/filter-image';
@@ -32,9 +32,9 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy';
 import ViewShot, { captureRef, releaseCapture } from 'react-native-view-shot';
 import { Buffer } from 'buffer';
-import { isUniformPng } from '../lib/media/blankImage';
+import { exportLooksBlank, isUniformPng } from '../lib/media/blankImage';
 import {
-  exportSize, mapForCrop, mapForRotate90, scaleCrop, toExport, type OverlayMap,
+  exportSize, mapForCrop, mapForRotate90, nudgeWithin, scaleCrop, toExport, type OverlayMap,
 } from '../lib/media/editExport';
 
 
@@ -100,16 +100,16 @@ const TEXT_MOVES = [
 /** How long Done waits for the offscreen copy of the photo to load. */
 const EXPORT_LOAD_MS = 4000;
 
-/** Shrink a capture to 8×8 and check whether every pixel is one colour
- *  (lib/media/blankImage). A probe that fails says "not blank". */
-async function captureLooksBlank(uri: string): Promise<boolean> {
+/** A capture shrunk to an 8×8 PNG, for lib/media/blankImage; null when the
+ *  probe fails (the capture then counts as "not blank"). */
+async function probePng(uri: string): Promise<Uint8Array | null> {
   try {
     const probe = await ImageManipulator.manipulateAsync(uri, [{ resize: { width: 8, height: 8 } }],
       { format: ImageManipulator.SaveFormat.PNG, base64: true });
     FileSystem.deleteAsync(probe.uri, { idempotent: true }).catch(() => {});
-    return !!probe.base64 && isUniformPng(Uint8Array.from(Buffer.from(probe.base64, 'base64')));
+    return probe.base64 ? Uint8Array.from(Buffer.from(probe.base64, 'base64')) : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -382,12 +382,25 @@ export default function ImageEditorScreen() {
     return pan;
   };
 
-  // Screen-reader alternative to dragging a text overlay: 5% of the canvas a step.
+  // Screen-reader alternative to dragging a text overlay: 5% of the canvas a
+  // step, kept inside the photo (the area that is sent), and the new place
+  // announced — a move that hits the edge says so.
   const nudgeText = (id: string, action: string) => {
     const step = Math.round(Math.min(canvasW, canvasH) * 0.05);
     const [dx, dy] = action === 'moveLeft' ? [-step, 0] : action === 'moveRight' ? [step, 0]
       : action === 'moveUp' ? [0, -step] : action === 'moveDown' ? [0, step] : [0, 0];
-    setTextOverlays(prev => prev.map(t => (t.id === id ? { ...t, x: t.x + dx, y: t.y + dy } : t)));
+    const t = overlaysRef.current.find(o => o.id === id);
+    if (!t) return;
+    const box = frame ?? { x: 0, y: 0, w: canvasW, h: canvasH };
+    const size = textSizes.current.get(id) ?? { w: 0, h: 0 };
+    const at = nudgeWithin(t, size, dx, dy, box);
+    // The ref is updated now, so a second action before the re-render starts from this one.
+    overlaysRef.current = overlaysRef.current.map(o => (o.id === id ? { ...o, ...at } : o));
+    setTextOverlays(overlaysRef.current);
+    const pct = (v: number, lo: number, span: number) => Math.round((100 * (v - lo)) / Math.max(1, span));
+    AccessibilityInfo.announceForAccessibility(at.x === t.x && at.y === t.y
+      ? 'At the edge of the photo'
+      : `${pct(at.x, box.x, box.w - size.w)}% across, ${pct(at.y, box.y, box.h - size.h)}% down`);
   };
 
   const dirty = imageUri !== (uri || '') || lines.length > 0 || textOverlays.length > 0 || !!matrix;
@@ -440,8 +453,17 @@ export default function ImageEditorScreen() {
       const out = await captureRef(exportRef, { format: 'jpg', quality: 0.92 });
       temps.current.add(out);
       // A platform that did not draw the offscreen view can hand back a
-      // uniformly black bitmap instead of throwing: never send that.
-      if (await captureLooksBlank(out)) { dropTemp(out); throw new Error('export capture came back blank'); }
+      // uniformly black bitmap instead of throwing: never send that. A
+      // uniform capture may also be a photo that really is one plain colour,
+      // so it is compared with the on-screen canvas (which is drawn) and
+      // only judged blank when the two differ.
+      const probe = await probePng(out);
+      if (probe && isUniformPng(probe)) {
+        const shown = await exportScreen().catch(() => null);
+        const blank = exportLooksBlank(probe, shown ? await probePng(shown) : null);
+        if (shown) dropTemp(shown);
+        if (blank) { dropTemp(out); throw new Error('export capture came back blank'); }
+      }
       return out;
     } finally {
       clearTimeout(timer);

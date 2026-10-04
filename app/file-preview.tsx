@@ -176,15 +176,27 @@ export default function FilePreviewScreen() {
           const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
           // Ask for the size first, so a file past the preview limit is not
           // downloaded in full only to be refused. A server that does not
-          // answer HEAD (or sends no length) falls through to the size check
-          // after the download, as before.
+          // answer HEAD (or sends no length) is still capped: the download is
+          // cancelled as soon as it passes the limit (or declares a larger
+          // body), and the size check after it stays as the last guard.
           const head = await fetch(fileUri, { method: 'HEAD', headers }).catch(() => null);
           const declared = head?.ok ? Number(head.headers.get('content-length')) : NaN;
           if (declared > MAX_PREVIEW_BYTES) {
             if (!dead) setFailure('too-large');
             return;
           }
-          const res = await FileSystem.downloadAsync(fileUri, tmp, headers ? { headers } : undefined);
+          let over = false;
+          const dl = FileSystem.createDownloadResumable(fileUri, tmp, headers ? { headers } : {}, p => {
+            if (over || (p.totalBytesWritten <= MAX_PREVIEW_BYTES && p.totalBytesExpectedToWrite <= MAX_PREVIEW_BYTES)) return;
+            over = true;
+            dl.cancelAsync().catch(() => {});
+          });
+          const res = await dl.downloadAsync().catch((e: unknown) => { if (over) return undefined; throw e; });
+          if (over) {
+            if (!dead) setFailure('too-large');
+            return;
+          }
+          if (!res) throw new Error('download cancelled');
           if (res.status >= 400) throw new Error('GET ' + res.status);
           local = tmp;
         }

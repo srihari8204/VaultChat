@@ -1,7 +1,7 @@
 // lib/media/blankImage.selftest.ts — run: npx tsx lib/media/blankImage.selftest.ts
 import assert from 'node:assert/strict';
 import { zlibSync } from 'fflate';
-import { decodeSmallPng, isUniformPng } from './blankImage';
+import { decodeSmallPng, exportLooksBlank, isUniformPng } from './blankImage';
 
 function crc32(b: Uint8Array): number {
   let c = ~0;
@@ -63,4 +63,26 @@ assert.equal(isUniformPng(png(8, 8, 2, (x, y) => (x === 5 && y === 6 ? [40, 0, 0
 assert.equal(isUniformPng(png(8, 8, 2, (x) => [x % 2, 0, 1])), true);
 // Unreadable input is "not blank" (never throws away a real export).
 assert.equal(isUniformPng(new Uint8Array([1, 2, 3])), false);
+
+// exportLooksBlank: a uniform export is blank only when the drawn screen shows something else.
+const black = png(8, 8, 6, () => [0, 0, 0, 255]);
+const clear = png(8, 8, 6, () => [0, 0, 0, 0]);
+const screenPhoto = png(8, 8, 6, (x, y) => [...photo(x, y), 255]);
+assert.equal(exportLooksBlank(black, screenPhoto), true, 'black export of a real photo is blank');
+assert.equal(exportLooksBlank(clear, screenPhoto), true, 'transparent export of a real photo is blank');
+// The regression: a plain-colour (near-uniform) photo exported correctly is kept.
+const sky = png(8, 8, 6, () => [120, 170, 230, 255]);
+const skyOnScreen = png(8, 8, 6, (x, y) => [121 + (x % 2), 169, 229 + (y % 3), 255]);
+assert.equal(exportLooksBlank(sky, skyOnScreen), false, 'plain sky photo is not blank');
+assert.equal(exportLooksBlank(png(8, 8, 6, () => [8, 8, 8, 255]), png(8, 8, 6, () => [10, 9, 8, 255])), false, 'plain dark photo is not blank');
+// A black export where the screen is white is blank.
+assert.equal(exportLooksBlank(black, png(8, 8, 6, () => [255, 255, 255, 255])), true);
+// A non-uniform export is never blank; an unreadable export is never blank.
+assert.equal(exportLooksBlank(screenPhoto, black), false);
+assert.equal(exportLooksBlank(new Uint8Array([1, 2, 3]), screenPhoto), false);
+// No readable screen probe: a uniform export counts as blank (screen capture is the fallback).
+assert.equal(exportLooksBlank(sky, null), true);
+assert.equal(exportLooksBlank(sky, new Uint8Array([9])), true);
+// RGB export vs RGBA screen compare by colour.
+assert.equal(exportLooksBlank(png(8, 8, 2, () => [120, 170, 230]), skyOnScreen), false);
 console.log('blankImage selftest: all passed');

@@ -93,4 +93,18 @@ export function scaleCrop(rect: Rect, factor: number, frame: Rect, ratio: number
   return { x, y, w, h };
 }
 
+/**
+ * A text overlay moved by (dx, dy) — the screen-reader alternative to
+ * dragging it — kept inside `box` (the photo's frame): its top-left stays in
+ * the box and, when it fits, so does its far edge. Text larger than the box
+ * is pinned to the box's top/left edge.
+ */
+export function nudgeWithin(p: Pt, size: { w: number; h: number }, dx: number, dy: number, box: Rect): Pt {
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(Math.max(lo, hi), v));
+  return {
+    x: clamp(p.x + dx, box.x, box.x + box.w - size.w),
+    y: clamp(p.y + dy, box.y, box.y + box.h - size.h),
+  };
+}
+
 export default {};

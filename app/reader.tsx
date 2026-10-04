@@ -28,6 +28,7 @@ import {
   getReaderSettingsCached, resetReaderSettings, setReaderSettings,
   type ReaderSettings,
 } from '../lib/readerSettings';
+import { AuroraDark } from '../constants/theme';
 
 const FONT_FAMILY: Record<ReaderSettings['font'], string | undefined> = {
   serif: Platform.OS === 'ios' ? 'Georgia' : 'serif',
@@ -351,7 +352,9 @@ const st = StyleSheet.create({
   },
   headTitle: { flex: 1, fontSize: 13, fontWeight: '600' },
   pager: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 26, marginTop: 36 },
-  scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)' },
+  // The reader has its own palettes (paper/sepia/night), not the app theme, so
+  // the scrim is the fixed dark token over all of them (0.6 ≥ the old 0.55).
+  scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: AuroraDark.scrim },
   sheet: {
     position: 'absolute', left: 0, right: 0, bottom: 0, maxHeight: '80%',
     borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1,

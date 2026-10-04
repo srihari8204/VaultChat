@@ -429,7 +429,7 @@ export default function MediaGalleryScreen() {
       accessibilityRole="link" accessibilityLabel={`${item.url}, ${fmtDate(item.createdAt)}`}>
       <View style={s.fileIcon}><Ionicons name="link-outline" size={20} color={colors.accent} /></View>
       <View style={s.flex}>
-        <Text style={[s.fileName, { color: colors.accent }]} numberOfLines={2}>{item.url}</Text>
+        <Text style={[s.fileName, s.linkUrl]} numberOfLines={2}>{item.url}</Text>
         <Text style={s.fileDate}>{fmtDate(item.createdAt)}</Text>
       </View>
     </TouchableOpacity>
@@ -599,6 +599,7 @@ const makeStyles = (c: Palette, insetTop: number) => StyleSheet.create({
   fileRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 12, padding: 12, marginBottom: 6, borderWidth: 1, borderColor: c.glassStroke, gap: 12 },
   fileIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: c.glassSoft, justifyContent: 'center', alignItems: 'center' },
   fileName: { color: c.text, fontSize: 13, fontWeight: '600' },
+  linkUrl: { color: c.accent },
   fileDate: { color: c.textDim, fontSize: 11, marginTop: 2 },
   staleBar: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 12, marginTop: 10, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: c.glassSoft, borderWidth: 1, borderColor: c.glassStroke },
   staleTxt: { flex: 1, color: c.textDim, fontSize: 12 },

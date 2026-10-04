@@ -235,6 +235,8 @@ function VideoPlayerInner() {
   }, [isPlaying, isSeeking, controlsOpacity, screenReader]);
 
   const toggleControls = useCallback(() => {
+    // With a screen reader on the controls stay up: a tap never starts a fade.
+    if (screenReader) return;
     if (showControls) {
       Animated.timing(controlsOpacity, { toValue: 0, duration: 250, useNativeDriver: true }).start(() => {
         setShowControls(false);
@@ -245,7 +247,7 @@ function VideoPlayerInner() {
       Animated.timing(controlsOpacity, { toValue: 1, duration: 250, useNativeDriver: true }).start();
       scheduleHideControls();
     }
-  }, [showControls, scheduleHideControls, controlsOpacity]);
+  }, [screenReader, showControls, scheduleHideControls, controlsOpacity]);
 
   useEffect(() => {
     if (showControls && isPlaying) scheduleHideControls();

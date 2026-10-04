@@ -1,7 +1,7 @@
 // lib/media/editExport.selftest.ts — run: npx tsx lib/media/editExport.selftest.ts
 import assert from 'node:assert/strict';
 import { containFrame, toImageCrop } from '../imageEditMath';
-import { EXPORT_MAX_EDGE, exportSize, mapForCrop, mapForRotate90, scaleCrop, toExport } from './editExport';
+import { EXPORT_MAX_EDGE, exportSize, mapForCrop, mapForRotate90, nudgeWithin, scaleCrop, toExport } from './editExport';
 
 const near = (a: number, b: number, msg: string) => assert.ok(Math.abs(a - b) < 1e-6, `${msg}: ${a} vs ${b}`);
 
@@ -66,5 +66,16 @@ near(huge.w, 300, 'fit w'); near(huge.h, 300, 'fit h');
 assert.ok(huge.x >= frame.x && huge.y >= frame.y && huge.y + huge.h <= frame.y + frame.h + 1e-9, 'inside the photo');
 const tiny = scaleCrop(box, 0.01, frame, null);
 near(tiny.w, 40, 'min w'); near(tiny.h, 40, 'min h');
+
+// nudgeWithin: screen-reader moves keep a text overlay inside the photo.
+{
+  const box = { x: 10, y: 20, w: 300, h: 200 };
+  const size = { w: 50, h: 20 };
+  assert.deepEqual(nudgeWithin({ x: 100, y: 100 }, size, 15, -15, box), { x: 115, y: 85 }, 'free move');
+  assert.deepEqual(nudgeWithin({ x: 12, y: 22 }, size, -15, -15, box), { x: 10, y: 20 }, 'stops at the top-left');
+  assert.deepEqual(nudgeWithin({ x: 255, y: 195 }, size, 15, 15, box), { x: 260, y: 200 }, 'far edge stays inside');
+  assert.deepEqual(nudgeWithin({ x: 400, y: -50 }, size, 0, 0, box), { x: 260, y: 20 }, 'outside text moves back in');
+  assert.deepEqual(nudgeWithin({ x: 40, y: 40 }, { w: 500, h: 20 }, 15, 0, box), { x: 10, y: 40 }, 'too wide: pinned left');
+}
 
 console.log('editExport selftest: all passed');

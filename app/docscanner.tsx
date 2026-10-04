@@ -28,14 +28,19 @@ import { enqueueMedia } from '../lib/mediaOutbox';
 import { listChats, chatTitle, type ChatSummary } from '../lib/chatService';
 import DocumentScanner from 'react-native-document-scanner-plugin';
 import { docFilename, DEFAULT_STYLE } from '../lib/docs/docStyle';
-import { sealJson, openJson, encryptFileTo, decryptToTemp } from '../lib/scanVault';
-import { updateRecent, RecentListUnavailable, type RecentStore } from '../lib/media/scanRecent';
+import { sealJson, openJson, encryptFileTo, decryptToTemp, SCAN_RECENT_KEY } from '../lib/scanVault';
+import { updateRecent, serialQueue, RecentListUnavailable, type RecentStore } from '../lib/media/scanRecent';
 import type { MediaKey } from '../lib/mediaCrypto';
 
 /** Pre-encryption list: plaintext JSON. Read once, migrated, then removed. */
 const LEGACY_RECENT_KEY = 'vc_docscanner_recent';
 /** The recent list, sealed under the scan key (titles are private too). */
-const RECENT_KEY = 'vc_docscanner_recent_v2';
+const RECENT_KEY = SCAN_RECENT_KEY;
+/** Every read-modify-write of the stored list (load + migration, save,
+ *  delete, reset) runs through this one queue, so a delete computed from an
+ *  older read can never land after a newer save, and two migrations never
+ *  overlap. Module-level: shared by every mounted scanner. */
+const recentQueue = serialQueue();
 const SCAN_DIR = `${FileSystem.documentDirectory}VaultScans/`;
 
 const DOC_TYPES: { id: string; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
@@ -100,9 +105,12 @@ function DocScannerContent() {
   const [processingPhase, setProcessingPhase] = useState('');
   const [recentDocs, setRecentDocs] = useState<ScannedDoc[]>([]);
   // A list that could not be read is an error, not "no documents". 'read' may
-  // pass on Retry; 'locked' (the list exists but its key cannot open it — the
-  // keychain was cleared, or the data is damaged) never will.
-  const [recentError, setRecentError] = useState<null | 'read' | 'locked'>(null);
+  // pass on Retry (also shown while legacy scans still await migration);
+  // 'locked' (the list exists but its key cannot open it — the data is
+  // damaged) never will; 'keyLost' (the key read back empty while the list
+  // exists — keychain cleared, or a transient miss) may on Retry, and the key
+  // is never replaced while the list exists (lib/scanVault).
+  const [recentError, setRecentError] = useState<null | 'read' | 'locked' | 'keyLost'>(null);
   const [sharing, setSharing] = useState(false);
   const [currentDoc, setCurrentDoc] = useState<ScannedDoc | null>(null);
   const [busy, setBusy] = useState(false);
@@ -138,18 +146,28 @@ function DocScannerContent() {
     open: sealed => openJson<ScannedDoc[]>(sealed),
     write: async docs => { await AsyncStorage.setItem(RECENT_KEY, await sealJson(docs)); },
   }), []);
-  const changeRecent = async (change: (stored: ScannedDoc[]) => ScannedDoc[]) => {
+  const changeRecent = (change: (stored: ScannedDoc[]) => ScannedDoc[]) => recentQueue(async () => {
     try {
       setRecentDocs(await updateRecent(recentStore, change));
       setRecentError(null);
     } catch (e) {
-      if (e instanceof RecentListUnavailable && e.reason === 'locked') setRecentError('locked');
+      // Show the start page's way out: Reset ('locked'), Retry + Reset
+      // ('keyLost'), or Retry, which re-runs a pending migration ('legacy').
+      if (e instanceof RecentListUnavailable) setRecentError(e.reason === 'legacy' ? 'read' : e.reason);
       throw e;
     }
-  };
+  });
 
+  // One load at a time: a double-tapped Retry must not start a second
+  // migration (two would encrypt the same <id>.vcs under different keys).
+  const loadingRef = useRef(false);
   const loadRecent = async () => {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
     setRecentError(null);
+    try { await recentQueue(loadRecentNow); } finally { loadingRef.current = false; }
+  };
+  const loadRecentNow = async () => {
     try {
       const sealed = await AsyncStorage.getItem(RECENT_KEY);
       if (sealed) {
@@ -168,16 +186,18 @@ function DocScannerContent() {
         await AsyncStorage.setItem(RECENT_KEY, await sealJson(docs));
       } catch (e) {
         // The new keys were never saved: drop the unreadable .vcs copies and
-        // keep the plaintext + legacy list so the next open retries.
-        for (const m of migrated) if (m.plain) FileSystem.deleteAsync(m.doc.pdfUri, { idempotent: true }).catch(() => {});
+        // keep the plaintext + legacy list so the next open retries. Awaited,
+        // so a queued Retry cannot write a new <id>.vcs this then deletes.
+        await Promise.all(migrated.filter(m => m.plain).map(m => FileSystem.deleteAsync(m.doc.pdfUri, { idempotent: true }).catch(() => {})));
         throw e;
       }
-      // Keys are saved; only now is the plaintext safe to remove.
+      // Keys are saved, and each .vcs was decrypt-checked against its source
+      // by encryptFileTo; only now is the plaintext safe to remove.
       for (const m of migrated) if (m.plain) await FileSystem.deleteAsync(m.plain, { idempotent: true }).catch(() => {});
       await AsyncStorage.removeItem(LEGACY_RECENT_KEY);
       setRecentDocs(docs);
-    } catch {
-      setRecentError('read');
+    } catch (e: unknown) {
+      setRecentError(e instanceof RecentListUnavailable && e.reason === 'keyLost' ? 'keyLost' : 'read');
     }
   };
 
@@ -186,13 +206,18 @@ function DocScannerContent() {
   const resetRecent = () => {
     Alert.alert(
       'Reset recent documents?',
-      'The saved scans on this device can no longer be opened. Resetting removes the list and those unreadable files. New scans will save normally.',
+      (recentError === 'keyLost'
+        ? 'Only do this if Retry did not help: resetting is permanent, and your saved scans could open again if the missing key comes back. '
+        : 'The saved scans on this device can no longer be opened. ')
+        + 'Resetting removes the list and those unreadable files. New scans will save normally.',
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Reset', style: 'destructive', onPress: async () => {
           try {
-            await AsyncStorage.removeItem(RECENT_KEY);
-            await FileSystem.deleteAsync(SCAN_DIR, { idempotent: true }).catch(() => {});
+            await recentQueue(async () => {
+              await AsyncStorage.removeItem(RECENT_KEY);
+              await FileSystem.deleteAsync(SCAN_DIR, { idempotent: true }).catch(() => {});
+            });
             setRecentDocs([]);
             setRecentError(null);
           } catch {
@@ -206,6 +231,8 @@ function DocScannerContent() {
   useEffect(() => {
     Animated.timing(fadeIn, { toValue: 1, duration: 400, useNativeDriver: true }).start();
     loadRecent();
+    // Mount-only: loadRecent guards itself and runs through recentQueue.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fadeIn]);
 
   /** A plaintext copy to hand to Share/Send: decrypted into a vt_ cache dir
@@ -318,6 +345,9 @@ function DocScannerContent() {
       // the scan's key is kept, so a failed save is a failed scan (the catch
       // below deletes the unreadable .vcs and says so).
       await changeRecent(stored => [doc, ...stored.filter(d => d.id !== doc.id)]);
+      // Saved (it is in the recent list now); Back during the save means the
+      // user left this flow, so do not jump to "PDF ready".
+      if (stale()) return;
       setCurrentDoc(doc);
       setProcessingProgress(100);
       setStep('preview');
@@ -332,7 +362,9 @@ function DocScannerContent() {
         // Saving now would replace a list holding older scans' keys.
         Alert.alert('Scan not saved', e.reason === 'locked'
           ? 'Your recent documents list can’t be opened on this device, and saving this scan would replace it. Reset the list on the Doc Scanner start page, then scan again.'
-          : 'Your earlier documents haven’t finished moving to secure storage, and saving this scan now could lose them. Tap Retry on the Doc Scanner start page, then scan again.');
+          : e.reason === 'keyLost'
+            ? 'The key that opens your recent documents is missing on this device, and saving this scan would replace it. Tap Retry on the Doc Scanner start page; if that does not help, reset the list. Then scan again.'
+            : 'Your earlier documents haven’t finished moving to secure storage, and saving this scan now could lose them. Tap Retry on the Doc Scanner start page, then scan again.');
       } else {
         Alert.alert('Could not save the PDF', 'The document could not be built and saved securely. Your pages are still selected — try Convert again.');
       }
@@ -498,17 +530,23 @@ function DocScannerContent() {
                   <Text style={S.errTitle}>
                     {recentError === 'locked'
                       ? 'Your recent documents can’t be opened on this device anymore'
-                      : 'Couldn’t load your recent documents'}
+                      : recentError === 'keyLost'
+                        ? 'The key that opens your recent documents is missing on this device'
+                        : 'Couldn’t load your recent documents'}
                   </Text>
-                  {recentError === 'locked' ? (
-                    <TouchableOpacity onPress={resetRecent} style={S.errBtn}
-                      accessibilityRole="button" accessibilityLabel="Reset recent documents">
-                      <Text style={S.errBtnTxt}>Reset list</Text>
-                    </TouchableOpacity>
-                  ) : (
+                  {recentError === 'keyLost' && (
+                    <Text style={S.errBody}>New scans can’t be saved until this is solved. Try Retry first; reset only if the key does not come back.</Text>
+                  )}
+                  {recentError !== 'locked' && (
                     <TouchableOpacity onPress={loadRecent} style={S.errBtn}
                       accessibilityRole="button" accessibilityLabel="Retry loading recent documents">
                       <Text style={S.errBtnTxt}>Retry</Text>
+                    </TouchableOpacity>
+                  )}
+                  {recentError !== 'read' && (
+                    <TouchableOpacity onPress={resetRecent} style={S.errBtn}
+                      accessibilityRole="button" accessibilityLabel="Reset recent documents">
+                      <Text style={S.errBtnTxt}>Reset list</Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -736,6 +774,7 @@ const makeStyles = (c: Palette, insetTop: number) => StyleSheet.create({
   tipRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   tipTxt: { color: c.textDim, fontSize: 12, lineHeight: 22, flex: 1 },
   errTitle: { color: c.text, fontSize: 13, fontWeight: '700' },
+  errBody: { color: c.textDim, fontSize: 12, lineHeight: 18, marginTop: 6 },
   errBtn: { marginTop: 10, alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center' },
   errBtnTxt: { color: c.accentOn, fontSize: 13, fontWeight: '800' },
   docInfo: { flex: 1, minWidth: 120 },

@@ -76,7 +76,7 @@ export const s = StyleSheet.create({
   headerFilenameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   headerIcon: { marginRight: 2 },
   headerFilename: { color: C.text, fontSize: 15, fontWeight: '600', flex: 1 },
-  headerSize: { color: C.textDim, fontSize: 12, marginTop: 2, marginLeft: 22 },
+  headerSize: { color: C.textDim, fontSize: 12, marginTop: 2, marginLeft: 24 },   // 16 icon + 2 margin + 6 gap: lines up with the filename
 
   // ── Content ─────────────────────────────────────────────────
   // paddingTop: inset + measured header height, set inline.

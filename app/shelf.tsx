@@ -71,15 +71,31 @@ export default function ShelfScreen() {
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<ShelfSort>('recent');
 
+  // The live pin set, so overlapping toggles on two rows each start from the
+  // other's result, and a failed write undoes only its OWN row (restoring a
+  // snapshot taken at tap time used to undo the other row's toggle too).
+  // Writes are chained so an older set can never land after a newer one.
+  const pinsRef = useRef(pins);
+  pinsRef.current = pins;
+  const pinWrites = useRef<Promise<unknown>>(Promise.resolve());
+  // A focus reload must not put back a pin set older than the live one: a
+  // load whose storage read started before a toggle, or that finishes while
+  // a pin write is still queued, keeps the live set (pinEdits counts toggles,
+  // pinWritesPending counts queued writes).
+  const pinEdits = useRef(0);
+  const pinWritesPending = useRef(0);
+
   const load = useCallback(async () => {
+    const editsAtStart = pinEdits.current;
     try {
       const [rows, pinRaw, me] = await Promise.all([
         listAllAttachments(), getMeta(PINS_KEY), getCurrentUserAsync().catch(() => null),
       ]);
       let pinList: string[] = [];
       try { pinList = pinRaw ? JSON.parse(pinRaw) : []; } catch { /* corrupt pins: start empty */ }
-      const pinned = new Set<string>(pinList);
-      setPins(pinned);
+      const stale = pinEdits.current !== editsAtStart || pinWritesPending.current > 0;
+      const pinned = stale ? pinsRef.current : new Set<string>(pinList);
+      if (!stale) setPins(pinned);
       setMyId(me?.id != null ? String(me.id) : null);
       setFiles(rows.filter(shelfListable).map(r => ({
         ...r,
@@ -96,13 +112,6 @@ export default function ShelfScreen() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  // The live pin set, so overlapping toggles on two rows each start from the
-  // other's result, and a failed write undoes only its OWN row (restoring a
-  // snapshot taken at tap time used to undo the other row's toggle too).
-  // Writes are chained so an older set can never land after a newer one.
-  const pinsRef = useRef(pins);
-  pinsRef.current = pins;
-  const pinWrites = useRef<Promise<unknown>>(Promise.resolve());
   const togglePin = useCallback((id: string) => {
     const was = pinsRef.current.has(id);
     const withPin = (set: Set<string>, on: boolean) => {
@@ -116,12 +125,14 @@ export default function ShelfScreen() {
       setFiles(fs => fs.map(f => (f.attachmentId === id ? { ...f, pinned: on } : f)));
     };
     setRow(!was);
+    pinEdits.current++;
+    pinWritesPending.current++;
     pinWrites.current = pinWrites.current.then(() =>
       setMeta(PINS_KEY, JSON.stringify([...pinsRef.current])).catch(() => {
         // The pin only looked saved: put this row back and say so.
         setRow(was);
         Alert.alert('Couldn’t save the pin', 'The change could not be written to this device. Please try again.');
-      }));
+      }).finally(() => { pinWritesPending.current--; }));
   }, []);
 
   const counts = useMemo(() => countsByKind(files), [files]);

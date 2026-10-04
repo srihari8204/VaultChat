@@ -3,8 +3,10 @@
 // react-native-view-shot can return a uniformly black/transparent bitmap
 // instead of throwing when the platform did not draw the view it was asked to
 // capture (app/image-editor's offscreen full-resolution export). The caller
-// shrinks the capture to a tiny PNG and asks here whether every pixel is the
-// same colour; a real photo never is. PURE (fflate only, no react-native).
+// shrinks the capture to a tiny PNG; a uniform one is either blank or a photo
+// that really is one plain colour, so exportLooksBlank compares it with the
+// same probe of the on-screen canvas (which is drawn). PURE (fflate only, no
+// react-native).
 
 import { unzlibSync } from 'fflate';
 
@@ -68,4 +70,30 @@ export function isUniformPng(png: Uint8Array, tolerance = 2): boolean {
   const { bpp, px } = img;
   for (let i = bpp; i < px.length; i++) if (Math.abs(px[i] - px[i % bpp]) > tolerance) return false;
   return true;
+}
+
+/** Mean per-pixel colour difference (0–255) above which a uniform export is
+ *  judged blank rather than a plain photo: a blank capture is black or
+ *  transparent where the screen shows the photo, while two renders of the
+ *  same plain photo differ only by scaling and JPEG noise. */
+export const BLANK_MEAN_DIFF = 16;
+
+/** True when the export probe is uniform AND it does not match the on-screen
+ *  probe of the same area — i.e. the platform did not draw the export. A
+ *  plain-colour photo (export uniform, screen the same colour) is kept.
+ *  Without a readable screen probe a uniform export counts as blank (the
+ *  screen capture is the fallback anyway); an unreadable export does not. */
+export function exportLooksBlank(exportPng: Uint8Array, screenPng: Uint8Array | null): boolean {
+  if (!isUniformPng(exportPng)) return false;
+  const e = decodeSmallPng(exportPng)!;
+  const s = screenPng ? decodeSmallPng(screenPng) : null;
+  if (!s || s.w !== e.w || s.h !== e.h) return true;
+  // Colour channels only (a transparent blank and an opaque photo both count
+  // by their RGB / grey value), compared pixel by pixel.
+  const ch = Math.min(e.bpp, s.bpp) >= 3 ? 3 : 1;
+  let sum = 0;
+  for (let i = 0; i < e.w * e.h; i++) {
+    for (let k = 0; k < ch; k++) sum += Math.abs(e.px[i * e.bpp + k] - s.px[i * s.bpp + k]);
+  }
+  return sum / (e.w * e.h * ch) > BLANK_MEAN_DIFF;
 }

@@ -13,4 +13,8 @@ assert.ok(!sameFileUrl('file:///a/c.pdf', 'file:///a/b.pdf'), 'another file');
 assert.ok(!sameFileUrl('https://evil.example/a/b.pdf', 'file:///a/b.pdf'), 'a link out is refused');
 assert.ok(!sameFileUrl('about:blank', 'file:///a/b.pdf'));
 assert.equal(filePathOf('file:///a/100%.pdf'), '/a/100%.pdf', 'a malformed escape is kept raw');
+assert.ok(sameFileUrl('file:///private/var/mobile/a.pdf', 'file:///var/mobile/a.pdf'), '/private/var is /var on iOS');
+assert.ok(sameFileUrl('file:///tmp/a.pdf', '/private/tmp/a.pdf'), '/private/tmp is /tmp on iOS');
+assert.ok(!sameFileUrl('file:///private/other/a.pdf', 'file:///other/a.pdf'), 'only the var/tmp symlinks are folded');
+assert.ok(!sameFileUrl('file:///private/variant/a.pdf', 'file:///variant/a.pdf'), 'whole path segment only');
 console.log('fileUrl selftest: all passed');

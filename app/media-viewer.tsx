@@ -577,8 +577,8 @@ function MediaViewerScreen() {
         mimeType: mime ? String(mime) : undefined,
         dialogTitle: fileName,
       });
-    } catch (e: any) {
-      console.warn('[media-viewer] share failed:', e?.message ?? e);
+    } catch (e: unknown) {
+      console.warn('[media-viewer] share failed:', e instanceof Error ? e.message : e);
       Alert.alert('Could not share', 'This file could not be shared. Please try again.');
     }
   };
@@ -612,8 +612,8 @@ function MediaViewerScreen() {
         if (temp) FileSystem.deleteAsync(localPath, { idempotent: true }).catch(() => {});
       } else if (await Sharing.isAvailableAsync()) { await Sharing.shareAsync(localPath); }
       else Alert.alert('Sharing unavailable', 'No app on this device can open this file.');
-    } catch (e: any) {
-      console.warn('[media-viewer] save failed:', e?.message ?? e);
+    } catch (e: unknown) {
+      console.warn('[media-viewer] save failed:', e instanceof Error ? e.message : e);
       Alert.alert('Could not save', 'This file could not be saved. Check your connection and storage, then try again.');
     }
   };
