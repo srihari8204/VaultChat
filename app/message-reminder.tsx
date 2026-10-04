@@ -65,24 +65,26 @@ function whenFor(mins: number): Date {
   return new Date(now.getTime() + mins * 60_000);
 }
 
+// Throws when the stored list cannot be read, so callers can tell "no
+// reminders" apart from "could not read them" (the list shows an error, the
+// composer undoes the notification it just scheduled).
 async function loadReminders(): Promise<ReminderRow[]> {
-  try {
-    const raw = await AsyncStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const list = JSON.parse(raw) as ReminderRow[];
-    // Drop any rows whose scheduled time has already passed (the notification
-    // either fired or was cancelled; we don't need to keep them around), and
-    // the plaintext preview older builds stored. Persist when either changed,
-    // so expired rows and old plaintext do not accumulate.
-    const now = Date.now();
-    const kept = list
-      .filter(r => new Date(r.when).getTime() > now - 60_000)
-      .map(({ preview: _drop, ...r }) => r);
-    if (kept.length !== list.length || list.some(r => r.preview)) {
-      await saveReminders(kept).catch(() => {});
-    }
-    return kept;
-  } catch { return []; }
+  const raw = await AsyncStorage.getItem(STORAGE_KEY);
+  if (!raw) return [];
+  const list = JSON.parse(raw) as ReminderRow[];
+  if (!Array.isArray(list)) throw new Error('Reminder list is unreadable');
+  // Drop any rows whose scheduled time has already passed (the notification
+  // either fired or was cancelled; we don't need to keep them around), and
+  // the plaintext preview older builds stored. Persist when either changed,
+  // so expired rows and old plaintext do not accumulate.
+  const now = Date.now();
+  const kept = list
+    .filter(r => new Date(r.when).getTime() > now - 60_000)
+    .map(({ preview: _drop, ...r }) => r);
+  if (kept.length !== list.length || list.some(r => r.preview)) {
+    await saveReminders(kept).catch(() => {});
+  }
+  return kept;
 }
 
 // The message text for display, from the local message cache. Null when the
@@ -166,15 +168,22 @@ function Composer({
           // to /chat?id=<chatId> when the user taps the notification.
           data:  { chatId, messageId },
         },
-        trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: when } as any,
+        trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: when },
       });
 
-      const list = await loadReminders();
-      list.push({
-        id, chatId, messageId, when: when.toISOString(),
-        createdAt: new Date().toISOString(),
-      });
-      await saveReminders(list);
+      try {
+        const list = await loadReminders();
+        list.push({
+          id, chatId, messageId, when: when.toISOString(),
+          createdAt: new Date().toISOString(),
+        });
+        await saveReminders(list);
+      } catch (e) {
+        // Without a stored row the reminder could never be cancelled from the
+        // app, so take the notification back out before reporting failure.
+        await Notifications.cancelScheduledNotificationAsync(id).catch(() => {});
+        throw e;
+      }
 
       Alert.alert('Reminder set', `We'll notify you ${when.toLocaleString()}.`, [
         { text: 'OK', onPress: () => router.back() },
@@ -193,7 +202,7 @@ function Composer({
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={S.title}>Remind me about</Text>
+        <Text style={S.title} accessibilityRole="header">Remind me about</Text>
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }}>
@@ -233,7 +242,7 @@ function Composer({
 
         <Text style={S.note}>
           Reminders are device-only — they fire as a local notification at the
-          chosen time and tap-open the chat. See all pending in Settings → Reminders.
+          chosen time and tap-open the chat. See all pending in Settings → Message reminders.
         </Text>
       </ScrollView>
     </View>
@@ -247,9 +256,17 @@ function RemindersList({ router }: { router: Router }) {
   // Display-only message text, keyed by reminder id (never persisted).
   const [texts,   setTexts]   = useState<Record<string, string | null>>({});
   const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const list = await loadReminders();
+    let list: ReminderRow[];
+    try {
+      list = await loadReminders();
+      setError(null);
+    } catch {
+      setError('Your reminders could not be read from this device.');
+      return;
+    }
     setRows(list.sort((a, b) => new Date(a.when).getTime() - new Date(b.when).getTime()));
     // A locked chat's text is not shown here without unlocking it. An
     // unreadable lock table counts as locked (lib/chatLock fails closed).
@@ -263,9 +280,11 @@ function RemindersList({ router }: { router: Router }) {
     setTexts(Object.fromEntries(pairs));
   }, []);
 
-  useEffect(() => {
-    (async () => { setLoading(true); await load(); setLoading(false); })();
+  const reload = useCallback(async () => {
+    setLoading(true); await load(); setLoading(false);
   }, [load]);
+
+  useEffect(() => { reload(); }, [reload]);
 
   const cancel = useCallback((r: ReminderRow) => {
     Alert.alert('Cancel reminder?', 'You won\'t be notified at the chosen time.', [
@@ -284,9 +303,13 @@ function RemindersList({ router }: { router: Router }) {
             Alert.alert('Could not cancel', e?.message ?? 'The reminder is still set. Try again.');
             return;
           }
-          const next = (await loadReminders()).filter(x => x.id !== r.id);
-          await saveReminders(next);
-          setRows(next);
+          try {
+            const next = (await loadReminders()).filter(x => x.id !== r.id);
+            await saveReminders(next);
+          } catch {
+            Alert.alert('Reminder cancelled', 'You won\'t be notified, but the list could not be updated on this device.');
+          }
+          setRows(prev => prev.filter(x => x.id !== r.id));
         }
       },
     ]);
@@ -303,14 +326,22 @@ function RemindersList({ router }: { router: Router }) {
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={S.title}>Reminders</Text>
+        <Text style={S.title} accessibilityRole="header">Reminders</Text>
       </View>
 
-      {rows.length === 0 ? (
+      {error ? (
+        <View style={[S.center, { flex: 1, paddingHorizontal: 32 }]}>
+          <Text style={S.emptyTitle}>{"Couldn't load reminders"}</Text>
+          <Text style={S.emptySub} accessibilityRole="alert">{error}</Text>
+          <TouchableOpacity accessibilityRole="button" onPress={reload} style={S.retryBtn}>
+            <Text style={S.retryTxt}>Try again</Text>
+          </TouchableOpacity>
+        </View>
+      ) : rows.length === 0 ? (
         <View style={[S.center, { flex: 1, paddingHorizontal: 32 }]}>
           <Text style={S.emptyTitle}>No reminders set</Text>
           <Text style={S.emptySub}>
-            Long-press any message in a chat → ⏰ Remind me about this — pick a time.
+            Long-press any message in a chat → Remind, then pick a time.
           </Text>
         </View>
       ) : (
@@ -324,10 +355,10 @@ function RemindersList({ router }: { router: Router }) {
               onPress={() => cancel(r)}
               activeOpacity={0.7}
               accessibilityRole="button"
-              accessibilityLabel={`Reminder for ${new Date(r.when).toLocaleString()}`}
+              accessibilityLabel={`Reminder for ${new Date(r.when).toLocaleString()}: ${texts[r.id] || 'Message reminder'}`}
               accessibilityHint="Cancels this reminder"
             >
-              <View style={S.iconBox}><Text style={S.iconTxt}>⏰</Text></View>
+              <View style={S.iconBox} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden><Text style={S.iconTxt}>⏰</Text></View>
               <View style={{ flex: 1 }}>
                 <Text style={S.rowWhen} numberOfLines={1}>
                   Fires {new Date(r.when).toLocaleString()}
@@ -352,7 +383,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   backBtn:      { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backTxt:      { color: c.text, fontSize: 26, fontWeight: '600' },
   title:        { color: c.text, fontSize: 22, fontWeight: '800' },
 
   previewCard:  { backgroundColor: c.glassSoft, borderColor: c.glassStroke, borderWidth: 1, borderRadius: 12, padding: 12 },
@@ -371,6 +401,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   emptyTitle:   { color: c.text, fontSize: 16, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
   emptySub:     { color: c.textDim, fontSize: 13, lineHeight: 18, textAlign: 'center' },
+  retryBtn:     { marginTop: 20, minHeight: 44, paddingHorizontal: 24, borderRadius: 12, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
+  retryTxt:     { color: c.bubbleOutText, fontWeight: '700' },
 
   row:          { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   iconBox:      { width: 36, height: 36, borderRadius: 18, backgroundColor: c.glassSoft, alignItems: 'center', justifyContent: 'center' },

@@ -10,7 +10,7 @@
 import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useState , useMemo} from 'react';
+import { useCallback, useRef, useState , useMemo} from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
@@ -59,6 +59,9 @@ export default function ScheduleMessageScreen() {
   const [message,    setMessage]    = useState(typeof initial === 'string' ? initial : '');
   const [scheduling, setScheduling] = useState(false);
   const [customWhen, setCustomWhen] = useState<Date | null>(null);
+  // Set synchronously, so a double tap cannot schedule the message twice
+  // before the disabled state re-renders.
+  const busyRef = useRef(false);
 
   // Reliable delivery via the SERVER sweep (fires even if the app is killed),
   // kept E2E-encrypted: content is sealed on-device before upload, so the server
@@ -68,6 +71,8 @@ export default function ScheduleMessageScreen() {
     if (!text) { Alert.alert('Empty message', 'Type something before scheduling.'); return; }
     if (!chatId) { Alert.alert('Missing chat', 'No chat context — open this screen from a chat.'); return; }
     if (when.getTime() <= Date.now() + 5000) { Alert.alert('Pick a future time', 'Choose a time at least a moment ahead.'); return; }
+    if (busyRef.current) return;
+    busyRef.current = true;
     setScheduling(true);
     try {
       const row = await scheduleEncryptedMessage(chatId as string, text, when.toISOString());
@@ -80,6 +85,7 @@ export default function ScheduleMessageScreen() {
     } catch (e: any) {
       Alert.alert('Could not schedule', e?.message ?? 'Try again');
     } finally {
+      busyRef.current = false;
       setScheduling(false);
     }
   }, [chatId, message, router]);
@@ -101,7 +107,7 @@ export default function ScheduleMessageScreen() {
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={S.title}>Schedule message</Text>
+        <Text style={S.title} accessibilityRole="header">Schedule message</Text>
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }}>
@@ -147,7 +153,7 @@ export default function ScheduleMessageScreen() {
 
         {/* Custom date + time */}
         <Text style={[S.label, { marginTop: 20 }]}>CUSTOM DATE & TIME</Text>
-        <TouchableOpacity style={S.customBtn} onPress={pickCustom} disabled={scheduling} activeOpacity={0.85} accessibilityRole="button" accessibilityState={{ disabled: scheduling }}>
+        <TouchableOpacity style={S.customBtn} onPress={pickCustom} disabled={scheduling} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel={customWhen ? `Change custom time, ${customWhen.toLocaleString()}` : 'Pick an exact date and time'} accessibilityState={{ disabled: scheduling }}>
           <Ionicons name="calendar-outline" size={20} color={colors.primary} />
           <Text style={S.customTxt}>
             {customWhen
@@ -179,7 +185,8 @@ export default function ScheduleMessageScreen() {
         <Text style={S.note}>
           🔒 End-to-end encrypted before it leaves your device, then delivered by the server within
           ~30 seconds of the chosen time — so it sends even if the app is closed or swiped away.
-          Cancel any pending one from <Text style={{ color: colors.primary }}>Scheduled</Text>.
+          Cancel any pending one from{' '}
+          <Text style={{ color: colors.primary }} accessibilityRole="link" onPress={() => router.push('/scheduled')}>Scheduled</Text>.
         </Text>
       </ScrollView>
       {picker.element}
@@ -192,7 +199,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backTxt:       { color: c.text, fontSize: 26, fontWeight: '600' },
   title:         { color: c.text, fontSize: 22, fontWeight: '800' },
 
   label:         { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 8 },

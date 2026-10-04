@@ -6,7 +6,7 @@
 // getBubbleColors(), which returns null for "Default" (theme green).
 
 import { HEADER_TOP } from '../constants/layout';
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert,
 } from 'react-native';
@@ -54,31 +54,46 @@ export default function ChatThemesScreen() {
   const isGlobal = !chatId;
   const key = isGlobal ? GLOBAL_BUBBLE : BUBBLE_KEY + chatId;
 
-  const [selected, setSelected] = useState('default');
+  // The raw value stored under this screen's key. null = nothing stored: the
+  // app default on the global screen, "same as all chats" on a per-chat one.
+  const [stored, setStored] = useState<string | null>(null);
+  // The all-chats choice, so a per-chat screen can show what it inherits.
+  const [globalId, setGlobalId] = useState<string | null>(null);
+  // A tap made before the initial read resolves wins over that read.
+  const touched = useRef(false);
 
   useEffect(() => {
+    touched.current = false;
     (async () => {
       try {
-        const saved = await AsyncStorage.getItem(key);
-        if (saved) setSelected(saved);
+        const [saved, global] = await Promise.all([AsyncStorage.getItem(key), AsyncStorage.getItem(GLOBAL_BUBBLE)]);
+        if (touched.current) return;
+        setStored(saved);
+        setGlobalId(global);
       } catch { /* keep the Default selection */ }
     })();
   }, [key]);
 
-  // Saves on tap. Per-chat "Default" is stored explicitly (see lib/scopedChoice).
-  const apply = async (id: string) => {
-    const prev = selected;
-    setSelected(id);
+  // Saves on tap. Per-chat "Default" is stored explicitly (see lib/scopedChoice);
+  // null removes the key (global: app default, per-chat: follow all chats).
+  const apply = async (id: string | null) => {
+    touched.current = true;
+    const prev = stored;
+    const next = id === SCOPED_DEFAULT && isGlobal ? null : id;
+    setStored(next);
     try {
-      if (id === SCOPED_DEFAULT && isGlobal) await AsyncStorage.removeItem(key);
-      else await AsyncStorage.setItem(key, id);
+      if (next == null) await AsyncStorage.removeItem(key);
+      else await AsyncStorage.setItem(key, next);
     } catch {
-      setSelected(prev);
+      setStored(prev);
       Alert.alert('Could not save', 'Your bubble colour was not changed. Try again.');
     }
   };
 
-  const current = BUBBLE_THEMES.find(t => t.id === selected) || BUBBLE_THEMES[0];
+  // What the chat actually shows, through the same rule chat.tsx uses.
+  const effectiveId = isGlobal ? resolveScoped(null, stored) : resolveScoped(stored, globalId);
+  const inherited = BUBBLE_THEMES.find(t => t.id === resolveScoped(null, globalId)) || BUBBLE_THEMES[0];
+  const current = BUBBLE_THEMES.find(t => t.id === effectiveId) || BUBBLE_THEMES[0];
   const mineBg = current.color ?? colors.bubbleOut;
   const mineText = current.color ? idealText(current.color) : colors.bubbleOutText;
   const mineMeta = current.color ? (idealText(current.color) === '#FFFFFF' ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.45)') : colors.bubbleMetaOut;
@@ -92,8 +107,15 @@ export default function ChatThemesScreen() {
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.iconBtn} hitSlop={8}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={s.headerTitle}>{isGlobal ? 'Bubble theme · all chats' : 'Bubble theme · this chat'}</Text>
-        <TouchableOpacity onPress={() => apply(SCOPED_DEFAULT)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Reset to default bubble colour"><Text style={s.resetText}>Reset</Text></TouchableOpacity>
+        <Text style={s.headerTitle} accessibilityRole="header">{isGlobal ? 'Bubble theme · all chats' : 'Bubble theme · this chat'}</Text>
+        <TouchableOpacity
+          onPress={() => apply(null)}
+          style={s.resetBtn}
+          accessibilityRole="button"
+          accessibilityLabel={isGlobal ? 'Reset to default bubble colour' : 'Reset to the colour used for all chats'}
+        >
+          <Text style={s.resetText}>Reset</Text>
+        </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
@@ -114,10 +136,23 @@ export default function ChatThemesScreen() {
         </View>
 
         <Text style={s.sectionTitle}>YOUR BUBBLE COLOR</Text>
+        {!isGlobal && (
+          <TouchableOpacity
+            style={[s.inheritRow, stored == null && s.inheritRowOn]}
+            onPress={() => apply(null)}
+            activeOpacity={0.8}
+            accessibilityRole="radio"
+            accessibilityLabel={`Same as all chats, currently ${inherited.name}`}
+            accessibilityState={{ checked: stored == null }}
+          >
+            <Ionicons name={stored == null ? 'radio-button-on' : 'radio-button-off'} size={20} color={stored == null ? colors.primary : colors.textFaint} />
+            <Text style={s.inheritTxt}>Same as all chats · {inherited.name}</Text>
+          </TouchableOpacity>
+        )}
         <View style={s.grid}>
           {BUBBLE_THEMES.map(t => {
             const swatch = t.color ?? colors.bubbleOut;
-            const on = selected === t.id;
+            const on = isGlobal ? (stored ?? SCOPED_DEFAULT) === t.id : stored === t.id;
             return (
               <TouchableOpacity key={t.id} style={s.cell} onPress={() => apply(t.id)} activeOpacity={0.8} accessibilityRole="radio" accessibilityLabel={`${t.name} bubble colour`} accessibilityState={{ checked: on }}>
                 <View style={[s.swatch, { backgroundColor: swatch }, on && s.swatchOn]}>
@@ -153,9 +188,13 @@ export async function getBubbleColors(chatId: string): Promise<{ mine: string; p
 const makeStyles = (c: Palette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingHorizontal: 12, paddingBottom: 12, backgroundColor: c.bg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke, gap: 8 },
-  iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  iconBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { flex: 1, color: c.text, fontSize: 18, fontWeight: '700' },
+  resetBtn: { minHeight: 44, justifyContent: 'center' },
   resetText: { color: c.primary, fontSize: 14, fontWeight: '700', paddingHorizontal: 8 },
+  inheritRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 48, paddingHorizontal: 14, marginBottom: 14, borderRadius: 14, backgroundColor: c.glassSoft, borderWidth: 1, borderColor: 'transparent' },
+  inheritRowOn: { borderColor: c.primary },
+  inheritTxt: { color: c.text, fontSize: 14, fontWeight: '600', flex: 1 },
 
   preview: { borderRadius: 16, padding: 14, minHeight: 180, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, justifyContent: 'center', marginBottom: 20 },
   peerBubble: { alignSelf: 'flex-start', maxWidth: '78%', borderRadius: 14, borderTopLeftRadius: 4, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 8 },

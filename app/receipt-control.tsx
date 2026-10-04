@@ -9,7 +9,7 @@
 // Defaults to "everything visible" when no rule exists for a contact.
 
 import { HEADER_TOP } from '../constants/layout';
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, TextInput,
 } from 'react-native';
@@ -29,6 +29,27 @@ function useS() {
   return useMemo(() => makeStyles(colors), [colors]);
 }
 
+// role=switch, not button: this is a two-state control, and a screen reader
+// should be able to say whether it is on without the user toggling it to
+// find out. The label names the setting; accessibilityState carries state.
+function Toggle({ on, icon, onPress, label }: {
+  on: boolean; icon: React.ComponentProps<typeof Ionicons>['name']; onPress: () => void; label: string;
+}) {
+  const { colors } = useTheme();
+  const s = useS();
+  return (
+    <TouchableOpacity
+      style={[s.toggleBtn, on && s.toggleBtnOn]}
+      onPress={onPress}
+      accessibilityRole="switch"
+      accessibilityLabel={label}
+      accessibilityState={{ checked: on }}
+    >
+      <Ionicons name={icon} size={18} color={on ? colors.primary : colors.textFaint} />
+    </TouchableOpacity>
+  );
+}
+
 export default function ReceiptControlScreen() {
   const { colors } = useTheme();
   const s = useS();
@@ -38,9 +59,12 @@ export default function ReceiptControlScreen() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let active = true;
+    setLoading(true);
     (async () => {
       try {
         const [chats, ghost] = await Promise.all([listChats(), listGhostMode()]);
@@ -55,68 +79,64 @@ export default function ReceiptControlScreen() {
         if (active) {
           setContacts(Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name)));
           setRules(rmap);
+          rulesRef.current = rmap;
+          setLoadFailed(false);
+          setError(null);
         }
       } catch (e: any) {
-        if (active) setError(e?.message ?? 'Failed to load contacts');
+        if (active) { setError(e?.message ?? 'Failed to load contacts'); setLoadFailed(true); }
       } finally {
         if (active) setLoading(false);
       }
     })();
     return () => { active = false; };
-  }, []);
+  }, [reloadKey]);
+
+  // The latest rules, updated synchronously on every patch, so a second tap
+  // before the re-render toggles from the value the first tap set, not a stale one.
+  const rulesRef = useRef(rules);
+  // One request at a time per contact+flag, so responses cannot land out of
+  // order and leave the server on a different value than the screen.
+  const chains = useRef<Record<string, Promise<void>>>({});
 
   // "Shown" state for a contact (defaults to all visible when no rule exists).
-  const shownFor = useCallback((userId: string) => {
-    const g = rules[userId];
-    return {
-      read: !(g?.hideRead),
-      typing: !(g?.hideTyping),
-      lastSeen: !(g?.hideLastSeen),
-    };
-  }, [rules]);
+  const shownFor = (g: GhostMode | undefined) => ({
+    read: !(g?.hideRead),
+    typing: !(g?.hideTyping),
+    lastSeen: !(g?.hideLastSeen),
+  });
 
-  const toggleRule = useCallback(async (userId: string, field: Field) => {
-    const cur = shownFor(userId);
-    const nextShown = !cur[field];           // user is toggling visibility
+  const toggleRule = useCallback((userId: string, field: Field) => {
+    const nextShown = !shownFor(rulesRef.current[userId])[field];   // user is toggling visibility
     const hideKey = field === 'read' ? 'hideRead' : field === 'typing' ? 'hideTyping' : 'hideLastSeen';
     // Optimistic patch of this ONE flag. The rollback below restores only this
     // flag too: restoring a whole snapshot also reverted any other toggle the
     // user changed while this request was in flight.
-    const patchFlag = (hidden: boolean) => setRules(r => {
+    const patchFlag = (hidden: boolean) => {
+      const r = rulesRef.current;
       const base = r[userId] ?? {
         targetId: userId, hideOnline: false, hideTyping: false, hideRead: false, hideLastSeen: false,
       };
-      return { ...r, [userId]: { ...base, [hideKey]: hidden } };
-    });
+      rulesRef.current = { ...r, [userId]: { ...base, [hideKey]: hidden } };
+      setRules(rulesRef.current);
+    };
     patchFlag(!nextShown);
-    try {
-      await setGhostMode(userId, { [hideKey]: !nextShown } as Partial<Record<typeof hideKey, boolean>>);
-      setError(null);
-    } catch (e: any) {
-      patchFlag(nextShown);
-      setError(e?.message ?? 'Failed to update');
-    }
-  }, [shownFor]);
+    const k = `${userId}:${hideKey}`;
+    chains.current[k] = (chains.current[k] ?? Promise.resolve()).then(async () => {
+      try {
+        await setGhostMode(userId, { [hideKey]: !nextShown } as Partial<Record<typeof hideKey, boolean>>);
+        setError(null);
+      } catch (e: any) {
+        // Roll back only if no later tap has changed this flag since.
+        if (!!rulesRef.current[userId]?.[hideKey] === !nextShown) patchFlag(nextShown);
+        setError(e?.message ?? 'Failed to update');
+      }
+    });
+  }, []);
 
   const filtered = useMemo(
     () => contacts.filter(c => !search || c.name.toLowerCase().includes(search.toLowerCase())),
     [contacts, search],
-  );
-
-  // role=switch, not button: this is a two-state control, and a screen reader
-  // should be able to say whether it is on without the user toggling it to
-  // find out. The label names the setting; accessibilityState carries state.
-  const Toggle = ({ on, icon, onPress, label }: { on: boolean; icon: any; onPress: () => void; label: string }) => (
-    <TouchableOpacity
-      style={[s.toggleBtn, on && s.toggleBtnOn]}
-      onPress={onPress}
-      hitSlop={5}
-      accessibilityRole="switch"
-      accessibilityLabel={label}
-      accessibilityState={{ checked: on }}
-    >
-      <Ionicons name={icon} size={16} color={on ? colors.primary : colors.textFaint} />
-    </TouchableOpacity>
   );
 
   return (
@@ -128,8 +148,8 @@ export default function ReceiptControlScreen() {
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={s.headerTitle}>Privacy per Contact</Text>
-        <View style={{ width: 40 }} />
+        <Text style={s.headerTitle} accessibilityRole="header">Privacy per Contact</Text>
+        <View style={{ width: 44 }} />
       </View>
 
       <View style={s.body}>
@@ -156,7 +176,16 @@ export default function ReceiptControlScreen() {
           <View style={s.legendItem}><Ionicons name="time-outline" size={14} color={colors.textDim} /><Text style={s.legendTxt}>Last Seen</Text></View>
         </View>
 
-        {error && <View style={s.errorBar}><Text style={s.errorTxt}>{error}</Text></View>}
+        {error && (
+          <View style={s.errorBar}>
+            <Text style={s.errorTxt} accessibilityRole="alert">{error}</Text>
+            {loadFailed && (
+              <TouchableOpacity accessibilityRole="button" onPress={() => setReloadKey(k => k + 1)} style={s.retryBtn}>
+                <Text style={s.retryTxt}>Try again</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
 
         {loading ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: 30 }} />
@@ -165,7 +194,7 @@ export default function ReceiptControlScreen() {
             data={filtered}
             keyExtractor={c => c.userId}
             renderItem={({ item }) => {
-              const r = shownFor(item.userId);
+              const r = shownFor(rules[item.userId]);
               return (
                 <View style={s.contactRow}>
                   <View style={s.avatar}><Text style={s.avatarTxt}>{initialOf(item.name, '#')}</Text></View>
@@ -178,11 +207,11 @@ export default function ReceiptControlScreen() {
                 </View>
               );
             }}
-            ListEmptyComponent={
+            ListEmptyComponent={loadFailed ? null : (
               <View style={{ alignItems: 'center', padding: 40 }}>
                 <Text style={s.emptyTxt}>{contacts.length === 0 ? 'No contacts yet — start a direct chat first.' : 'No contacts found'}</Text>
               </View>
-            }
+            )}
           />
         )}
       </View>
@@ -193,7 +222,7 @@ export default function ReceiptControlScreen() {
 const makeStyles = (c: Palette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingHorizontal: 16, paddingBottom: 8 },
-  backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
+  backBtn: { width: 44, height: 44, justifyContent: 'center', alignItems: 'center' },
   headerTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
   body: { flex: 1, padding: 16 },
   infoCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glass, borderRadius: 14, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: c.glassStroke },
@@ -205,12 +234,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   legendTxt: { color: c.textDim, fontSize: 10 },
   errorBar: { backgroundColor: c.danger + '1F', borderColor: c.danger + '66', borderWidth: 1, padding: 10, borderRadius: 10, marginBottom: 8 },
   errorTxt: { color: c.danger, fontSize: 12 },
+  retryBtn: { alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center', paddingHorizontal: 4, marginTop: 4 },
+  retryTxt: { color: c.primary, fontSize: 14, fontWeight: '700' },
   contactRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glass, borderRadius: 14, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: c.glassStroke, gap: 12 },
   avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: c.surfaceSolid, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: c.glassStroke },
   avatarTxt: { color: c.textDim, fontSize: 16, fontWeight: '800' },
   contactName: { flex: 1, color: c.text, fontSize: 14, fontWeight: '700' },
-  toggleGroup: { flexDirection: 'row', gap: 6 },
-  toggleBtn: { width: 34, height: 34, borderRadius: 8, backgroundColor: c.glassSoft, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: c.glassStroke },
+  toggleGroup: { flexDirection: 'row', gap: 4 },
+  toggleBtn: { width: 44, height: 44, borderRadius: 8, backgroundColor: c.glassSoft, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: c.glassStroke },
   toggleBtnOn: { backgroundColor: brandAlpha(0.2), borderColor: c.primary },
   emptyTxt: { color: c.textDim, fontSize: 13, textAlign: 'center' },
 });

@@ -6,11 +6,11 @@
 // in both light and dark. Consumed by app/chat.tsx via getWallpaper().
 
 import { HEADER_TOP } from '../constants/layout';
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Image,
   ScrollView, Alert, useWindowDimensions } from 'react-native';
-import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
+import { useLocalSearchParams, useNavigation, Stack, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
@@ -24,12 +24,20 @@ import { resolveScoped, SCOPED_DEFAULT } from '../lib/scopedChoice';
 import { replacedWallpaperFile } from '../lib/wallpaperFile';
 
 
-// WhatsApp-style solid wallpapers — a bright row then a dark row.
-const SOLID_COLORS = [
-  '#ECE5DD', '#E4DDD3', '#DCEAF5', '#EAF2E9', '#F5E6E8',
-  '#E8EAF0', '#F0E6D8', '#E6EEF5', '#FFFFFF', '#F6F7F9',
-  '#0B141A', '#1F2C34', '#131C21', '#17212B', '#202C33',
-  '#0A0A0F', '#102027', '#1A1A2E', '#0B3D2E', '#075E54',
+// WhatsApp-style solid wallpapers — a bright row then a dark row. These are
+// wallpaper content, not UI colour, so they stay fixed in both themes. The name
+// is what a screen reader announces (not the hex code).
+const SOLID_COLORS: { hex: string; name: string }[] = [
+  { hex: '#ECE5DD', name: 'Classic beige' }, { hex: '#E4DDD3', name: 'Sand' },
+  { hex: '#DCEAF5', name: 'Pale blue' },     { hex: '#EAF2E9', name: 'Mint' },
+  { hex: '#F5E6E8', name: 'Blush' },         { hex: '#E8EAF0', name: 'Cloud grey' },
+  { hex: '#F0E6D8', name: 'Cream' },         { hex: '#E6EEF5', name: 'Ice blue' },
+  { hex: '#FFFFFF', name: 'White' },         { hex: '#F6F7F9', name: 'Off-white' },
+  { hex: '#0B141A', name: 'Night' },         { hex: '#1F2C34', name: 'Slate' },
+  { hex: '#131C21', name: 'Charcoal' },      { hex: '#17212B', name: 'Ink blue' },
+  { hex: '#202C33', name: 'Graphite' },      { hex: '#0A0A0F', name: 'Black' },
+  { hex: '#102027', name: 'Deep teal' },     { hex: '#1A1A2E', name: 'Midnight blue' },
+  { hex: '#0B3D2E', name: 'Forest green' },  { hex: '#075E54', name: 'Teal green' },
 ];
 
 const GRADIENT_PRESETS = [
@@ -66,6 +74,26 @@ export async function getWallpaper(chatId: string): Promise<WallpaperConfig | nu
 
 type Tab = 'solid' | 'gradient' | 'custom';
 
+// The live preview behind the sample bubbles. Module scope, so the Image /
+// LinearGradient are not remounted on every render of the screen.
+function PreviewBg({ selected, fallbackBg, boxStyle, children }: {
+  selected: WallpaperConfig | null; fallbackBg: string; boxStyle: object; children: React.ReactNode;
+}) {
+  if (selected?.type === 'image') {
+    return (
+      <View style={boxStyle}>
+        <Image source={{ uri: selected.value }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+        {children}
+      </View>
+    );
+  }
+  if (selected?.type === 'gradient' && selected.colors) {
+    return <LinearGradient colors={selected.colors as [string, string, ...string[]]} style={boxStyle}>{children}</LinearGradient>;
+  }
+  const bg = selected?.type === 'solid' ? selected.value : fallbackBg;
+  return <View style={[boxStyle, { backgroundColor: bg }]}>{children}</View>;
+}
+
 export default function ChatWallpaperScreen() {
   // Reactive size, so the tile grid follows rotation.
   const {width: SW} = useWindowDimensions();
@@ -79,17 +107,49 @@ export default function ChatWallpaperScreen() {
   // null = default (theme wallpaper)
   const [selected, setSelected] = useState<WallpaperConfig | null>(null);
   const [tab, setTab] = useState<Tab>('solid');
+  // What is stored now, to tell an unsaved change from the saved choice.
+  const [savedJson, setSavedJson] = useState('null');
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  // A pick made before the initial read resolves wins over that read.
+  const touched = useRef(false);
+  const pick = (w: WallpaperConfig | null) => { touched.current = true; setSelected(w); };
 
   useEffect(() => {
+    touched.current = false;
     (async () => {
       try {
         const raw = await AsyncStorage.getItem(storageKey);
-        setSelected(raw && raw !== SCOPED_DEFAULT ? JSON.parse(raw) : null);
+        const loaded: WallpaperConfig | null = raw && raw !== SCOPED_DEFAULT ? JSON.parse(raw) : null;
+        setSavedJson(JSON.stringify(loaded));
+        if (!touched.current) setSelected(loaded);
       } catch { /* keep default */ }
     })();
   }, [storageKey]);
 
+  // Same model as everywhere else that edits before saving: leaving with an
+  // unsaved pick (header back, hardware back, swipe) asks first.
+  const dirty = JSON.stringify(selected) !== savedJson;
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const leaving = useRef(false);
+  const navigation = useNavigation();
+  useEffect(() => navigation.addListener('beforeRemove', (ev) => {
+    // beforeRemove is preventable at runtime; the generic navigation type says otherwise.
+    const e = ev as typeof ev & { preventDefault(): void };
+    if (leaving.current || !dirtyRef.current) return;
+    e.preventDefault();
+    Alert.alert('Discard wallpaper change?', 'Tap "Set wallpaper" to keep it.', [
+      { text: 'Keep editing', style: 'cancel' },
+      { text: 'Discard', style: 'destructive', onPress: () => navigation.dispatch(e.data.action) },
+    ]);
+  }), [navigation]);
+
   const save = async () => {
+    // A double tap would copy the photo twice and orphan one copy.
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
     const dir = FileSystem.documentDirectory ? FileSystem.documentDirectory + 'wallpapers/' : '';
     let copied: string | null = null;
     try {
@@ -112,48 +172,40 @@ export default function ChatWallpaperScreen() {
       // or every change leaves another full-size file in documents.
       const stale = replacedWallpaperFile(prevRaw, toSave?.type === 'image' ? toSave.value : null, dir);
       if (stale) FileSystem.deleteAsync(stale, { idempotent: true }).catch(() => {});
+      leaving.current = true;
       router.back();
     } catch {
       // Not stored: the fresh copy is referenced by nothing.
       if (copied) FileSystem.deleteAsync(copied, { idempotent: true }).catch(() => {});
       Alert.alert('Error', 'Failed to save wallpaper.');
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
   };
 
-  const reset = () => setSelected(null);
+  const reset = () => pick(null);
 
   const pickImage = async () => {
-    const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      permissionDenied('Permission required', 'Allow access to your photos to set a custom wallpaper.', canAskAgain);
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true, aspect: [9, 16], quality: 0.8,
-    });
-    if (!result.canceled && result.assets[0]) {
-      setSelected({ type: 'image', value: result.assets[0].uri });
+    try {
+      const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        permissionDenied('Permission required', 'Allow access to your photos to set a custom wallpaper.', canAskAgain);
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true, aspect: [9, 16], quality: 0.8,
+      });
+      if (!result.canceled && result.assets[0]) {
+        pick({ type: 'image', value: result.assets[0].uri });
+      }
+    } catch (e: any) {
+      Alert.alert('Could not open your photos', e?.message ?? 'Try again.');
     }
   };
 
   const isDefault = !selected;
-
-  const PreviewBg = ({ children }: { children: React.ReactNode }) => {
-    if (selected?.type === 'image') {
-      return (
-        <View style={s.previewBox}>
-          <Image source={{ uri: selected.value }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
-          {children}
-        </View>
-      );
-    }
-    if (selected?.type === 'gradient' && selected.colors) {
-      return <LinearGradient colors={selected.colors as [string, string, ...string[]]} style={s.previewBox}>{children}</LinearGradient>;
-    }
-    const bg = selected?.type === 'solid' ? selected.value : colors.chatBg;
-    return <View style={[s.previewBox, { backgroundColor: bg }]}>{children}</View>;
-  };
 
   return (
     <View style={s.root}>
@@ -165,13 +217,13 @@ export default function ChatWallpaperScreen() {
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.iconBtn} hitSlop={8}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={s.headerTitle}>{chatId ? 'Wallpaper · this chat' : 'Wallpaper · all chats'}</Text>
-        <TouchableOpacity onPress={reset} hitSlop={8} accessibilityRole="button" accessibilityLabel="Reset to default wallpaper"><Text style={s.resetText}>Reset</Text></TouchableOpacity>
+        <Text style={s.headerTitle} accessibilityRole="header">{chatId ? 'Wallpaper · this chat' : 'Wallpaper · all chats'}</Text>
+        <TouchableOpacity onPress={reset} style={s.resetBtn} accessibilityRole="button" accessibilityLabel="Reset to default wallpaper"><Text style={s.resetText}>Reset</Text></TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
         {/* Preview */}
-        <PreviewBg>
+        <PreviewBg selected={selected} fallbackBg={colors.chatBg} boxStyle={s.previewBox}>
           <View style={s.sampleBubbles}>
             <View style={[s.peerBubble, { backgroundColor: colors.bubbleIn }]}>
               <Text style={[s.bubbleText, { color: colors.bubbleInText }]}>Hey, how are you?</Text>
@@ -209,13 +261,13 @@ export default function ChatWallpaperScreen() {
                 ? <Ionicons name="checkmark" size={18} color={colors.primary} />
                 : <Text style={[s.defaultTileTxt, { color: colors.textDim }]}>Default</Text>}
             </TouchableOpacity>
-            {SOLID_COLORS.map((color, i) => {
-              const on = selected?.type === 'solid' && selected.value === color;
+            {SOLID_COLORS.map(({ hex, name }) => {
+              const on = selected?.type === 'solid' && selected.value === hex;
               return (
-                <TouchableOpacity accessibilityRole="radio" accessibilityLabel={`Wallpaper colour ${color}`} accessibilityState={{ checked: on }}
-                  key={i}
-                  onPress={() => setSelected({ type: 'solid', value: color })}
-                  style={[s.colorTile, { backgroundColor: color }, on && s.tileSelected]}
+                <TouchableOpacity accessibilityRole="radio" accessibilityLabel={`${name} wallpaper`} accessibilityState={{ checked: on }}
+                  key={hex}
+                  onPress={() => pick({ type: 'solid', value: hex })}
+                  style={[s.colorTile, { backgroundColor: hex }, on && s.tileSelected]}
                 >
                   {on && <Ionicons name="checkmark" size={18} color={colors.primary} />}
                 </TouchableOpacity>
@@ -229,7 +281,7 @@ export default function ChatWallpaperScreen() {
             {GRADIENT_PRESETS.map(g => {
               const on = selected?.type === 'gradient' && selected.value === g.id;
               return (
-                <TouchableOpacity key={g.id} onPress={() => setSelected({ type: 'gradient', value: g.id, colors: g.colors })} activeOpacity={0.8} accessibilityRole="radio" accessibilityLabel={`${g.name} gradient`} accessibilityState={{ checked: on }}>
+                <TouchableOpacity key={g.id} onPress={() => pick({ type: 'gradient', value: g.id, colors: g.colors })} activeOpacity={0.8} accessibilityRole="radio" accessibilityLabel={`${g.name} gradient`} accessibilityState={{ checked: on }}>
                   <LinearGradient colors={g.colors as [string, string, ...string[]]} style={[s.gradientTile, on && s.tileSelected]}>
                     {on && <Ionicons name="checkmark-circle" size={22} color={colors.primary} />}
                   </LinearGradient>
@@ -242,14 +294,14 @@ export default function ChatWallpaperScreen() {
 
         {tab === 'custom' && (
           <View>
-            <TouchableOpacity style={s.customPickBtn} activeOpacity={0.8} onPress={pickImage} accessibilityRole="button">
+            <TouchableOpacity style={s.customPickBtn} activeOpacity={0.8} onPress={pickImage} accessibilityRole="button" accessibilityLabel="Choose a photo from the gallery">
               <Ionicons name="image-outline" size={28} color={colors.primary} />
               <Text style={s.customPickText}>Choose from gallery</Text>
               <Text style={s.customPickSub}>Pick a photo to use as the chat wallpaper</Text>
             </TouchableOpacity>
             {selected?.type === 'image' && (
               <View style={{ marginTop: 12 }}>
-                <Image source={{ uri: selected.value }} style={s.customImage} resizeMode="cover" />
+                <Image source={{ uri: selected.value }} style={s.customImage} resizeMode="cover" accessibilityIgnoresInvertColors accessible accessibilityLabel="Selected wallpaper photo" />
                 <View style={s.customCheckRow}>
                   <Ionicons name="checkmark-circle" size={18} color={colors.success} />
                   <Text style={[s.customCheckText, { color: colors.success }]}>Photo selected</Text>
@@ -259,8 +311,8 @@ export default function ChatWallpaperScreen() {
           </View>
         )}
 
-        <TouchableOpacity activeOpacity={0.85} onPress={save} style={s.setBtn} accessibilityRole="button">
-          <Text style={s.setBtnText}>Set wallpaper</Text>
+        <TouchableOpacity activeOpacity={0.85} onPress={save} disabled={saving} style={[s.setBtn, saving && { opacity: 0.6 }]} accessibilityRole="button" accessibilityState={{ disabled: saving, busy: saving }}>
+          <Text style={s.setBtnText}>{saving ? 'Saving…' : 'Set wallpaper'}</Text>
         </TouchableOpacity>
       </ScrollView>
     </View>
@@ -278,8 +330,9 @@ const makeStyles = (c: Palette, SW: number) => {
   return StyleSheet.create({
   root: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingHorizontal: 12, paddingBottom: 12, backgroundColor: c.bg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke, gap: 8 },
-  iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  iconBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { flex: 1, color: c.text, fontSize: 18, fontWeight: '700' },
+  resetBtn: { minHeight: 44, justifyContent: 'center' },
   resetText: { color: c.primary, fontSize: 14, fontWeight: '700', paddingHorizontal: 8 },
 
   previewBox: { minHeight: 200, borderRadius: 16, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, justifyContent: 'flex-end', marginBottom: 18 },
@@ -290,7 +343,7 @@ const makeStyles = (c: Palette, SW: number) => {
   bubbleTime: { fontSize: 10, alignSelf: 'flex-end', marginTop: 2 },
 
   tabs: { flexDirection: 'row', backgroundColor: c.glassSoft, borderRadius: 12, padding: 4, marginBottom: 16 },
-  tab: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 9 },
+  tab: { flex: 1, minHeight: 44, paddingVertical: 10, alignItems: 'center', justifyContent: 'center', borderRadius: 9 },
   tabActive: { backgroundColor: c.primary },
   tabText: { color: c.textDim, fontSize: 14, fontWeight: '600' },
   tabTextActive: { color: c.bubbleOutText },

@@ -20,7 +20,7 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, ScrollView, Share,
+  AccessibilityInfo, ActivityIndicator, Alert, ScrollView, Share,
   StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -63,6 +63,17 @@ function secondsLeft(iso?: string): number {
 // mm:ss, because at two minutes "expires in 1 min" is a lie for half its life.
 function mmss(s: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+// What a screen reader is told as the code runs down. A polite live region on
+// the one-second tick made TalkBack speak every second; this changes only at
+// these marks.
+function countdownMark(s: number): string | null {
+  if (s <= 0) return null;
+  if (s <= 10) return 'Code expires in 10 seconds';
+  if (s <= 30) return 'Code expires in 30 seconds';
+  if (s <= 60) return 'Code expires in 1 minute';
+  return null;
 }
 
 export default function ChatCodeScreen() {
@@ -116,7 +127,12 @@ export default function ChatCodeScreen() {
     return () => clearInterval(h);
   }, [expiresAt]);
 
-  const generate = async () => {
+  const mark = countdownMark(left);
+  useEffect(() => {
+    if (mark) AccessibilityInfo.announceForAccessibility(mark);
+  }, [mark]);
+
+  const mint = async () => {
     if (busy) return;
     setBusy(true);
     try {
@@ -124,6 +140,15 @@ export default function ChatCodeScreen() {
     } catch (e: any) {
       Alert.alert('Could not create a code', e?.message ?? 'Try again.');
     } finally { setBusy(false); }
+  };
+
+  // A new code kills the live one, which may already have been read out.
+  const generate = () => {
+    if (!live) { mint(); return; }
+    Alert.alert('Replace this code?', 'The current code stops working, even if you have already read it out.', [
+      { text: 'Keep it', style: 'cancel' },
+      { text: 'New code', style: 'destructive', onPress: mint },
+    ]);
   };
 
   const stop = async () => {
@@ -145,7 +170,7 @@ export default function ChatCodeScreen() {
     setJoining(true);
     try {
       const res = await joinChatCode(digits);
-      router.replace({ pathname: '/chat', params: { id: res.chatId } } as any);
+      router.replace({ pathname: '/chat', params: { id: res.chatId } });
     } catch (e: any) {
       Alert.alert('That code did not work', e?.message ?? 'Check it and try again.');
     } finally { setJoining(false); }
@@ -158,7 +183,7 @@ export default function ChatCodeScreen() {
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={S.title}>Chat by code</Text>
+        <Text style={S.title} accessibilityRole="header">Chat by code</Text>
       </View>
 
       <View style={S.tabs}>
@@ -196,7 +221,7 @@ export default function ChatCodeScreen() {
             {live?.code ? (
               <View style={S.codeBox}>
                 <Text style={S.code} selectable>{live.code}</Text>
-                <View style={S.timerRow} accessibilityLiveRegion="polite">
+                <View style={S.timerRow} accessible accessibilityLabel={`${mmss(left)} left`}>
                   <Ionicons name="time-outline" size={15} color={left <= 30 ? colors.danger : colors.textDim} />
                   <Text style={[S.timer, left <= 30 && S.timerLow]}>{mmss(left)} left</Text>
                 </View>
@@ -268,7 +293,7 @@ export default function ChatCodeScreen() {
             </TouchableOpacity>
 
             {live && (
-              <TouchableOpacity style={S.stop} onPress={stop} disabled={busy} activeOpacity={0.7} accessibilityRole="button">
+              <TouchableOpacity style={S.stop} onPress={stop} disabled={busy} activeOpacity={0.7} accessibilityRole="button" accessibilityState={{ disabled: busy }}>
                 <Ionicons name="close-circle-outline" size={18} color={colors.danger} />
                 <Text style={S.stopTxt}>Stop — nobody can use it</Text>
               </TouchableOpacity>
@@ -322,11 +347,11 @@ function useS() {
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8 },
-  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  backBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   title: { color: c.text, fontSize: 20, fontWeight: '800' },
 
   tabs: { flexDirection: 'row', gap: 8, marginHorizontal: 16, marginBottom: 8 },
-  tab: { flex: 1, minHeight: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: c.glassSoft },
+  tab: { flex: 1, minHeight: 44, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: c.glassSoft },
   tabOn: { backgroundColor: c.primary },
   tabTxt: { color: c.textDim, fontSize: 14, fontWeight: '700' },
   tabTxtOn: { color: c.bubbleOutText },
@@ -348,20 +373,20 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   timerLow: { color: c.danger },
   codeSub: { color: c.textFaint, fontSize: 12.5, marginTop: 8 },
   codeActions: { flexDirection: 'row', gap: 28, marginTop: 16 },
-  codeAction: { alignItems: 'center', gap: 4 },
+  codeAction: { alignItems: 'center', justifyContent: 'center', gap: 4, minWidth: 56, minHeight: 48 },
   codeActionTxt: { color: c.primary, fontSize: 12.5, fontWeight: '700' },
 
   // 2026-09-18: minHeight on both — a 34sp code field and a 16sp button pinned
-  // to a fixed box clip once the OS font scale is turned up, and this screen is
-  // how a second device gets linked. The padding is sized so content + 2×10
-  // still sits inside the old 66 / 50 at scale 1.0, so nothing moves there.
+  // to a fixed box clip once the OS font scale is turned up. The padding is
+  // sized so content + 2×10 still sits inside the old 66 / 50 at scale 1.0,
+  // so nothing moves there.
   input: { marginTop: 22, minHeight: 66, paddingVertical: 10, borderRadius: 14, backgroundColor: c.glassSoft, color: c.text, fontSize: 34, fontWeight: '800', letterSpacing: 10, textAlign: 'center' },
 
   cta: { marginTop: 22, minHeight: 50, paddingVertical: 10, borderRadius: 14, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
   ctaOff: { opacity: 0.4 },
   ctaTxt: { color: c.bubbleOutText, fontSize: 16, fontWeight: '800' },
 
-  stop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 16 },
+  stop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 8, minHeight: 44 },
   stopTxt: { color: c.danger, fontSize: 13.5, fontWeight: '700' },
 
   hint: { color: c.textFaint, fontSize: 12, marginTop: 10, lineHeight: 17 },

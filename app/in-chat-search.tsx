@@ -21,7 +21,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { searchInChat, type InChatMessageHit } from '../lib/chatService';
 import { setPendingJump } from '../lib/chatJump';
-import { AuroraBackground } from '../components/ui';
+import { AuroraBackground, KeyboardSafe } from '../components/ui';
 import { HEADER_TOP } from '../constants/layout';
 
 function useS() {
@@ -29,13 +29,15 @@ function useS() {
   return useMemo(() => makeStyles(colors), [colors]);
 }
 
+const ResultGap = () => <View style={{ height: 8 }} />;
+
 export default function InChatSearchScreen() {
   const { colors } = useTheme();
   const s = useS();
   const router = useRouter();
   const { chatId } = useLocalSearchParams<{ chatId: string }>();
   const inputRef = useRef<TextInput>(null);
-  const debounce = useRef<any>(null);
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reqSeq = useRef(0);
 
   const [query, setQuery] = useState('');
@@ -131,7 +133,7 @@ export default function InChatSearchScreen() {
     } catch { return ''; }
   }, []);
 
-  const highlightMatch = (text: string, q: string) => {
+  const highlightMatch = useCallback((text: string, q: string) => {
     const lower = text.toLowerCase();
     const idx = lower.indexOf(q.toLowerCase());
     if (idx === -1) return <Text style={s.msgText} numberOfLines={2}>{text}</Text>;
@@ -148,15 +150,16 @@ export default function InChatSearchScreen() {
         {text.substring(idx + q.length, endCtx)}{suffix}
       </Text>
     );
-  };
+  }, [s]);
 
-  const onTapResult = (messageId: number) => {
+  const onTapResult = useCallback((messageId: number) => {
     // Hand the target to the chat screen, then return to it; it scrolls there.
     if (chatId) setPendingJump(chatId, messageId);
     router.back();
-  };
+  }, [chatId, router]);
 
-  const renderItem = ({ item }: { item: InChatMessageHit }) => (
+  const term = query.trim();
+  const renderItem = useCallback(({ item }: { item: InChatMessageHit }) => (
     <TouchableOpacity
       style={s.resultCard}
       activeOpacity={0.7}
@@ -169,16 +172,17 @@ export default function InChatSearchScreen() {
         <Text style={s.senderName} numberOfLines={1}>{item.senderName || 'Unknown'}</Text>
         <Text style={s.timestamp}>{formatTime(item.createdAt)}</Text>
       </View>
-      {highlightMatch(item.content, query.trim())}
+      {highlightMatch(item.content, term)}
     </TouchableOpacity>
-  );
+  ), [s, onTapResult, formatTime, highlightMatch, term]);
 
   const hasQuery = query.trim().length > 0;
 
   if (gate !== 'open') {
     const m = lockInfo?.lockMethod;
     return (
-      <View style={s.root}>
+      // KeyboardSafe: the PIN input is centred and would sit under the keyboard.
+      <KeyboardSafe style={s.root}>
         <AuroraBackground />
         <Stack.Screen options={{ headerShown: false }} />
         <View style={s.header}>
@@ -230,13 +234,13 @@ export default function InChatSearchScreen() {
                       </TouchableOpacity>
                     </>
                   )}
-                  {!!lockErr && <Text style={[s.emptySubtitle, { color: colors.danger }]} accessibilityLiveRegion="polite">{lockErr}</Text>}
+                  {!!lockErr && <Text style={[s.emptySubtitle, { color: colors.danger }]} accessibilityRole="alert" accessibilityLiveRegion="polite">{lockErr}</Text>}
                 </>
               )}
             </>
           )}
         </View>
-      </View>
+      </KeyboardSafe>
     );
   }
 
@@ -256,6 +260,7 @@ export default function InChatSearchScreen() {
             ref={inputRef}
             style={s.searchInput}
             placeholder="Search messages…"
+            accessibilityLabel="Search messages in this chat"
             placeholderTextColor={colors.textFaint}
             value={query}
             onChangeText={setQuery}
@@ -311,7 +316,7 @@ export default function InChatSearchScreen() {
           renderItem={renderItem}
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
-          ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+          ItemSeparatorComponent={ResultGap}
         />
       )}
     </View>
@@ -380,7 +385,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   msgText: { color: c.textDim, fontSize: 14, lineHeight: 20 },
   highlight: { color: c.text, backgroundColor: brandAlpha(0.28), fontWeight: '700' },
   unlockBtn: { marginTop: 16, minHeight: 48, minWidth: 200, paddingHorizontal: 24, borderRadius: 12, backgroundColor: c.primary, justifyContent: 'center', alignItems: 'center' },
-  unlockTxt: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  unlockTxt: { color: c.bubbleOutText, fontSize: 15, fontWeight: '700' },
   pinInput: {
     marginTop: 16, minWidth: 200, minHeight: 48, borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke,
     backgroundColor: c.glassSoft, color: c.text, fontSize: 20, letterSpacing: 6, textAlign: 'center', paddingHorizontal: 12,

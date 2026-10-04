@@ -21,6 +21,17 @@ export function bookmarkBody(
   return null;
 }
 
+/**
+ * View-once and Invisible Ink messages are shown only in place, in their own
+ * bubble. Bookmarks made before Star stopped snapshotting them may still hold
+ * a sealed copy, so the list hides the body whenever the message carries one
+ * of these flags.
+ */
+export function isProtectedMessage(meta: unknown): boolean {
+  const m = meta as { viewOnce?: unknown; invisibleInk?: unknown } | null | undefined;
+  return !!(m && typeof m === 'object' && (m.viewOnce || m.invisibleInk));
+}
+
 export function withoutBodies<T extends BookmarkLike>(rows: readonly T[]): T[] {
   return rows.map(r => (r.message && r.message.content != null
     ? { ...r, message: { ...r.message, content: null } }

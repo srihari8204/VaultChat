@@ -14,6 +14,7 @@ import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
+// BRAND_ACCENT styles the exported HTML file only (a fixed dark document), not the app UI.
 import { type Palette, BRAND_ACCENT } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { getChat, getMessages, hydrateMessages, looksEncrypted, type Message } from '../lib/chatService';
@@ -207,12 +208,14 @@ export default function ChatExportScreen() {
         namesRef.current = new Map(detail.members.map(mm => [mm.userId, mm.name || mm.email || '']));
       } catch { namesRef.current = new Map(); }   // names are cosmetic; peerName is the fallback
       const { msgs, truncated } = await fetchAll();
+      // Say so BEFORE the file is shared, while the user can still decide.
+      if (truncated && !(await confirm(
+        'Export incomplete',
+        `Only the newest ${MAX_PAGES * PAGE} messages from the server can be included, plus older ones saved on this device. Export anyway?`,
+      ))) return;
       setProgress('Formatting ' + msgs.length + ' messages…');
       await fn(msgs, me?.id ?? '');
       setProgress('');
-      if (truncated) {
-        Alert.alert('Export incomplete', `Only the newest ${MAX_PAGES * PAGE} messages from the server were included.`);
-      }
     } catch (e: any) {
       Alert.alert('Export failed', e?.message ?? 'Something went wrong');
     } finally {
@@ -274,8 +277,8 @@ export default function ChatExportScreen() {
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={s.headerTitle}>Export Chat</Text>
-        <View style={{ width: 40 }} />
+        <Text style={s.headerTitle} accessibilityRole="header">Export Chat</Text>
+        <View style={{ width: 44 }} />
       </View>
 
       <View style={s.body}>
@@ -322,26 +325,32 @@ export default function ChatExportScreen() {
         <KeyboardSafe keyboardOnly>
         <View style={s.pinOverlay}>
           <View style={s.pinPanel}>
-            <Text style={s.pinTitle}>Chat locked</Text>
+            <Text style={s.pinTitle} accessibilityRole="header">Chat locked</Text>
             <Text style={s.pinDesc}>Enter this chat&apos;s PIN to export it.</Text>
             <TextInput
               style={[s.pinInput, !!pinErr && { borderColor: colors.danger }]}
               value={pin}
-              onChangeText={(t) => { setPin(t); setPinErr(null); }}
+              onChangeText={(t) => { setPin(t.replace(/\D/g, '').slice(0, 8)); setPinErr(null); }}
               keyboardType="number-pad"
               secureTextEntry
-              maxLength={12}
+              maxLength={8}
               autoFocus
               accessibilityLabel="Chat lock PIN"
               onSubmitEditing={submitPin}
             />
-            {!!pinErr && <Text style={{ color: colors.danger, fontSize: 11, marginBottom: 8 }} accessibilityLiveRegion="polite">{pinErr}</Text>}
+            {!!pinErr && <Text style={{ color: colors.danger, fontSize: 11, marginBottom: 8 }} accessibilityRole="alert" accessibilityLiveRegion="polite">{pinErr}</Text>}
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <TouchableOpacity style={s.pinCancel} onPress={() => closePin(false)} accessibilityRole="button">
                 <Text style={{ color: colors.textDim, fontWeight: '700' }}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={s.pinOk} onPress={submitPin} accessibilityRole="button">
-                <Text style={{ color: '#FFFFFF', fontWeight: '700' }}>Unlock</Text>
+              <TouchableOpacity
+                style={[s.pinOk, pin.length < 4 && { opacity: 0.5 }]}
+                onPress={submitPin}
+                disabled={pin.length < 4}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: pin.length < 4 }}
+              >
+                <Text style={{ color: colors.bubbleOutText, fontWeight: '700' }}>Unlock</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -355,7 +364,7 @@ export default function ChatExportScreen() {
 const makeStyles = (c: Palette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingHorizontal: 16, paddingBottom: 8 },
-  backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
+  backBtn: { width: 44, height: 44, justifyContent: 'center', alignItems: 'center' },
   headerTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
   body: { flex: 1, padding: 16 },
   infoCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 14, padding: 16, marginBottom: 20, borderWidth: 1, borderColor: c.glassStroke },
@@ -371,11 +380,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   noteBox: { marginTop: 24, backgroundColor: c.glassSoft, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: c.glassStroke },
   noteTitle: { color: c.danger, fontSize: 12, fontWeight: '800', marginBottom: 4 },
   noteDesc: { color: c.textDim, fontSize: 11, lineHeight: 18 },
+  // Fixed scrim: dims whatever is behind the dialog the same way in both themes.
   pinOverlay: { flex: 1, backgroundColor: '#00000099', justifyContent: 'center', padding: 28 },
   pinPanel: { backgroundColor: c.surfaceSolid, borderRadius: 16, padding: 20, borderWidth: 1, borderColor: c.glassStroke },
   pinTitle: { color: c.text, fontSize: 16, fontWeight: '800' },
   pinDesc: { color: c.textDim, fontSize: 12, marginTop: 4, marginBottom: 14 },
   pinInput: { backgroundColor: c.glassSoft, borderRadius: 10, borderWidth: 1, borderColor: c.glassStroke, color: c.text, fontSize: 20, letterSpacing: 6, textAlign: 'center', paddingVertical: 10, marginBottom: 10 },
-  pinCancel: { flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 10, borderWidth: 1, borderColor: c.glassStroke },
-  pinOk: { flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 10, backgroundColor: BRAND_ACCENT },
+  pinCancel: { flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: 44, paddingVertical: 12, borderRadius: 10, borderWidth: 1, borderColor: c.glassStroke },
+  pinOk: { flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: 44, paddingVertical: 12, borderRadius: 10, backgroundColor: c.primary },
 });

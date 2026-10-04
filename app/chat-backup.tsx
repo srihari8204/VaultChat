@@ -5,7 +5,7 @@
 // automatically on reinstall (prompted at sign-in) but is also available here.
 
 import { HEADER_TOP } from '../constants/layout';
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator,
   Modal, TextInput, Platform,
@@ -63,16 +63,22 @@ export default function ChatBackupScreen() {
   const [busy, setBusy] = useState<'backup' | 'restore' | 'signin' | null>(null);
 
   const [loadErr, setLoadErr] = useState(false);
-
-  const refresh = async () => {
-    try { setSettings(await getBackupSettings()); setLoadErr(false); }
-    catch { setLoadErr(true); }
-    driveBackupMeta().then(setDrive).catch(() => {});
-    getDriveEmail().then(setGEmail).catch(() => {});
-    listLocalBackups().then(setLocal).catch(() => {});
-    cloudBackupMeta().then(setCloud).catch(() => {});
-    getBackupMode().then(setMode).catch(() => {});
-  };
+  // The metadata reads below are fire-and-forget; none may set state after
+  // the screen has closed.
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
+  const refresh = useCallback(async () => {
+    const live = <T,>(set: (v: T) => void) => (v: T) => { if (mounted.current) set(v); };
+    try {
+      const st = await getBackupSettings();
+      if (mounted.current) { setSettings(st); setLoadErr(false); }
+    } catch { if (mounted.current) setLoadErr(true); }
+    driveBackupMeta().then(live(setDrive)).catch(() => {});
+    getDriveEmail().then(live(setGEmail)).catch(() => {});
+    listLocalBackups().then(live(setLocal)).catch(() => {});
+    cloudBackupMeta().then(live(setCloud)).catch(() => {});
+    getBackupMode().then(live(setMode)).catch(() => {});
+  }, []);
 
   const connectGoogle = async () => {
     setBusy('signin');
@@ -85,7 +91,7 @@ export default function ChatBackupScreen() {
     } finally { setBusy(null); }
   };
   // On focus, not just mount: returning from /backup-e2ee must refresh `mode`.
-  useFocusEffect(useCallback(() => { refresh(); }, []));
+  useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
 
   const patch = async (p: Partial<BackupSettings>) => {
     const prev = settings as BackupSettings;
@@ -163,7 +169,13 @@ export default function ChatBackupScreen() {
         }
       }
       setAskSecret(null); setSecretInput('');
-      Alert.alert('Restore complete', `${n} messages restored. Restart the app to see them.`);
+      // Restored rows go straight into the local store, which every chat reads
+      // when it opens, and the Chats list re-reads itself on focus — so going
+      // back to Chats shows them; no restart needed.
+      Alert.alert('Restore complete', `${n} messages restored.`, [
+        { text: 'Stay here', style: 'cancel' },
+        { text: 'Open chats', onPress: () => router.dismissTo('/(tabs)/chats') },
+      ]);
     } catch (e: any) {
       if (isSecretRequired(e)) { setAskSecret(e.mode); return; }
       // A supplied secret that did not open it is the overwhelmingly likely
@@ -184,7 +196,7 @@ export default function ChatBackupScreen() {
   const onRestore = () => {
     Alert.alert(
       'Restore chats?',
-      'Restore your messages from the latest backup. Restart the app afterwards.',
+      'Restore your messages from the latest backup.',
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Restore', onPress: () => { doRestore(); } },
@@ -200,7 +212,7 @@ export default function ChatBackupScreen() {
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.iconBtn} hitSlop={8}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={s.headerTitle}>Chat backup</Text>
+        <Text style={s.headerTitle} accessibilityRole="header">Chat backup</Text>
       </View>
     </>
   );
@@ -213,7 +225,7 @@ export default function ChatBackupScreen() {
           {loadErr ? (
             <>
               <Text style={s.topDesc}>Backup settings could not be loaded.</Text>
-              <TouchableOpacity onPress={refresh} accessibilityRole="button" style={{ padding: 10 }}>
+              <TouchableOpacity onPress={refresh} accessibilityRole="button" style={{ padding: 10, minHeight: 44, justifyContent: 'center' }}>
                 <Text style={s.restoreLink}>Try again</Text>
               </TouchableOpacity>
             </>
@@ -254,10 +266,10 @@ export default function ChatBackupScreen() {
 
           <TouchableOpacity style={[s.backupBtn, busy && s.btnOff]} onPress={onBackUp} disabled={!!busy} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel="Back up now" accessibilityState={{ disabled: !!busy, busy: busy === 'backup' }}>
             {busy === 'backup'
-              ? <ActivityIndicator color="#fff" />
+              ? <ActivityIndicator color={colors.bubbleOutText} />
               : <Text style={s.backupTxt}>BACK UP</Text>}
           </TouchableOpacity>
-          <TouchableOpacity onPress={onRestore} disabled={!!busy} style={{ paddingVertical: 10 }} accessibilityRole="button" accessibilityState={{ disabled: !!busy }}>
+          <TouchableOpacity onPress={onRestore} disabled={!!busy} style={{ paddingVertical: 10, minHeight: 44, justifyContent: 'center' }} accessibilityRole="button" accessibilityLabel="Restore from backup" accessibilityState={{ disabled: !!busy, busy: busy === 'restore' }}>
             <Text style={s.restoreLink}>{busy === 'restore' ? 'Restoring…' : 'Restore'}</Text>
           </TouchableOpacity>
         </View>
@@ -275,7 +287,16 @@ export default function ChatBackupScreen() {
 
         <View style={s.divider} />
         <Text style={s.section}>END-TO-END ENCRYPTED BACKUP</Text>
-        <TouchableOpacity style={s.optRow} onPress={() => router.push('/backup-e2ee' as any)} disabled={!!busy} activeOpacity={0.7}>
+        <TouchableOpacity
+          style={s.optRow}
+          onPress={() => router.push('/backup-e2ee')}
+          disabled={!!busy}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={`End-to-end encrypted backup: ${mode === 'account' ? 'off' : 'on'}`}
+          accessibilityHint="Opens end-to-end encrypted backup settings"
+          accessibilityState={{ disabled: !!busy }}
+        >
           <Ionicons name={mode === 'account' ? 'lock-open-outline' : 'lock-closed'} size={22}
                     color={mode === 'account' ? colors.textDim : colors.primary} />
           <View style={{ flex: 1 }}>
@@ -293,7 +314,15 @@ export default function ChatBackupScreen() {
 
         <View style={s.divider} />
         <Text style={s.section}>GOOGLE ACCOUNT</Text>
-        <TouchableOpacity style={s.optRow} onPress={connectGoogle} disabled={!!busy} activeOpacity={0.7}>
+        <TouchableOpacity
+          style={s.optRow}
+          onPress={connectGoogle}
+          disabled={!!busy}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={gEmail ? `Google account: ${gEmail}` : 'Connect a Google account'}
+          accessibilityState={{ disabled: !!busy, busy: busy === 'signin' }}
+        >
           <Ionicons name="logo-google" size={20} color={colors.primary} />
           <Text style={[s.optLabel, { flex: 1 }]} numberOfLines={1}>{gEmail || 'Connect a Google account'}</Text>
           {busy === 'signin'
@@ -329,7 +358,7 @@ export default function ChatBackupScreen() {
         <KeyboardSafe keyboardOnly>
         <View style={s.modalWrap}>
           <View style={s.modalCard}>
-            <Text style={s.modalTitle}>
+            <Text style={s.modalTitle} accessibilityRole="header">
               {askSecret === 'key' ? 'Enter your 64-digit key' : 'Enter your backup password'}
             </Text>
             <Text style={s.modalBody}>
@@ -350,12 +379,13 @@ export default function ChatBackupScreen() {
               accessibilityLabel={askSecret === 'key' ? '64-digit backup key' : 'Backup password'}
             />
             <View style={s.modalBtns}>
-              <TouchableOpacity onPress={() => { setAskSecret(null); setSecretInput(''); }} disabled={!!busy} accessibilityRole="button">
+              <TouchableOpacity onPress={() => { setAskSecret(null); setSecretInput(''); }} disabled={!!busy} style={s.modalBtn} accessibilityRole="button">
                 <Text style={s.modalCancel}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => doRestore(secretInput)}
                 disabled={!!busy || !secretInput.trim()}
+                style={s.modalBtn}
                 accessibilityRole="button"
                 accessibilityLabel="Unlock backup"
                 accessibilityState={{ disabled: !!busy || !secretInput.trim() }}>
@@ -375,7 +405,7 @@ export default function ChatBackupScreen() {
 const makeStyles = (c: Palette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', paddingTop: HEADER_TOP, paddingHorizontal: 12, paddingBottom: 12, backgroundColor: c.bg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke, gap: 8 },
-  iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  iconBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
 
   top: { alignItems: 'center', paddingHorizontal: 24, paddingTop: 24 },
@@ -385,7 +415,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   timeVal: { color: c.text, fontSize: 14, fontWeight: '600' },
   backupBtn: { backgroundColor: c.primary, borderRadius: 26, paddingVertical: 14, paddingHorizontal: 48, marginTop: 22, minWidth: 200, alignItems: 'center' },
   btnOff: { opacity: 0.6 },
-  backupTxt: { color: '#fff', fontSize: 15, fontWeight: '800', letterSpacing: 0.5 },
+  backupTxt: { color: c.bubbleOutText, fontSize: 15, fontWeight: '800', letterSpacing: 0.5 },
   restoreLink: { color: c.primary, fontSize: 14, fontWeight: '700' },
 
   divider: { height: StyleSheet.hairlineWidth, backgroundColor: c.hairline, marginVertical: 12 },
@@ -395,6 +425,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   optSub: { color: c.textFaint, fontSize: 12, lineHeight: 16, marginTop: 2 },
   note: { color: c.textFaint, fontSize: 12, lineHeight: 17, paddingHorizontal: 18, paddingTop: 18 },
 
+  // Fixed scrim: dims whatever is behind the dialog the same way in both themes (no scrim token exists).
   modalWrap: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center', padding: 24 },
   modalCard: { width: '100%', maxWidth: 420, backgroundColor: c.bg, borderRadius: 14, padding: 20 },
   modalTitle: { color: c.text, fontSize: 17, fontWeight: '700', marginBottom: 8 },
@@ -404,7 +435,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderRadius: 10, paddingHorizontal: 14, paddingVertical: Platform.OS === 'ios' ? 14 : 10,
   },
   modalInputMono: { minHeight: 92, textAlignVertical: 'top', letterSpacing: 1, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
-  modalBtns: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 26, marginTop: 18 },
+  modalBtns: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 12, marginTop: 18 },
+  modalBtn: { minHeight: 44, minWidth: 64, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center' },
   modalCancel: { color: c.textDim, fontSize: 14, fontWeight: '700' },
   modalOk: { color: c.primary, fontSize: 14, fontWeight: '800', letterSpacing: 0.5 },
 });

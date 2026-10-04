@@ -32,7 +32,7 @@ import {
   type BookmarkRow,
 } from '../lib/chatService';
 import { readCache, writeCache } from '../lib/localCache';
-import { bookmarkBody, hasBodies, withoutBodies } from '../lib/bookmarkBodies';
+import { bookmarkBody, hasBodies, isProtectedMessage, withoutBodies } from '../lib/bookmarkBodies';
 import { setPendingJump } from '../lib/chatJump';
 import { isChatLocked } from '../lib/chatLock';
 import { AuroraBackground } from '../components/ui';
@@ -40,6 +40,8 @@ import { AppText as Text } from '../components/ui/Text';
 
 /** Shown instead of the body of a bookmark from a locked chat. */
 const LOCKED_TEXT = '🔒 Locked chat';
+/** Shown instead of the body of a view-once or Invisible Ink message. */
+const PROTECTED_TEXT = '🔒 Protected message';
 
 // Fill each row's body from the sealed local snapshot (or a non-ciphertext
 // server body). Rows whose body is unreadable show their type label instead.
@@ -55,6 +57,9 @@ async function withBodies(rows: BookmarkRow[]): Promise<BookmarkRow[]> {
     const id = Number(b.message?.id ?? 0);
     if (!b.message || !id) return b;
     if (lockedIds.has(b.message.chatId)) return { ...b, message: { ...b.message, content: LOCKED_TEXT } };
+    // ponytail: hidden, not purged — chatService exports no snapshot delete
+    // short of removeBookmark; the sealed copy goes when the bookmark does.
+    if (isProtectedMessage(b.message.meta)) return { ...b, message: { ...b.message, content: PROTECTED_TEXT } };
     const local = await getBookmarkPlaintext(id);
     return { ...b, message: { ...b.message, content: bookmarkBody(b.message.content, local, looksEncrypted) } };
   }));
@@ -73,6 +78,8 @@ export default function BookmarksScreen() {
   const [loading,    setLoading]    = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error,      setError]      = useState<string | null>(null);
+  // The server could not be reached, so the rows are the saved copy.
+  const [stale,      setStale]      = useState(false);
 
   const load = useCallback(async () => {
     // Local-first: paint cached bookmarks instantly, then fetch fresh.
@@ -94,9 +101,11 @@ export default function BookmarksScreen() {
       setRows(hydrated);
       writeCache('bookmarks', withoutBodies(hydrated));
       setError(null);
+      setStale(false);
     } catch (e: any) {
-      // Keep cached rows for offline read; only surface if nothing painted.
-      if (!cached) setError(e?.message ?? 'Failed to load bookmarks');
+      // Keep cached rows for offline read, and say they are the saved copy.
+      if (cached) setStale(true);
+      else setError(e?.message ?? 'Failed to load bookmarks');
     }
   }, []);
 
@@ -117,7 +126,7 @@ export default function BookmarksScreen() {
     }
     // chat.tsx consumes this on focus and scrolls to the message.
     if (Number(b.message.id) > 0) setPendingJump(b.message.chatId, Number(b.message.id));
-    router.push({ pathname: '/chat', params: { id: b.message.chatId } } as any);
+    router.push({ pathname: '/chat', params: { id: b.message.chatId } });
   }, [router]);
 
   const onLongPress = useCallback((b: BookmarkRow) => {
@@ -155,18 +164,39 @@ export default function BookmarksScreen() {
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={S.title}>Bookmarks</Text>
+        <Text style={S.title} accessibilityRole="header">Bookmarks</Text>
       </View>
 
-      {error && <Text style={S.errorTxt}>{error}</Text>}
+      {stale && (
+        <Text style={S.staleTxt} accessibilityRole="alert">
+          {"Couldn't refresh — showing your saved copy. Pull down to try again."}
+        </Text>
+      )}
 
       {rows.length === 0 ? (
-        <ScrollView contentContainerStyle={[S.center, { flexGrow: 1, padding: 32, gap: 12 }]}>
-          <Ionicons name="bookmark-outline" size={48} color={colors.primary} />
-          <Text style={S.emptyTitle}>No bookmarks yet</Text>
-          <Text style={S.emptySub}>
-            Long-press any message in a chat and choose Star to save it here.
-          </Text>
+        <ScrollView
+          contentContainerStyle={[S.center, { flexGrow: 1, padding: 32, gap: 12 }]}
+          refreshControl={<RefreshControl tintColor={colors.primary} refreshing={refreshing} onRefresh={onRefresh} />}
+        >
+          {error ? (
+            // A failed load is not "No bookmarks yet".
+            <>
+              <Ionicons name="cloud-offline-outline" size={48} color={colors.danger} />
+              <Text style={S.emptyTitle}>{"Couldn't load bookmarks"}</Text>
+              <Text style={S.emptySub} accessibilityRole="alert">{error}</Text>
+              <TouchableOpacity accessibilityRole="button" accessibilityState={{ busy: refreshing }} disabled={refreshing} onPress={onRefresh} style={S.retryBtn}>
+                <Text style={S.retryTxt}>Try again</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <Ionicons name="bookmark-outline" size={48} color={colors.primary} />
+              <Text style={S.emptyTitle}>No bookmarks yet</Text>
+              <Text style={S.emptySub}>
+                Long-press any message in a chat and choose Star to save it here.
+              </Text>
+            </>
+          )}
         </ScrollView>
       ) : (
         <FlatList
@@ -182,6 +212,9 @@ export default function BookmarksScreen() {
               delayLongPress={300}
               activeOpacity={0.7}
               accessibilityRole="button"
+              accessibilityLabel={`${b.message?.chatName || (b.message?.chatType === 'group' ? 'Group' : 'Direct chat')}: ${b.message
+                ? b.message.deletedAt ? 'message deleted by sender' : (b.message.content || typeLabel(b.message.type))
+                : 'message no longer available'}. Saved ${formatAgo(b.createdAt)}`}
               accessibilityHint="Opens the chat at this message"
               accessibilityActions={[{ name: 'remove', label: 'Remove bookmark' }]}
               onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'remove') onLongPress(b); }}
@@ -190,8 +223,7 @@ export default function BookmarksScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={S.rowChat} numberOfLines={1}>
                   {b.message?.chatName
-                    || (b.message?.chatType === 'group' ? 'Group' : 'Direct chat')
-                    || '(deleted chat)'}
+                    || (b.message?.chatType === 'group' ? 'Group' : 'Direct chat')}
                 </Text>
                 <Text style={S.rowContent} numberOfLines={2}>
                   {b.message
@@ -239,10 +271,11 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   backBtn:      { width: 44, height: 44, borderRadius: 16, backgroundColor: c.glassSoft, alignItems: 'center', justifyContent: 'center' },
-  backTxt:      { color: c.text, fontSize: 26, fontWeight: '600' },
   title:        { color: c.text, fontSize: 22, fontWeight: '800' },
 
-  errorTxt:     { color: c.danger, paddingHorizontal: 16, paddingVertical: 8, fontSize: 12 },
+  staleTxt:     { color: c.textDim, paddingHorizontal: 16, paddingVertical: 8, fontSize: 12 },
+  retryBtn:     { minHeight: 44, paddingHorizontal: 24, borderRadius: 12, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
+  retryTxt:     { color: c.bubbleOutText, fontWeight: '700' },
   emptyTitle:   { color: c.text, fontSize: 16, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
   emptySub:     { color: c.textDim, fontSize: 13, lineHeight: 18, textAlign: 'center' },
 

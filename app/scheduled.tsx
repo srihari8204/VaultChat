@@ -11,7 +11,7 @@
 import { HEADER_TOP, SCREEN_BOTTOM } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState , useMemo} from 'react';
+import { useCallback, useEffect, useRef, useState , useMemo} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -31,14 +31,13 @@ import {
   looksEncrypted,
   type ScheduledMessageRow,
 } from '../lib/chatService';
-import { SCHEDULED_LOCAL } from '../constants/flags';
-import { listScheduled, cancelScheduled } from '../lib/scheduledQueue';
-import { cancelTrigger } from '../lib/scheduledRunner';
-import { getScheduledCopy, deleteScheduledCopy } from '../lib/scheduledLocalCopy';
+import { getScheduledCopy, deleteScheduledCopy, pruneScheduledCopies } from '../lib/scheduledLocalCopy';
 import { AuroraBackground } from '../components/ui';
 import { AppText as Text } from '../components/ui/Text';
 
 const CACHE_KEY = 'scheduled';
+/** GET /user/scheduled-messages returns at most this many rows (LIMIT 200). */
+const SERVER_LIST_LIMIT = 200;
 
 const withoutContent = (rows: ScheduledMessageRow[]) => rows.map(r => ({ ...r, content: null }));
 
@@ -46,7 +45,8 @@ const withoutContent = (rows: ScheduledMessageRow[]) => rows.map(r => ({ ...r, c
 // and never the ciphertext itself.
 async function withLocalCopies(rows: ScheduledMessageRow[]): Promise<ScheduledMessageRow[]> {
   return Promise.all(rows.map(async r => {
-    if (r.type !== 'text') return r;
+    // A media row's content (caption/meta) is ciphertext too: never print it.
+    if (r.type !== 'text') return r.content && looksEncrypted(r.content) ? { ...r, content: null } : r;
     const plain = await getScheduledCopy(String(r.id));
     if (plain != null) return { ...r, content: plain };
     return r.content && !looksEncrypted(r.content) ? r : { ...r, content: '🔒 Encrypted scheduled message' };
@@ -66,20 +66,17 @@ export default function ScheduledScreen() {
   const [loading,    setLoading]    = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error,      setError]      = useState<string | null>(null);
+  // Set once the server answered, so a slower cache read cannot paint over it.
+  const loadedRef = useRef(false);
 
   const load = useCallback(async () => {
     try {
-      let list: ScheduledMessageRow[];
-      if (SCHEDULED_LOCAL) {
-        // On-device queue (#73): map to the shared row shape the UI renders.
-        list = (await listScheduled()).map(it => ({
-          id: it.id, chatId: it.chatId, chatName: it.peerName || 'Chat', chatType: 'direct',
-          content: it.content, type: it.type as any,
-          sendAt: new Date(it.sendAt).toISOString(), sentAt: null,
-        } as any));
-      } else {
-        list = await withLocalCopies(await listScheduledMessages());
-      }
+      const server = await listScheduledMessages();
+      loadedRef.current = true;
+      // Local copies of rows the server no longer lists (delivered > 7 days ago)
+      // are dropped — but only from a complete list, never a truncated one.
+      if (server.length < SERVER_LIST_LIMIT) pruneScheduledCopies(server.map(r => String(r.id))).catch(() => {});
+      const list = await withLocalCopies(server);
       setRows(list);
       setError(null);
       writeCache(CACHE_KEY, withoutContent(list));
@@ -92,23 +89,25 @@ export default function ScheduledScreen() {
     }
   }, []);
 
+  // Paint the cached rows (no bodies) while the first server load runs.
   useEffect(() => {
     (async () => {
       const cached = await readCache<ScheduledMessageRow[]>(CACHE_KEY);
-      if (cached) {
-        // Older builds cached decrypted previews here; scrub them.
-        if (cached.some(r => r.content != null)) writeCache(CACHE_KEY, withoutContent(cached));
-        setRows(await withLocalCopies(withoutContent(cached)));
-        setLoading(false);
-      }
-      await load();
+      if (!cached || loadedRef.current) return;
+      // Older builds cached decrypted previews here; scrub them.
+      if (cached.some(r => r.content != null)) writeCache(CACHE_KEY, withoutContent(cached));
+      const rowsFromCache = await withLocalCopies(withoutContent(cached));
+      if (loadedRef.current) return;
+      setRows(rowsFromCache);
       setLoading(false);
     })();
-  }, [load]);
+  }, []);
 
-  // Refresh on return (e.g. after scheduling from a chat). The first focus
-  // overlaps the mount load above, which is harmless: both write the same rows.
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  // The one server load: on first focus, and again on every return (e.g. after
+  // scheduling from a chat).
+  useFocusEffect(useCallback(() => {
+    load().finally(() => setLoading(false));
+  }, [load]));
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -117,32 +116,23 @@ export default function ScheduledScreen() {
   }, [load]);
 
   const removeRow = useCallback(async (row: ScheduledMessageRow) => {
-    if (SCHEDULED_LOCAL) { await cancelScheduled(row.id); await cancelTrigger(row.id); }
-    else { await cancelScheduledMessage(row.id); await deleteScheduledCopy(String(row.id)); }
+    await cancelScheduledMessage(row.id);
+    await deleteScheduledCopy(String(row.id));
     setRows(prev => prev.filter(r => r.id !== row.id));
   }, []);
 
   const onCancel = useCallback((row: ScheduledMessageRow) => {
-    const buttons: any[] = [];
-    if (SCHEDULED_LOCAL) {
-      // Edit = drop the queued item and reopen the composer prefilled to reschedule.
-      buttons.push({ text: 'Edit', onPress: async () => {
-        try {
-          await removeRow(row);
-          router.push({ pathname: '/schedule-message', params: { chatId: (row as any).chatId, peerName: row.chatName, initial: row.content || '' } } as any);
-        } catch (e: any) { Alert.alert('Could not edit', e?.message ?? 'Try again'); }
-      }});
-    }
-    buttons.push({ text: 'Cancel message', style: 'destructive', onPress: async () => {
-      try { await removeRow(row); } catch (e: any) { Alert.alert('Could not cancel', e?.message ?? 'Try again'); }
-    }});
-    buttons.push({ text: 'Keep', style: 'cancel' });
     Alert.alert(
-      SCHEDULED_LOCAL ? 'Scheduled message' : 'Cancel scheduled message?',
+      'Cancel scheduled message?',
       `"${(row.content || '').slice(0, 80) || row.type}" — scheduled for ${new Date(row.sendAt).toLocaleString()}.`,
-      buttons,
+      [
+        { text: 'Cancel message', style: 'destructive', onPress: async () => {
+          try { await removeRow(row); } catch (e: any) { Alert.alert('Could not cancel', e?.message ?? 'Try again'); }
+        } },
+        { text: 'Keep', style: 'cancel' },
+      ],
     );
-  }, [removeRow, router]);
+  }, [removeRow]);
 
   if (loading) {
     return <View style={[S.screen, S.center]}>
@@ -159,18 +149,35 @@ export default function ScheduledScreen() {
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={S.title}>Scheduled</Text>
+        <Text style={S.title} accessibilityRole="header">Scheduled</Text>
       </View>
 
-      {error && <Text style={S.errorTxt}>{error}</Text>}
+      {error && rows.length > 0 && <Text style={S.errorTxt} accessibilityRole="alert">{error}</Text>}
 
       {rows.length === 0 ? (
-        <ScrollView contentContainerStyle={[S.center, { flexGrow: 1, padding: 32, gap: 12 }]}>
-          <Ionicons name="time-outline" size={48} color={colors.primary} />
-          <Text style={S.emptyTitle}>No scheduled messages</Text>
-          <Text style={S.emptySub}>
-            Open any chat, tap ⋮ and choose “Schedule a message” to send one later.
-          </Text>
+        <ScrollView
+          contentContainerStyle={[S.center, { flexGrow: 1, padding: 32, gap: 12 }]}
+          refreshControl={<RefreshControl tintColor={colors.primary} refreshing={refreshing} onRefresh={onRefresh} />}
+        >
+          {error ? (
+            // A failed cold load is not "No scheduled messages".
+            <>
+              <Ionicons name="cloud-offline-outline" size={48} color={colors.danger} />
+              <Text style={S.emptyTitle}>{"Couldn't load scheduled messages"}</Text>
+              <Text style={S.emptySub} accessibilityRole="alert">{error}</Text>
+              <TouchableOpacity accessibilityRole="button" accessibilityState={{ busy: refreshing }} disabled={refreshing} onPress={onRefresh} style={S.retryBtn}>
+                <Text style={S.retryTxt}>Try again</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <Ionicons name="time-outline" size={48} color={colors.primary} />
+              <Text style={S.emptyTitle}>No scheduled messages</Text>
+              <Text style={S.emptySub}>
+                Open any chat, tap ⋮ and choose “Schedule a message” to send one later.
+              </Text>
+            </>
+          )}
         </ScrollView>
       ) : (
         <FlatList
@@ -192,6 +199,7 @@ export default function ScheduledScreen() {
               disabled={!!r.sentAt}
               activeOpacity={0.7}
               accessibilityRole="button"
+              accessibilityLabel={`${r.chatName || (r.chatType === 'group' ? 'Group' : 'Direct chat')}${r.sentAt ? ', delivered' : ''}: ${r.type === 'text' ? (r.content || 'empty message') : typeLabel(r.type)}. ${r.sentAt ? `Sent ${new Date(r.sentAt).toLocaleString()}` : `Sends ${formatFuture(r.sendAt)}`}`}
               accessibilityState={{ disabled: !!r.sentAt }}
               accessibilityHint={r.sentAt ? undefined : `Cancel the message scheduled to ${r.chatName || 'this chat'}`}
             >
@@ -249,12 +257,13 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   backBtn:       { width: 44, height: 44, borderRadius: 16, backgroundColor: c.glassSoft, alignItems: 'center', justifyContent: 'center' },
-  backTxt:       { color: c.text, fontSize: 26, fontWeight: '600' },
   title:         { color: c.text, fontSize: 22, fontWeight: '800' },
 
   errorTxt:      { color: c.danger, paddingHorizontal: 16, paddingVertical: 8, fontSize: 12 },
   emptyTitle:    { color: c.text, fontSize: 16, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
   emptySub:      { color: c.textDim, fontSize: 13, lineHeight: 18, textAlign: 'center' },
+  retryBtn:      { minHeight: 44, paddingHorizontal: 24, borderRadius: 12, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
+  retryTxt:      { color: c.bubbleOutText, fontWeight: '700' },
 
   intro:         { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12 },
   introTxt:      { color: c.textDim, fontSize: 12 },

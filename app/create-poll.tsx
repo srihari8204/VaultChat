@@ -7,8 +7,8 @@
 
 import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useRef, useState , useMemo} from 'react';
+import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
+import { useCallback, useEffect, useRef, useState , useMemo} from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Switch, TextInput, TouchableOpacity, View } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
@@ -36,6 +36,24 @@ export default function CreatePollScreen() {
   const [options,       setOptions]       = useState<{ id: number; text: string }[]>([{ id: 0, text: '' }, { id: 1, text: '' }]);
   const [allowMultiple, setAllowMultiple] = useState(false);
   const [posting,       setPosting]       = useState(false);
+
+  // Leaving with a typed poll asks first (header back, hardware back, swipe).
+  // `sent` lets the post-send pop through.
+  const sent = useRef(false);
+  const dirty = !!question.trim() || options.some(o => o.text.trim());
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const navigation = useNavigation();
+  useEffect(() => navigation.addListener('beforeRemove', (ev) => {
+    // beforeRemove is preventable at runtime; the generic navigation type says otherwise.
+    const e = ev as typeof ev & { preventDefault(): void };
+    if (sent.current || !dirtyRef.current) return;
+    e.preventDefault();
+    Alert.alert('Discard poll?', 'Your poll has not been sent and will be lost.', [
+      { text: 'Keep editing', style: 'cancel' },
+      { text: 'Discard', style: 'destructive', onPress: () => navigation.dispatch(e.data.action) },
+    ]);
+  }), [navigation]);
 
   const updateOption = useCallback((id: number, value: string) => {
     setOptions(prev => prev.map(o => o.id === id ? { ...o, text: value } : o));
@@ -69,6 +87,7 @@ export default function CreatePollScreen() {
     setPosting(true);
     try {
       await createPoll(chatId, q, cleaned, allowMultiple);
+      sent.current = true;
       router.back();
     } catch (e: any) {
       Alert.alert('Could not send poll', e?.message ?? 'Try again');
@@ -85,7 +104,7 @@ export default function CreatePollScreen() {
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
-          <Text style={S.title}>New poll</Text>
+          <Text style={S.title} accessibilityRole="header">New poll</Text>
           {peerName ? <Text style={S.sub}>to {peerName}</Text> : null}
         </View>
         <TouchableOpacity
@@ -172,10 +191,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backTxt:       { color: c.text, fontSize: 26, fontWeight: '600' },
   title:         { color: c.text, fontSize: 22, fontWeight: '800' },
   sub:           { color: c.textDim, fontSize: 12 },
-  sendBtn:       { backgroundColor: c.primary, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20 },
+  sendBtn:       { backgroundColor: c.primary, paddingHorizontal: 16, paddingVertical: 10, minHeight: 44, justifyContent: 'center', borderRadius: 22 },
   sendBtnOff:    { opacity: 0.5 },
   sendBtnTxt:    { color: c.bubbleOutText, fontWeight: '700' },
 
@@ -187,8 +205,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   optionRow:     { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   optionInput:   { flex: 1, color: c.text, backgroundColor: c.glass, borderColor: c.glassStroke, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15 },
   removeBtn:     { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: 18, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glass },
-  removeBtnTxt:  { color: c.danger, fontSize: 22, fontWeight: '700' },
-  addBtn:        { flexDirection: 'row', justifyContent: 'center', padding: 12, borderRadius: 12, backgroundColor: c.glass, borderWidth: 1, borderColor: c.glassStroke, alignItems: 'center', marginTop: 4 },
+  addBtn:        { flexDirection: 'row', justifyContent: 'center', padding: 12, minHeight: 44, borderRadius: 12, backgroundColor: c.glass, borderWidth: 1, borderColor: c.glassStroke, alignItems: 'center', marginTop: 4 },
   addBtnTxt:     { color: c.primary, fontWeight: '700' },
 
   toggleRow:     { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 24, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.glassStroke },

@@ -4,7 +4,8 @@
 // Scheduled messages are E2E-encrypted before they reach the server, so the
 // server (and therefore the /scheduled list) only holds ciphertext the sender
 // can't self-decrypt. This local copy is what the Scheduled tray shows the
-// sender as the preview. Purely local, cleaned up on cancel/delivery.
+// sender as the preview. Purely local: deleted on cancel, and pruned once the
+// server stops listing the row (delivered more than 7 days ago).
 //
 // Stored in the local DB's kv table sealed with the cache DEK (encField), the
 // same way cacheBookmarkPlaintext keeps bookmark snapshots — never as a bare
@@ -16,7 +17,8 @@ import { getLocalDb, getMeta, setMeta } from './localDb';
 import { decField, encField } from './cacheCrypto';
 
 const LEGACY_KEY = 'scheduled_plain_v1';
-const key = (id: string) => `vc_sched_pt_${id}`;
+const PREFIX = 'vc_sched_pt_';
+const key = (id: string) => `${PREFIX}${id}`;
 
 async function readLegacy(): Promise<Record<string, string>> {
   try { const r = await AsyncStorage.getItem(LEGACY_KEY); return r ? JSON.parse(r) : {}; } catch { return {}; }
@@ -61,4 +63,23 @@ export async function deleteScheduledCopy(id: string): Promise<void> {
   await dropLegacy(id);
 }
 
-export default { putScheduledCopy, getScheduledCopy, deleteScheduledCopy };
+/**
+ * Deletes every local copy whose row the server no longer lists (delivered
+ * more than 7 days ago, cancelled elsewhere). Call it only with a COMPLETE
+ * server list: a copy missing from a truncated list would be lost.
+ */
+export async function pruneScheduledCopies(listedIds: string[]): Promise<void> {
+  const keep = new Set(listedIds.map(key));
+  try {
+    const db = await getLocalDb();
+    const rows = await db.getAllAsync(`SELECT k FROM kv WHERE substr(k, 1, ?) = ?`, [PREFIX.length, PREFIX]);
+    for (const r of rows) {
+      if (!keep.has(r.k)) await db.runAsync(`DELETE FROM kv WHERE k = ?`, [r.k]);
+    }
+  } catch {}
+  const legacy = await readLegacy();
+  const stale = Object.keys(legacy).filter(id => !keep.has(key(id)));
+  for (const id of stale) await dropLegacy(id);
+}
+
+export default { putScheduledCopy, getScheduledCopy, deleteScheduledCopy, pruneScheduledCopies };

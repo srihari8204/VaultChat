@@ -110,6 +110,8 @@ export default function ImportChatsScreen() {
   const [failure, setFailure] = useState<{ reason: WaFailure; detail?: string } | null>(null);
 
   const [directChats, setDirectChats] = useState<ChatSummary[] | null>(null);
+  // listChats failed: shown with a retry, never as "No conversations yet".
+  const [chatsErr, setChatsErr] = useState(false);
   const [parsed, setParsed] = useState<Parsed | null>(null);
   const [match, setMatch] = useState<{ level: MatchLevel; because: string } | null>(null);
   const [ackMismatch, setAckMismatch] = useState(false);
@@ -153,11 +155,11 @@ export default function ImportChatsScreen() {
 
   // ── the contact picker: single selection, by construction ──
   useEffect(() => {
-    if (stage !== 'pick-chat' || directChats) return;
+    if (stage !== 'pick-chat' || directChats || chatsErr) return;
     listChats()
       .then(all => setDirectChats(all.filter(c => c.type === 'direct')))
-      .catch(() => setDirectChats([]));
-  }, [stage, directChats]);
+      .catch(() => setChatsErr(true));
+  }, [stage, directChats, chatsErr]);
 
   // ── reading the export ────────────────────────────────────────────
   const pickFile = useCallback(async () => {
@@ -200,41 +202,51 @@ export default function ImportChatsScreen() {
         new Uint8Array(Buffer.from(await RNFS.read(path, length, offset, 'base64'), 'base64')),
     };
 
-    const r = await readExport(src, forceOrder ? { forceOrder } : undefined);
-    if (stale()) return;
-    if (parsedFail(r)) { setFailure({ reason: r.reason, detail: r.detail }); setStage('failed'); return; }
+    // Everything below can throw (a file that vanished, a parser fault). A
+    // throw from a parse the user already cancelled is ignored; any other
+    // becomes the 'failed' stage rather than an unhandled rejection that
+    // strands the spinner (the date-order re-read has no other catch).
+    try {
+      const r = await readExport(src, forceOrder ? { forceOrder } : undefined);
+      if (stale()) return;
+      if (parsedFail(r)) { setFailure({ reason: r.reason, detail: r.detail }); setStage('failed'); return; }
 
-    setStage('matching');
-    setBusyNote('Matching contact…');
+      setStage('matching');
+      setBusyNote('Matching contact…');
 
-    const me = await getCurrentUserAsync();
-    if (stale()) return;
-    const myName = String(me?.displayName ?? me?.name ?? '').trim();
+      const me = await getCurrentUserAsync();
+      if (stale()) return;
+      const myName = String(me?.displayName ?? me?.name ?? '').trim();
 
-    // Which participant is the user? Prefer their own display name; otherwise the
-    // one that does NOT look like the peer. With two participants this is always
-    // decidable; with one (a monologue export) both sides collapse and we treat
-    // the single label as the counterpart.
-    const ppl = r.participants;
-    const selfLabel =
-      ppl.find(p => myName && fold(p) === fold(myName))
-      ?? ppl.find(p => fold(p) !== fold(peerName))
-      ?? (ppl.length > 1 ? ppl[1] : '');
-    const counterpart = ppl.find(p => p !== selfLabel) ?? ppl[0] ?? '';
+      // Which participant is the user? Prefer their own display name; otherwise the
+      // one that does NOT look like the peer. With two participants this is always
+      // decidable; with one (a monologue export) both sides collapse and we treat
+      // the single label as the counterpart.
+      const ppl = r.participants;
+      const selfLabel =
+        ppl.find(p => myName && fold(p) === fold(myName))
+        ?? ppl.find(p => fold(p) !== fold(peerName))
+        ?? (ppl.length > 1 ? ppl[1] : '');
+      const counterpart = ppl.find(p => p !== selfLabel) ?? ppl[0] ?? '';
 
-    setParsed({
-      messages: r.messages, participants: ppl, format: r.format,
-      unsupported: r.unsupported, missingMedia: r.missingMedia,
-      mediaNames: new Set(r.media.map(m => m.name.slice(m.name.lastIndexOf('/') + 1))),
-      counterpart, selfLabel,
-    });
-    setDateOrder(r.format.order === 'MDY' ? 'MDY' : 'DMY');
-    setDateOrderAnswered(!r.format.ambiguous);
-    const verdict = await verifyContact(chatId, peerName, counterpart);
-    if (stale()) return;
-    setMatch(verdict);
-    setAckMismatch(false);
-    setStage('preview');
+      setParsed({
+        messages: r.messages, participants: ppl, format: r.format,
+        unsupported: r.unsupported, missingMedia: r.missingMedia,
+        mediaNames: new Set(r.media.map(m => m.name.slice(m.name.lastIndexOf('/') + 1))),
+        counterpart, selfLabel,
+      });
+      setDateOrder(r.format.order === 'MDY' ? 'MDY' : 'DMY');
+      setDateOrderAnswered(!r.format.ambiguous);
+      const verdict = await verifyContact(chatId, peerName, counterpart);
+      if (stale()) return;
+      setMatch(verdict);
+      setAckMismatch(false);
+      setStage('preview');
+    } catch (e: any) {
+      if (stale()) return;
+      setFailure({ reason: 'not-an-archive', detail: String(e?.message ?? e) });
+      setStage('failed');
+    }
   }, [chatId, peerName]);
 
   // Reading has no abort hook in the parser, so Cancel abandons the result:
@@ -262,20 +274,22 @@ export default function ImportChatsScreen() {
     setProgress({ done: 0, total: parsed.messages.length });
     doneRef.current = 0;
 
-    const me = await getCurrentUserAsync();
-    const myId = String(me?.id ?? '');
-    const peerId = chat.members.find(m => m.userId !== myId && !m.leftAt)?.userId ?? '';
-    const sessionId = `${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
-    const conv = parsed.counterpart || peerName;
-
-    await setMeta(SESSION_KEY(chatId), JSON.stringify({
-      state: 'running', source, total: parsed.messages.length, sessionId, at: new Date().toISOString(),
-    })).catch(() => {});
-
     let mediaCopied = 0, mediaSkipped = 0;
     const localByName = new Map<string, string>();
 
+    // Inside the try, so a throw here lands in the catch below instead of
+    // leaving the screen on 'importing' forever.
     try {
+      const me = await getCurrentUserAsync();
+      const myId = String(me?.id ?? '');
+      const peerId = chat.members.find(m => m.userId !== myId && !m.leftAt)?.userId ?? '';
+      const sessionId = `${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
+      const conv = parsed.counterpart || peerName;
+
+      await setMeta(SESSION_KEY(chatId), JSON.stringify({
+        state: 'running', source, total: parsed.messages.length, sessionId, at: new Date().toISOString(),
+      })).catch(() => {});
+
       // 1. Media first, so a message row never points at a file that is not there
       //    yet. Only what the transcript actually references.
       const referenced = new Set<string>();
@@ -284,6 +298,10 @@ export default function ImportChatsScreen() {
       }
       if (referenced.size && file) {
         setBusyNote(`Copying ${referenced.size} media file${referenced.size === 1 ? '' : 's'}…`);
+        // ponytail: imported media is written unencrypted to private app storage,
+        // the same at-rest treatment as received chat media (MEDIA_ROOT): the OS
+        // sandbox protects it and uninstall deletes it. Seal it when chat media
+        // at rest is sealed (lib/cacheCrypto, VAULT_CACHE_ENCRYPTED), not before.
         const dir = `${APP_DOCS}/VaultChat/Imported/${sessionId}`;
         await ensureDir(dir);
         const src: ArchiveSource = {
@@ -397,6 +415,7 @@ export default function ImportChatsScreen() {
         {stage === 'pick-chat' && (
           <PickChat
             s={s} colors={colors} chats={directChats}
+            error={chatsErr} onRetry={() => { setChatsErr(false); setDirectChats(null); }}
             onPick={(c, name) => { setChatId(c); setPeerName(name); setStage('pick-source'); }}
           />
         )}
@@ -481,7 +500,7 @@ export default function ImportChatsScreen() {
             onPickOrder={(o) => {
               setDateOrder(o); setDateOrderAnswered(true);
               const f = fileRef.current;
-              if (f) runParse(f.uri, f.size, o);
+              if (f) void runParse(f.uri, f.size, o);   // failures land in its own catch
             }}
             onConfirm={runImport} onCancel={() => setStage('pick-source')}
           />
@@ -585,7 +604,9 @@ function fold(s: string): string {
 
 // ─── Pieces ──────────────────────────────────────────────────────────
 
-function PrivacyNote({ s, colors }: { s: any; colors: Palette }) {
+type S = ReturnType<typeof makeStyles>;
+
+function PrivacyNote({ s, colors }: { s: S; colors: Palette }) {
   return (
     <View style={s.privacy}>
       <Ionicons name="lock-closed" size={14} color={colors.success} />
@@ -594,7 +615,7 @@ function PrivacyNote({ s, colors }: { s: any; colors: Palette }) {
   );
 }
 
-function Step({ s, n, text, last }: { s: any; n: number; text: string; last?: boolean }) {
+function Step({ s, n, text, last }: { s: S; n: number; text: string; last?: boolean }) {
   return (
     <View style={[s.step, last && { borderBottomWidth: 0 }]}>
       <View style={s.stepNum}><Text style={s.stepNumTxt}>{n}</Text></View>
@@ -603,7 +624,7 @@ function Step({ s, n, text, last }: { s: any; n: number; text: string; last?: bo
   );
 }
 
-function Row({ s, k, v }: { s: any; k: string; v: string }) {
+function Row({ s, k, v }: { s: S; k: string; v: string }) {
   return (
     <View style={s.kv}>
       <Text style={s.kvK}>{k}</Text>
@@ -612,11 +633,21 @@ function Row({ s, k, v }: { s: any; k: string; v: string }) {
   );
 }
 
-function PickChat({ s, colors, chats, onPick }: {
-  s: any; colors: Palette; chats: ChatSummary[] | null;
+function PickChat({ s, colors, chats, error, onRetry, onPick }: {
+  s: S; colors: Palette; chats: ChatSummary[] | null;
+  error: boolean; onRetry: () => void;
   onPick: (chatId: string, name: string) => void;
 }) {
-  if (!chats) return <View style={s.center}><ActivityIndicator color={colors.primary} /></View>;
+  if (error) {
+    return (
+      <View style={s.center}>
+        <Text style={s.h1}>{"Couldn't load your chats"}</Text>
+        <Text style={s.sub} accessibilityRole="alert">Check your connection and try again.</Text>
+        <Button title="Try again" onPress={onRetry} />
+      </View>
+    );
+  }
+  if (!chats) return <View style={s.center}><ActivityIndicator color={colors.primary} accessibilityLabel="Loading chats" /></View>;
   if (!chats.length) {
     return (
       <View style={s.center}>
@@ -654,7 +685,7 @@ function PickChat({ s, colors, chats, onPick }: {
 function Preview({
   s, colors, parsed, peerName, match, ack, setAck, dateOrder, answered, onPickOrder, onConfirm, onCancel,
 }: {
-  s: any; colors: Palette; parsed: Parsed; peerName: string;
+  s: S; colors: Palette; parsed: Parsed; peerName: string;
   match: { level: MatchLevel; because: string } | null;
   ack: boolean; setAck: (v: boolean) => void;
   dateOrder: 'DMY' | 'MDY'; answered: boolean; onPickOrder: (o: 'DMY' | 'MDY') => void;
@@ -699,7 +730,7 @@ function Preview({
       {needsAck && (
         <TouchableOpacity style={s.ackRow} activeOpacity={0.8} onPress={() => setAck(!ack)} accessibilityRole="checkbox" accessibilityState={{ checked: ack }}>
           <View style={[s.check, ack && s.checkOn]}>
-            {ack && <Ionicons name="checkmark" size={14} color="#fff" />}
+            {ack && <Ionicons name="checkmark" size={14} color={colors.bubbleOutText} />}
           </View>
           <Text style={s.ackTxt}>
             Yes — this WhatsApp conversation with{' '}
@@ -749,7 +780,7 @@ function Preview({
 }
 
 function Done({ s, colors, outcome, peerName, onOpen, onRetry }: {
-  s: any; colors: Palette; outcome: Outcome; peerName: string;
+  s: S; colors: Palette; outcome: Outcome; peerName: string;
   onOpen: () => void; onRetry: () => void;
 }) {
   return (
@@ -845,9 +876,10 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   match:    { flexDirection: 'row', alignItems: 'flex-start', gap: SPACING.xs, borderRadius: RADIUS.md ?? 12,
               padding: SPACING.md, marginBottom: SPACING.md, borderWidth: 1 },
-  matchOk:  { backgroundColor: 'rgba(34,197,94,0.10)',  borderColor: 'rgba(34,197,94,0.35)' },
-  matchMeh: { backgroundColor: brandAlpha(0.10),        borderColor: brandAlpha(0.35) },
-  matchBad: { backgroundColor: 'rgba(239,68,68,0.10)',  borderColor: 'rgba(239,68,68,0.35)' },
+  // Token + hex alpha (1A ≈ 10 %, 59 ≈ 35 %): follows the theme's success/danger.
+  matchOk:  { backgroundColor: c.success + '1A', borderColor: c.success + '59' },
+  matchMeh: { backgroundColor: brandAlpha(0.10), borderColor: brandAlpha(0.35) },
+  matchBad: { backgroundColor: c.danger + '1A',  borderColor: c.danger + '59' },
   matchTxt: { color: c.text, fontSize: 13, lineHeight: 18, flex: 1 },
 
   ackRow:   { flexDirection: 'row', alignItems: 'flex-start', gap: SPACING.md, marginBottom: SPACING.md },
@@ -860,7 +892,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   warnTitle:{ color: c.text, fontSize: 14, fontWeight: '800', marginBottom: SPACING.xs },
   warnBody: { color: c.textDim, fontSize: 13, lineHeight: 19 },
   pillRow:  { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm, marginTop: SPACING.md },
-  pill:     { borderWidth: 1, borderColor: c.glassStroke, borderRadius: 999,
+  pill:     { borderWidth: 1, borderColor: c.glassStroke, borderRadius: 999, minHeight: 44, justifyContent: 'center',
               paddingHorizontal: SPACING.md, paddingVertical: SPACING.xs },
   pillOn:   { borderColor: c.primary, backgroundColor: brandAlpha(0.15) },
   pillTxt:  { color: c.textDim, fontSize: 12, fontWeight: '700' },
@@ -869,6 +901,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   tick:     { width: 76, height: 76, borderRadius: 38, backgroundColor: brandAlpha(0.15),
               borderWidth: 2, borderColor: c.success, alignItems: 'center', justifyContent: 'center',
               marginBottom: SPACING.md },
-  failIcon: { width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(239,68,68,0.12)',
+  failIcon: { width: 64, height: 64, borderRadius: 32, backgroundColor: c.danger + '1F',
               alignItems: 'center', justifyContent: 'center', marginBottom: SPACING.md },
 });
