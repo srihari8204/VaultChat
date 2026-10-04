@@ -72,11 +72,11 @@ export function Sheet({ visible, title, message, actions, onClose }: SheetProps)
               {message ? <AppText variant="caption" color={Aurora.textDim} style={styles.center}>{message}</AppText> : null}
             </View>
           )}
-          {actions.map((a, i) => (
+          {actions.map((a) => (
             <TouchableOpacity
               accessibilityRole="button"
               accessibilityState={a.selected === undefined ? undefined : { selected: a.selected }}
-              key={i}
+              key={a.label}
               style={[styles.row, { backgroundColor: Aurora.glassSoft, borderColor: Aurora.glassStroke }]}
               onPress={() => pick(a)}
               activeOpacity={0.7}
@@ -87,7 +87,7 @@ export function Sheet({ visible, title, message, actions, onClose }: SheetProps)
             </TouchableOpacity>
           ))}
         </ScrollView>
-        <TouchableOpacity accessibilityRole="button" style={[styles.row, styles.cancel, { backgroundColor: Aurora.glassSoft, borderColor: Aurora.glassStroke }]} onPress={onClose} activeOpacity={0.7}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cancel" style={[styles.row, styles.cancel, { backgroundColor: Aurora.glassSoft, borderColor: Aurora.glassStroke }]} onPress={onClose} activeOpacity={0.7}>
           <AppText variant="bodyStrong" color={Aurora.textDim}>Cancel</AppText>
         </TouchableOpacity>
       </Animated.View>

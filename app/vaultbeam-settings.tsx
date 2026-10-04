@@ -5,12 +5,12 @@
 // settings (VB_AUTO_MAX_BYTES, enforced in the engine).
 
 import React from 'react';
-import { View, ScrollView, StyleSheet, TouchableOpacity, Switch, StatusBar } from 'react-native';
+import { View, ScrollView, StyleSheet, TouchableOpacity, Switch, StatusBar, type ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import { useTheme } from '../lib/theme';
 import { AppText as Text, AuroraBackground } from '../components/ui';
-import { BRAND_ACCENT } from '../constants/theme';
+import { type Palette } from '../constants/theme';
 import { VB_AUTODOWNLOAD } from '../constants/flags';
 import {
   useVBSettings, patchSettings, SIZE_OPTIONS,
@@ -28,8 +28,13 @@ export default function VaultBeamSettings() {
     patchSettings(p).then(() => setSaveFailed(false), () => setSaveFailed(true));
   };
 
-  const C = colors as any;
-  const card = { backgroundColor: C.glass, borderColor: C.glassStroke };
+  const C = colors;
+  const card: ViewStyle = { backgroundColor: C.glass, borderColor: C.glassStroke };
+  // Mobile data always counts as metered (lib/vaultBeamAutoDownload), so
+  // "Mobile data only" + "Only on unmetered networks" could never download.
+  // Picking mobile data turns the unmetered rule off, and the switch is
+  // disabled while it cannot apply.
+  const cellular = s.network === 'cellular';
 
   return (
     <View style={[styles.screen, { backgroundColor: C.bg }]}>
@@ -40,7 +45,7 @@ export default function VaultBeamSettings() {
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={styles.hBtn}>
           <Ionicons name="arrow-back" size={22} color={C.text} />
         </TouchableOpacity>
-        <Text style={[styles.hTitle, { color: C.text }]}>VaultBeam auto-download</Text>
+        <Text style={[styles.hTitle, { color: C.text }]} accessibilityRole="header">VaultBeam auto-download</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
@@ -68,9 +73,12 @@ export default function VaultBeamSettings() {
           <>
             <Section title="Network" colors={C}>
               <Radio label="Wi-Fi only" active={s.network === 'wifi'} onPress={() => save({ network: 'wifi' as VBNetwork })} card={card} colors={C} />
-              <Radio label="Mobile data only" active={s.network === 'cellular'} onPress={() => save({ network: 'cellular' as VBNetwork })} card={card} colors={C} />
+              <Radio label="Mobile data only" active={cellular} onPress={() => save({ network: 'cellular' as VBNetwork, unmeteredOnly: false })} card={card} colors={C} />
               <Radio label="Any network" active={s.network === 'any'} onPress={() => save({ network: 'any' as VBNetwork })} card={card} colors={C} />
-              <Toggle label="Only on unmetered networks" value={s.unmeteredOnly} onValueChange={(v) => save({ unmeteredOnly: v })} card={card} colors={C} />
+              <Toggle label="Only on unmetered networks"
+                desc={cellular ? 'Not available with Mobile data only: mobile data is always metered.' : undefined}
+                value={s.unmeteredOnly && !cellular} disabled={cellular}
+                onValueChange={(v) => save({ unmeteredOnly: v })} card={card} colors={C} />
               {/* "Pause while roaming" is not offered: NetInfo does not expose
                   roaming, so lib/vaultBeamAutoDownload never reads the setting.
                   "Only on unmetered networks" above is the control that works. */}
@@ -84,7 +92,7 @@ export default function VaultBeamSettings() {
               {SIZE_OPTIONS.map((o) => (
                 <Radio key={o.label} label={o.label} active={s.maxBytes === o.bytes} onPress={() => save({ maxBytes: o.bytes })} card={card} colors={C} />
               ))}
-              <Text style={[styles.hint, { color: C.textFaint ?? C.textDim }]}>Files 2.5 GB and larger always require manual approval (up to the 12 GB limit).</Text>
+              <Text style={[styles.hint, { color: C.textFaint }]}>Files 2.5 GB and larger always require manual approval (up to the 12 GB limit).</Text>
             </Section>
 
             <Section title="Battery" colors={C}>
@@ -99,16 +107,16 @@ export default function VaultBeamSettings() {
   );
 }
 
-function Section({ title, children, colors }: { title: string; children: React.ReactNode; colors: any }) {
+function Section({ title, children, colors }: { title: string; children: React.ReactNode; colors: Palette }) {
   return (
     <View style={{ marginTop: 20 }}>
-      <Text numberOfLines={1} style={[styles.section, { color: colors.textDim }]}>{title.toUpperCase()}</Text>
+      <Text numberOfLines={1} accessibilityRole="header" style={[styles.section, { color: colors.textDim }]}>{title.toUpperCase()}</Text>
       <View style={{ gap: 8 }}>{children}</View>
     </View>
   );
 }
 
-function Radio({ label, desc, active, onPress, card, colors }: { label: string; desc?: string; active: boolean; onPress: () => void; card: any; colors: any }) {
+function Radio({ label, desc, active, onPress, card, colors }: { label: string; desc?: string; active: boolean; onPress: () => void; card: ViewStyle; colors: Palette }) {
   return (
     <TouchableOpacity style={[styles.row, card]} onPress={onPress} activeOpacity={0.8}
       accessibilityRole="radio" accessibilityLabel={desc ? `${label}. ${desc}` : label} accessibilityState={{ selected: active, checked: active }}>
@@ -116,19 +124,19 @@ function Radio({ label, desc, active, onPress, card, colors }: { label: string; 
         <Text style={[styles.rowLabel, { color: colors.text }]}>{label}</Text>
         {desc ? <Text style={[styles.rowDesc, { color: colors.textDim }]}>{desc}</Text> : null}
       </View>
-      <Ionicons name={active ? 'radio-button-on' : 'radio-button-off'} size={22} color={active ? BRAND_ACCENT : colors.textDim} />
+      <Ionicons name={active ? 'radio-button-on' : 'radio-button-off'} size={22} color={active ? colors.primary : colors.textDim} />
     </TouchableOpacity>
   );
 }
 
-function Toggle({ label, desc, value, onValueChange, card, colors }: { label: string; desc?: string; value: boolean; onValueChange: (v: boolean) => void; card: any; colors: any }) {
+function Toggle({ label, desc, value, disabled, onValueChange, card, colors }: { label: string; desc?: string; value: boolean; disabled?: boolean; onValueChange: (v: boolean) => void; card: ViewStyle; colors: Palette }) {
   return (
-    <View style={[styles.row, card]}>
+    <View style={[styles.row, card, disabled && { opacity: 0.6 }]}>
       <View style={{ flex: 1 }}>
         <Text style={[styles.rowLabel, { color: colors.text }]}>{label}</Text>
         {desc ? <Text style={[styles.rowDesc, { color: colors.textDim }]}>{desc}</Text> : null}
       </View>
-      <Switch accessibilityLabel={label} value={value} onValueChange={onValueChange} trackColor={{ true: BRAND_ACCENT, false: colors.border }} />
+      <Switch accessibilityLabel={desc ? `${label}. ${desc}` : label} value={value} disabled={disabled} onValueChange={onValueChange} trackColor={{ true: colors.primary, false: colors.border }} />
     </View>
   );
 }

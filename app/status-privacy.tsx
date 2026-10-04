@@ -15,7 +15,7 @@ import {
   getStatusPrivacy, setStatusPrivacy, listChats, attachmentUrl,
   type StatusPrivacyMode,
 } from '../lib/chatService';
-import { privacyUserIds, selectionAfterModeSwitch } from '../lib/statusPrivacySelection';
+import { modeSwitchClearsList, privacyUserIds, selectionAfterModeSwitch } from '../lib/statusPrivacySelection';
 
 type Contact = { id: string; name: string; photoURL: string | null };
 const MODES: { key: StatusPrivacyMode; label: string; sub: string }[] = [
@@ -83,8 +83,19 @@ export default function StatusPrivacyScreen() {
   }, [saving, mode, selected]);
 
   // Each mode starts from an empty list: the excluded people must never become
-  // the only people who can see the status (lib/statusPrivacySelection).
-  const pickMode = (m: StatusPrivacyMode) => { if (m !== mode) commit(m, selectionAfterModeSwitch(mode, m, selected)); };
+  // the only people who can see the status (lib/statusPrivacySelection). The
+  // server keeps one list, so leaving a mode that holds people is confirmed.
+  const pickMode = (m: StatusPrivacyMode) => {
+    if (m === mode) return;
+    const go = () => commit(m, selectionAfterModeSwitch(mode, m, selected));
+    if (!modeSwitchClearsList(mode, m, selected)) { go(); return; }
+    const n = selected.size;
+    Alert.alert(
+      'Clear your list?',
+      `Switching mode clears the ${n} ${n === 1 ? 'person' : 'people'} you ${mode === 'except' ? 'hid your status from' : 'share your status with'}. You will pick again for the new mode.`,
+      [{ text: 'Cancel', style: 'cancel' }, { text: 'Switch', style: 'destructive', onPress: go }],
+    );
+  };
   const toggle = (id: string) => {
     const n = new Set(selected);
     if (n.has(id)) n.delete(id); else n.add(id);
@@ -97,7 +108,13 @@ export default function StatusPrivacyScreen() {
       <Stack.Screen options={{ headerShown: false }} />
       <View style={S.header}>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={8} style={S.hBtn}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
-        <Text style={S.hTitle}>Status privacy</Text>
+        <Text style={S.hTitle} accessibilityRole="header">Status privacy</Text>
+        {saving && (
+          <View style={S.savingTag} accessibilityLiveRegion="polite" accessible accessibilityLabel="Saving">
+            <ActivityIndicator size="small" color={colors.primary} />
+            <Text style={S.modeSub}>Saving…</Text>
+          </View>
+        )}
       </View>
 
       {loading ? (
@@ -124,7 +141,8 @@ export default function StatusPrivacyScreen() {
                   onPress={() => pickMode(m.key)}
                   disabled={saving}
                   accessibilityRole="radio"
-                  accessibilityState={{ selected: mode === m.key, disabled: saving }}
+                  accessibilityLabel={`${m.label}. ${m.sub}`}
+                  accessibilityState={{ selected: mode === m.key, checked: mode === m.key, disabled: saving, busy: saving }}
                 >
                   <Ionicons name={mode === m.key ? 'radio-button-on' : 'radio-button-off'} size={22} color={mode === m.key ? colors.primary : colors.textDim} />
                   <View style={{ flex: 1 }}>
@@ -160,7 +178,7 @@ export default function StatusPrivacyScreen() {
                 disabled={saving}
                 accessibilityRole="checkbox"
                 accessibilityLabel={item.name}
-                accessibilityState={{ checked: on, disabled: saving }}
+                accessibilityState={{ checked: on, disabled: saving, busy: saving }}
               >
                 <Avatar uri={item.photoURL && authHeader ? attachmentUrl(item.photoURL) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={item.name} size={44} ring />
                 <Text style={S.contactName} numberOfLines={1}>{item.name}</Text>
@@ -180,6 +198,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   hBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   hTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
+  savingTag: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: 6 },
   modeRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 14, paddingVertical: 14, borderRadius: 16, backgroundColor: c.glass, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
   modeLabel: { color: c.text, fontSize: 16, fontWeight: '600' },
   modeSub: { color: c.textDim, fontSize: 13, marginTop: 2 },

@@ -9,29 +9,35 @@
 // cannot provide (screenshot blocking on iOS) is `null` and left out of the
 // denominator rather than counted as a failure or a pass — the same rule as
 // services/security/securityScore.ts.
+//
+// A fact whose source failed to load is 'unknown' and is also left out of the
+// score — one failing request degrades its own row, not the whole dashboard.
+
+/** true = on, false = off, null = the platform cannot provide it, 'unknown' = could not be checked. */
+export type FactValue = boolean | null | 'unknown';
 
 export interface PrivacyFacts {
   /** Direct chats are end-to-end encrypted in this build (E2EE_ENABLED). */
   e2ee: boolean;
-  /** Screenshots and recordings are blocked app-wide (Android FLAG_SECURE); null where the OS cannot. */
-  screenshotsBlocked: boolean | null;
+  /** Screenshots and recordings are blocked (Android FLAG_SECURE, as setSecure reports it); null where the OS cannot. */
+  screenshotsBlocked: FactValue;
   /** Device MFA (biometric / device PIN at launch), lib/mfa. */
-  deviceMfa: boolean;
+  deviceMfa: FactValue;
   /** A device PIN is set (services/security/pinStore). */
-  pinSet: boolean;
+  pinSet: FactValue;
   /** At least one trusted contact for account recovery. */
-  trustedContacts: boolean;
+  trustedContacts: FactValue;
   /** Last seen hidden — server setting. */
-  lastSeenHidden: boolean;
+  lastSeenHidden: FactValue;
   /** Read receipts off — server setting. */
-  readReceiptsOff: boolean;
+  readReceiptsOff: FactValue;
 }
 
 export interface ChecklistRow {
   key: keyof PrivacyFacts;
   label: string;
-  /** true = on, false = off, null = not available on this device. */
-  on: boolean | null;
+  /** true = on, false = off, null = not available on this device, 'unknown' = could not be checked. */
+  on: FactValue;
   /** Fixed by the build or the OS — shown, but there is nothing to change. */
   fixed: boolean;
   /** Where the user changes it (when not fixed). */
@@ -59,9 +65,9 @@ export function privacyChecklist(f: PrivacyFacts): ChecklistRow[] {
   return ROWS.map((r) => ({ ...r, on: f[r.key] }));
 }
 
-/** 0–100: share of applicable rows that are on. */
+/** 0–100: share of applicable, checked rows that are on. */
 export function privacyScore(rows: readonly ChecklistRow[]): number {
-  const applicable = rows.filter((r) => r.on !== null);
+  const applicable = rows.filter((r) => typeof r.on === 'boolean');
   if (applicable.length === 0) return 0;
-  return Math.round((applicable.filter((r) => r.on).length / applicable.length) * 100);
+  return Math.round((applicable.filter((r) => r.on === true).length / applicable.length) * 100);
 }

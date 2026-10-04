@@ -8,8 +8,15 @@
  * read, so tapping a row changed the score and protected nothing, and "E2E
  * Encryption" was bound to the screenshot key. Every row is now a checkable
  * fact (lib/privacyChecklist.ts) and opens the screen where it is changed.
- * "My Contacts" is gone from the chips: the server only stores on/off for last
- * seen and profile photo, so "contacts" silently meant "everyone".
+ * "My Contacts" is gone: the server only stores on/off for last seen and
+ * profile photo, so "contacts" silently meant "everyone".
+ *
+ * The dashboard no longer edits last seen / profile photo itself. Those (with
+ * read receipts and discoverable) are owned by app/last-seen-privacy.tsx; the
+ * "Who can see" card shows their current state and links there.
+ *
+ * Each source loads on its own: if trusted contacts or MFA cannot be read,
+ * that row says "Could not check" instead of the whole screen failing.
  */
 
 import { brandAlpha, type Palette } from '../constants/theme';
@@ -18,7 +25,6 @@ import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Platform,
   ScrollView,
   StyleSheet,
@@ -27,16 +33,19 @@ import {
 } from 'react-native';
 import { useTheme } from '../lib/theme';
 import Svg, { Circle } from 'react-native-svg';
-import { getSettings, updateSettings, listTrustedContacts, listBlocks, type UserSettings } from '../lib/chatService';
+import { getSettings, listTrustedContacts, listBlocks, type UserSettings } from '../lib/chatService';
+import { setSecure } from '../lib/screenGuard';
 import { isMfaEnabled } from '../lib/mfa';
 import { hasPIN } from './(constants)/authService';
 import { E2EE_ENABLED } from '../constants/flags';
-import { privacyChecklist, privacyScore, type ChecklistRow, type PrivacyFacts } from '../lib/privacyChecklist';
+import { privacyChecklist, privacyScore, type ChecklistRow, type FactValue } from '../lib/privacyChecklist';
 import { AppText as Text, AuroraBackground } from '../components/ui';
 import { HEADER_TOP } from '../constants/layout';
 
-type Visibility = 'everyone' | 'nobody';
-type ServerKey = 'lastSeenVisible' | 'profilePhotoVisible';
+/** A settled promise's value, or 'unknown' when it failed. */
+function factOf<T>(r: PromiseSettledResult<T>, pick: (v: T) => boolean): FactValue {
+  return r.status === 'fulfilled' ? pick(r.value) : 'unknown';
+}
 
 function useS() {
   const { colors } = useTheme();
@@ -49,35 +58,34 @@ export default function PrivacyDashboardScreen() {
   const router = useRouter();
 
   const [server, setServer] = useState<UserSettings | null>(null);
-  const [facts, setFacts] = useState<PrivacyFacts | null>(null);
+  const [rows, setRows] = useState<ChecklistRow[] | null>(null);
   const [blockedCount, setBlockedCount] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState<ServerKey | null>(null);
+  const [loading, setLoading] = useState(false);
   const loadSeq = useRef(0);
 
   const load = useCallback(async () => {
     const seq = ++loadSeq.current;
-    setError(null);
-    try {
-      const [bs, trusted, pin, mfa] = await Promise.all([
-        getSettings(), listTrustedContacts(), hasPIN(), isMfaEnabled(),
-      ]);
-      if (seq !== loadSeq.current) return;
-      setServer(bs);
-      setFacts({
-        e2ee: E2EE_ENABLED,
-        // FLAG_SECURE is set app-wide by the root layout on Android and never
-        // lowered; iOS offers no way to block capture.
-        screenshotsBlocked: Platform.OS === 'android' ? true : null,
-        deviceMfa: mfa,
-        pinSet: !!pin,
-        trustedContacts: trusted.length > 0,
-        lastSeenHidden: bs.lastSeenVisible === false,
-        readReceiptsOff: bs.readReceipts === false,
-      });
-    } catch (e: any) {
-      if (seq === loadSeq.current) setError(e?.message ?? 'Could not load your privacy settings');
-    }
+    setLoading(true);
+    const [bs, trusted, pin, mfa, secure] = await Promise.allSettled([
+      getSettings(), listTrustedContacts(), hasPIN(), isMfaEnabled(),
+      // The guard's real answer, not a platform guess: setSecure reports
+      // whether blocking is in force (false in a dev build, always false on
+      // iOS). Asking with `true` only re-asserts the app-wide default — it can
+      // never lower FLAG_SECURE.
+      Platform.OS === 'android' ? setSecure(true) : Promise.resolve(null),
+    ]);
+    if (seq !== loadSeq.current) return;
+    setLoading(false);
+    setServer(bs.status === 'fulfilled' ? bs.value : null);
+    setRows(privacyChecklist({
+      e2ee: E2EE_ENABLED,
+      screenshotsBlocked: secure.status === 'fulfilled' ? secure.value : 'unknown',
+      deviceMfa: factOf(mfa, (v) => !!v),
+      pinSet: factOf(pin, (v) => !!v),
+      trustedContacts: factOf(trusted, (v) => v.length > 0),
+      lastSeenHidden: factOf(bs, (v) => v.lastSeenVisible === false),
+      readReceiptsOff: factOf(bs, (v) => v.readReceipts === false),
+    }));
     listBlocks()
       .then((b) => { if (seq === loadSeq.current) setBlockedCount(b.length); })
       .catch(() => { if (seq === loadSeq.current) setBlockedCount(null); });
@@ -90,8 +98,8 @@ export default function PrivacyDashboardScreen() {
     return () => { loadSeq.current++; };
   }, [load]));
 
-  const rows = useMemo(() => (facts ? privacyChecklist(facts) : []), [facts]);
-  const score = privacyScore(rows);
+  const score = privacyScore(rows ?? []);
+  const unchecked = (rows ?? []).filter((r) => r.on === 'unknown').length;
 
   // Settings is where privacy-dashboard is opened from, and where Device MFA
   // and the blocked-users list live: go back to it rather than stacking a
@@ -100,25 +108,6 @@ export default function PrivacyDashboardScreen() {
     if (route === '/settings') router.dismissTo('/settings' as any);
     else router.push(route as any);
   }, [router]);
-
-  const setVisibility = useCallback(async (key: ServerKey, value: Visibility) => {
-    if (!server || saving) return;
-    const prev = server;
-    const next = { ...server, [key]: value === 'everyone' };
-    if (next[key] === prev[key]) return;
-    setServer(next);
-    if (key === 'lastSeenVisible' && facts) setFacts({ ...facts, lastSeenHidden: !next.lastSeenVisible });
-    setSaving(key);
-    try {
-      await updateSettings({ [key]: next[key] });
-    } catch (e: any) {
-      setServer(prev);
-      if (key === 'lastSeenVisible' && facts) setFacts({ ...facts, lastSeenHidden: !prev.lastSeenVisible });
-      Alert.alert('Could not save', e?.message ?? 'Try again');
-    } finally {
-      setSaving(null);
-    }
-  }, [server, saving, facts]);
 
   const scoreColor = score >= 80 ? colors.primary : score >= 50 ? colors.accent : colors.danger;
 
@@ -162,18 +151,21 @@ export default function PrivacyDashboardScreen() {
 
   // ── Checklist ──
   const renderRow = (r: ChecklistRow) => {
-    const stateText = r.on === null ? 'Not available on this device' : r.on ? 'On' : 'Off';
+    const on = r.on === true;
+    const stateText = r.on === null ? 'Not available on this device'
+      : r.on === 'unknown' ? 'Could not check' : on ? 'On' : 'Off';
     const body = (
       <>
-        <View style={[s.checkIcon, r.on ? s.checkIconOn : s.checkIconOff]}>
-          <Ionicons name={r.on ? 'checkmark' : r.on === null ? 'remove' : 'close'} size={14} color={r.on ? colors.text : colors.textDim} />
+        <View style={[s.checkIcon, on ? s.checkIconOn : s.checkIconOff]}>
+          {/* bubbleOutText is the palette's white-on-accent ink. */}
+          <Ionicons name={on ? 'checkmark' : r.on === false ? 'close' : r.on === 'unknown' ? 'help' : 'remove'} size={14} color={on ? colors.bubbleOutText : colors.textDim} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={[s.checkLabel, !r.on && { color: colors.textDim }]}>{r.label}</Text>
-          {r.on === null && <Text style={s.checkSub}>{stateText}</Text>}
+          <Text style={[s.checkLabel, !on && { color: colors.textDim }]}>{r.label}</Text>
+          {(r.on === null || r.on === 'unknown') && <Text style={s.checkSub}>{stateText}</Text>}
         </View>
         {r.fixed ? (
-          r.on !== null && <View style={s.alwaysBadge}><Text style={s.alwaysBadgeText}>Built in</Text></View>
+          on && <View style={s.alwaysBadge}><Text style={s.alwaysBadgeText}>Built in</Text></View>
         ) : (
           <Ionicons name="chevron-forward" size={16} color={colors.textDim} />
         )}
@@ -201,54 +193,31 @@ export default function PrivacyDashboardScreen() {
     );
   };
 
-  // ── Privacy Options ──
-  const renderVisibility = (label: string, key: ServerKey, icon: React.ComponentProps<typeof Ionicons>['name']) => {
-    const value: Visibility = server?.[key] ? 'everyone' : 'nobody';
-    const options: { label: string; value: Visibility }[] = [
-      { label: 'Everyone', value: 'everyone' },
-      { label: 'Nobody', value: 'nobody' },
-    ];
-    return (
-      <View style={s.privacyRow}>
-        <View style={s.privacyLeft}>
-          <Ionicons name={icon} size={20} color={colors.accent} style={{ marginRight: 10 }} />
-          <Text style={s.privacyLabel}>{label}</Text>
-          {saving === key && <ActivityIndicator size="small" color={colors.primary} style={{ marginLeft: 8 }} />}
-        </View>
-        <View style={s.privacyChips} accessibilityRole="radiogroup" accessibilityLabel={label}>
-          {options.map(opt => (
-            <TouchableOpacity
-              key={opt.value}
-              style={[s.pChip, value === opt.value && s.pChipActive]}
-              onPress={() => setVisibility(key, opt.value)}
-              disabled={!!saving}
-              accessibilityRole="radio"
-              accessibilityLabel={`${label}: ${opt.label}`}
-              accessibilityState={{ selected: value === opt.value, disabled: !!saving }}
-            >
-              <Text style={[s.pChipText, value === opt.value && s.pChipTextActive]}>{opt.label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
-    );
-  };
+  // ── Who can see: read-only, edited on app/last-seen-privacy.tsx ──
+  const seen = (v: boolean | undefined) => (v ? 'Everyone' : 'Nobody');
+  const visibilitySummary = server
+    ? `Last seen: ${seen(server.lastSeenVisible)} · Profile photo: ${seen(server.profilePhotoVisible)} · Read receipts: ${server.readReceipts ? 'On' : 'Off'}`
+    : 'Could not load these settings';
 
-  const suggestions = rows.filter(r => r.on === false && r.suggestion && r.route);
+  const suggestions = (rows ?? []).filter(r => r.on === false && r.suggestion && r.route);
 
-  const content = error ? (
-    <View style={s.stateBox} accessibilityRole="alert">
-      <Text style={s.stateTitle}>Could not load your privacy settings</Text>
-      <Text style={s.stateSub}>{error}</Text>
-      <TouchableOpacity accessibilityRole="button" accessibilityLabel="Try again" onPress={load} style={s.retryBtn}>
-        <Text style={s.retryTxt}>Try again</Text>
-      </TouchableOpacity>
-    </View>
-  ) : !facts || !server ? (
+  const content = !rows ? (
     <View style={s.stateBox}><ActivityIndicator color={colors.primary} size="large" /></View>
   ) : (
     <ScrollView contentContainerStyle={{ paddingBottom: 60 }} showsVerticalScrollIndicator={false}>
       {renderScoreRing()}
+
+      {unchecked > 0 && (
+        <View style={s.notice} accessibilityRole="alert">
+          <Text style={s.noticeTxt}>
+            {unchecked === 1 ? '1 check' : `${unchecked} checks`} could not be loaded and {unchecked === 1 ? 'is' : 'are'} left out of the score.
+          </Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Try loading the checks again" accessibilityState={{ busy: loading, disabled: loading }}
+            disabled={loading} onPress={load} style={s.retryBtn}>
+            {loading ? <ActivityIndicator color={colors.primary} /> : <Text style={s.retryTxt}>Try again</Text>}
+          </TouchableOpacity>
+        </View>
+      )}
 
       <View style={s.section}>
         <Text style={s.sectionTitle} accessibilityRole="header">Checks</Text>
@@ -257,8 +226,21 @@ export default function PrivacyDashboardScreen() {
 
       <View style={s.section}>
         <Text style={s.sectionTitle} accessibilityRole="header">Who can see</Text>
-        {renderVisibility('Last seen', 'lastSeenVisible', 'time')}
-        {renderVisibility('Profile photo', 'profilePhotoVisible', 'person-circle')}
+        <TouchableOpacity
+          style={s.blockedRow}
+          onPress={() => openRoute('/last-seen-privacy')}
+          accessibilityRole="button"
+          accessibilityLabel={`${visibilitySummary}. Change in Last seen and privacy`}
+        >
+          <View style={{ flex: 1, marginRight: 8 }}>
+            <View style={[s.privacyLeft, { marginBottom: 4 }]}>
+              <Ionicons name="time" size={20} color={colors.accent} style={{ marginRight: 10 }} />
+              <Text style={s.privacyLabel}>Last seen & privacy</Text>
+            </View>
+            <Text style={s.checkSub}>{visibilitySummary}</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color={colors.accent} />
+        </TouchableOpacity>
 
         {/* The blocked-users list (with Unblock) lives in Settings. This row
             used to push /blocked — the SECURITY lock-out screen, which swallows
@@ -310,7 +292,7 @@ export default function PrivacyDashboardScreen() {
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <View style={s.header}>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.backBtn}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={8} style={s.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.headerTitle} accessibilityRole="header">Privacy Dashboard</Text>
@@ -385,27 +367,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   alwaysBadgeText: { fontSize: 10, color: c.primary, fontWeight: '700' },
 
   // Privacy controls
-  privacyRow: {
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: c.hairline,
-  },
   privacyLeft: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   privacyLabel: { fontSize: 14, color: c.text, fontWeight: '600' },
-  privacyChips: { flexDirection: 'row', gap: 6 },
-  pChip: {
-    minHeight: 44,
-    justifyContent: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: c.surfaceSolid,
-    borderWidth: 1,
-    borderColor: c.glassStroke,
-  },
-  pChipActive: { backgroundColor: brandAlpha(0.15), borderColor: c.accent },
-  pChipText: { fontSize: 12, color: c.textDim, fontWeight: '600' },
-  pChipTextActive: { color: c.accent },
 
   blockedRow: {
     flexDirection: 'row',
@@ -427,10 +390,10 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   suggestionLabel: { fontSize: 13, fontWeight: '600', color: c.text },
   suggestionText: { fontSize: 12, color: c.textDim, marginTop: 2, lineHeight: 18 },
 
-  // Loading / error
+  // Loading / partial-failure notice
   stateBox: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 8 },
-  stateTitle: { fontSize: 16, fontWeight: '700', color: c.text, textAlign: 'center' },
-  stateSub: { fontSize: 13, color: c.textDim, textAlign: 'center', lineHeight: 18 },
-  retryBtn: { marginTop: 8, minHeight: 44, paddingHorizontal: 18, justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glassSoft },
+  notice: { marginHorizontal: 16, marginTop: 16, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: c.danger, backgroundColor: c.glassSoft, gap: 4 },
+  noticeTxt: { fontSize: 13, color: c.text, lineHeight: 18 },
+  retryBtn: { alignSelf: 'flex-start', marginTop: 8, minHeight: 44, paddingHorizontal: 18, justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glassSoft },
   retryTxt: { color: c.primary, fontWeight: '700' },
 });

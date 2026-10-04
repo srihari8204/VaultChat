@@ -51,9 +51,6 @@ function useS() {
 }
 
 export default function GhostModeScreen() {
-  const { colors } = useTheme();
-  const S = useS();
-  const router = useRouter();
   const { targetId, targetName } = useLocalSearchParams<{ targetId?: string; targetName?: string }>();
 
   if (targetId) return <PerTargetEditor targetId={targetId} targetName={targetName ?? null} />;
@@ -99,7 +96,7 @@ function ListView() {
       <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
         <Ionicons name="arrow-back" size={24} color={colors.text} />
       </TouchableOpacity>
-      <Text style={S.title}>Ghost Mode</Text>
+      <Text style={S.title} accessibilityRole="header">Ghost Mode</Text>
     </View>
   );
 
@@ -119,6 +116,17 @@ function ListView() {
     <View style={S.screen}>
       <AuroraBackground />
       {header}
+
+      {/* A refresh that failed while saved rows are on screen must say so:
+          the list may be out of date. */}
+      {error ? (
+        <View style={S.staleBox} accessibilityRole="alert">
+          <Text style={[S.introTxt, { flex: 1 }]}>Showing your saved list — it could not be refreshed. {error}</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Try refreshing Ghost Mode again" onPress={load} style={S.retryBtn} activeOpacity={0.7}>
+            <Text style={S.retryTxt}>Try again</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
 
       <View style={S.intro}>
         <Text style={S.introTxt}>
@@ -205,6 +213,7 @@ function PerTargetEditor({ targetId, targetName }: { targetId: string; targetNam
   const [error,   setError]   = useState<string | null>(null);
   const [saving,  setSaving]  = useState<null | keyof GhostMode>(null);
   const [loadTick, setLoadTick] = useState(0);
+  const [clearing, setClearing] = useState(false);
 
   useEffect(() => {
     let cancel = false;
@@ -249,24 +258,27 @@ function PerTargetEditor({ targetId, targetName }: { targetId: string; targetNam
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Clear', style: 'destructive', onPress: async () => {
+            if (clearing) return;
+            setClearing(true);
             try {
               await clearGhostMode(targetId);
               router.back();
             } catch (e: any) {
+              setClearing(false);
               Alert.alert('Failed', e?.message ?? 'Try again');
             }
           }
         },
       ],
     );
-  }, [targetId, router]);
+  }, [targetId, router, clearing]);
 
   const header = (
     <View style={S.header}>
       <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
         <Ionicons name="arrow-back" size={24} color={colors.text} />
       </TouchableOpacity>
-      <Text style={S.title}>Ghost Mode</Text>
+      <Text style={S.title} accessibilityRole="header">Ghost Mode</Text>
     </View>
   );
 
@@ -329,8 +341,8 @@ function PerTargetEditor({ targetId, targetName }: { targetId: string; targetNam
       </View>
 
       {anySet && (
-        <TouchableOpacity style={S.clearBtn} onPress={onClearAll} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel="Clear all overrides">
-          <Text style={S.clearBtnTxt}>Clear all overrides</Text>
+        <TouchableOpacity style={S.clearBtn} onPress={onClearAll} disabled={clearing} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel="Clear all overrides" accessibilityState={{ disabled: clearing, busy: clearing }}>
+          {clearing ? <ActivityIndicator color={colors.danger} /> : <Text style={S.clearBtnTxt}>Clear all overrides</Text>}
         </TouchableOpacity>
       )}
     </ScrollView>
@@ -359,7 +371,7 @@ function ToggleRow({
           value={value}
           onValueChange={onChange}
           trackColor={{ true: colors.primary, false: colors.border }}
-          thumbColor="#fff"
+          thumbColor={colors.bubbleOutText}
         />
       )}
     </View>
@@ -384,7 +396,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   row:           { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   avatar:        { width: 44, height: 44, borderRadius: 22, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   avatarImg:     { width: '100%', height: '100%' },
-  avatarTxt:     { color: '#fff', fontWeight: '700' },
+  avatarTxt:     { color: c.bubbleOutText, fontWeight: '700' },  // white-on-accent ink
   rowName:       { color: c.text, fontSize: 15, fontWeight: '600' },
   rowSub:        { color: c.textDim, fontSize: 12, marginTop: 2 },
 
@@ -395,6 +407,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   clearBtn:      { marginHorizontal: 20, marginTop: 32, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: c.danger, backgroundColor: c.glassSoft, alignItems: 'center' },
   clearBtnTxt:   { color: c.danger, fontWeight: '700' },
+  staleBox:      { flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 16, marginTop: 12, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: c.danger, backgroundColor: c.glassSoft },
   retryBtn:      { marginTop: 8, minHeight: 44, paddingHorizontal: 18, justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glassSoft },
   retryTxt:      { color: c.primary, fontWeight: '700' },
 });

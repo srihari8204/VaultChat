@@ -1,13 +1,10 @@
-import { AppText as Text } from '../components/ui/Text';
-import { AuroraBackground } from '../components/ui';
-import { Ionicons } from '@expo/vector-icons';
 // app/vault-features.tsx
 // crazzychat advanced security
 //
 // 1. Temp Chat Codes — single-use invite code, 5-minute expiry (real backend)
 // 2. Auto Screen Lock — how long the app may be in the background before it
 //    asks for biometrics / MPIN again (components/ResumeLock reads it; applies
-//    when Device MFA is on)
+//    when Device MFA is on or a Device PIN is set — lib/resumeLockPolicy)
 // 3. Links to the real notification-privacy controls and the Vault
 //
 // REMOVED 2026-10-04, because nothing read them: a "default disappearing timer"
@@ -17,7 +14,10 @@ import { Ionicons } from '@expo/vector-icons';
 // "Backup vault files to email" (the vault has no backup).
 
 
-import React, { useState, useEffect, useMemo } from 'react';
+import { AppText as Text } from '../components/ui/Text';
+import { AuroraBackground } from '../components/ui';
+import { Ionicons } from '@expo/vector-icons';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View, TouchableOpacity, StyleSheet,
   ScrollView, Alert, ActivityIndicator,
@@ -31,7 +31,8 @@ import type { Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { HEADER_TOP } from '../constants/layout';
 import { isMfaEnabled } from '../lib/mfa';
-import { DEFAULT_LOCK_TIMER, LOCK_SETTINGS_KEY, parseLockTimer, type LockTimer } from '../lib/resumeLockPolicy';
+import { hasPIN } from './(constants)/authService';
+import { DEFAULT_LOCK_TIMER, LOCK_SETTINGS_KEY, lockAppliesTo, parseLockTimer, type LockTimer } from '../lib/resumeLockPolicy';
 
 // ─────────────────────────────────────────────────────────────────
 // Types
@@ -63,64 +64,105 @@ const DEFAULT_SETTINGS: VaultSettings = {
   lockTimer:         DEFAULT_LOCK_TIMER,
 };
 
+const CODE_KEY = 'vault_chat_code';
+const CODE_EXPIRY_KEY = 'vault_chat_code_expiry';
+
+/** "4:59" for the time left before `expiry`, or null once it has passed. */
+function remaining(expiry: string, now: number): string | null {
+  const ms = new Date(expiry).getTime() - now;
+  if (!(ms > 0)) return null;
+  const total = Math.ceil(ms / 1000);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
+type IconName = React.ComponentProps<typeof Ionicons>['name'];
+
 // ─────────────────────────────────────────────────────────────────
 // Main Screen
 // ─────────────────────────────────────────────────────────────────
 
 export default function VaultFeaturesScreen() {
-  const { colors: c, scheme } = useTheme();
-  const styles = useMemo(() => makeStyles(c, scheme === 'light'), [c, scheme]);
+  const { colors: c } = useTheme();
+  const styles = useMemo(() => makeStyles(c), [c]);
   const modalStyles = useMemo(() => makeModalStyles(c), [c]);
   const router = useRouter();
 
   const [settings,      setSettings]      = useState<VaultSettings>(DEFAULT_SETTINGS);
+  // A failed read is said out loud: the picker would otherwise show the
+  // default as if it were the saved choice.
+  const [loadFailed,    setLoadFailed]    = useState(false);
 
   // Temp chat code
   const [chatCode,      setChatCode]      = useState<string | null>(null);
   const [codeExpiry,    setCodeExpiry]    = useState<string | null>(null);
   const [generatingCode,setGeneratingCode]= useState(false);
+  const [revoking,      setRevoking]      = useState(false);
   const [codeCopied,    setCodeCopied]    = useState(false);
+  const [now,           setNow]           = useState(() => Date.now());
 
   // Lock timer picker modal
   const [showLock,      setShowLock]      = useState(false);
-  // The relock only applies to a user with Device MFA on (the same condition
-  // as the cold-launch lock); say so rather than offer a timer that does nothing.
-  const [mfaOn,         setMfaOn]         = useState<boolean | null>(null);
-  useEffect(() => { isMfaEnabled().then(setMfaOn).catch(() => setMfaOn(false)); }, []);
-
-  // ── Load settings ─────────────────────────────────────────────
+  // The relock applies to a user with Device MFA on or a Device PIN set (the
+  // same condition as ResumeLock); say so rather than offer a timer that does nothing.
+  const [lockApplies,   setLockApplies]   = useState<boolean | null>(null);
   useEffect(() => {
-    loadSettings();
+    Promise.all([isMfaEnabled().catch(() => false), hasPIN().catch(() => false)])
+      .then(([mfaOn, hasDevicePin]) => setLockApplies(lockAppliesTo({ signedIn: true, mfaOn, hasDevicePin })));
   }, []);
 
-  const loadSettings = async () => {
+  const clearLocalCode = useCallback(async () => {
+    setChatCode(null);
+    setCodeExpiry(null);
+    await SecureStore.deleteItemAsync(CODE_KEY).catch(() => {});
+    await SecureStore.deleteItemAsync(CODE_EXPIRY_KEY).catch(() => {});
+  }, []);
+
+  // ── Load settings ─────────────────────────────────────────────
+  const loadSettings = useCallback(async () => {
+    setLoadFailed(false);
     try {
       const raw = await SecureStore.getItemAsync(LOCK_SETTINGS_KEY);
       setSettings({ lockTimer: parseLockTimer(raw) });
-
-      const code   = await SecureStore.getItemAsync('vault_chat_code');
-      const expiry = await SecureStore.getItemAsync('vault_chat_code_expiry');
-      if (code && expiry) {
-        // Check if still valid
-        if (new Date(expiry) > new Date()) {
-          setChatCode(code);
-          setCodeExpiry(expiry);
-        } else {
-          // Expired — clean up
-          await SecureStore.deleteItemAsync('vault_chat_code');
-          await SecureStore.deleteItemAsync('vault_chat_code_expiry');
-        }
+    } catch {
+      setLoadFailed(true);
+    }
+    try {
+      const code   = await SecureStore.getItemAsync(CODE_KEY);
+      const expiry = await SecureStore.getItemAsync(CODE_EXPIRY_KEY);
+      if (code && expiry && remaining(expiry, Date.now())) {
+        setChatCode(code);
+        setCodeExpiry(expiry);
+      } else if (code || expiry) {
+        await clearLocalCode();   // expired — clean up
       }
-    } catch {}
-  };
+    } catch {
+      // The code is a convenience copy of a 5-minute server code; without it
+      // the user just generates a new one.
+    }
+  }, [clearLocalCode]);
+  useEffect(() => { loadSettings(); }, [loadSettings]);
 
-  const saveSetting = async (key: keyof VaultSettings, value: any) => {
+  // ── Countdown: tick each second while a code is shown, clear it at zero ──
+  useEffect(() => {
+    if (!codeExpiry) return;
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [codeExpiry]);
+  const left = codeExpiry ? remaining(codeExpiry, now) : null;
+  const leftMins = codeExpiry ? Math.max(1, Math.ceil((new Date(codeExpiry).getTime() - now) / 60000)) : 0;
+  useEffect(() => {
+    if (codeExpiry && !left) clearLocalCode();
+  }, [codeExpiry, left, clearLocalCode]);
+
+  const saveSetting = async <K extends keyof VaultSettings>(key: K, value: VaultSettings[K]) => {
     const prev = settings;
     const updated = { ...settings, [key]: value };
     setSettings(updated);
     // Device-local; read by components/ResumeLock via services/lockService.
     try {
       await SecureStore.setItemAsync(LOCK_SETTINGS_KEY, JSON.stringify(updated));
+      setLoadFailed(false);
     } catch {
       setSettings(prev);
       Alert.alert('Not saved', 'The setting could not be saved. Try again.');
@@ -129,21 +171,22 @@ export default function VaultFeaturesScreen() {
 
   // ── Generate temp chat code ───────────────────────────────────
   const handleGenerateCode = async () => {
+    if (generatingCode) return;
     setGeneratingCode(true);
     try {
       // Use the real mutual-consent sync-code backend (5-min, single-use).
       // The recipient enters it under "Add Contact → Enter Their Code".
       const { code } = await createSyncCode();
       const expiryStr = new Date(Date.now() + 5 * 60 * 1000).toISOString();
-
-      await SecureStore.setItemAsync('vault_chat_code', code);
-      await SecureStore.setItemAsync('vault_chat_code_expiry', expiryStr);
-
       setChatCode(code);
       setCodeExpiry(expiryStr);
       setCodeCopied(false);
+      // Only a convenience copy for reopening this screen; failing to keep it
+      // does not make the code any less valid.
+      await SecureStore.setItemAsync(CODE_KEY, code).catch(() => {});
+      await SecureStore.setItemAsync(CODE_EXPIRY_KEY, expiryStr).catch(() => {});
     } catch (e: any) {
-      Alert.alert('Error', e.message);
+      Alert.alert('Could not create a code', e?.message ?? 'Try again.');
     } finally {
       setGeneratingCode(false);
     }
@@ -151,19 +194,26 @@ export default function VaultFeaturesScreen() {
 
   const handleCopyCode = async () => {
     if (!chatCode) return;
-    await copyAndAutoClear(chatCode);
-    setCodeCopied(true);
-    setTimeout(() => setCodeCopied(false), 2000);
+    try {
+      await copyAndAutoClear(chatCode);
+      setCodeCopied(true);
+      setTimeout(() => setCodeCopied(false), 2000);
+    } catch {
+      Alert.alert('Could not copy', 'Use Share instead, or try again.');
+    }
   };
 
   const handleShareCode = async () => {
     if (!chatCode) return;
+    const mins = leftMins;
     try {
       await Share.share({
-        message: `Join me on crazzychat — use this secure invite code:\n\n${chatCode}\n\nExpires in 5 minutes. Enter it under Add Contact → Enter Their Code.`,
+        message: `Join me on crazzychat — use this secure invite code:\n\n${chatCode}\n\nExpires in ${mins} minute${mins === 1 ? '' : 's'}. Enter it under Add Contact → Enter Their Code.`,
         title:   'crazzychat Secure Invite',
       });
-    } catch {}
+    } catch {
+      Alert.alert('Could not share', 'Try again, or copy the code instead.');
+    }
   };
 
   // Revoke used to delete only the LOCAL copy (2026-09-22), so the shared code
@@ -176,20 +226,25 @@ export default function VaultFeaturesScreen() {
   // replacement nobody has seen expires on its own five minutes later.
   // On failure the local copy is KEPT: clearing it while the code is still live
   // would hide a working invite from the one person who might re-revoke it.
-  const handleRevokeCode = async () => {
-    Alert.alert('Revoke Code', 'This will invalidate the current invite code.', [
+  const handleRevokeCode = () => {
+    Alert.alert('Revoke code?', 'This will invalidate the current invite code.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Revoke', style: 'destructive',
         onPress: async () => {
+          if (revoking) return;
+          setRevoking(true);
           try {
             await createSyncCode();
           } catch (e: any) {
             Alert.alert('Not revoked', `The code is still valid. ${e?.message ?? 'Try again.'}`);
             return;
+          } finally {
+            setRevoking(false);
           }
-          await SecureStore.deleteItemAsync('vault_chat_code');
-          await SecureStore.deleteItemAsync('vault_chat_code_expiry');
+          // Only after the server copy is dead (silentFailure.selftest #17).
+          await SecureStore.deleteItemAsync(CODE_KEY).catch(() => {});
+          await SecureStore.deleteItemAsync(CODE_EXPIRY_KEY).catch(() => {});
           setChatCode(null);
           setCodeExpiry(null);
         },
@@ -197,16 +252,7 @@ export default function VaultFeaturesScreen() {
     ]);
   };
 
-  // ── Format expiry time ────────────────────────────────────────
-  const formatExpiry = (expiryStr: string): string => {
-    const expiry = new Date(expiryStr);
-    const diff   = expiry.getTime() - Date.now();
-    const h      = Math.floor(diff / 3600000);
-    const m      = Math.floor((diff % 3600000) / 60000);
-    if (h <= 0 && m <= 0) return 'Expired';
-    if (h === 0) return `Expires in ${m}m`;
-    return `Expires in ${h}h ${m}m`;
-  };
+  const lockLabel = LOCK_OPTIONS.find(o => o.value === settings.lockTimer)?.label;
 
   // ─────────────────────────────────────────────────────────────
   // Render
@@ -217,14 +263,13 @@ export default function VaultFeaturesScreen() {
 
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={26} color={c.primary} />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle}>Vault Features</Text>
+          <Text style={styles.headerTitle} accessibilityRole="header">Vault Features</Text>
           <Text style={styles.headerSub}>ADVANCED SECURITY</Text>
         </View>
-        <Text style={styles.headerBadge}>⚡</Text>
       </View>
 
       <ScrollView
@@ -235,48 +280,27 @@ export default function VaultFeaturesScreen() {
 
         {/* ── 1. Temp Chat Codes ── */}
         <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionIcon}>🔗</Text>
-            <View>
-              <Text style={styles.sectionTitle}>Temp Chat Code</Text>
-              {/* "24 hours" was wrong by 288x: the server mints these with
-                  INTERVAL '5 minutes' (contacts.go) and both read paths enforce
-                  it with a 410. */}
-              <Text style={styles.sectionDesc}>
-                Single-use invite code — expires in 5 minutes
-              </Text>
-            </View>
-          </View>
+          <SectionHeader icon="link-outline" title="Temp Chat Code" styles={styles} color={c.primary}
+            /* "24 hours" was wrong by 288x: the server mints these with
+               INTERVAL '5 minutes' (contacts.go) and both read paths enforce
+               it with a 410. */
+            desc="Single-use invite code — expires in 5 minutes" />
 
-          {chatCode ? (
+          {chatCode && left ? (
             <View style={styles.codeCard}>
-              <Text style={styles.codeValue}>{chatCode}</Text>
-              {codeExpiry && (
-                <Text style={styles.codeExpiry}>{formatExpiry(codeExpiry)}</Text>
-              )}
+              <Text style={styles.codeValue} selectable accessibilityLabel={`Invite code ${chatCode.split('').join(' ')}`}>{chatCode}</Text>
+              {/* The visible text is the clock; the spoken label is the minute,
+                  so a screen reader is not read a new number every second. */}
+              <Text style={styles.codeExpiry} accessibilityLabel={`Expires in about ${leftMins} minute${leftMins === 1 ? '' : 's'}`}>
+                Expires in {left}
+              </Text>
               <View style={styles.codeActions}>
-                <TouchableOpacity
-                  style={[styles.codeBtn, codeCopied && styles.codeBtnCopied]}
-                  onPress={handleCopyCode}
-                >
-                  <Text style={styles.codeBtnText}>
-                    {codeCopied ? '✓ Copied' : '📋 Copy'}
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.codeBtn}
-                  onPress={handleShareCode}
-                >
-                  <Text style={styles.codeBtnText}>📤 Share</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.codeBtn, styles.codeBtnRevoke]}
-                  onPress={handleRevokeCode}
-                >
-                  <Text style={[styles.codeBtnText, styles.codeBtnTextRevoke]}>
-                    🗑️ Revoke
-                  </Text>
-                </TouchableOpacity>
+                <CodeButton icon={codeCopied ? 'checkmark' : 'copy-outline'} label={codeCopied ? 'Copied' : 'Copy'}
+                  a11yLabel={codeCopied ? 'Copied' : 'Copy invite code'} onPress={handleCopyCode}
+                  style={codeCopied ? styles.codeBtnCopied : undefined} styles={styles} color={c.text} />
+                <CodeButton icon="share-outline" label="Share" a11yLabel="Share invite code" onPress={handleShareCode} styles={styles} color={c.text} />
+                <CodeButton icon="trash-outline" label="Revoke" a11yLabel="Revoke invite code" onPress={handleRevokeCode}
+                  busy={revoking} style={styles.codeBtnRevoke} textStyle={styles.codeBtnTextRevoke} styles={styles} color={c.danger} />
               </View>
             </View>
           ) : (
@@ -284,9 +308,12 @@ export default function VaultFeaturesScreen() {
               style={[styles.actionBtn, generatingCode && styles.actionBtnDim]}
               onPress={handleGenerateCode}
               disabled={generatingCode}
+              accessibilityRole="button"
+              accessibilityLabel="Generate invite code"
+              accessibilityState={{ disabled: generatingCode, busy: generatingCode }}
             >
               {generatingCode
-                ? <ActivityIndicator color="#FFFFFF" size="small" />
+                ? <ActivityIndicator color={c.bubbleOutText} size="small" />
                 : <Text style={styles.actionBtnText}>Generate Invite Code</Text>
               }
             </TouchableOpacity>
@@ -295,72 +322,49 @@ export default function VaultFeaturesScreen() {
 
         {/* ── 2. Auto Screen Lock ── */}
         <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionIcon}>🔒</Text>
-            <View>
-              <Text style={styles.sectionTitle}>Auto Screen Lock</Text>
-              <Text style={styles.sectionDesc}>
-                Ask for biometrics or your MPIN when you come back to the app after this long away
-              </Text>
-            </View>
-          </View>
+          <SectionHeader icon="lock-closed-outline" title="Auto Screen Lock" styles={styles} color={c.primary}
+            desc="Ask for biometrics or your MPIN when you come back to the app after this long away" />
 
           <TouchableOpacity
             style={styles.pickerRow}
             onPress={() => setShowLock(true)}
             accessibilityRole="button"
-            accessibilityLabel={`Lock after: ${LOCK_OPTIONS.find(o => o.value === settings.lockTimer)?.label}`}
+            accessibilityLabel={`Lock after: ${lockLabel}`}
           >
             <Text style={styles.pickerLabel}>Lock after</Text>
             <View style={styles.pickerValue}>
-              <Text style={styles.pickerValueText}>
-                {LOCK_OPTIONS.find(o => o.value === settings.lockTimer)?.label}
-              </Text>
-              <Ionicons name="chevron-forward" size={18} color={scheme === 'light' ? c.textDim : '#9CA3AF'} />
+              <Text style={styles.pickerValueText}>{lockLabel}</Text>
+              <Ionicons name="chevron-forward" size={18} color={c.textDim} />
             </View>
           </TouchableOpacity>
-          {mfaOn === false && (
+          {loadFailed && (
+            <View style={styles.inlineError} accessibilityRole="alert">
+              <Text style={[styles.sectionDesc, { flex: 1 }]}>Your saved choice could not be read, so the default is shown.</Text>
+              <TouchableOpacity onPress={loadSettings} style={styles.retryBtn} accessibilityRole="button" accessibilityLabel="Try reading the saved choice again">
+                <Text style={styles.retryTxt}>Try again</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          {lockApplies === false && (
             <Text style={[styles.sectionDesc, { marginTop: 10 }]}>
-              Turn on Device MFA in Settings → Security for this to take effect.
+              Turn on Device MFA in Settings → Security, or set a Device PIN, for this to take effect.
             </Text>
           )}
         </View>
 
         {/* ── 3. Privacy ── */}
         <View style={styles.section}>
-          <Text style={styles.toggleSectionLabel}>PRIVACY</Text>
-
-          <TouchableOpacity
-            style={styles.exportRow}
-            accessibilityRole="button"
-            accessibilityLabel="Notification and link previews"
-            onPress={() => router.push('/notifications')}
-          >
-            <Text style={styles.exportIcon}>🔕</Text>
-            <View style={styles.exportInfo}>
-              <Text style={styles.exportTitle}>Notification & Link Previews</Text>
-              <Text style={styles.exportDesc}>Choose what notifications say, and whether links you receive are fetched</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={scheme === 'light' ? c.textDim : '#9CA3AF'} />
-          </TouchableOpacity>
+          <Text style={styles.toggleSectionLabel} accessibilityRole="header">PRIVACY</Text>
+          <LinkRow icon="notifications-off-outline" title="Notification & Link Previews"
+            desc="Choose what notifications say, and whether links you receive are fetched"
+            onPress={() => router.push('/notifications')} styles={styles} c={c} />
         </View>
 
         {/* ── 4. Vault ── */}
         <View style={styles.section}>
-          <Text style={styles.toggleSectionLabel}>VAULT</Text>
-          <TouchableOpacity
-            style={styles.exportRow}
-            onPress={() => router.push('/vault')}
-            accessibilityRole="button"
-            accessibilityLabel="Vault: encrypted files stored on this phone"
-          >
-            <Text style={styles.exportIcon}>🔒</Text>
-            <View style={styles.exportInfo}>
-              <Text style={styles.exportTitle}>Vault</Text>
-              <Text style={styles.exportDesc}>Encrypted files, stored on this phone only</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={scheme === 'light' ? c.textDim : '#9CA3AF'} />
-          </TouchableOpacity>
+          <Text style={styles.toggleSectionLabel} accessibilityRole="header">VAULT</Text>
+          <LinkRow icon="lock-closed-outline" title="Vault" desc="Encrypted files, stored on this phone only"
+            onPress={() => router.push('/vault')} styles={styles} c={c} />
         </View>
 
         <View style={{ height: 40 }} />
@@ -377,35 +381,33 @@ export default function VaultFeaturesScreen() {
           style={modalStyles.overlay}
           activeOpacity={1}
           onPress={() => setShowLock(false)}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
         >
-          <View style={modalStyles.panel}>
+          <View style={modalStyles.panel} accessibilityRole="radiogroup">
             <View style={modalStyles.handle} />
-            <Text style={modalStyles.title}>Auto Screen Lock</Text>
-            {LOCK_OPTIONS.map(opt => (
-              <TouchableOpacity
-                key={opt.value}
-                accessibilityRole="radio"
-                accessibilityState={{ checked: settings.lockTimer === opt.value }}
-                style={[
-                  modalStyles.option,
-                  settings.lockTimer === opt.value && modalStyles.optionActive,
-                ]}
-                onPress={() => {
-                  saveSetting('lockTimer', opt.value);
-                  setShowLock(false);
-                }}
-              >
-                <Text style={[
-                  modalStyles.optionText,
-                  settings.lockTimer === opt.value && modalStyles.optionTextActive,
-                ]}>
-                  {opt.label}
-                </Text>
-                {settings.lockTimer === opt.value && (
-                  <Ionicons name="checkmark" size={16} color={c.primary} />
-                )}
-              </TouchableOpacity>
-            ))}
+            <Text style={modalStyles.title} accessibilityRole="header">Auto Screen Lock</Text>
+            {LOCK_OPTIONS.map(opt => {
+              const on = settings.lockTimer === opt.value;
+              return (
+                <TouchableOpacity
+                  key={opt.value}
+                  accessibilityRole="radio"
+                  accessibilityLabel={opt.label}
+                  accessibilityState={{ checked: on, selected: on }}
+                  style={[modalStyles.option, on && modalStyles.optionActive]}
+                  onPress={() => {
+                    saveSetting('lockTimer', opt.value);
+                    setShowLock(false);
+                  }}
+                >
+                  <Text style={[modalStyles.optionText, on && modalStyles.optionTextActive]}>
+                    {opt.label}
+                  </Text>
+                  {on && <Ionicons name="checkmark" size={16} color={c.primary} />}
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </TouchableOpacity>
       </Modal>
@@ -414,23 +416,62 @@ export default function VaultFeaturesScreen() {
   );
 }
 
+type Styles = ReturnType<typeof makeStyles>;
+
+function SectionHeader({ icon, title, desc, styles, color }: { icon: IconName; title: string; desc: string; styles: Styles; color: string }) {
+  return (
+    <View style={styles.sectionHeader}>
+      <Ionicons name={icon} size={24} color={color} style={{ marginTop: 2 }} importantForAccessibility="no" accessibilityElementsHidden />
+      <View style={{ flex: 1 }}>
+        <Text style={styles.sectionTitle} accessibilityRole="header">{title}</Text>
+        <Text style={styles.sectionDesc}>{desc}</Text>
+      </View>
+    </View>
+  );
+}
+
+function CodeButton({ icon, label, a11yLabel, onPress, busy, style, textStyle, styles, color }: {
+  icon: IconName; label: string; a11yLabel: string; onPress: () => void; busy?: boolean;
+  style?: object; textStyle?: object; styles: Styles; color: string;
+}) {
+  return (
+    <TouchableOpacity style={[styles.codeBtn, style]} onPress={onPress} disabled={busy}
+      accessibilityRole="button" accessibilityLabel={a11yLabel} accessibilityState={{ disabled: !!busy, busy: !!busy }}>
+      {busy ? <ActivityIndicator size="small" color={color} /> : <Ionicons name={icon} size={16} color={color} />}
+      <Text style={[styles.codeBtnText, textStyle]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+function LinkRow({ icon, title, desc, onPress, styles, c }: { icon: IconName; title: string; desc: string; onPress: () => void; styles: Styles; c: Palette }) {
+  return (
+    <TouchableOpacity style={styles.linkRow} onPress={onPress} accessibilityRole="button" accessibilityLabel={`${title}. ${desc}`}>
+      <Ionicons name={icon} size={22} color={c.primary} />
+      <View style={styles.linkInfo}>
+        <Text style={styles.linkTitle}>{title}</Text>
+        <Text style={styles.linkDesc}>{desc}</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={c.textDim} />
+    </TouchableOpacity>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Styles
 // ─────────────────────────────────────────────────────────────────
 
-const makeStyles = (c: Palette, light: boolean) => StyleSheet.create({
+const makeStyles = (c: Palette) => StyleSheet.create({
   container:    { flex: 1, backgroundColor: c.bg },
   header: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: c.bg,
-    paddingTop: HEADER_TOP, paddingBottom: 12, paddingHorizontal: 16,
-    borderBottomWidth: 0.5, borderBottomColor: c.glassStroke, gap: 12,
+    paddingTop: HEADER_TOP, paddingBottom: 12, paddingHorizontal: 12,
+    borderBottomWidth: 0.5, borderBottomColor: c.glassStroke, gap: 8,
   },
-  back:          { fontSize: 28, color: c.primary, fontWeight: 'bold' },
+  backBtn:       { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   headerCenter:  { flex: 1 },
   headerTitle:   { fontSize: 18, fontWeight: 'bold', color: c.text },
   headerSub:     { fontSize: 12, color: c.primary, marginTop: 1, fontWeight: 'bold' },
-  headerBadge:   { fontSize: 22 },
 
   scroll:        { flex: 1 },
   scrollContent: { padding: 16, paddingBottom: 60 },
@@ -444,7 +485,6 @@ const makeStyles = (c: Palette, light: boolean) => StyleSheet.create({
   sectionHeader: {
     flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 14,
   },
-  sectionIcon:   { fontSize: 26, marginTop: 2 },
   sectionTitle:  { fontSize: 15, fontWeight: 'bold', color: c.text, marginBottom: 3 },
   sectionDesc:   { fontSize: 12, color: c.textDim, lineHeight: 17 },
 
@@ -458,75 +498,60 @@ const makeStyles = (c: Palette, light: boolean) => StyleSheet.create({
     fontSize: 28, fontWeight: 'bold', color: c.primary,
     letterSpacing: 3, fontFamily: 'monospace',
   },
-  codeExpiry:   { fontSize: 12, color: c.textDim, marginBottom: 4 },
-  codeActions:  { flexWrap: 'wrap', flexDirection: 'row', gap: 8, marginTop: 4 },
+  codeExpiry:   { fontSize: 12, color: c.textDim, marginBottom: 4, fontVariant: ['tabular-nums'] },
+  codeActions:  { flexWrap: 'wrap', flexDirection: 'row', justifyContent: 'center', gap: 8, marginTop: 4 },
   codeBtn: {
-    minHeight: 44, justifyContent: 'center', backgroundColor: c.surfaceSolid, borderRadius: 8,
+    minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: c.surfaceSolid, borderRadius: 8,
     borderWidth: 0.5, borderColor: c.glassStroke,
     paddingHorizontal: 12, paddingVertical: 7,
   },
-  codeBtnCopied:    { backgroundColor: 'rgba(34,197,94,0.14)', borderColor: c.primary },
-  codeBtnRevoke:    { borderColor: '#FF4D6D44' },
+  codeBtnCopied:    { borderColor: c.success },
+  codeBtnRevoke:    { borderColor: c.danger },
   codeBtnText:      { fontSize: 12, color: c.text },
-  codeBtnTextRevoke:{ color: light ? c.danger : '#FF4D6D' },
+  codeBtnTextRevoke:{ color: c.danger },
 
   actionBtn: {
-    backgroundColor: c.primary, borderRadius: 10,
-    paddingVertical: 12, alignItems: 'center',
+    backgroundColor: c.primary, borderRadius: 10, minHeight: 44,
+    paddingVertical: 12, alignItems: 'center', justifyContent: 'center',
   },
   actionBtnDim:   { opacity: 0.5 },
-  actionBtnText:  { color: '#FFFFFF', fontWeight: 'bold', fontSize: 14 },
+  // bubbleOutText is the palette's white-on-accent ink.
+  actionBtnText:  { color: c.bubbleOutText, fontWeight: 'bold', fontSize: 14 },
 
   // Picker row
   pickerRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    backgroundColor: c.surfaceSolid, borderRadius: 10,
+    backgroundColor: c.surfaceSolid, borderRadius: 10, minHeight: 44,
     borderWidth: 0.5, borderColor: c.glassStroke,
     paddingHorizontal: 14, paddingVertical: 12,
   },
   pickerLabel:      { fontSize: 14, color: c.text },
   pickerValue:      { flexDirection: 'row', alignItems: 'center', gap: 6 },
   pickerValueText:  { fontSize: 14, color: c.primary, fontWeight: 'bold' },
-  pickerChevron:    { fontSize: 18, color: c.textDim },
 
-  // Info banner
-  infoBanner: {
-    backgroundColor: '#D1FAE520', borderRadius: 8,
-    borderWidth: 0.5, borderColor: c.primary + '33',
-    paddingHorizontal: 12, paddingVertical: 7, marginTop: 10,
-  },
-  infoBannerText: { fontSize: 12, color: c.primary, lineHeight: 17 },
+  inlineError:  { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10 },
+  retryBtn:     { minHeight: 44, paddingHorizontal: 14, justifyContent: 'center', borderRadius: 10, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glass },
+  retryTxt:     { color: c.primary, fontWeight: '700' },
 
-  // Toggle section
   toggleSectionLabel: {
     fontSize: 12, fontWeight: 'bold', color: c.textDim,
     letterSpacing: 0.8, marginBottom: 10,
   },
-  toggleRow: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingVertical: 10, gap: 12,
-    borderBottomWidth: 0.5, borderBottomColor: c.glassStroke,
-  },
-  toggleIcon:   { fontSize: 20 },
-  toggleInfo:   { flex: 1 },
-  toggleTitle:  { fontSize: 13, fontWeight: 'bold', color: c.text, marginBottom: 2 },
-  toggleDesc:   { fontSize: 12, color: c.textDim, lineHeight: 15 },
 
-  // Export rows
-  exportRow: {
-    flexDirection: 'row', alignItems: 'center',
+  // Link rows
+  linkRow: {
+    flexDirection: 'row', alignItems: 'center', minHeight: 44,
     paddingVertical: 12, gap: 12,
-    borderBottomWidth: 0.5, borderBottomColor: c.glassStroke,
   },
-  exportIcon:    { fontSize: 22 },
-  exportInfo:    { flex: 1 },
-  exportTitle:   { fontSize: 13, fontWeight: 'bold', color: c.text, marginBottom: 2 },
-  exportDesc:    { fontSize: 12, color: c.textDim },
-  exportChevron: { fontSize: 18, color: c.textDim },
+  linkInfo:    { flex: 1 },
+  linkTitle:   { fontSize: 13, fontWeight: 'bold', color: c.text, marginBottom: 2 },
+  linkDesc:    { fontSize: 12, color: c.textDim },
 });
 
 const makeModalStyles = (c: Palette) => StyleSheet.create({
-  overlay:  { flex: 1, backgroundColor: '#00000088', justifyContent: 'flex-end' },
+  // Modal scrim: a translucent black dims whatever is behind in either theme.
+  overlay:  { flex: 1, backgroundColor: 'rgba(0,0,0,0.53)', justifyContent: 'flex-end' },
   panel: {
     backgroundColor: c.bg,
     borderTopLeftRadius: 20, borderTopRightRadius: 20,
@@ -540,39 +565,13 @@ const makeModalStyles = (c: Palette) => StyleSheet.create({
     fontSize: 17, fontWeight: 'bold', color: c.text,
     textAlign: 'center', marginBottom: 8,
   },
-  subtitle: {
-    fontSize: 13, color: c.textDim, textAlign: 'center',
-    lineHeight: 19, marginBottom: 16,
-  },
   option: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingVertical: 14, paddingHorizontal: 16, borderRadius: 10,
+    minHeight: 44, paddingVertical: 14, paddingHorizontal: 16, borderRadius: 10,
     marginBottom: 6, backgroundColor: c.surfaceSolid,
     borderWidth: 0.5, borderColor: c.glassStroke,
   },
-  optionActive:     { backgroundColor: 'rgba(34,197,94,0.14)', borderColor: c.primary },
+  optionActive:     { backgroundColor: c.glass, borderColor: c.primary },
   optionText:       { fontSize: 15, color: c.text },
   optionTextActive: { color: c.primary, fontWeight: 'bold' },
-  checkmark:        { fontSize: 16, color: c.primary, fontWeight: 'bold' },
-  inputLabel:       { fontSize: 12, color: c.textDim, marginBottom: 6, marginTop: 4 },
-  pinInput: {
-    backgroundColor: c.surfaceSolid, borderRadius: 10,
-    borderWidth: 0.5, borderColor: c.glassStroke,
-    paddingHorizontal: 14, paddingVertical: 11,
-    color: c.text, fontSize: 20,
-    letterSpacing: 4, textAlign: 'center', marginBottom: 12,
-  },
-  btnRow:       { flexDirection: 'row', gap: 10, marginTop: 8 },
-  cancelBtn: {
-    flex: 1, backgroundColor: c.surfaceSolid, borderRadius: 10,
-    borderWidth: 0.5, borderColor: c.glassStroke,
-    paddingVertical: 13, alignItems: 'center',
-  },
-  cancelText:   { color: c.textDim, fontWeight: 'bold' },
-  confirmBtn: {
-    flex: 1, backgroundColor: c.primary,
-    borderRadius: 10, paddingVertical: 13, alignItems: 'center',
-  },
-  confirmBtnDim:  { opacity: 0.5 },
-  confirmText:    { color: '#FFFFFF', fontWeight: 'bold', fontSize: 15 },
 });

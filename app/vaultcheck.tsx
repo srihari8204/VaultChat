@@ -1,8 +1,6 @@
-import { AppText as Text } from '../components/ui/Text';
-import { AuroraBackground } from '../components/ui';
 // app/vaultcheck.tsx — VaultCheck result screen.
 //
-// Opened from a message long-press ("Verify") or the media viewer. Runs the
+// Opened from a message long-press ("Verify", app/chat.tsx). Runs the
 // authenticity layers on-device and shows the verdict plus a per-layer
 // breakdown the user can read and share.
 //
@@ -11,6 +9,8 @@ import { AuroraBackground } from '../components/ui';
 // what was checked, what was NOT checked, and the limits of the answer — every
 // time, not only when the news is bad.
 
+import { AppText as Text } from '../components/ui/Text';
+import { AuroraBackground } from '../components/ui';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity, Share, Alert,
@@ -22,45 +22,66 @@ import { type Palette } from '../constants/theme';
 import { getMedia } from '../lib/mediaStore';
 import { verifyMedia, formatReport, type VaultCheckReport } from '../lib/vaultcheck';
 
-const VERDICT_STYLE: Record<string, { icon: any; color: string; label: string }> = {
-  'likely-authentic': { icon: 'shield-checkmark', color: '#00D4AA', label: 'LIKELY AUTHENTIC' },
-  'unknown':          { icon: 'help-circle',      color: '#FFC53D', label: 'NOT VERIFIED' },
-  'likely-fake':      { icon: 'alert-circle',     color: '#FF3C6E', label: 'ALTERED' },
+type IconName = React.ComponentProps<typeof Ionicons>['name'];
+// Colours are palette ROLES so they keep contrast in both themes: success,
+// danger, and a neutral for "not verified" (it is not a warning, just no answer).
+const VERDICT_STYLE: Record<VaultCheckReport['verdict'], { icon: IconName; tone: 'success' | 'textDim' | 'danger'; label: string }> = {
+  'likely-authentic': { icon: 'shield-checkmark', tone: 'success', label: 'LIKELY AUTHENTIC' },
+  'unknown':          { icon: 'help-circle',      tone: 'textDim', label: 'NOT VERIFIED' },
+  'likely-fake':      { icon: 'alert-circle',     tone: 'danger',  label: 'ALTERED' },
 };
+
+// A long video analysis should end in an answer, not an endless spinner.
+const CHECK_TIMEOUT_MS = 120_000;
 
 export default function VaultCheckScreen() {
   const { colors } = useTheme();
   const S = useMemo(() => makeStyles(colors), [colors]);
-  const { attachmentId, uri, msgType, mime, filename, isMine } = useLocalSearchParams();
+  // Only an attachment id is accepted: the old `uri` param read any path it
+  // was given, and no caller passes it.
+  const { attachmentId, msgType, mime, filename, isMine } = useLocalSearchParams();
 
   const kind: 'image' | 'video' = msgType === 'video' ? 'video' : 'image';
   const [report, setReport] = useState<VaultCheckReport | null>(null);
   const [error, setError] = useState<string>('');
+  const [attempt, setAttempt] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    setReport(null);
+    setError('');
+    setElapsed(0);
+    const started = Date.now();
+    const tick = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
     (async () => {
       try {
         // Resolve to a local file first — VaultCheck never uploads the media,
         // so everything below works on bytes already on this device.
-        let local = uri ? String(uri) : '';
-        if (!local && attachmentId) {
-          local = await getMedia(String(attachmentId), {
-            kind,
-            isMine: isMine === '1',
-            mime: mime ? String(mime) : undefined,
-            filename: filename ? String(filename) : undefined,
-          });
-        }
+        const id = typeof attachmentId === 'string' ? attachmentId : '';
+        if (!id) throw new Error('No media was given to check.');
+        const local = await getMedia(id, {
+          kind,
+          isMine: isMine === '1',
+          mime: mime ? String(mime) : undefined,
+          filename: filename ? String(filename) : undefined,
+        });
         if (!local) throw new Error('Could not locate the media on this device');
-        const r = await verifyMedia(local, kind);
+        const timeout = new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('The check took too long and was stopped. Try again, or try a shorter clip.')), CHECK_TIMEOUT_MS);
+        });
+        const r = await Promise.race([verifyMedia(local, kind), timeout]);
         if (!cancelled) setReport(r);
       } catch (e: any) {
         if (!cancelled) setError(e?.message || 'Verification failed');
+      } finally {
+        clearInterval(tick);
+        if (timer) clearTimeout(timer);
       }
     })();
-    return () => { cancelled = true; };
-  }, [attachmentId, uri, kind, mime, filename, isMine]);
+    return () => { cancelled = true; clearInterval(tick); if (timer) clearTimeout(timer); };
+  }, [attachmentId, kind, mime, filename, isMine, attempt]);
 
   const onShare = useCallback(async () => {
     if (!report) return;
@@ -69,6 +90,7 @@ export default function VaultCheckScreen() {
   }, [report]);
 
   const v = report ? VERDICT_STYLE[report.verdict] : null;
+  const vColor = v ? colors[v.tone] : colors.textDim;
 
   return (
     <>
@@ -83,23 +105,34 @@ export default function VaultCheckScreen() {
             <Text style={S.loadingTxt}>Checking on this device…</Text>
             <Text style={S.loadingHint}>
               Nothing is uploaded. The analysis runs entirely on your phone.
+              {kind === 'video' ? ' A video can take up to a minute or two.' : ''}
             </Text>
+            {elapsed >= 3 && (
+              <Text style={S.loadingHint} accessibilityLiveRegion="polite">{elapsed}s elapsed</Text>
+            )}
           </View>
         )}
 
         {!!error && (
-          <View style={S.card}>
-            <Ionicons name="warning-outline" size={28} color="#FF3C6E" />
+          <View style={S.card} accessibilityRole="alert">
+            <Ionicons name="warning-outline" size={28} color={colors.danger} />
             <Text style={S.cardTitle}>Could not check this file</Text>
             <Text style={S.cardBody}>{error}</Text>
+            <Text style={S.cardBody}>
+              If the file has not finished downloading, open it in the chat first, then try again.
+            </Text>
+            <TouchableOpacity style={S.retryBtn} onPress={() => setAttempt((a) => a + 1)} activeOpacity={0.8}
+              accessibilityRole="button" accessibilityLabel="Try checking this file again">
+              <Text style={S.retryTxt}>Try again</Text>
+            </TouchableOpacity>
           </View>
         )}
 
         {report && v && (
           <>
-            <View style={[S.verdict, { borderColor: v.color }]}>
-              <Ionicons name={v.icon} size={40} color={v.color} />
-              <Text style={[S.verdictLabel, { color: v.color }]}>{v.label}</Text>
+            <View style={[S.verdict, { borderColor: vColor }]}>
+              <Ionicons name={v.icon} size={40} color={vColor} />
+              <Text style={[S.verdictLabel, { color: vColor }]} accessibilityRole="header">{v.label}</Text>
               <Text style={S.verdictHeadline}>{report.headline}</Text>
               <Text style={S.verdictDetail}>{report.detail}</Text>
             </View>
@@ -157,8 +190,10 @@ export default function VaultCheckScreen() {
               </View>
             )}
 
-            <TouchableOpacity style={S.shareBtn} onPress={onShare} activeOpacity={0.85}>
-              <Ionicons name="share-outline" size={16} color="#fff" />
+            <TouchableOpacity style={S.shareBtn} onPress={onShare} activeOpacity={0.85}
+              accessibilityRole="button" accessibilityLabel="Share this report">
+              {/* bubbleOutText is the palette's white-on-accent ink. */}
+              <Ionicons name="share-outline" size={16} color={colors.bubbleOutText} />
               <Text style={S.shareTxt}>Share this report</Text>
             </TouchableOpacity>
 
@@ -174,11 +209,13 @@ export default function VaultCheckScreen() {
   );
 }
 
-function Row({ label, value, S }: { label: string; value: string; S: any }) {
+function Row({ label, value, S }: { label: string; value: string; S: ReturnType<typeof makeStyles> }) {
+  // No line cap: a signer name or an action list can be long, and a truncated
+  // line in a report people share as evidence would hide part of the answer.
   return (
     <View style={S.row}>
       <Text style={S.rowLabel}>{label}</Text>
-      <Text style={S.rowValue} numberOfLines={3}>{value}</Text>
+      <Text style={S.rowValue}>{value}</Text>
     </View>
   );
 }
@@ -214,6 +251,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     backgroundColor: c.primary, borderRadius: 14, paddingVertical: 14, marginTop: 4,
   },
-  shareTxt: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  shareTxt: { color: c.bubbleOutText, fontSize: 14, fontWeight: '800' },
+  retryBtn: { alignSelf: 'flex-start', minHeight: 44, paddingHorizontal: 18, marginTop: 4, justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glass },
+  retryTxt: { color: c.primary, fontWeight: '700' },
   disclaimer: { color: c.textDim, fontSize: 12, lineHeight: 16, textAlign: 'center', marginTop: 14 },
 });

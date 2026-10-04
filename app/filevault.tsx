@@ -4,9 +4,11 @@
 // *references* (uri:'') with plaintext folder passwords — it showed lock icons
 // and "PRIVATE ON-DEVICE STORAGE" but encrypted nothing and kept no file bytes.
 // The real vault (app/vault.tsx) encrypts the actual file bytes on-device with
-// AES-256-GCM (PBKDF2 key derived from the Vault PIN) and stores them as .enc
-// files with a SecureStore manifest. Rather than ship two vaults — one real,
-// one fake — every "Vault" entry point now lands on the real one.
+// AES-256-GCM (a random file key wrapped under the Device PIN, lib/vaultCrypto)
+// and stores them as .enc files with a SecureStore manifest. Rather than ship
+// two vaults — one real, one fake — every "Vault" entry point now lands on the
+// real one. Kept only as an alias for old links; the in-app caller left is
+// components/SafetyNavBar.tsx (see that file to point it at /vault directly).
 
 import { Redirect } from 'expo-router';
 

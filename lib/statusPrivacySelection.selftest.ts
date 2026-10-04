@@ -1,6 +1,6 @@
 // Run: npx tsx lib/statusPrivacySelection.selftest.ts
 import assert from 'node:assert/strict';
-import { privacyUserIds, selectionAfterModeSwitch } from './statusPrivacySelection';
+import { modeSwitchClearsList, privacyUserIds, selectionAfterModeSwitch } from './statusPrivacySelection';
 
 const excluded = new Set(['ex1', 'ex2']);
 
@@ -17,5 +17,12 @@ assert.notEqual(same, excluded);
 
 assert.deepEqual(privacyUserIds('contacts', excluded), []);
 assert.deepEqual(privacyUserIds('only', new Set(['a'])), ['a']);
+
+// Leaving a mode that holds a list is confirmed; nothing to lose, no prompt.
+assert.equal(modeSwitchClearsList('except', 'only', excluded), true);
+assert.equal(modeSwitchClearsList('only', 'contacts', excluded), true);
+assert.equal(modeSwitchClearsList('except', 'only', new Set()), false);
+assert.equal(modeSwitchClearsList('contacts', 'except', excluded), false);
+assert.equal(modeSwitchClearsList('except', 'except', excluded), false);
 
 console.log('statusPrivacySelection selftest passed');

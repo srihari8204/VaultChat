@@ -12,6 +12,11 @@ export function selectionAfterModeSwitch(from: PrivacyMode, to: PrivacyMode, cur
   return from === to ? new Set(current) : new Set();
 }
 
+/** Whether moving from `from` to `to` throws away people the user picked (so it should be confirmed). */
+export function modeSwitchClearsList(from: PrivacyMode, to: PrivacyMode, current: ReadonlySet<string>): boolean {
+  return from !== to && from !== 'contacts' && current.size > 0;
+}
+
 /** The user ids sent with a save for `mode`. */
 export function privacyUserIds(mode: PrivacyMode, selected: ReadonlySet<string>): string[] {
   return mode === 'contacts' ? [] : [...selected];

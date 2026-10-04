@@ -45,4 +45,16 @@ ok('fixed rows have no route; every changeable row says where it is changed and 
   }
 });
 
+ok('a fact that could not be checked is left out of the score and never counts as on', () => {
+  const rows = privacyChecklist({ ...ALL_ON, trustedContacts: 'unknown', lastSeenHidden: 'unknown' });
+  assert.equal(rows.find((r) => r.key === 'trustedContacts')!.on, 'unknown');
+  assert.equal(privacyScore(rows), 100);
+  const mixed = privacyChecklist({ ...ALL_OFF, e2ee: true, deviceMfa: 'unknown', pinSet: 'unknown' });
+  assert.equal(privacyScore(mixed), 20);  // 1 of the 5 checked rows
+  assert.equal(privacyScore(privacyChecklist({
+    e2ee: 'unknown' as never, screenshotsBlocked: null, deviceMfa: 'unknown', pinSet: 'unknown',
+    trustedContacts: 'unknown', lastSeenHidden: 'unknown', readReceiptsOff: 'unknown',
+  })), 0);
+});
+
 console.log(`\nprivacyChecklist.selftest: ${n} passed`);

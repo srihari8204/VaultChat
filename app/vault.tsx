@@ -1,5 +1,3 @@
-import { AppText as Text } from '../components/ui/Text';
-import { AuroraBackground } from '../components/ui';
 // app/vault.tsx
 // Device-PIN gated local file vault (the PIN set in Settings → Device PIN,
 // 4–8 digits — services/security/pinFormat).
@@ -8,14 +6,17 @@ import { AuroraBackground } from '../components/ui';
 // Tabs: Documents / Photos / Voice / Videos
 // "Export file list" shares names/sizes/dates only — not the files, not encrypted.
 // There is no automatic or server backup of vault files.
+// Leaving the app (background) locks the vault again, except while a system
+// picker or share sheet that this screen opened is in front.
 
-import { BRAND_ACCENT } from '../constants/theme';
+import { AppText as Text } from '../components/ui/Text';
+import { AuroraBackground } from '../components/ui';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   View, TouchableOpacity, StyleSheet,
   FlatList, Alert, Vibration, ActivityIndicator,
-  Modal,
+  Modal, AppState,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
@@ -27,9 +28,9 @@ import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { clearVaultKeyCache, vaultFileDecrypt, vaultFileEncrypt, type VaultKeys } from '../lib/vaultCrypto';
-import { unlockVaultKeys } from '../lib/vaultKeyStore';
+import { unlockVaultKeys, type VaultKeyMiss } from '../lib/vaultKeyStore';
 import type { Palette } from '../constants/theme';
-import { useColors, useTheme } from '../lib/theme';
+import { useColors } from '../lib/theme';
 import { HEADER_TOP } from '../constants/layout';
 import { permissionDenied } from '../lib/permissionDenied';
 import { parseVaultManifest } from '../lib/vaultManifestParse';
@@ -54,18 +55,19 @@ interface VaultFile {
 // Helpers
 // ─────────────────────────────────────────────────────────────────
 
-const TAB_CONFIG: Record<VaultTab, { icon: string; color: string; accept: string }> = {
-  Documents: { icon: '📄', color: '#3B82F6', accept: '*/*' },
-  Photos:    { icon: '🖼️', color: '#F5C842', accept: 'image/*' },
-  Voice:     { icon: '🎵', color: '#EC4899', accept: 'audio/*' },
-  Videos:    { icon: '🎥', color: BRAND_ACCENT, accept: 'video/*' },
+type IconName = React.ComponentProps<typeof Ionicons>['name'];
+const TAB_CONFIG: Record<VaultTab, { icon: IconName }> = {
+  Documents: { icon: 'document-text-outline' },
+  Photos:    { icon: 'image-outline' },
+  Voice:     { icon: 'musical-notes-outline' },
+  Videos:    { icon: 'videocam-outline' },
 };
 
-const VAULT_DIR = (FileSystem as any).documentDirectory + 'vault/';
+const VAULT_DIR = FileSystem.documentDirectory + 'vault/';
 // Decrypted copies handed to the share sheet. Each is deleted once the sheet
 // returns, and the whole folder on every vault open and close, so a copy the
 // share target was still reading (or a crash) cannot outlive the next visit.
-const OPEN_DIR = (FileSystem as any).cacheDirectory + 'vault-open/';
+const OPEN_DIR = FileSystem.cacheDirectory + 'vault-open/';
 const wipeOpenDir = () => FileSystem.deleteAsync(OPEN_DIR, { idempotent: true }).catch(() => {});
 /** A file name safe to use as a path segment. */
 const safeName = (name: string) => name.replace(/[/\\]/g, '_').replace(/^\.+/, '') || 'file';
@@ -89,9 +91,8 @@ function formatDate(ms: number): string {
 
 function PinGate({ onUnlock }: { onUnlock: (pin: string) => Promise<void> }) {
   const c = useColors();
-  const { scheme } = useTheme();
   const router = useRouter();
-  const pinStyles = useMemo(() => makePinStyles(c, scheme === 'light'), [c, scheme]);
+  const pinStyles = useMemo(() => makePinStyles(c), [c]);
   const [pin,   setPin]   = useState('');
   const [error, setError] = useState('');
   const [busy,  setBusy]  = useState(false);
@@ -129,8 +130,9 @@ function PinGate({ onUnlock }: { onUnlock: (pin: string) => Promise<void> }) {
     return (
       <View style={pinStyles.container}>
         <AuroraBackground />
-        <Text style={pinStyles.lockIcon}>🔒</Text>
-        <Text style={pinStyles.title}>Vault</Text>
+        <BackButton onPress={() => router.back()} color={c.primary} />
+        <Ionicons name="lock-closed" size={52} color={c.primary} style={pinStyles.lockIcon} importantForAccessibility="no" accessibilityElementsHidden />
+        <Text style={pinStyles.title} accessibilityRole="header">Vault</Text>
         <Text style={[pinStyles.sub, { textAlign: 'center', paddingHorizontal: 32 }]}>
           The vault opens with your Device PIN, and this phone does not have one yet.
         </Text>
@@ -149,9 +151,10 @@ function PinGate({ onUnlock }: { onUnlock: (pin: string) => Promise<void> }) {
   return (
     <View style={pinStyles.container}>
       <AuroraBackground />
-      <Text style={pinStyles.lockIcon}>🔒</Text>
-      <Text style={pinStyles.title}>Vault</Text>
-      <Text style={pinStyles.sub}>Enter your Device PIN, then tap ✓</Text>
+      <BackButton onPress={() => router.back()} color={c.primary} />
+      <Ionicons name="lock-closed" size={52} color={c.primary} style={pinStyles.lockIcon} importantForAccessibility="no" accessibilityElementsHidden />
+      <Text style={pinStyles.title} accessibilityRole="header">Vault</Text>
+      <Text style={pinStyles.sub} accessibilityLabel="Enter your Device PIN, then tap Done">Enter your Device PIN, then tap ✓</Text>
 
       <PinPad
         value={pin}
@@ -167,9 +170,18 @@ function PinGate({ onUnlock }: { onUnlock: (pin: string) => Promise<void> }) {
       {error ? <Text style={pinStyles.error} accessibilityLiveRegion="polite">{error}</Text> : null}
 
       <Text style={pinStyles.note}>
-        🔐 Files are AES-256-GCM encrypted
+        Files are AES-256-GCM encrypted
       </Text>
     </View>
+  );
+}
+
+function BackButton({ onPress, color }: { onPress: () => void; color: string }) {
+  return (
+    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={onPress} hitSlop={8}
+      style={{ position: 'absolute', top: HEADER_TOP, left: 12, width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
+      <Ionicons name="arrow-back" size={26} color={color} />
+    </TouchableOpacity>
   );
 }
 
@@ -188,6 +200,7 @@ export default function VaultScreen() {
   // was reset somewhere that could not re-wrap it): older files still open via
   // the PIN, new files fall back to the PIN-derived format — see vaultKeyStore.
   const [vaultKeys,   setVaultKeys]   = useState<VaultKeys | null>(null);
+  const [keyMiss,     setKeyMiss]     = useState<VaultKeyMiss | undefined>(undefined);
   const [activeTab,   setActiveTab]   = useState<VaultTab>('Documents');
   const [files,       setFiles]       = useState<VaultFile[]>([]);
   // Latest saved manifest, so an add or delete never builds on a stale render.
@@ -208,12 +221,44 @@ export default function VaultScreen() {
   }, []);
 
   const unlock = async (pin: string) => {
-    let keys: VaultKeys | null = null;
-    try { keys = (await unlockVaultKeys(pin)).keys; } catch { keys = null; }
-    setVaultKeys(keys);
+    let res: { keys: VaultKeys | null; miss?: VaultKeyMiss };
+    try { res = await unlockVaultKeys(pin); } catch { res = { keys: null, miss: 'storage' }; }
+    setVaultKeys(res.keys);
+    setKeyMiss(res.keys ? undefined : res.miss);
     setVaultPin(pin);
     setUnlocked(true);
   };
+
+  // Re-lock when the app goes to the background. A picker or share sheet this
+  // screen opened also backgrounds the app (Android runs it as another
+  // activity), so those are bracketed by `systemUi` and do not lock.
+  // ponytail: the bracket is a counter around our own awaits, not a signal
+  // from the OS. If the user leaves the app from inside a picker, the vault
+  // stays open until the picker returns. Replace with an OS-level signal if
+  // one becomes available; needs a device check either way.
+  const systemUi = useRef(0);
+  const withSystemUi = useCallback(async <T,>(fn: () => Promise<T>): Promise<T> => {
+    systemUi.current++;
+    try { return await fn(); } finally { systemUi.current--; }
+  }, []);
+  useEffect(() => {
+    if (!unlocked) return;
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st !== 'background' || systemUi.current > 0) return;
+      clearVaultKeyCache();
+      wipeOpenDir();
+      setVaultPin('');
+      setVaultKeys(null);
+      setKeyMiss(undefined);
+      // filesRef is left alone: the next unlock re-reads the manifest, and an
+      // empty ref here is what a save would build on.
+      setFiles([]);
+      setShowBackup(false);
+      setManifestState('loading');
+      setUnlocked(false);
+    });
+    return () => sub.remove();
+  }, [unlocked]);
 
   // ── Load manifest on unlock ───────────────────────────────────
   useEffect(() => {
@@ -251,8 +296,12 @@ export default function VaultScreen() {
   };
 
   const loadLastBackupDate = async () => {
-    const d = await SecureStore.getItemAsync('vault_last_backup');
+    const d = await SecureStore.getItemAsync('vault_last_backup').catch(() => null);
     if (d) setLastBackup(d);
+  };
+
+  const retryKeys = async () => {
+    if (vaultPin) await unlock(vaultPin);
   };
 
   // ── File encryption + save ────────────────────────────────────
@@ -307,20 +356,22 @@ export default function VaultScreen() {
   const handleAdd = async () => {
     if (adding.current || loading || manifestState !== 'ok') return;
     adding.current = true;
-    try { await pickAndAdd(); } finally { adding.current = false; }
+    // The whole add (picker, encrypt, manifest save) is one bracket, so going
+    // to the background mid-encrypt cannot lock the vault under it.
+    try { await withSystemUi(pickAndAdd); } finally { adding.current = false; }
   };
 
   const pickAndAdd = async () => {
     if (activeTab === 'Photos') {
-      const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const { status, canAskAgain } = await withSystemUi(() => ImagePicker.requestMediaLibraryPermissionsAsync());
       if (status !== 'granted') {
         permissionDenied('Photo access needed', 'Allow gallery access to move a photo into the vault.', canAskAgain);
         return;
       }
-      const result = await ImagePicker.launchImageLibraryAsync({
+      const result = await withSystemUi(() => ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         quality:    0.85,
-      });
+      }));
       if (!result.canceled && result.assets[0]) {
         const asset = result.assets[0];
         const name  = asset.fileName || `photo_${Date.now()}.jpg`;
@@ -329,14 +380,14 @@ export default function VaultScreen() {
         );
       }
     } else if (activeTab === 'Videos') {
-      const { status , canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const { status , canAskAgain } = await withSystemUi(() => ImagePicker.requestMediaLibraryPermissionsAsync());
       if (status !== 'granted') {
         permissionDenied('Photo access needed', 'Allow gallery access to move a video into the vault.', canAskAgain);
         return;
       }
-      const result = await ImagePicker.launchImageLibraryAsync({
+      const result = await withSystemUi(() => ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-      });
+      }));
       if (!result.canceled && result.assets[0]) {
         const asset = result.assets[0];
         const name  = asset.fileName || `video_${Date.now()}.mp4`;
@@ -346,10 +397,10 @@ export default function VaultScreen() {
       }
     } else {
       // Documents and Voice — use document picker
-      const result = await DocumentPicker.getDocumentAsync({
+      const result = await withSystemUi(() => DocumentPicker.getDocumentAsync({
         multiple: false,
         copyToCacheDirectory: true,
-      });
+      }));
       if (!result.canceled && result.assets[0]) {
         const asset = result.assets[0];
         await encryptAndSave(
@@ -388,10 +439,11 @@ export default function VaultScreen() {
       // 4. Share/open with system viewer
       const canShare = await Sharing.isAvailableAsync();
       if (canShare) {
-        await Sharing.shareAsync(tempPath, {
+        const path = tempPath;
+        await withSystemUi(() => Sharing.shareAsync(path, {
           mimeType: file.mimeType,
           dialogTitle: file.name,
-        });
+        }));
       } else {
         Alert.alert('Cannot open', 'This device has no app to open the file with.');
       }
@@ -443,22 +495,24 @@ export default function VaultScreen() {
     setLoading(true);
     let exportPath: string | null = null;
     try {
-      const now = new Date().toLocaleDateString();
-      const list = files.map(f => ({ name: f.name, type: f.type, size: f.size, addedAt: new Date(f.addedAt).toISOString() }));
-      exportPath = (FileSystem as any).cacheDirectory + `vault_file_list_${Date.now()}.json`;
-      await FileSystem.writeAsStringAsync(exportPath, JSON.stringify(list, null, 2), { encoding: 'utf8' });
-
-      await SecureStore.setItemAsync('vault_last_backup', now);
-      setLastBackup(now);
+      if (manifestState !== 'ok') return;   // never share an empty stand-in list
       setShowBackup(false);
-
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(exportPath, { mimeType: 'application/json', dialogTitle: 'Vault file list' });
-      } else {
+      if (!(await Sharing.isAvailableAsync())) {
         Alert.alert('Cannot share', 'This device has no app to share the list with.');
+        return;
       }
+      const list = filesRef.current.map(f => ({ name: f.name, type: f.type, size: f.size, addedAt: new Date(f.addedAt).toISOString() }));
+      const path = FileSystem.cacheDirectory + `vault_file_list_${Date.now()}.json`;
+      exportPath = path;
+      await FileSystem.writeAsStringAsync(path, JSON.stringify(list, null, 2), { encoding: 'utf8' });
+      await withSystemUi(() => Sharing.shareAsync(path, { mimeType: 'application/json', dialogTitle: 'Vault file list' }));
+
+      // Recorded only once the share sheet has returned.
+      const now = new Date().toLocaleDateString();
+      setLastBackup(now);
+      await SecureStore.setItemAsync('vault_last_backup', now).catch(() => {});
     } catch (e: any) {
-      Alert.alert('Error', e.message);
+      Alert.alert('Export failed', e?.message ?? 'Try again.');
     } finally {
       if (exportPath) await FileSystem.deleteAsync(exportPath, { idempotent: true }).catch(() => {});
       setLoading(false);
@@ -485,11 +539,11 @@ export default function VaultScreen() {
 
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={8} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={26} color={c.primary} />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle}>Vault</Text>
+          <Text style={styles.headerTitle} accessibilityRole="header">Vault</Text>
           <Text style={styles.headerSub}>AES-256-GCM Encrypted</Text>
         </View>
         <TouchableOpacity hitSlop={4}
@@ -501,7 +555,7 @@ export default function VaultScreen() {
           accessibilityLabel="Export file list"
           accessibilityState={{ disabled: manifestState !== 'ok' }}
         >
-          <Text style={styles.backupBtnText}>💾</Text>
+          <Ionicons name="download-outline" size={20} color={c.primary} />
         </TouchableOpacity>
       </View>
 
@@ -526,10 +580,23 @@ export default function VaultScreen() {
       </View>
 
       {!vaultKeys && (
-        <Text style={styles.keyNotice} accessibilityLiveRegion="polite">
-          This PIN cannot open the vault key from before your PIN was reset, so files added under the
-          old PIN may not open. New files are still encrypted with this PIN.
-        </Text>
+        keyMiss === 'storage' ? (
+          <View style={styles.keyNoticeRow}>
+            <Text style={[styles.keyNotice, { flex: 1 }]} accessibilityLiveRegion="polite">
+              This phone&apos;s secure storage could not be read, so the vault key did not load. Files may
+              not open until it does.
+            </Text>
+            <TouchableOpacity style={styles.keyRetryBtn} onPress={retryKeys} accessibilityRole="button" accessibilityLabel="Try loading the vault key again">
+              <Text style={styles.keyRetryText}>Try again</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <Text style={styles.keyNotice} accessibilityLiveRegion="polite">
+            {keyMiss === 'damaged'
+              ? 'The saved vault key is damaged, so files added with it may not open. It has been left as it is. New files are still encrypted with your PIN.'
+              : 'This PIN cannot open the vault key from before your PIN was reset, so files added under the old PIN may not open. New files are still encrypted with this PIN.'}
+          </Text>
+        )
       )}
 
       {/* Tabs */}
@@ -545,17 +612,13 @@ export default function VaultScreen() {
               accessibilityLabel={`${tab}, ${count} file${count === 1 ? '' : 's'}`}
               accessibilityState={{ selected: activeTab === tab }}
             >
-              <Text style={styles.tabIcon}>{TAB_CONFIG[tab].icon}</Text>
+              <Ionicons name={TAB_CONFIG[tab].icon} size={20} color={activeTab === tab ? c.primary : c.textDim} />
               <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
                 {tab}
               </Text>
               {count > 0 && (
-                <View style={[styles.tabCount,
-                  { backgroundColor: TAB_CONFIG[tab].color + '33' }]}>
-                  <Text style={[styles.tabCountText,
-                    { color: TAB_CONFIG[tab].color }]}>
-                    {count}
-                  </Text>
+                <View style={styles.tabCount}>
+                  <Text style={styles.tabCountText}>{count}</Text>
                 </View>
               )}
             </TouchableOpacity>
@@ -597,7 +660,7 @@ export default function VaultScreen() {
           contentContainerStyle={styles.listContent}
           ListEmptyComponent={
             <View style={styles.emptyWrap}>
-              <Text style={styles.emptyIcon}>{TAB_CONFIG[activeTab].icon}</Text>
+              <Ionicons name={TAB_CONFIG[activeTab].icon} size={52} color={c.textDim} importantForAccessibility="no" accessibilityElementsHidden />
               <Text style={styles.emptyTitle}>
                 No {activeTab.toLowerCase()} yet
               </Text>
@@ -613,12 +676,11 @@ export default function VaultScreen() {
               onLongPress={() => handleDelete(item)}
               accessibilityRole="button"
               accessibilityLabel={`Open ${item.name}, ${formatSize(item.size)}`}
+              accessibilityActions={[{ name: 'delete', label: `Delete ${item.name}` }]}
+              onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'delete') handleDelete(item); }}
             >
-              <View style={[styles.fileIcon,
-                { backgroundColor: TAB_CONFIG[item.type].color + '22' }]}>
-                <Text style={styles.fileIconText}>
-                  {TAB_CONFIG[item.type].icon}
-                </Text>
+              <View style={styles.fileIcon}>
+                <Ionicons name={TAB_CONFIG[item.type].icon} size={22} color={c.primary} />
               </View>
               <View style={styles.fileInfo}>
                 <Text style={styles.fileName} numberOfLines={1}>
@@ -629,8 +691,9 @@ export default function VaultScreen() {
                 </Text>
               </View>
               <View style={styles.fileActions}>
-                <View style={styles.encBadge}>
-                  <Text style={styles.encBadgeText}>🔐 ENC</Text>
+                <View style={styles.encBadge} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
+                  <Ionicons name="lock-closed" size={11} color={c.primary} />
+                  <Text style={styles.encBadgeText}>ENC</Text>
                 </View>
                 <TouchableOpacity
                   style={styles.deleteBtn}
@@ -638,7 +701,7 @@ export default function VaultScreen() {
                   accessibilityRole="button"
                   accessibilityLabel={`Delete ${item.name}`}
                 >
-                  <Text style={styles.deleteBtnText}>🗑️</Text>
+                  <Ionicons name="trash-outline" size={20} color={c.danger} />
                 </TouchableOpacity>
               </View>
             </TouchableOpacity>
@@ -655,7 +718,8 @@ export default function VaultScreen() {
         style={[styles.fab, (loading || manifestState !== 'ok') && styles.fabDisabled]}
         onPress={handleAdd}
       >
-        <Ionicons name="add" size={28} color="#FFFFFF" />
+        {/* bubbleOutText is the palette's white-on-accent ink. */}
+        <Ionicons name="add" size={28} color={c.bubbleOutText} />
       </TouchableOpacity>
 
       {/* Backup modal */}
@@ -684,18 +748,20 @@ export default function VaultScreen() {
                 style={styles.backupCancelBtn}
                 onPress={() => setShowBackup(false)}
                 accessibilityRole="button"
+                accessibilityLabel="Cancel"
               >
                 <Text style={styles.backupCancelText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.backupConfirmBtn}
                 onPress={handleBackup}
-                disabled={loading}
+                disabled={loading || manifestState !== 'ok'}
                 accessibilityRole="button"
                 accessibilityLabel="Export file list"
+                accessibilityState={{ disabled: loading || manifestState !== 'ok', busy: loading }}
               >
                 {loading
-                  ? <ActivityIndicator color="#FFFFFF" size="small" />
+                  ? <ActivityIndicator color={c.bubbleOutText} size="small" />
                   : <Text style={styles.backupConfirmText}>Export</Text>
                 }
               </TouchableOpacity>
@@ -724,18 +790,18 @@ export default function VaultScreen() {
 // Styles
 // ─────────────────────────────────────────────────────────────────
 
-const makePinStyles = (c: Palette, light: boolean) => StyleSheet.create({
+const makePinStyles = (c: Palette) => StyleSheet.create({
   container: {
     flex: 1, backgroundColor: c.glassSoft,
     alignItems: 'center', justifyContent: 'center',
   },
-  lockIcon:  { fontSize: 52, marginBottom: 12 },
+  lockIcon:  { marginBottom: 12 },
   title:     { fontSize: 26, fontWeight: 'bold', color: c.text, marginBottom: 4 },
   sub:       { fontSize: 13, color: c.textDim, marginBottom: 24 },
-  error:     { color: light ? c.danger : '#FF4D6D', fontSize: 13, marginTop: 12, textAlign: 'center', paddingHorizontal: 24 },
+  error:     { color: c.danger, fontSize: 13, marginTop: 12, textAlign: 'center', paddingHorizontal: 24 },
   note:      { marginTop: 28, color: c.textDim, fontSize: 11 },
   setBtn:    { marginTop: 8, minHeight: 48, paddingHorizontal: 24, borderRadius: 12, backgroundColor: c.primary, justifyContent: 'center', alignItems: 'center' },
-  setBtnText:{ color: '#FFFFFF', fontWeight: 'bold', fontSize: 15 },
+  setBtnText:{ color: c.bubbleOutText, fontWeight: 'bold', fontSize: 15 },
 });
 
 const makeStyles = (c: Palette) => StyleSheet.create({
@@ -749,7 +815,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderBottomWidth: 0.5, borderBottomColor: c.glassStroke,
     gap: 12,
   },
-  back:         { fontSize: 28, color: c.primary, fontWeight: 'bold' },
+  backBtn:      { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginLeft: -8 },
   headerCenter: { flex: 1 },
   headerTitle:  { fontSize: 18, fontWeight: 'bold', color: c.text },
   headerSub:    { fontSize: 12, color: c.primary, marginTop: 1 },
@@ -758,7 +824,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderRadius: 9, borderWidth: 0.5, borderColor: c.glassStroke,
     justifyContent: 'center', alignItems: 'center',
   },
-  backupBtnText: { fontSize: 18 },
 
   // Stats
   statsBar: {
@@ -772,6 +837,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   statDivider: { width: 0.5, backgroundColor: c.surfaceSolid, marginVertical: 4 },
 
   keyNotice: { color: c.danger, fontSize: 12, lineHeight: 17, paddingHorizontal: 16, paddingVertical: 8 },
+  keyNoticeRow: { flexDirection: 'row', alignItems: 'center', paddingRight: 12 },
+  keyRetryBtn: { minHeight: 44, paddingHorizontal: 14, borderRadius: 10, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glassSoft, justifyContent: 'center' },
+  keyRetryText: { color: c.primary, fontWeight: '700', fontSize: 13 },
 
   // Tabs
   tabs: {
@@ -784,13 +852,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   tabActive: {
     borderBottomWidth: 2, borderBottomColor: c.primary,
   },
-  tabIcon:       { fontSize: 20 },
   tabText:       { fontSize: 12, color: c.textDim },
   tabTextActive: { color: c.primary, fontWeight: 'bold' },
   tabCount: {
-    borderRadius: 8, paddingHorizontal: 5, paddingVertical: 1,
+    borderRadius: 8, paddingHorizontal: 5, paddingVertical: 1, backgroundColor: c.glass,
   },
-  tabCountText:  { fontSize: 12, fontWeight: 'bold' },
+  tabCountText:  { fontSize: 12, fontWeight: 'bold', color: c.primary },
 
   // Loading
   loadingWrap: {
@@ -805,7 +872,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   emptyWrap: {
     flex: 1, alignItems: 'center', paddingTop: 64, gap: 10,
   },
-  emptyIcon:  { fontSize: 52 },
   emptyTitle: { fontSize: 16, fontWeight: 'bold', color: c.textDim },
   emptyHint:  { fontSize: 12, color: c.textDim, textAlign: 'center' },
 
@@ -817,22 +883,21 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderWidth: 0.5, borderColor: c.glassStroke,
   },
   fileIcon: {
-    width: 44, height: 44, borderRadius: 10,
+    width: 44, height: 44, borderRadius: 10, backgroundColor: c.glassSoft,
     justifyContent: 'center', alignItems: 'center', marginRight: 12,
   },
-  fileIconText:  { fontSize: 22 },
   fileInfo:      { flex: 1 },
   fileName:      { fontSize: 14, fontWeight: 'bold', color: c.text, marginBottom: 3 },
   fileMeta:      { fontSize: 12, color: c.textDim },
   fileActions:   { flexDirection: 'row', alignItems: 'center', gap: 8 },
   encBadge: {
-    backgroundColor: 'rgba(34,197,94,0.14)', borderRadius: 6,
-    borderWidth: 0.5, borderColor: c.primary + '44',
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    backgroundColor: c.glassSoft, borderRadius: 6,
+    borderWidth: 0.5, borderColor: c.primary,
     paddingHorizontal: 6, paddingVertical: 2,
   },
   encBadgeText:  { fontSize: 12, color: c.primary, fontWeight: 'bold' },
-  deleteBtn:     { padding: 4 },
-  deleteBtnText: { fontSize: 16 },
+  deleteBtn:     { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
 
   // FAB
   fab: {
@@ -844,12 +909,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   },
   fabDisabled: { opacity: 0.4 },
   retryBtn: { minHeight: 44, paddingHorizontal: 24, borderRadius: 12, backgroundColor: c.primary, justifyContent: 'center', alignItems: 'center' },
-  retryText: { color: '#FFFFFF', fontWeight: 'bold', fontSize: 15 },
-  fabText: { fontSize: 28, color: '#FFFFFF', fontWeight: 'bold', lineHeight: 32 },
+  retryText: { color: c.bubbleOutText, fontWeight: 'bold', fontSize: 15 },
 
   // Backup modal
+  // Modal scrim: a translucent black dims whatever is behind in either theme.
   modalOverlay: {
-    flex: 1, backgroundColor: '#00000088', justifyContent: 'flex-end',
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.53)', justifyContent: 'flex-end',
   },
   backupPanel: {
     backgroundColor: c.bg,
@@ -868,13 +933,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     fontSize: 13, color: c.textDim, lineHeight: 20,
     textAlign: 'center', marginBottom: 20,
   },
-  backupLabel:   { fontSize: 12, color: c.textDim, marginBottom: 6 },
-  backupInput: {
-    backgroundColor: c.surfaceSolid, borderRadius: 10,
-    borderWidth: 0.5, borderColor: c.glassStroke,
-    paddingHorizontal: 14, paddingVertical: 11,
-    color: c.text, fontSize: 15, marginBottom: 16,
-  },
   backupBtnRow:  { flexDirection: 'row', gap: 10, marginBottom: 12 },
   backupCancelBtn: {
     flex: 1, backgroundColor: c.surfaceSolid,
@@ -886,7 +944,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     flex: 1, backgroundColor: c.primary,
     borderRadius: 10, paddingVertical: 13, alignItems: 'center',
   },
-  backupConfirmText: { color: '#FFFFFF', fontWeight: 'bold', fontSize: 15 },
+  backupConfirmText: { color: c.bubbleOutText, fontWeight: 'bold', fontSize: 15 },
   backupLastText:    { fontSize: 12, color: c.textDim, textAlign: 'center' },
   backupNote:        { fontSize: 12, color: c.text, textAlign: 'center', marginTop: 6 },
 });

@@ -26,17 +26,29 @@ async function readRecord(): Promise<VaultKeyRecord | null | undefined> {
   try { return JSON.parse(raw) as VaultKeyRecord; } catch { return null; }
 }
 
+/** Why `keys` is null: SecureStore failed, the record is unreadable, or this PIN cannot open it. */
+export type VaultKeyMiss = 'storage' | 'damaged' | 'pin';
+
 /**
  * The vault keys for a PIN pinStore has already verified. Creates the record
  * on first use. `keys` is null when a record exists but this PIN cannot open
- * it, or when SecureStore could not be read (never treated as "no record").
+ * it, or when SecureStore could not be read or written (never treated as "no
+ * record"); `miss` says which, so the screen can tell the user the real cause.
  */
-export async function unlockVaultKeys(pin: string): Promise<{ keys: VaultKeys | null }> {
+export async function unlockVaultKeys(pin: string): Promise<{ keys: VaultKeys | null; miss?: VaultKeyMiss }> {
   let rec: VaultKeyRecord | null | undefined;
-  try { rec = await readRecord(); } catch { return { keys: null }; }
-  if (rec !== undefined) return { keys: openVaultKeys(pin, rec) };
+  try { rec = await readRecord(); } catch { return { keys: null, miss: 'storage' }; }
+  if (rec === null) return { keys: null, miss: 'damaged' };
+  if (rec !== undefined) {
+    const keys = openVaultKeys(pin, rec);
+    return keys ? { keys } : { keys: null, miss: 'pin' };
+  }
   const keys = newVaultKeys(pin);
-  await SecureStore.setItemAsync(KEY, JSON.stringify(sealVaultKeys(pin, keys)));
+  try {
+    await SecureStore.setItemAsync(KEY, JSON.stringify(sealVaultKeys(pin, keys)));
+  } catch {
+    return { keys: null, miss: 'storage' };
+  }
   return { keys };
 }
 

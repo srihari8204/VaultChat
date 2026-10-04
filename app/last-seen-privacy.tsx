@@ -5,6 +5,9 @@
 // visibility. Each toggle saves immediately and takes effect server-side. The
 // earlier version stored richer-looking 3-way "everyone/contacts/nobody" radios
 // in AsyncStorage that nothing read or enforced — those are gone.
+//
+// This is the ONE screen that edits these four settings. Settings and the
+// Privacy Dashboard link here rather than carrying their own copies.
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { View, TouchableOpacity, StyleSheet, ScrollView, Alert, Switch, ActivityIndicator } from 'react-native';
@@ -27,7 +30,8 @@ function useS() {
   return useMemo(() => makeStyles(colors), [colors]);
 }
 
-const ROWS: { key: keyof UserSettings; icon: any; title: string; info: string }[] = [
+type PrivacyKey = 'lastSeenVisible' | 'readReceipts' | 'profilePhotoVisible' | 'discoverable';
+const ROWS: { key: PrivacyKey; icon: React.ComponentProps<typeof Ionicons>['name']; title: string; info: string }[] = [
   { key: 'lastSeenVisible',     icon: 'time-outline',           title: 'Last Seen & Online', info: 'Let others see when you were last active and whether you are online.' },
   { key: 'readReceipts',        icon: 'checkmark-done-outline', title: 'Read Receipts',      info: 'Send read receipts. If off, you also stop seeing others’ read receipts.' },
   { key: 'profilePhotoVisible', icon: 'person-circle-outline',  title: 'Profile Photo',      info: 'Allow other people to see your profile photo.' },
@@ -41,7 +45,9 @@ export default function LastSeenPrivacyScreen() {
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadTick, setLoadTick] = useState(0);
-  const [busy, setBusy] = useState<keyof UserSettings | null>(null);
+  // One save at a time. Two rows saving at once could each roll back over the
+  // other's success; serialising keeps the switches equal to the server.
+  const [busy, setBusy] = useState<PrivacyKey | null>(null);
 
   useEffect(() => {
     let cancel = false;
@@ -52,15 +58,15 @@ export default function LastSeenPrivacyScreen() {
     return () => { cancel = true; };
   }, [loadTick]);
 
-  const toggle = async (key: keyof UserSettings, value: boolean) => {
-    if (!settings) return;
-    const prev = settings;
+  const toggle = async (key: PrivacyKey, value: boolean) => {
+    if (!settings || busy) return;
     setSettings({ ...settings, [key]: value });   // optimistic
     setBusy(key);
     try {
       await updateSettings({ [key]: value } as Partial<UserSettings>);
     } catch (e: any) {
-      setSettings(prev);                            // rollback on failure
+      // Roll back only the key that failed.
+      setSettings((cur) => (cur ? { ...cur, [key]: !value } : cur));
       Alert.alert('Could not save', e?.message ?? 'Try again');
     } finally {
       setBusy(null);
@@ -77,7 +83,7 @@ export default function LastSeenPrivacyScreen() {
           <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={16} style={s.backBtn}>
             <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
-          <Text style={s.headerTitle}>Last Seen & Privacy</Text>
+          <Text style={s.headerTitle} accessibilityRole="header">Last Seen & Privacy</Text>
           <View style={{ width: 40 }} />
         </View>
       </View>
@@ -115,7 +121,7 @@ export default function LastSeenPrivacyScreen() {
                   accessibilityLabel={row.title}
                   value={!!settings[row.key]}
                   onValueChange={(v) => toggle(row.key, v)}
-                  disabled={busy === row.key}
+                  disabled={busy !== null}
                   trackColor={{ false: colors.border, true: colors.primary }}
                   thumbColor={colors.card}
                 />

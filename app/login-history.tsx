@@ -133,11 +133,24 @@ export default function LoginHistoryScreen() {
     );
   }, [fetchAll, revoking]);
 
+  // The header (with Back) is on screen in every state, loading included.
+  const header = (
+    <View style={S.header}>
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
+        <Ionicons name="arrow-back" size={24} color={colors.text} />
+      </TouchableOpacity>
+      <Text style={S.title} accessibilityRole="header">Active devices</Text>
+    </View>
+  );
+
   if (loading) {
     return (
-      <View style={[S.screen, S.center]}>
-      <AuroraBackground />
-        <ActivityIndicator color={colors.primary} size="large" />
+      <View style={S.screen}>
+        <AuroraBackground />
+        {header}
+        <View style={[S.center, { flex: 1 }]}>
+          <ActivityIndicator color={colors.primary} size="large" />
+        </View>
       </View>
     );
   }
@@ -147,12 +160,7 @@ export default function LoginHistoryScreen() {
   return (
     <View style={S.screen}>
       <AuroraBackground />
-      <View style={S.header}>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={S.title}>Active devices</Text>
-      </View>
+      {header}
 
       {error && (
         <View style={S.errorRow} accessibilityRole="alert">
@@ -169,7 +177,9 @@ export default function LoginHistoryScreen() {
         refreshControl={<RefreshControl tintColor={colors.primary} refreshing={refreshing} onRefresh={onRefresh} />}
         contentContainerStyle={{ paddingBottom: 24 }}
         ListHeaderComponent={
-          <View style={S.intro}>
+          // A cold-load failure has no list to describe: "0 signed-in devices"
+          // would be a false statement, not an empty state.
+          error && rows.length === 0 ? null : <View style={S.intro}>
             <Text style={S.introTxt}>
               {rows.length} signed-in device{rows.length === 1 ? '' : 's'}. Tap any other device to sign it out remotely.
             </Text>
@@ -200,7 +210,7 @@ export default function LoginHistoryScreen() {
         )}
         ListFooterComponent={
           others.length > 0 ? (
-            <TouchableOpacity accessibilityRole="button" accessibilityState={{ disabled: revoking }} disabled={revoking} style={[S.revokeAllBtn, revoking && { opacity: 0.5 }]} onPress={onRevokeAllOthers} activeOpacity={0.85}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Sign out all other devices, ${others.length}`} accessibilityState={{ disabled: revoking, busy: revoking }} disabled={revoking} style={[S.revokeAllBtn, revoking && { opacity: 0.5 }]} onPress={onRevokeAllOthers} activeOpacity={0.85}>
               <Text style={S.revokeAllTxt}>Sign out all other devices ({others.length})</Text>
             </TouchableOpacity>
           ) : null
@@ -248,7 +258,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backTxt:       { color: c.text, fontSize: 26, fontWeight: '600' },
   title:         { color: c.text, fontSize: 22, fontWeight: '800' },
 
   errorTxt:      { color: c.danger, paddingVertical: 8, fontSize: 12 },

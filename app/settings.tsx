@@ -37,9 +37,21 @@ import { getAutoDownload, setAutoDownload, type AutoDownloadPolicy } from '../li
 import { getSaveToGallery, setSaveToGallery } from '../lib/galleryExport';
 import { useTheme, type ThemePref } from '../lib/theme';
 import { useVisionComfort } from '../lib/visionComfort';
-import { type Palette, brandAlpha } from '../constants/theme';
+import { type Palette } from '../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { Sheet, type SheetAction } from '../components/ui/Sheet';
+
+import {
+  attachmentUrl,
+  exportMyData,
+  getSettings,
+  listBlocks,
+  unblockUser,
+  updateSettings,
+  type BlockedUser,
+  type UserSettings,
+} from '../lib/chatService';
+import { AppText as Text, AuroraBackground } from '../components/ui';
 
 // Multi-choice settings are pickers, not alerts. Android's native dialog takes
 // exactly three buttons (positive/negative/neutral), so an Alert.alert with one
@@ -53,17 +65,6 @@ function useS() {
   const { colors } = useTheme();
   return useMemo(() => makeStyles(colors), [colors]);
 }
-import {
-  attachmentUrl,
-  exportMyData,
-  getSettings,
-  listBlocks,
-  unblockUser,
-  updateSettings,
-  type BlockedUser,
-  type UserSettings,
-} from '../lib/chatService';
-import { AppText as Text, AuroraBackground } from '../components/ui';
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -80,7 +81,6 @@ export default function SettingsScreen() {
   const [loadError,   setLoadError]   = useState<string | null>(null);
   const [blocksError, setBlocksError] = useState<string | null>(null);
   const [loadTick,    setLoadTick]    = useState(0);
-  const [saving,   setSaving]   = useState<null | keyof UserSettings>(null);
   const authHeader = useAuthHeader();
   const [profile, setProfile] = useState<{ name?: string; email?: string; status?: string; photoURL?: string } | null>(null);
   const [autoDl, setAutoDl] = useState<AutoDownloadPolicy>('always');
@@ -115,22 +115,6 @@ export default function SettingsScreen() {
     return () => { cancel = true; };
   }, [loadTick, loadBlocks]);
   const reload = useCallback(() => setLoadTick((t) => t + 1), []);
-
-  // Toggle one flag — optimistic, with rollback on failure.
-  const toggle = useCallback(async (key: keyof UserSettings) => {
-    if (!settings || saving) return;
-    const next = { ...settings, [key]: !settings[key] };
-    setSettings(next);
-    setSaving(key);
-    try {
-      await updateSettings({ [key]: next[key] });
-    } catch (e: any) {
-      setSettings(settings); // rollback
-      Alert.alert('Save failed', e?.message ?? 'Try again');
-    } finally {
-      setSaving(null);
-    }
-  }, [settings, saving]);
 
   // Non-boolean settings (group-add policy, default timer) — optimistic save,
   // one at a time: a second pick while the first PUT is in flight could land
@@ -182,20 +166,22 @@ export default function SettingsScreen() {
     if (exporting) return;
     setExporting(true);
     try {
+      // Checked BEFORE anything is written: without a share sheet the export
+      // could only sit in the app cache, where nobody can reach it and nothing
+      // would ever delete the whole account's data.
+      if (!(await Sharing.isAvailableAsync())) {
+        Alert.alert('Export unavailable', 'Sharing is not available on this device, so the export has nowhere to go.');
+        return;
+      }
       const json = await exportMyData();
-      const fname = `vaultchat-export-${Date.now()}.json`;
-      const dest  = `${(FileSystem as any).cacheDirectory}${fname}`;
-      await (FileSystem as any).writeAsStringAsync(dest, json, { encoding: 'utf8' });
-      if (await Sharing.isAvailableAsync()) {
-        try {
-          await Sharing.shareAsync(dest, { mimeType: 'application/json', dialogTitle: 'Save your crazzychat data' });
-        } finally {
-          // The whole account export must not linger in the app cache once the
-          // share sheet has handed it on (or been dismissed).
-          await (FileSystem as any).deleteAsync(dest, { idempotent: true }).catch(() => {});
-        }
-      } else {
-        Alert.alert('Saved', `Export saved to ${dest}`);
+      const dest = `${FileSystem.cacheDirectory}vaultchat-export-${Date.now()}.json`;
+      await FileSystem.writeAsStringAsync(dest, json, { encoding: FileSystem.EncodingType.UTF8 });
+      try {
+        await Sharing.shareAsync(dest, { mimeType: 'application/json', dialogTitle: 'Save your crazzychat data' });
+      } finally {
+        // The whole account export must not linger in the app cache once the
+        // share sheet has handed it on (or been dismissed).
+        await FileSystem.deleteAsync(dest, { idempotent: true }).catch(() => {});
       }
     } catch (e: any) {
       Alert.alert('Export failed', e?.message ?? 'Try again');
@@ -266,24 +252,28 @@ export default function SettingsScreen() {
         <Text style={S.title}>Settings</Text>
       </View>
 
-      {/* Profile card (WhatsApp-style) — avatar + name + about + QR */}
-      <TouchableOpacity style={S.profileCard} activeOpacity={0.8} onPress={() => router.push('/(tabs)/profile' as any)}
-        accessibilityRole="button" accessibilityLabel={`Your profile, ${profile?.name || 'Your name'}`}>
-        <View style={S.profileAvatar}>
-          {profile?.photoURL && authHeader ? (
-            <Image source={{ uri: attachmentUrl(profile.photoURL), headers: { Authorization: authHeader } }} style={S.profileAvatarImg} />
-          ) : (
-            <Text style={S.profileAvatarTxt}>{initialOf(profile?.name, profile?.email)}</Text>
-          )}
-        </View>
-        <View style={{ flex: 1 }}>
-        <Text style={S.profileName}>{profile?.name || 'Your name'}</Text>
-        <Text style={S.profileSub}>{profile?.status || profile?.email || ''}</Text>
-        </View>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Show your QR code" onPress={() => router.push('/qr-contact' as any)} hitSlop={12}>
+      {/* Profile card (WhatsApp-style) — avatar + name + about, with the QR
+          button BESIDE it, not inside it: an accessible touchable hides its
+          children from VoiceOver, so a nested QR button could not be reached. */}
+      <View style={S.profileCard}>
+        <TouchableOpacity style={S.profileMain} activeOpacity={0.8} onPress={() => router.push('/(tabs)/profile' as any)}
+          accessibilityRole="button" accessibilityLabel={`Your profile, ${profile?.name || 'Your name'}`}>
+          <View style={S.profileAvatar}>
+            {profile?.photoURL && authHeader ? (
+              <Image source={{ uri: attachmentUrl(profile.photoURL), headers: { Authorization: authHeader } }} style={S.profileAvatarImg} />
+            ) : (
+              <Text style={S.profileAvatarTxt}>{initialOf(profile?.name, profile?.email)}</Text>
+            )}
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={S.profileName}>{profile?.name || 'Your name'}</Text>
+            <Text style={S.profileSub}>{profile?.status || profile?.email || ''}</Text>
+          </View>
+        </TouchableOpacity>
+        <TouchableOpacity style={S.qrBtn} accessibilityRole="button" accessibilityLabel="Show your QR code" onPress={() => router.push('/qr-contact' as any)} hitSlop={6}>
           <Ionicons name="qr-code-outline" size={22} color={colors.primary} />
         </TouchableOpacity>
-      </TouchableOpacity>
+      </View>
 
       <AppearanceSection />
 
@@ -329,7 +319,7 @@ export default function SettingsScreen() {
               value={toGallery}
               onValueChange={(v) => { setToGallery(v); setSaveToGallery(v); }}
               trackColor={{ false: colors.border, true: colors.accentDeep }}
-              thumbColor="#FFFFFF"
+              thumbColor={colors.bubbleOutText}
             />
           </View>
         </View>
@@ -338,34 +328,14 @@ export default function SettingsScreen() {
       <View style={S.section}>
         <Text style={S.label}>PRIVACY</Text>
 
-        <ToggleRow
-          title="Discoverable by phone"
-          sub="Allow others who have your number to find your crazzychat account when they tap Contacts."
-          value={settings.discoverable}
-          busy={saving === 'discoverable'}
-          onValueChange={() => toggle('discoverable')}
-        />
-        <ToggleRow
-          title="Show last seen"
-          sub="Other users will see when you were last online."
-          value={settings.lastSeenVisible}
-          busy={saving === 'lastSeenVisible'}
-          onValueChange={() => toggle('lastSeenVisible')}
-        />
-        <ToggleRow
-          title="Send read receipts"
-          sub="Senders see ✓✓ blue when you read their message."
-          value={settings.readReceipts}
-          busy={saving === 'readReceipts'}
-          onValueChange={() => toggle('readReceipts')}
-        />
-        <ToggleRow
-          title="Show profile photo to everyone"
-          sub="When off, only people you've chatted with see your photo."
-          value={settings.profilePhotoVisible}
-          busy={saving === 'profilePhotoVisible'}
-          onValueChange={() => toggle('profilePhotoVisible')}
-        />
+        {/* Last seen, read receipts, profile photo and discoverable are owned
+            by ONE screen (app/last-seen-privacy.tsx). They used to be switches
+            here, there and as chips on the Privacy Dashboard: three copies of
+            one server value, each able to show a stale state after another
+            had saved. Settings and the dashboard link to it instead. */}
+        <View style={[S.linkCard, { marginBottom: 4 }]}>
+          <LinkRow icon="time-outline" title="Last seen & privacy" sub="Last seen, read receipts, profile photo, discoverable by phone" onPress={() => router.push('/last-seen-privacy' as any)} last />
+        </View>
         <TouchableOpacity style={S.prefRow} activeOpacity={0.7} disabled={prefBusy} accessibilityRole="button" accessibilityLabel={`Add me to groups, ${groupAddLabel(settings.groupAddPolicy)}`} accessibilityState={{ disabled: prefBusy }} onPress={() => setPicker({
           title: 'Who can add me to groups',
           actions: [
@@ -428,8 +398,8 @@ export default function SettingsScreen() {
               is routed here rather than deleted (2026-09-17). */}
           <LinkRow icon="options-outline" title="App permissions" sub="Camera, microphone, contacts, location and notifications" onPress={() => router.push('/permissions?from=settings' as any)} />
           <LinkRow icon="speedometer-outline" title="Privacy dashboard" sub="Your privacy score and what is protecting you" onPress={() => router.push('/privacy-dashboard' as any)} />
-          <LinkRow icon="checkmark-done-outline" title="Read receipts" sub="Control who sees when you have read a message" onPress={() => router.push('/receipt-control' as any)} />
-          <LinkRow icon="time-outline" title="Last seen & online" sub="Who can see when you were last active" onPress={() => router.push('/last-seen-privacy' as any)} />
+          <LinkRow icon="shield-half-outline" title="Security Hub" sub="Your account's security overview" onPress={() => router.push('/dashboard' as any)} />
+          <LinkRow icon="checkmark-done-outline" title="Per-contact receipts" sub="Hide read receipts, typing or last seen from chosen people" onPress={() => router.push('/receipt-control' as any)} />
           {/* Opens in the browser, not a WebView: a privacy policy is the one
               document a person should be able to see is served from the real
               domain, with the padlock their own browser drew. Play also expects
@@ -584,14 +554,15 @@ function AppearanceSection() {
               accessibilityLabel={`Appearance: ${o.label}`}
               accessibilityState={{ selected: active, checked: active }}
             >
-              <Ionicons name={o.icon} size={16} color={active ? '#FFFFFF' : colors.textDim} />
-              <Text style={[apS.pillTxt, { color: active ? '#FFFFFF' : colors.textDim }]}>{o.label}</Text>
+              {/* bubbleOutText is the palette's white-on-accent ink. */}
+              <Ionicons name={o.icon} size={16} color={active ? colors.bubbleOutText : colors.textDim} />
+              <Text style={[apS.pillTxt, { color: active ? colors.bubbleOutText : colors.textDim }]}>{o.label}</Text>
             </TouchableOpacity>
           );
         })}
       </View>
       <Text style={[apS.hint, { color: colors.textDim }]}>
-        {pref === 'system' ? `Following your device (currently ${scheme}).` : `Always ${pref}.`} Light mode is rolling out screen by screen.
+        {pref === 'system' ? `Following your device (currently ${scheme}).` : `Always ${pref}.`}
       </Text>
     </View>
   );
@@ -634,7 +605,7 @@ function ToggleRow({
           value={value}
           onValueChange={onValueChange}
           trackColor={{ true: colors.primary, false: colors.border }}
-          thumbColor="#fff"
+          thumbColor={colors.bubbleOutText}
         />
       )}
     </View>
@@ -653,10 +624,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   title:         { color: c.text, fontSize: 22, fontWeight: '800' },
 
   // Profile card
-  profileCard:   { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 16, marginTop: 4, padding: 14, borderRadius: 16, backgroundColor: c.glassSoft, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
+  profileCard:   { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginTop: 4, padding: 14, borderRadius: 16, backgroundColor: c.glassSoft, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
+  profileMain:   { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 14 },
+  qrBtn:         { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   profileAvatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   profileAvatarImg: { width: '100%', height: '100%' },
-  profileAvatarTxt: { color: '#fff', fontSize: 22, fontWeight: '800' },
+  profileAvatarTxt: { color: c.bubbleOutText, fontSize: 22, fontWeight: '800' },
   profileName:   { color: c.text, fontSize: 17, fontWeight: '700' },
   profileSub:    { color: c.textDim, fontSize: 13, marginTop: 2 },
 
@@ -678,7 +651,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   blockRow:      { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   blockAvatar:   { width: 40, height: 40, borderRadius: 20, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   blockAvatarImg:{ width: '100%', height: '100%' },
-  blockAvatarTxt:{ color: '#fff', fontWeight: '700' },
+  blockAvatarTxt:{ color: c.bubbleOutText, fontWeight: '700' },
   blockName:     { color: c.text, fontSize: 15, fontWeight: '600' },
   blockEmail:    { color: c.textDim, fontSize: 12, marginTop: 2 },
   unblockBtn:    { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, borderWidth: 1, borderColor: c.danger },

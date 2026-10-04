@@ -13,13 +13,14 @@ import { getD2DEStatus } from '../services/d2deService';
 
 // Keyed by the layer names services/d2deService.ts returns — a key that does
 // not match leaves the card's explanation blank ('Android Keystore' vs
-// 'Secure Keystore' did exactly that).
+// 'Secure Keystore' did exactly that). Worded as what the build is MADE to do:
+// this screen reads flags, it cannot observe the live connection or keystore.
 const LAYER_INFO: Record<string, string> = {
-  'TLS 1.3':           'Traffic between your device and crazzychat servers is encrypted in transit.',
+  'TLS 1.3':           'This build is made to encrypt traffic between your device and crazzychat servers in transit.',
   'AES-256-GCM':       'Direct-chat messages are encrypted on your device before they are sent, so the server stores ciphertext it cannot read.',
   'Double Ratchet':    'A fresh key for every message gives forward secrecy: one exposed key does not unlock earlier messages.',
   'X3DH':              'Two devices agree on a shared secret from published prekeys without ever sending a private key.',
-  'Secure Keystore':   'Your end-to-end keys are kept in the operating system’s secure storage on this device.',
+  'Secure Keystore':   'This build is made to keep your end-to-end keys in the operating system’s secure storage on this device.',
 };
 
 function useS() {
@@ -42,9 +43,11 @@ export default function D2DEStatusScreen() {
 
         {/* Score card */}
         <View style={s.scoreCard}>
-          <Text style={s.scoreNum}>{active}/{layers.length}</Text>
-          <Text style={s.scoreLabel}>Encryption layers in this build</Text>
-          <View style={s.scoreBar}>
+          <Text style={s.scoreNum} accessibilityRole="header"
+            accessibilityLabel={`${active} of ${layers.length} encryption layers in this build`}>{active}/{layers.length}</Text>
+          <Text style={s.scoreLabel} importantForAccessibility="no" accessibilityElementsHidden>Encryption layers in this build</Text>
+          {/* Decorative: the number above already says it. */}
+          <View style={s.scoreBar} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
             {layers.map((l) => (
               <View key={l.layer} style={[s.scoreSeg, { backgroundColor: l.active ? colors.success : colors.border }]} />
             ))}
@@ -59,7 +62,8 @@ export default function D2DEStatusScreen() {
 
         {/* Layer cards */}
         {layers.map((layer) => (
-          <View key={layer.layer} style={[s.layerCard, { borderLeftColor: layer.active ? colors.success : colors.border }]}>
+          <View key={layer.layer} style={[s.layerCard, { borderLeftColor: layer.active ? colors.success : colors.border }]}
+            accessible accessibilityLabel={`${layer.layer}, ${layer.active ? 'on' : 'off'}. ${layer.label}. ${LAYER_INFO[layer.layer] ?? ''}`}>
             <View style={s.layerHeader}>
               <View style={[s.layerDot, { backgroundColor: layer.active ? colors.success : colors.border }]} />
               <Text style={[s.layerName, { color: layer.active ? colors.text : colors.textDim }]}>{layer.layer}</Text>
@@ -77,7 +81,8 @@ export default function D2DEStatusScreen() {
         <View style={s.uniqueBox}>
           <Text style={s.uniqueBody}>
             This lists what this version of the app is built to use. To check that a particular conversation is end-to-end
-            encrypted with the right person, compare safety numbers from their contact info.
+            encrypted with the right person, open the chat, tap their name, then tap the End-to-End Encrypted card, and
+            compare the safety number with the one on their phone.
           </Text>
         </View>
 
