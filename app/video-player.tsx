@@ -23,17 +23,18 @@ import { ErrorBoundary } from '../components/ErrorBoundary';
 import { getAccessToken } from '../lib/api';
 import { isOwnServerUrl } from '../lib/serverOrigin';
 import { VIEWER_TEMP_PREFIX } from '../lib/mediaCacheGC';
+import { MEDIA_INK, MEDIA_STAGE, VIDEO_ACCENT, VIDEO_CTA } from '../constants/mediaChrome';
 
-// Fixed palette, deliberately not theme tokens: the video stage is black in
+// Fixed palette (constants/mediaChrome.ts), deliberately not theme tokens: the video stage is black in
 // both themes, so the chrome on it must stay light-on-dark.
-const ACCENT = '#4A9FFF';
+const ACCENT = VIDEO_ACCENT;
 const ACCENT_FILL = 'rgba(74,159,255,0.25)';   // ACCENT, translucent, behind the play icon
-const BG = '#000000';
-const CTA = '#1D4ED8'; // 6.7:1 under white text
+const BG = MEDIA_STAGE;
+const CTA = VIDEO_CTA; // 6.7:1 under white text
 const OVERLAY = 'rgba(0,0,0,0.55)';
 // Controls sit on the fixed black stage + OVERLAY in BOTH themes, so they use
 // a fixed light foreground. c.text is #1B1526 in light theme — invisible here.
-const FG = '#FFFFFF';
+const FG = MEDIA_INK;
 const FG_DIM = 'rgba(255,255,255,0.75)';
 const SPEEDS = [0.5, 1, 1.25, 1.5, 2];
 

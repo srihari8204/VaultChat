@@ -38,6 +38,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../lib/theme';
 import { storyDurationMs } from '../lib/storyDuration';
 import { AuroraDark } from '../constants/theme';
+import { MEDIA_INK, MEDIA_STAGE } from '../constants/mediaChrome';
 import { useReducedMotion } from '../lib/useReducedMotion';
 import { initialOf } from '../lib/format';
 import {
@@ -60,10 +61,11 @@ import { puzzleFrameUri } from '../lib/status/puzzleFrame';
 
 // The story stage is black in EVERY theme (full-bleed media; the light status
 // bar and the white chrome assume it), so its chrome takes the dark palette's
-// tokens. Black and white are the stage itself, kept as deliberate fixed ink.
+// tokens. Black and white are the stage itself, kept as deliberate fixed ink
+// (constants/mediaChrome.ts).
 const STAGE = {
-  black: '#000000',
-  ink: '#FFFFFF',                  // icons and text over media
+  black: MEDIA_STAGE,
+  ink: MEDIA_INK,                  // icons and text over media
   dim: 'rgba(255,255,255,0.7)',
   faint: 'rgba(255,255,255,0.62)',
   sheet: AuroraDark.card,

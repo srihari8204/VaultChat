@@ -27,7 +27,9 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { targetSize, shouldCompressVideo, JPEG_QUALITY } from './compress';
 
 /** Loaded once. null when the native module is absent — then video passes through. */
-let VideoCompressor: any = null;
+/** The slice of react-native-compressor's `Video` this file calls. */
+type VideoCompressorApi = { compress: (uri: string, opts: { compressionMethod: 'auto' }) => Promise<string> };
+let VideoCompressor: VideoCompressorApi | null = null;
 try {
   const m = require('react-native-compressor');
   VideoCompressor = typeof m?.Video?.compress === 'function' ? m.Video : null;
@@ -42,8 +44,9 @@ export function videoCompressionAvailable(): boolean {
 
 async function sizeOf(uri: string): Promise<number> {
   try {
-    const info = await FileSystem.getInfoAsync(uri, { size: true } as any);
-    return (info as any)?.size ?? 0;
+    // getInfoAsync reports `size` for every existing file; there is no option for it.
+    const info = await FileSystem.getInfoAsync(uri);
+    return info.exists ? info.size ?? 0 : 0;
   } catch {
     return 0;
   }

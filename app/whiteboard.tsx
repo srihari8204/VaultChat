@@ -3,7 +3,8 @@
 // shared capturedUri contract, staged in the chat's caption preview) or share
 // it to another app. Pen, eraser, colours, brush sizes, undo/redo, clear.
 
-import { BRAND_ACCENT, type Palette } from '../constants/theme';
+import { type Palette } from '../constants/theme';
+import { WHITEBOARD_INKS, inkNames } from '../constants/inkPalette';
 import React, { useState, useRef, useMemo, useEffect, memo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, PanResponder, Alert, ActivityIndicator, AccessibilityInfo } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
@@ -18,13 +19,12 @@ import { strokeD } from '../lib/strokePath';
 import { returnParams } from '../lib/camera/cameraMode';
 
 
-// Ink colours are drawing content on the fixed white canvas, not theme roles.
-const COLORS = [DEFAULT_INK, '#FF3C6E', '#4A9FFF', BRAND_ACCENT, '#F59E0B', '#A78BFA', '#FFFFFF', '#EC4899', '#8B5CF6'];
+// Ink colours are drawing content on the fixed white canvas, not theme roles
+// (constants/inkPalette.ts).
+const INKS = [{ hex: DEFAULT_INK, name: 'black' }, ...WHITEBOARD_INKS];
+const COLORS = INKS.map(i => i.hex);
+const COLOR_NAMES = inkNames(INKS);
 const BRUSH_SIZES = [2, 4, 8, 14, 22];
-const COLOR_NAMES: Record<string, string> = {
-  [DEFAULT_INK]: 'black', '#FF3C6E': 'red', '#4A9FFF': 'blue', [BRAND_ACCENT]: 'brand blue', '#F59E0B': 'amber',
-  '#A78BFA': 'lavender', '#FFFFFF': 'white', '#EC4899': 'pink', '#8B5CF6': 'purple',
-};
 
 /** One SVG path per stroke. Memoised: committed strokes re-render only when
  *  the stroke list changes, not on every move event of the live stroke. */

@@ -368,8 +368,8 @@ export function extractDocBlocks(
   // Both entry points read the same untrusted attachment, so a cap on only one
   // of them is no cap at all.
   try { files = unzipSync(bytes, { filter }); }
-  catch (e: any) {
-    if (e?.message === DOC_BOMB_MESSAGE) throw e;
+  catch (e: unknown) {
+    if (e instanceof Error && e.message === DOC_BOMB_MESSAGE) throw e;
     throw new Error('This file is not a readable document.');
   }
   const get = (p: string) => (files[p] ? strFromU8(files[p]) : '');

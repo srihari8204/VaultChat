@@ -3,16 +3,17 @@
 
 import { Platform, StyleSheet } from 'react-native';
 import { AuroraDark, AuroraLight, BRAND_GRADIENT_CTA, brandAlpha, type Palette } from '../../constants/theme';
+import { MEDIA_STAGE } from '../../constants/mediaChrome';
 
 // ── Design tokens ────────────────────────────────────────────────
 // The viewer chrome is a dark media surface in BOTH app themes (a photo sits on
 // black, a document is framed by dark bars), so it takes the DARK palette's
 // tokens rather than the active theme's — the same rule as media-viewer's `M`.
-// It used to be a private navy palette with its own hex values; the one hex
-// left is the photo stage.
+// It used to be a private navy palette with its own hex values; the photo
+// stage is the shared fixed black (constants/mediaChrome).
 export const C = {
   bg: AuroraDark.bg,
-  bgPure: '#000000',                 // the photo stage: black in every theme
+  bgPure: MEDIA_STAGE,               // the photo stage: black in every theme (constants/mediaChrome)
   accent: AuroraDark.accentOn,       // accent as text/icon on the dark chrome (9.5:1)
   accentFill: AuroraDark.accentDeep, // accent as a solid fill under onFill text
   secondary: AuroraDark.purple,

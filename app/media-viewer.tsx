@@ -3,6 +3,7 @@
 // track | Audio: built-in player | Code: inline preview
 
 import { AuroraDark } from '../constants/theme';
+import { MEDIA_DANGER, MEDIA_STAGE } from '../constants/mediaChrome';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
@@ -36,10 +37,10 @@ type PlaybackState = Partial<AVPlaybackStatusSuccess>;
 
 // DARK-MEDIA TOKENS. Media sits on a black stage in BOTH app themes, so this
 // screen takes the dark palette's tokens rather than the active theme's (a
-// light-theme card on a black stage was the old bug). The two hex values left
-// are deliberate: the stage is black and the error red is tuned for black.
+// light-theme card on a black stage was the old bug). The two fixed values
+// (constants/mediaChrome.ts): the stage is black and the error red is tuned for black.
 const M = {
-  stage: '#000000',
+  stage: MEDIA_STAGE,
   card: AuroraDark.card,
   border: AuroraDark.border,
   text: AuroraDark.text,
@@ -49,7 +50,7 @@ const M = {
   accent: AuroraDark.accentOn,        // accent as text/icon on dark (9.5:1)
   accentFill: AuroraDark.accentDeep,  // accent as a fill under onAccent text
   onAccent: AuroraDark.onPrimary,     // text/icon on accentFill
-  danger: '#FF7B72',                   // readable red on black
+  danger: MEDIA_DANGER,                // readable red on black
   scrim: 'rgba(0,0,0,0.67)',
 };
 

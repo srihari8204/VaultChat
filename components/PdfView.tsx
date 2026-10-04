@@ -45,6 +45,7 @@ import { WebView } from 'react-native-webview';
 import { Image as ExpoImage } from 'expo-image';
 import * as FileSystem from 'expo-file-system/legacy';
 import type { Palette } from '../constants/theme';
+import { MEDIA_INK, PDF_MAT, PDF_PAPER, PDF_PILL_ALPHA } from '../constants/mediaChrome';
 import { useColors } from '../lib/theme';
 import { pdfInfo, pdfNativeAvailable, renderPdfPage, type PdfInfo } from '../lib/pdfNative';
 import { PDF_MAX_ZOOM, PDF_MIN_ZOOM, keepCentre, pdfZoom, pdfZoomLabel, stepZoom } from '../lib/media/pdfZoom';
@@ -358,9 +359,9 @@ export function PdfView({ uri, onFail, onReady }: {
 }
 
 const makeS = (c: Palette) => StyleSheet.create({
-  fill: { flex: 1, backgroundColor: '#3A3A3E' },   // theme-exempt: the mat behind the pages. Every PDF reader uses a fixed neutral here — theming it would tint the paper's surround against the paper.
+  fill: { flex: 1, backgroundColor: PDF_MAT },   // theme-exempt: the mat behind the pages. Every PDF reader uses a fixed neutral here — theming it would tint the paper's surround against the paper.
   list: { paddingVertical: 10, paddingHorizontal: 10 },
-  page: { alignSelf: 'center', marginBottom: 10, backgroundColor: '#FFFFFF' },   // theme-exempt: a PDF page IS white paper, and the rendered bitmap assumes it. A dark page would show as white content on a dark card.
+  page: { alignSelf: 'center', marginBottom: 10, backgroundColor: PDF_PAPER },   // theme-exempt: a PDF page IS white paper, and the rendered bitmap assumes it. A dark page would show as white content on a dark card.
   pagePending: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
   pageErr: { color: 'rgba(0,0,0,0.45)', fontSize: 12 },
   cover: {
@@ -371,12 +372,12 @@ const makeS = (c: Palette) => StyleSheet.create({
   pill: {
     position: 'absolute', bottom: 16, alignSelf: 'center',
     paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    backgroundColor: `rgba(0,0,0,${PDF_PILL_ALPHA})`,
   },
-  pillTxt: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },   // theme-exempt: on the fixed dark pill
+  pillTxt: { color: MEDIA_INK, fontSize: 12, fontWeight: '700' },   // theme-exempt: on the fixed dark pill
   zoomPill: {
     position: 'absolute', bottom: 16, right: 14, minHeight: 32, justifyContent: 'center',
-    paddingHorizontal: 12, borderRadius: 999, backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingHorizontal: 12, borderRadius: 999, backgroundColor: `rgba(0,0,0,${PDF_PILL_ALPHA})`,
   },
 });
 

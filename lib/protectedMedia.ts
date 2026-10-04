@@ -83,7 +83,7 @@ export async function wipeRevokedMedia(attachmentId: string): Promise<number> {
 
   // 3. Ephemeral cache copies.
   try {
-    const dir = (FileSystem as any).cacheDirectory;
+    const dir = FileSystem.cacheDirectory;
     if (dir) {
       const names: string[] = await FileSystem.readDirectoryAsync(dir);
       for (const name of names) {
@@ -106,12 +106,12 @@ export async function wipeRevokedMedia(attachmentId: string): Promise<number> {
  * Returns true when the response meant "revoked" (caller should render the
  * tombstone rather than a generic error).
  */
-export async function handleFetchStatus(attachmentId: string, status: number, body?: any): Promise<boolean> {
+export async function handleFetchStatus(attachmentId: string, status: number, body?: unknown): Promise<boolean> {
   // 410 covers both view-once consumption and revoke; only revoke carries the
   // flag, and only revoke should destroy the key (a consumed view-once is
   // already unreadable, and wiping its key would be harmless but pointless).
   if (status !== 410) return false;
-  const revoked = body && typeof body === 'object' ? body.revoked === true : false;
+  const revoked = body && typeof body === 'object' ? (body as { revoked?: unknown }).revoked === true : false;
   if (!revoked) return false;
   await wipeRevokedMedia(attachmentId);
   return true;

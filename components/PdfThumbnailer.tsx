@@ -23,7 +23,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
-import { WebView } from 'react-native-webview';
+import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { pdfInfo, pdfNativeAvailable, renderPdfPage } from '../lib/pdfNative';
@@ -117,6 +117,9 @@ export function requestPdfThumb(uri: string): Promise<PdfThumb | null> {
   });
 }
 
+/** What the thumbnail page posts back: `{ ready }` once pdf.js is up, then one reply per request. */
+type ThumbMessage = { ready?: boolean; id?: unknown; ok?: boolean; b64?: unknown; pages?: unknown } | null;
+
 /**
  * Mount ONCE, near the root. Renders nothing visible.
  */
@@ -131,16 +134,17 @@ export function PdfThumbnailerHost() {
     return () => { wake = null; };
   }, []);
 
-  const onMessage = useCallback((e: any) => {
-    let m: any;
+  const onMessage = useCallback((e: WebViewMessageEvent) => {
+    let m: ThumbMessage;
     try { m = JSON.parse(e.nativeEvent.data); } catch { return; }
+    if (!m || typeof m !== 'object') return;
     if (m.ready) {
       ready = true;
       while (queued.length) ref.current?.postMessage(queued.shift()!);
       return;
     }
     if (typeof m.id !== 'number') return;
-    settle(m.id, m.ok && m.b64 ? { b64: m.b64, pages: Number(m.pages) || 1 } : null);
+    settle(m.id, m.ok && typeof m.b64 === 'string' && m.b64 ? { b64: m.b64, pages: Number(m.pages) || 1 } : null);
   }, []);
 
   if (Platform.OS !== 'android' || !live) return null;

@@ -6,7 +6,7 @@
 // better is already in the file — lib/docBlocks.ts pulls it out, and this draws
 // it.
 //
-// Deliberately plain React Native: Views, Texts and two ScrollViews. No renderer,
+// Deliberately plain React Native: Views, Texts and scroll views. No renderer,
 // no WebView, no native module. It is a READER, not an editor — fonts, colours,
 // images and charts stay the "open in another app" button's job.
 //
@@ -14,18 +14,22 @@
 // re-wraps to the screen and the glyphs stay sharp — see lib/docs/zoom.ts.
 
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, Pressable, useWindowDimensions } from 'react-native';
+import {
+  View, Text, ScrollView, StyleSheet, Pressable, useWindowDimensions,
+  type StyleProp, type TextStyle,
+} from 'react-native';
 import {
   Gesture, GestureDetector, FlatList as GHFlatList,
 } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 import type { Block, Run } from '../lib/docBlocks';
-import { columnWidth, pinchZoom, zoomLabel } from '../lib/docs/zoom';
+import { pinchZoom, zoomLabel } from '../lib/docs/zoom';
+import { columnWidths, gridCols, gridPlan, longestCells, rowPaneHeight, sumWidths } from '../lib/media/sheetGrid';
 import { type Palette } from '../constants/theme';
 
 // ─── Inline runs ─────────────────────────────────────────────────────
 
-function Runs({ runs, style }: { runs: Run[]; style?: any }) {
+function Runs({ runs, style }: { runs: Run[]; style?: StyleProp<TextStyle> }) {
   return (
     <Text selectable style={style}>
       {runs.map((r, i) => (
@@ -45,109 +49,95 @@ function Runs({ runs, style }: { runs: Run[]; style?: any }) {
 
 // ─── Grid (Word tables and Excel sheets) ─────────────────────────────
 
-// ponytail: lib/docBlocks.ts emits ONE block per worksheet, so a 50k-row sheet is
-// a single item in the outer FlatList — windowing buys it nothing and it would
-// mount whole. Ceiling: rows are revealed ROW_CHUNK at a time behind a tap, and
-// column widths are measured from the first WIDTH_SAMPLE rows only, so a column
-// whose widest cell sits below that sample renders slightly narrow. Upgrade path:
-// chunk sheet rows into separate blocks in lib/docBlocks.ts so the outer FlatList
-// virtualises them, then delete all of this.
-const ROW_CHUNK = 200;
-const WIDTH_SAMPLE = 500;
+// lib/docBlocks.ts emits ONE block per worksheet, so the outer FlatList cannot
+// window a 50k-row sheet. A sheet over VIRTUAL_MIN_ROWS rows therefore gets its
+// own bounded row pane: a vertical FlatList of rows inside the grid's single
+// horizontal scroller, every row laid out on the same fixed column widths so the
+// columns line up while scrolling either way. The header row is drawn above the
+// pane in that same scroller, so it stays put vertically and moves with the
+// columns horizontally. Smaller grids flow into the page as before. Layout maths:
+// lib/media/sheetGrid.ts.
 
-/**
- * Column widths from the CONTENT, not equal shares.
- *
- * An equal split makes a sheet of one long note and six short numbers unreadable
- * — the note wraps to eight lines while the numbers sit in acres of space. Width
- * tracks the longest cell, clamped so one enormous cell cannot push the rest off
- * the screen.
- *
- * Measured from the whole sheet's first WIDTH_SAMPLE rows — never from the rows
- * currently revealed, or the columns would visibly jump on every "show more".
- */
-function columnWidths(rows: string[][], cols: number, zoom: number): number[] {
-  const w: number[] = new Array(cols).fill(0);
-  const n = Math.min(rows.length, WIDTH_SAMPLE);
-  for (let i = 0; i < n; i++) {
-    const r = rows[i];
-    for (let c = 0; c < cols; c++) {
-      const len = (r[c] ?? '').length;
-      if (len > w[c]) w[c] = len;
-    }
-  }
-  return w.map(len => columnWidth(len, zoom));
-}
+type DocStyles = ReturnType<typeof makeStyles>;
+
+/** One grid row. Shared by both layouts so a cell renders identically in each. */
+const GridRow = React.memo(function GridRow({
+  row, ri, cols, widths, head, s,
+}: { row: string[]; ri: number; cols: number; widths: number[]; head: boolean; s: DocStyles }) {
+  return (
+    <View style={[s.gridRow, head && s.gridHead, !head && ri % 2 === 1 && s.gridAlt]}>
+      {Array.from({ length: cols }).map((_, ci) => (
+        <View key={ci} style={[s.gridCell, { width: widths[ci] }]}>
+          <Text
+            selectable
+            numberOfLines={4}
+            style={[s.gridTxt, head && s.gridHeadTxt,
+                    // Numbers right-align, as they do in every spreadsheet.
+                    !head && isNumeric(row[ci]) && { textAlign: 'right' as const }]}
+          >
+            {row[ci] ?? ''}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+});
 
 function Grid({
-  rows, header, s, colors, maxWidth, zoom,
-}: { rows: string[][]; header: boolean; s: any; colors: Palette; maxWidth: number; zoom: number }) {
-  const cols = rows.reduce((n, r) => Math.max(n, r.length), 0);
-  const widths = useMemo(() => columnWidths(rows, cols, zoom), [rows, cols, zoom]);
-  const total = widths.reduce((a, b) => a + b, 0);
+  rows, header, s, maxWidth, zoom, paneHeight,
+}: { rows: string[][]; header: boolean; s: DocStyles; maxWidth: number; zoom: number; paneHeight: number }) {
+  const cols = useMemo(() => gridCols(rows), [rows]);
+  // Lengths are measured once per sheet; a pinch only rescales them.
+  const longest = useMemo(() => longestCells(rows, cols), [rows, cols]);
+  const widths = useMemo(() => columnWidths(longest, zoom), [longest, zoom]);
+  const total = sumWidths(widths);
+  const plan = gridPlan(rows.length, header, total, maxWidth);
+  const body = useMemo(() => rows.slice(plan.pinned), [rows, plan.pinned]);
 
-  // A new document — or the deferred full parse replacing the preview — must not
-  // inherit the last sheet's reveal count. Reset during render, not in an effect,
-  // so the stale count never reaches the tree.
-  const [shown, setShown] = useState(ROW_CHUNK);
-  const seen = useRef(rows);
-  const fresh = seen.current !== rows;
-  if (fresh) { seen.current = rows; setShown(ROW_CHUNK); }
-  const limit = fresh ? ROW_CHUNK : shown;
-  const remaining = rows.length - limit;
+  const renderRow = useCallback(
+    ({ item, index }: { item: string[]; index: number }) => {
+      const ri = index + plan.pinned;
+      return <GridRow row={item} ri={ri} cols={cols} widths={widths} head={header && ri === 0} s={s} />;
+    },
+    [plan.pinned, cols, widths, header, s],
+  );
 
-  // Only scroll horizontally when the grid genuinely does not fit. Wrapping every
-  // grid in a horizontal scroller steals the vertical pan near the edges.
-  const body = (
+  const grid = (
     <View style={[s.grid, { minWidth: Math.min(total, maxWidth) }]}>
-      {rows.slice(0, limit).map((row, ri) => {
-        const head = header && ri === 0;
-        return (
-          <View key={ri} style={[s.gridRow, head && s.gridHead, !head && ri % 2 === 1 && s.gridAlt]}>
-            {Array.from({ length: cols }).map((_, ci) => (
-              <View key={ci} style={[s.gridCell, { width: widths[ci] }]}>
-                <Text
-                  selectable
-                  numberOfLines={4}
-                  style={[s.gridTxt, head && s.gridHeadTxt,
-                          // Numbers right-align, as they do in every spreadsheet.
-                          !head && isNumeric(row[ci]) && { textAlign: 'right' as const }]}
-                >
-                  {row[ci] ?? ''}
-                </Text>
-              </View>
-            ))}
-          </View>
-        );
-      })}
+      {plan.virtual ? (
+        <>
+          {plan.pinned === 1 && <GridRow row={rows[0]} ri={0} cols={cols} widths={widths} head s={s} />}
+          <GHFlatList
+            data={body}
+            renderItem={renderRow}
+            keyExtractor={rowKey}
+            // Fixed width = the column sum, so the pane never relies on the
+            // horizontal scroller's content to size a vertical list.
+            style={{ width: total, maxHeight: paneHeight }}
+            nestedScrollEnabled
+            showsVerticalScrollIndicator
+            initialNumToRender={30}
+            maxToRenderPerBatch={30}
+            windowSize={7}
+          />
+        </>
+      ) : (
+        rows.map((row, ri) => (
+          <GridRow key={ri} row={row} ri={ri} cols={cols} widths={widths} head={header && ri === 0} s={s} />
+        ))
+      )}
     </View>
   );
 
-  // Outside the horizontal scroller: the way to more rows must not be somewhere
-  // off to the right.
-  const more = remaining > 0 ? (
-    <Pressable
-      onPress={() => setShown(n => n + ROW_CHUNK)}
-      style={s.moreRow}
-      accessibilityRole="button"
-      accessibilityLabel={`Show ${Math.min(ROW_CHUNK, remaining)} more rows, ${remaining.toLocaleString()} remaining`}
-    >
-      <Text style={s.moreTxt}>
-        Show {Math.min(ROW_CHUNK, remaining)} more rows ({remaining.toLocaleString()} remaining)
-      </Text>
-    </Pressable>
-  ) : null;
-
-  if (total <= maxWidth) return <>{body}{more}</>;
+  if (!plan.wide) return grid;
   return (
-    <>
-      <ScrollView horizontal showsHorizontalScrollIndicator directionalLockEnabled>
-        {body}
-      </ScrollView>
-      {more}
-    </>
+    <ScrollView horizontal showsHorizontalScrollIndicator directionalLockEnabled nestedScrollEnabled>
+      {grid}
+    </ScrollView>
   );
 }
+
+const rowKey = (_: string[], i: number) => String(i);
 
 function isNumeric(v: string | undefined): boolean {
   if (!v) return false;
@@ -169,8 +159,9 @@ const PAGE_TAIL = <View style={{ height: 28 }} />;
 export function DocView({ blocks, colors }: { blocks: Block[]; colors: Palette }) {
   const [zoom, setZoom] = useState(1);
   const s = useMemo(() => makeStyles(colors, zoom), [colors, zoom]);
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const maxWidth = width - 36;   // the page padding below, both sides
+  const paneHeight = rowPaneHeight(height);
 
   // A pinch reports a multiplier measured from where the fingers STARTED, so it
   // must be applied to the zoom the gesture began at. Multiplying it against the
@@ -237,7 +228,7 @@ export function DocView({ blocks, colors }: { blocks: Block[]; colors: Palette }
           case 'table':
             return (
               <View style={s.blockGap}>
-                <Grid rows={b.rows} header={looksLikeHeader(b.rows)} s={s} colors={colors} maxWidth={maxWidth} zoom={zoom} />
+                <Grid rows={b.rows} header={looksLikeHeader(b.rows)} s={s} maxWidth={maxWidth} zoom={zoom} paneHeight={paneHeight} />
               </View>
             );
 
@@ -250,7 +241,7 @@ export function DocView({ blocks, colors }: { blocks: Block[]; colors: Palette }
                     {b.rows.length} row{b.rows.length === 1 ? '' : 's'}
                   </Text>
                 </View>
-                <Grid rows={b.rows} header={looksLikeHeader(b.rows)} s={s} colors={colors} maxWidth={maxWidth} zoom={zoom} />
+                <Grid rows={b.rows} header={looksLikeHeader(b.rows)} s={s} maxWidth={maxWidth} zoom={zoom} paneHeight={paneHeight} />
               </View>
             );
 
@@ -325,14 +316,14 @@ const makeStyles = (c: Palette, zoom: number) => {
   grid:     { borderWidth: 1, borderColor: c.glassStroke, borderRadius: 8, overflow: 'hidden' },
   gridRow:  { flexDirection: 'row' },
   gridHead: { backgroundColor: c.glassSoft },
-  gridAlt:  { backgroundColor: c.glassSoft + '55' },
+  // Faint ink stripe. It was `c.glassSoft + '55'`, which on an rgba() token is
+  // not a colour at all, so the stripes never drew.
+  gridAlt:  { backgroundColor: c.glass },
   gridCell: { paddingHorizontal: 9, paddingVertical: 7,
               borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: c.glassStroke,
               borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   gridTxt:      { color: c.text, fontSize: z(13), lineHeight: z(18) },
   gridHeadTxt:  { fontWeight: '800', color: c.text },
-  moreRow:      { paddingVertical: 10, alignItems: 'center' },
-  moreTxt:      { color: c.textDim, fontSize: z(13), fontWeight: '700' },
 
   sheetTab:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
                gap: 10, marginBottom: 7 },

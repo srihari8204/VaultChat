@@ -7,6 +7,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, FlatList, ActivityIndicator, Alert, useWindowDimensions } from 'react-native';
 import * as Sharing from 'expo-sharing';
 import { type Palette, brandAlpha } from '../constants/theme';
+import { CODE_CANVAS, SYNTAX_TOKEN_COLORS, type SyntaxToken } from '../constants/syntaxPalette';
 import { useTheme } from '../lib/theme';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -19,25 +20,8 @@ import { VIEWER_TEMP_PREFIX } from '../lib/mediaCacheGC';
 const MAX_PREVIEW_BYTES = 2 * 1024 * 1024;
 
 
-// Syntax color themes per token type
-type TokenType = 'keyword' | 'string' | 'comment' | 'number' | 'function' | 'type' | 'operator'
-  | 'property' | 'tag' | 'attribute' | 'punctuation' | 'default';
-type Token = { text: string; type: TokenType };
-
-const TOKEN_COLORS: Record<TokenType, string> = {
-  keyword: '#FF7B72',
-  string: '#A5D6FF',
-  comment: '#8B949E',
-  number: '#79C0FF',
-  function: '#D2A8FF',
-  type: '#FFA657',
-  operator: '#FF7B72',
-  property: '#79C0FF',
-  tag: '#7EE787',
-  attribute: '#79C0FF',
-  punctuation: '#C9D1D9',
-  default: '#C9D1D9',
-};
+// Syntax colours: a fixed dark code canvas in both themes (constants/syntaxPalette.ts).
+type Token = { text: string; type: SyntaxToken };
 
 // Language detection from extension
 const LANG_MAP: Record<string, string> = {
@@ -107,7 +91,7 @@ const tokenize = (line: string, lang: string): Token[] => {
       let j = i;
       while (j < line.length && /[a-zA-Z0-9_$]/.test(line[j])) j++;
       const word = line.slice(i, j);
-      let type: TokenType = 'default';
+      let type: SyntaxToken = 'default';
       if (kw.includes(word) || kw.includes(word.toLowerCase())) type = 'keyword';
       else if (j < line.length && line[j] === '(') type = 'function';
       else if (/^[A-Z]/.test(word) && word.length > 1) type = 'type';
@@ -291,7 +275,7 @@ export default function FilePreviewScreen() {
           <Text style={[s.lineNum, { width: lineNumWidth }]}>{idx + 1}</Text>
           <Text style={[s.codeLine, wordWrap && s.codeLineWrap]}>
             {tokensAt(idx).map((t, ti) => (
-              <Text key={ti} style={{ color: TOKEN_COLORS[t.type] }}>{t.text}</Text>
+              <Text key={ti} style={{ color: SYNTAX_TOKEN_COLORS[t.type] }}>{t.text}</Text>
             ))}
           </Text>
         </View>
@@ -380,10 +364,10 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   lineCount: { color: c.textDim, fontSize: 11 },
   sizeInfo: { color: c.textDim, fontSize: 11 },
   // Syntax tokens use a fixed dark canvas; chrome follows the app theme.
-  codeScroll: { flex: 1, backgroundColor: '#0D1117' },
+  codeScroll: { flex: 1, backgroundColor: CODE_CANVAS.bg },
   lineRow: { flexDirection: 'row', minHeight: 22 },
-  lineNum: { color: '#8B949E', fontSize: 12, fontFamily: 'monospace', textAlign: 'right', paddingRight: 12, paddingTop: 2, backgroundColor: '#161B22', borderRightWidth: 1, borderRightColor: '#21262D' },
-  codeLine: { fontSize: 12, fontFamily: 'monospace', paddingLeft: 12, paddingTop: 2, color: '#C9D1D9' },
+  lineNum: { color: CODE_CANVAS.lineNum, fontSize: 12, fontFamily: 'monospace', textAlign: 'right', paddingRight: 12, paddingTop: 2, backgroundColor: CODE_CANVAS.gutterBg, borderRightWidth: 1, borderRightColor: CODE_CANVAS.gutterRule },
+  codeLine: { fontSize: 12, fontFamily: 'monospace', paddingLeft: 12, paddingTop: 2, color: CODE_CANVAS.text },
   failure: { alignItems: 'center', padding: 32, gap: 10 },
   failureTitle: { color: c.text, fontSize: 16, fontWeight: '700', textAlign: 'center' },
   failureBody: { color: c.textDim, fontSize: 13, textAlign: 'center', lineHeight: 19 },

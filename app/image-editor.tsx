@@ -10,7 +10,9 @@ import { AuroraBackground } from '../components/ui';
 // with react-native-view-shot (see exportFullRes) — capturing the on-screen
 // canvas would send a screen-sized photo.
 
-import { BRAND_ACCENT, brandAlpha, type Palette } from '../constants/theme';
+import { brandAlpha, type Palette } from '../constants/theme';
+import { EDITOR_INKS, inkNames } from '../constants/inkPalette';
+import { MEDIA_INK, MEDIA_SHADOW } from '../constants/mediaChrome';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
@@ -38,11 +40,10 @@ import {
 } from '../lib/media/editExport';
 
 
-// Ink colours are image content, not theme roles.
-const DRAW_COLORS = ['#FFFFFF', '#FF3C3C', '#4A9FFF', BRAND_ACCENT, '#FBBF24'];
-const COLOR_NAMES: Record<string, string> = {
-  '#FFFFFF': 'white', '#FF3C3C': 'red', '#4A9FFF': 'blue', [BRAND_ACCENT]: 'brand blue', '#FBBF24': 'yellow',
-};
+// Ink colours are image content, not theme roles (constants/inkPalette.ts).
+const DRAW_COLORS = EDITOR_INKS.map(i => i.hex);
+const COLOR_NAMES = inkNames(EDITOR_INKS);
+const DEFAULT_INK = DRAW_COLORS[0];
 const CROP_RATIOS = [
   { label: 'Free', value: null },
   { label: '1:1', value: 1 },
@@ -167,13 +168,13 @@ export default function ImageEditorScreen() {
     frameReq.current = requestAnimationFrame(() => { frameReq.current = null; setFrame(f => f + 1); });
   };
   useEffect(() => () => { if (frameReq.current != null) cancelAnimationFrame(frameReq.current); }, []);
-  const [drawColor, setDrawColor] = useState('#FFFFFF');
+  const [drawColor, setDrawColor] = useState(DEFAULT_INK);
   const [brushSize, setBrushSize] = useState(3);
 
   // Text overlays
   const [textOverlays, setTextOverlays] = useState<TextOverlay[]>([]);
   const [editingText, setEditingText] = useState('');
-  const [textColor, setTextColor] = useState('#FFFFFF');
+  const [textColor, setTextColor] = useState(DEFAULT_INK);
   const [textFontSize, setTextFontSize] = useState(24);
 
   // Filters + adjustments → one colour matrix
@@ -936,11 +937,11 @@ const makeStyles = (c: Palette, SW: number, SH: number, insetTop: number, insetB
   // The crop shade/box sit over the photo itself, so they stay dark/light in
   // both themes (like any photo editor), not theme tokens.
   cropShade: { position: 'absolute', backgroundColor: 'rgba(0,0,0,0.55)' },
-  cropBox: { position: 'absolute', borderWidth: 2, borderColor: '#FFFFFF' },
+  cropBox: { position: 'absolute', borderWidth: 2, borderColor: MEDIA_INK },
   // Overlay text is image content: a dark halo keeps any ink colour legible on any photo.
-  overlayText: { fontWeight: '700', textShadowColor: '#000', textShadowRadius: 3 },
+  overlayText: { fontWeight: '700', textShadowColor: MEDIA_SHADOW, textShadowRadius: 3 },
   bottomChrome: { backgroundColor: c.card, paddingBottom: insetBottom },
   // Offscreen (left is set past the screen's width): laid out and drawable, never seen.
   exportLayer: { position: 'absolute', top: 0, overflow: 'hidden' },
-  cropHandle: { position: 'absolute', width: 28, height: 28, borderColor: '#FFFFFF', borderWidth: 4, borderRadius: 4, backgroundColor: 'rgba(0,0,0,0.25)' },
+  cropHandle: { position: 'absolute', width: 28, height: 28, borderColor: MEDIA_INK, borderWidth: 4, borderRadius: 4, backgroundColor: 'rgba(0,0,0,0.25)' },
 });
