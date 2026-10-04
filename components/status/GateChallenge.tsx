@@ -20,6 +20,7 @@ import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import PuzzleBoard from './PuzzleBoard';
 import type { Palette } from '../../constants/theme';
 import { useColors } from '../../lib/theme';
@@ -57,6 +58,7 @@ export default function GateChallenge({
 }: Props) {
   const c = useColors();
   const S = useMemo(() => makeS(c), [c]);
+  const insets = useSafeAreaInsets();
   const [answer, setAnswer] = useState('');
   const [busy, setBusy] = useState(false);
   const [wrong, setWrong] = useState(false);
@@ -88,7 +90,7 @@ export default function GateChallenge({
 
   return (
     <View style={S.wrap}>
-      <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close" style={S.close} onPress={onDismiss} hitSlop={12}>
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close" style={[S.close, { bottom: 40 + insets.bottom }]} onPress={onDismiss} hitSlop={12}>
         <Ionicons name="close" size={26} color="#fff" />
       </TouchableOpacity>
 

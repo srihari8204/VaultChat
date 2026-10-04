@@ -2,7 +2,7 @@ import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState, useCallback , useMemo, type ComponentProps } from 'react';
+import { useEffect, useRef, useState, useCallback , useMemo } from 'react';
 import { Alert, Animated, Easing, ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Switch, TouchableOpacity, View } from 'react-native';
 import { brandAlpha, type Palette } from '../constants/theme';
 import { SafetyNavBar } from '../components/SafetyNavBar';
@@ -12,7 +12,7 @@ import { readCache, writeCache } from '../lib/localCache';
 import * as Location from 'expo-location';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import {
-  sendSOS, listSOSHistory, listTrustedContacts, getSettings, updateSettings,
+  sendSOS, listSOSHistory, listTrustedContacts, getSettings,
   type SOSHistoryItem, type TrustedContact, type UserSettings,
 } from '../lib/chatService';
 import {
@@ -20,7 +20,6 @@ import {
   getRemoteLinkPreviews, setRemoteLinkPreviews, type NotifPreview,
 } from '../lib/privacyPrefs';
 
-type IoniconName = ComponentProps<typeof Ionicons>['name'];
 
 type TabId = 'alerts' | 'settings' | 'panic';
 const TABS: { id: TabId; label: string }[] = [
@@ -31,12 +30,6 @@ const TABS: { id: TabId; label: string }[] = [
 // on-danger token; white passes on both themes' danger red at this size.
 const ON_DANGER = '#FFFFFF';
 
-const SETTING_DEFS: { key: keyof UserSettings; title: string; desc: string; icon: IoniconName }[] = [
-  { key:'discoverable',        title:'Discoverable',  desc:'Let others find you by phone or handle', icon:'search-outline' },
-  { key:'lastSeenVisible',     title:'Last Seen',     desc:'Show your last-seen time to contacts',   icon:'eye-outline' },
-  { key:'readReceipts',        title:'Read Receipts', desc:'Send read receipts in your chats',       icon:'checkmark-done-outline' },
-  { key:'profilePhotoVisible', title:'Profile Photo', desc:'Show your profile photo to others',      icon:'person-circle-outline' },
-];
 
 function fmtTime(iso: string): string {
   const d = Date.now() - new Date(iso).getTime();
@@ -187,15 +180,6 @@ function NotificationsContent() {
     Animated.sequence([Animated.timing(panicAnim,{toValue:0.94,duration:100,useNativeDriver:true}),Animated.timing(panicAnim,{toValue:1,duration:300,useNativeDriver:true})]).start();
   };
 
-  const toggleSetting = async (key: keyof UserSettings) => {
-    if (!settings) return;
-    const next = { ...settings, [key]: !settings[key] };
-    setSettings(next); // optimistic
-    try { await updateSettings({ [key]: next[key] } as Partial<UserSettings>); }
-    // Revert only this key, so a concurrent toggle that did save is kept.
-    catch { setSettings(cur => cur ? { ...cur, [key]: settings[key] } : cur); Alert.alert('Could not save', 'Setting was not updated.'); }
-  };
-
   const retrySettings = async () => {
     if (settingsRetrying) return;
     setSettingsRetrying(true);
@@ -272,16 +256,22 @@ function NotificationsContent() {
           {!loading && activeTab==='settings' && settings && (
             <View style={{marginTop:4}}>
               <Text accessibilityRole="header" style={{color:colors.textFaint,fontSize:11,fontWeight:'800',letterSpacing:1.5,marginBottom:10}}>PRIVACY</Text>
-              {SETTING_DEFS.map((d)=>(
-                <View key={d.key} style={S.settingRow}>
-                  <View style={S.settingIcon}><Ionicons name={d.icon} size={20} color={colors.primary} /></View>
-                  <View style={{flex:1}}>
-                    <Text numberOfLines={1} style={{color:colors.text,fontSize:13,fontWeight:'700'}}>{d.title}</Text>
-                    <Text style={{color:colors.textFaint,fontSize:12,marginTop:2}}>{d.desc}</Text>
-                  </View>
-                  <Switch value={!!settings[d.key]} onValueChange={()=>toggleSetting(d.key)} trackColor={{false:colors.border,true:colors.primary}} thumbColor={colors.card} accessibilityLabel={d.title}/>
+              {/* One owner per privacy setting: these four live on Last seen &
+                  privacy (app/last-seen-privacy.tsx); this row only links there. */}
+              <TouchableOpacity
+                style={[S.settingRow,{minHeight:44}]}
+                onPress={()=>router.push('/last-seen-privacy' as any)}
+                accessibilityRole="button"
+                accessibilityLabel="Privacy: last seen, read receipts, profile photo and discoverability"
+                accessibilityHint="Opens your privacy settings"
+              >
+                <View style={S.settingIcon}><Ionicons name="eye-outline" size={20} color={colors.primary} /></View>
+                <View style={{flex:1}}>
+                  <Text numberOfLines={1} style={{color:colors.text,fontSize:13,fontWeight:'700'}}>Last seen & privacy</Text>
+                  <Text style={{color:colors.textFaint,fontSize:12,marginTop:2}}>Last seen, read receipts, profile photo, discoverability</Text>
                 </View>
-              ))}
+                <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
+              </TouchableOpacity>
 
               {/* Notification preview. There is no "show message text" option:
                   the push carries no text to show — see lib/privacyPrefs.ts. */}

@@ -1933,10 +1933,14 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       { label: 'Location',      icon: 'location' as const, onPress: () => router.push({ pathname: '/location' as any, params: { chatId, name: peerName } }) },
       { label: 'Navigate',      icon: 'navigate' as const, onPress: () => openNavigator() },
       { label: 'Poll',          icon: 'stats-chart' as const, onPress: () => router.push({ pathname: '/create-poll' as any, params: { chatId, peerName } }) },
-      // Whiteboard: a working sketch canvas that shipped with no entry point
-      // anywhere in the app. Its output is shared through the normal share
-      // sheet, so the attach menu is where it belongs.
-      { label: 'Whiteboard',    icon: 'brush' as const, onPress: () => router.push({ pathname: '/whiteboard' as any, params: { chatId } }) },
+      // Whiteboard: returns the drawing to this chat through the same
+      // capturedUri contract as /image-editor, so it needs the same params.
+      { label: 'Whiteboard',    icon: 'brush' as const, onPress: () => {
+        const peer = chat?.type === 'direct' && meId ? chat.members.find(m => m.userId !== meId) : null;
+        router.push({ pathname: '/whiteboard' as any, params: {
+          chatId, returnTo: '/chat', peerUid: peer?.userId || '', peerName: peer?.name || chat?.name || '',
+        } });
+      } },
       { label: nextInvisibleInk ? 'Ink: armed' : 'Invisible Ink', icon: 'sparkles' as const, onPress: () => setNextInvisibleInk(v => !v) },
     ];
   }, [onPickMedia, onPickFile, onEditPhoto, onSendVaultBeam, router, chatId, chat, meId, nextInvisibleInk]);

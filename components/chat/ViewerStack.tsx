@@ -7,6 +7,7 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, Modal, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '../ui/Avatar';
 import { useTheme } from '../../lib/theme';
 import type { Palette } from '../../constants/theme';
@@ -27,6 +28,7 @@ const act = (a?: string) => ACTIVITY[a || 'reading'] || ACTIVITY.reading;
 export function ViewerStack({ viewers, resolve }: { viewers: Viewer[]; resolve: Resolve }) {
   const { colors } = useTheme();
   const S = useMemo(() => makeStyles(colors), [colors]);
+  const insets = useSafeAreaInsets();
   const [open, setOpen] = useState(false);
 
   if (!viewers.length) return null;
@@ -53,7 +55,7 @@ export function ViewerStack({ viewers, resolve }: { viewers: Viewer[]; resolve: 
 
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
         <Pressable style={S.backdrop} onPress={() => setOpen(false)} accessibilityRole="button" accessibilityLabel="Close viewing now">
-          <Pressable style={S.sheet} onPress={() => {}} accessible={false} accessibilityViewIsModal>
+          <Pressable style={[S.sheet, { paddingBottom: 28 + insets.bottom }]} onPress={() => {}} accessible={false} accessibilityViewIsModal>
             <View style={S.handle} />
             <View style={S.titleRow}>
               <Text style={[S.sheetTitle, { flex: 1 }]}>Viewing now · {viewers.length}</Text>

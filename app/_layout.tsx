@@ -211,8 +211,6 @@ purgeRetiredKeys().catch(() => {});
 // second time — the exact double-inset this list's own note warns about.
 const INSET_SCREENS = [
   'emergency-sos',
-  'filevault',
-  'interest-calculator',
   'lock-alert',
   'network-test',
   'onboard-mpin',

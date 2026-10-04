@@ -20,7 +20,7 @@ const NAV: { id: SafetyNavId; icon: ComponentProps<typeof Ionicons>['name']; lab
   { id: 'chats', icon: 'chatbubbles-outline', label: 'Chats', route: '/(tabs)/chats' },
   { id: 'shield', icon: 'shield-checkmark-outline', label: 'Shield', route: '/dashboard' },
   { id: 'community', icon: 'people-outline', label: 'Community', route: '/communities' },
-  { id: 'vault', icon: 'file-tray-full-outline', label: 'Vault', route: '/filevault' },
+  { id: 'vault', icon: 'file-tray-full-outline', label: 'Vault', route: '/vault' },
   { id: 'alerts', icon: 'notifications-outline', label: 'Alerts', route: '/notifications' },
 ];
 
