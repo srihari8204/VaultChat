@@ -289,7 +289,8 @@ function VoiceCallEngine() {
           label: pp.name,
           icon: 'person-add-outline' as const,
           // Say what the tap did: inviteToCall rings nobody when the person is
-          // already here or the call has ended, and that must not look like success.
+          // already here, the call has ended, or the server rate-limited the
+          // ring, and none of that must look like success.
           onPress: () => {
             void inviteAndDescribe(() => engine.inviteToCall([pp.id]), pp.name)
               .then(message => setAddSheet({ title: 'Add to call', message, actions: [] }));

@@ -931,9 +931,10 @@ export function markChatRead(): void { dispatch({ type: 'chat_read' }); }
  *
  * Rings ONLY the uids given, and only while a group call is live: an invite is
  * a deliberate act aimed at named people, not a re-broadcast. Returns how many
- * were rung so the caller can say so.
+ * were rung so the caller can say so: 0 when there was nobody to ring (already
+ * here, or no live call), or 'rate_limited' when the server refused the ring.
  */
-export async function inviteToCall(uids: string[]): Promise<number> {
+export async function inviteToCall(uids: string[]): Promise<number | 'rate_limited'> {
   const s = session;
   // 1:1 IS ALLOWED NOW. This used to return early on s.peerUid, which meant a
   // two-person call had no way to become a three-person one — the "add person"
@@ -946,8 +947,11 @@ export async function inviteToCall(uids: string[]): Promise<number> {
   // looking at the call it is ringing about.
   const targets = uids.filter(u => u && u !== s.meId && !live[u]);
   if (!targets.length) return 0;
-  await ringTheGroup(s, targets, targets);
-  return targets.length;
+  const rang = await ringTheGroup(s, targets, targets);
+  // For a non-empty named list the server rings at least one person (it grants
+  // non-members a call invite), so 0 here is ringCallGroup's 429 mapping: the
+  // ring budget refused it and nobody's phone rang.
+  return rang === 0 ? 'rate_limited' : rang;
 }
 
 /**
@@ -962,10 +966,11 @@ export async function inviteToCall(uids: string[]): Promise<number> {
  * `fallback` is the uid list the loop needs; the server needs only the call id
  * (and, for an invite, who to narrow to).
  */
-async function ringTheGroup(s: Session, only: string[] | undefined, fallback: string[]): Promise<void> {
+async function ringTheGroup(s: Session, only: string[] | undefined, fallback: string[]): Promise<number> {
   const rang = await ringCallGroup(s.serverCallId, only);
-  if (rang !== null) return;
+  if (rang !== null) return rang;
   await signal.ringPeers(fallback, s.meId, s.chatId, s.peerName || '', s.kind === 'video');
+  return fallback.length;
 }
 
 /**

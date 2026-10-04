@@ -132,16 +132,18 @@ export async function getAutoCleanDays(): Promise<number> {
     return Number.isFinite(n) && n > 0 ? n : 0;
   } catch { return 0; }
 }
+/** Rejects when the setting could not be stored, so the caller can revert and say so. */
 export async function setAutoCleanDays(days: number): Promise<void> {
-  await AsyncStorage.setItem(AUTO_DAYS_KEY, String(days | 0)).catch(() => {});
+  await AsyncStorage.setItem(AUTO_DAYS_KEY, String(days | 0));
 }
 
 /** Whether to clear cache automatically on logout. */
 export async function getClearOnLogout(): Promise<boolean> {
   try { return (await AsyncStorage.getItem(CLEAR_LOGOUT_KEY)) === '1'; } catch { return false; }
 }
+/** Rejects when the setting could not be stored, so the caller can revert and say so. */
 export async function setClearOnLogout(on: boolean): Promise<void> {
-  await AsyncStorage.setItem(CLEAR_LOGOUT_KEY, on ? '1' : '0').catch(() => {});
+  await AsyncStorage.setItem(CLEAR_LOGOUT_KEY, on ? '1' : '0');
 }
 
 // ─── Orchestration (boot + logout) ───────────────────────────────────────────

@@ -57,6 +57,24 @@ export async function isIgnoringBatteryOptimizations(): Promise<boolean> {
   } catch { return true; }
 }
 
+/**
+ * The same question for a screen that SHOWS the answer: true, false, or null
+ * when it cannot be read (not Android, no VaultPower module in this build, or
+ * the call failed). isIgnoringBatteryOptimizations above maps "unknown" to
+ * true because it only decides whether to warn; a status card must not turn
+ * "unknown" into "Done".
+ */
+export async function readBatteryExemption(): Promise<boolean | null> {
+  if (Platform.OS !== 'android') return null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { NativeModules } = require('react-native');
+    const mod = NativeModules?.VaultPower;
+    if (!mod?.isIgnoringBatteryOptimizations) return null;
+    return !!(await mod.isIgnoringBatteryOptimizations());
+  } catch { return null; }
+}
+
 /** Is the device in system-wide power-save mode? Throttles background location
  *  on top of any per-app exemption, so it is a separate question. */
 export async function isPowerSaveMode(): Promise<boolean> {

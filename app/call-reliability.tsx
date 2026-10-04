@@ -12,7 +12,7 @@ import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  requestIgnoreBatteryOptimizations, openAutoStartSettings, oemInstructions, isIgnoringBatteryOptimizations,
+  requestIgnoreBatteryOptimizations, readBatteryExemption, openAutoStartSettings, oemInstructions,
   type OemStep,
 } from '../lib/batteryOptimization';
 import { getLowDataMode, setLowDataMode } from '../lib/callPrefs';
@@ -28,7 +28,8 @@ export default function CallReliabilityScreen() {
   const S = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
   const [oem, setOem] = useState<OemStep | null>(null);
-  const [battOk, setBattOk] = useState(false);
+  // null = could not be read back; never shown as done.
+  const [battOk, setBattOk] = useState<boolean | null>(false);
   const [autoOk, setAutoOk] = useState(false);
   const [lowData, setLowData] = useState(false);
   const [lowDataFailed, setLowDataFailed] = useState(false);
@@ -56,12 +57,12 @@ export default function CallReliabilityScreen() {
   //
   // The battery exemption is READ BACK the same way. This used to flip to "done"
   // the moment the system dialog returned, whether or not the user allowed it.
-  // isIgnoringBatteryOptimizations reports true when it cannot tell (iOS, no
-  // native module), which here only means no warning is shown.
+  // When it cannot be read (readBatteryExemption → null) the card says so and
+  // still offers the settings, rather than claiming it is done.
   const [fsiOk, setFsiOk] = useState(true);
   const refresh = () => {
     canUseFullScreenIntent().then(setFsiOk).catch(() => {});
-    isIgnoringBatteryOptimizations().then(setBattOk).catch(() => {});
+    if (Platform.OS === 'android') readBatteryExemption().then(setBattOk).catch(() => setBattOk(null));
   };
   useFocusEffect(useCallback(() => { refresh(); }, []));
 
@@ -105,19 +106,24 @@ export default function CallReliabilityScreen() {
         {Platform.OS === 'android' && (
         <View style={S.card}>
           <View style={S.cardHead}>
-            <Ionicons name={battOk ? 'checkmark-circle' : 'battery-charging-outline'} size={22} color={battOk ? colors.online : colors.text} />
+            <Ionicons
+              name={battOk === true ? 'checkmark-circle' : battOk === null ? 'help-circle-outline' : 'battery-charging-outline'}
+              size={22} color={battOk === true ? colors.online : colors.text}
+            />
             <Text style={S.cardTitle}>1. Ignore battery optimization</Text>
           </View>
           <Text style={S.cardBody}>
-            {battOk ? 'Done — crazzychat can receive a call while closed or with the screen off.'
+            {battOk === true ? 'Done — crazzychat can receive a call while closed or with the screen off.'
+              : battOk === null ? 'Couldn’t check this on your phone. Open battery settings and make sure crazzychat is not optimized (set to “Unrestricted” or “Don’t optimize”).'
               : 'Lets crazzychat receive a call while the app is closed or the screen is off.'}
           </Text>
           <TouchableOpacity
             style={S.btn}
             onPress={async () => { await requestIgnoreBatteryOptimizations(); refresh(); }}
-            accessibilityRole="button" accessibilityLabel="Allow crazzychat to ignore battery optimization"
+            accessibilityRole="button"
+            accessibilityLabel={battOk === null ? 'Open battery settings' : 'Allow crazzychat to ignore battery optimization'}
           >
-            <Text style={S.btnTxt}>{battOk ? 'Open again' : 'Allow'}</Text>
+            <Text style={S.btnTxt}>{battOk === true ? 'Open again' : battOk === null ? 'Open battery settings' : 'Allow'}</Text>
           </TouchableOpacity>
         </View>
         )}
@@ -152,7 +158,7 @@ export default function CallReliabilityScreen() {
           </View>
         )}
 
-        {Platform.OS === 'android' && battOk && autoOk && (
+        {Platform.OS === 'android' && battOk === true && autoOk && (
           <View style={S.okBar}>
             <Ionicons name="shield-checkmark" size={18} color={colors.online} />
             <Text style={S.okTxt}>You’re set — calls should ring even when crazzychat is closed.</Text>

@@ -335,13 +335,16 @@ export async function revokeInviteLink(broadcastId: string): Promise<void> {
  */
 export type RedeemResult =
   | { ok: true; broadcastId: string; reason?: undefined }
-  | { ok: false; broadcastId?: undefined; reason: 'passcode' | 'invalid' };
+  | { ok: false; broadcastId?: undefined; reason: 'passcode' | 'invalid' | 'network' };
 
 /**
  * Redeem a code and get the broadcast it unlocks.
  *
  * 'invalid' covers unknown, revoked, expired, and ended alike — the server
- * deliberately does not distinguish them, so neither can this.
+ * deliberately does not distinguish them (404), so neither can this.
+ * 'network' means the code was never judged: no response, a 5xx, a 408, or
+ * the 429 redeem rate limit. The code may be fine, so the screen offers a
+ * retry rather than calling the link dead.
  */
 export async function redeemInviteLink(
   code: string,
@@ -363,6 +366,11 @@ export async function redeemInviteLink(
     // from whichever shape the api() helper surfaces.
     const status = e?.status ?? e?.response?.status ?? e?.statusCode;
     if (status === 403) return { ok: false, reason: 'passcode' };
+    // No HTTP status means the request never got an answer (offline, DNS,
+    // timeout). 5xx, 408 and 429 are the server not judging the code at all.
+    if (typeof status !== 'number' || status >= 500 || status === 408 || status === 429) {
+      return { ok: false, reason: 'network' };
+    }
     return { ok: false, reason: 'invalid' };
   }
 }

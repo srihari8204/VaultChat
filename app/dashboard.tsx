@@ -1,6 +1,6 @@
 import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter, type Href } from 'expo-router';
+import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import { useCallback, useEffect, useRef, useState , useMemo} from 'react';
 import { ActivityIndicator, Animated, Easing, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { AppText as Text } from '../components/ui/Text';
@@ -78,8 +78,11 @@ function DashboardContent() {
     finally { setLoading(false); inFlight.current = false; }
   }, []);
 
+  // On every focus, not just mount: the check rows send you off to change a
+  // setting, and coming back must show the score that change produced.
+  useFocusEffect(useCallback(() => { load(); }, [load]));
+
   useEffect(() => {
-    load();
     Animated.timing(fadeAnim,{toValue:1,duration:500,useNativeDriver:true}).start();
     // Keep the loop handles so leaving the screen stops them (same leak as
     // the one fixed in app/notifications.tsx).
@@ -90,7 +93,7 @@ function DashboardContent() {
     ]));
     radar.start(); pulse.start();
     return () => { radar.stop(); pulse.stop(); };
-  }, [load, fadeAnim, pulseAnim, radarAnim]);
+  }, [fadeAnim, pulseAnim, radarAnim]);
 
   const checks = overview ? buildChecks(overview) : [];
   const score = checks.length ? Math.round((checks.filter(c => c.ok).length / checks.length) * 100) : 0;

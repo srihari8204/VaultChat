@@ -30,7 +30,6 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, TextInput,
 } from 'react-native';
-import NetInfo from '@react-native-community/netinfo';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../../../constants/theme';
@@ -59,11 +58,10 @@ type Phase =
   | { kind: 'joining' }
   // The code is good, the passcode is not (or was not supplied).
   | { kind: 'passcode'; wrong: boolean }
-  // `offline`: the redeem failed while the device had no connection, so the
-  // code may be perfectly good. lib/broadcast.ts redeemInviteLink folds every
-  // non-403 into 'invalid', so the device's own connectivity is what tells the
-  // two apart here (see the Handoffs in the fix log for the server-side split).
-  | { kind: 'error'; offline: boolean };
+  // `network`: the code was never judged — no answer, a server error, or the
+  // redeem rate limit (redeemInviteLink's 'network' reason) — so it may be
+  // perfectly good. Otherwise the server said the invitation is not valid.
+  | { kind: 'error'; network: boolean };
 
 export default function LiveJoinScreen() {
   const { colors } = useTheme();
@@ -101,7 +99,7 @@ export default function LiveJoinScreen() {
   }, []);
 
   const attempt = useCallback(async (pc: string, showWrong: boolean) => {
-    if (!code) { setPhase({ kind: 'error', offline: false }); return; }
+    if (!code) { setPhase({ kind: 'error', network: false }); return; }
     setBusy(true);
     try {
       const res = await redeemInviteLink(code, { passcode: pc, displayName: name });
@@ -111,9 +109,7 @@ export default function LiveJoinScreen() {
         return;
       }
       if (res.reason === 'passcode') { setPhase({ kind: 'passcode', wrong: showWrong }); return; }
-      let offline = false;
-      try { const net = await NetInfo.fetch(); offline = net.isConnected === false || net.isInternetReachable === false; } catch {}
-      setPhase({ kind: 'error', offline });
+      setPhase({ kind: 'error', network: res.reason === 'network' });
     } finally {
       setBusy(false);
     }
@@ -222,17 +218,17 @@ export default function LiveJoinScreen() {
         <AuroraBackground />
         <Stack.Screen options={{ headerShown: false }} />
         <View style={s.body}>
-          <Ionicons name={phase.offline ? 'cloud-offline-outline' : 'close-circle-outline'} size={56} color={colors.danger} />
+          <Ionicons name={phase.network ? 'cloud-offline-outline' : 'close-circle-outline'} size={56} color={colors.danger} />
           <Text style={s.title} accessibilityRole="header">
-            {phase.offline ? 'You’re offline' : 'This invitation isn’t valid'}
+            {phase.network ? 'Couldn’t check the invitation' : 'This invitation isn’t valid'}
           </Text>
           <Text style={s.sub}>
-            {phase.offline
-              ? 'The invitation could not be checked. Connect to the internet and try again.'
+            {phase.network
+              ? 'The link may still be good. Check your connection and try again in a moment.'
               : 'The link may have been revoked or expired, or the broadcast has ended. Ask the host for a new link.'}
           </Text>
-          {/* Retry for either case: a redeem is idempotent, and "invalid" can
-              also be a server or network fault the client cannot tell apart. */}
+          {/* Retry for either case: a redeem is idempotent, so retrying is
+              always safe. */}
           <TouchableOpacity
             style={s.cta}
             onPress={() => { setPhase({ kind: 'joining' }); void attempt(passcode, false); }}
