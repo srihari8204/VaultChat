@@ -5,7 +5,7 @@
 // settings (VB_AUTO_MAX_BYTES, enforced in the engine).
 
 import React from 'react';
-import { View, ScrollView, StyleSheet, TouchableOpacity, Switch, StatusBar, Platform } from 'react-native';
+import { View, ScrollView, StyleSheet, TouchableOpacity, Switch, StatusBar } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import { useTheme } from '../lib/theme';
@@ -59,7 +59,9 @@ export default function VaultBeamSettings() {
               <Radio label="Mobile data only" active={s.network === 'cellular'} onPress={() => patchSettings({ network: 'cellular' as VBNetwork })} card={card} colors={C} />
               <Radio label="Any network" active={s.network === 'any'} onPress={() => patchSettings({ network: 'any' as VBNetwork })} card={card} colors={C} />
               <Toggle label="Only on unmetered networks" value={s.unmeteredOnly} onValueChange={(v) => patchSettings({ unmeteredOnly: v })} card={card} colors={C} />
-              <Toggle label="Pause auto-downloads while roaming" value={s.pauseRoaming} onValueChange={(v) => patchSettings({ pauseRoaming: v })} card={card} colors={C} />
+              {/* "Pause while roaming" is not offered: NetInfo does not expose
+                  roaming, so lib/vaultBeamAutoDownload never reads the setting.
+                  "Only on unmetered networks" above is the control that works. */}
             </Section>
 
             <Section title="Sender" colors={C}>
@@ -96,7 +98,8 @@ function Section({ title, children, colors }: { title: string; children: React.R
 
 function Radio({ label, desc, active, onPress, card, colors }: { label: string; desc?: string; active: boolean; onPress: () => void; card: any; colors: any }) {
   return (
-    <TouchableOpacity style={[styles.row, card]} onPress={onPress} activeOpacity={0.8}>
+    <TouchableOpacity style={[styles.row, card]} onPress={onPress} activeOpacity={0.8}
+      accessibilityRole="radio" accessibilityLabel={desc ? `${label}. ${desc}` : label} accessibilityState={{ selected: active, checked: active }}>
       <View style={{ flex: 1 }}>
         <Text style={[styles.rowLabel, { color: colors.text }]}>{label}</Text>
         {desc ? <Text style={[styles.rowDesc, { color: colors.textDim }]}>{desc}</Text> : null}
@@ -113,14 +116,17 @@ function Toggle({ label, desc, value, onValueChange, card, colors }: { label: st
         <Text style={[styles.rowLabel, { color: colors.text }]}>{label}</Text>
         {desc ? <Text style={[styles.rowDesc, { color: colors.textDim }]}>{desc}</Text> : null}
       </View>
-      <Switch value={value} onValueChange={onValueChange} trackColor={{ true: BRAND_ACCENT }} />
+      <Switch accessibilityLabel={label} value={value} onValueChange={onValueChange} trackColor={{ true: BRAND_ACCENT, false: colors.border }} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: Platform.OS === 'ios' ? 54 : 40, paddingBottom: 12, paddingHorizontal: 8, borderBottomWidth: StyleSheet.hairlineWidth },
+  // The status-bar inset comes from the navigator: this screen is in
+  // INSET_SCREENS (app/_layout.tsx), which already pads it. A second 40/54
+  // here put a band of empty space above the header.
+  header: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 4, paddingBottom: 12, paddingHorizontal: 8, borderBottomWidth: StyleSheet.hairlineWidth },
   hBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   hTitle: { fontSize: 18, fontWeight: '800' },
   body: { padding: 16 },

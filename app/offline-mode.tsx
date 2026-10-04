@@ -1,393 +1,228 @@
-// app/offline-mode.tsx — Offline Mode Manager
-// Connection status, message queue, sync progress, cache management
+// app/offline-mode.tsx — Offline mode: connection status and the real outbox.
+//
+// Everything on this screen is read from the app's own state:
+//   • connection — NetInfo, live.
+//   • outbox     — the localDb 'msg' queue that lib/messageQueue sends from
+//                  (text, reactions, edits and deletes made while offline).
+//   • retry      — messageQueue.retry() for rejected rows, flush() for the rest.
+//
+// It used to seed a demo queue ("Alice Chen…") into storage, add a made-up
+// 5.2 MB to the cache size, fake progress with an 800 ms sleep per item and
+// then announce "N messages sent successfully" without sending anything. It
+// also cleared every storage key containing "cache" or "temp", which took the
+// local-first caches with it. Cache clean-up now goes to /cache-cleanup, which
+// plans what it deletes.
 
-import React, { useState, useEffect, useRef , useMemo} from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Platform, Alert, ActivityIndicator, Animated } from 'react-native';
-import { type Palette } from '../constants/theme';
-import { useTheme } from '../lib/theme';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { View, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import NetInfo from '@react-native-community/netinfo';
-import { AuroraBackground } from '../components/ui';
+import { type Palette } from '../constants/theme';
+import { useTheme } from '../lib/theme';
+import { AppText as Text, AuroraBackground } from '../components/ui';
 import { HEADER_TOP } from '../constants/layout';
+import { queueList } from '../lib/localDb';
+import { flush, on, retry } from '../lib/messageQueue';
+import { summarizeOutbox, type OutboxRow, type OutboxSummary } from '../lib/outboxSummary';
 
-// Was: StatusBar.currentHeight on Android, a hardcoded 44 elsewhere, read
-// ONCE at module scope. currentHeight ignores display cutouts, the 44 is a
-// guess, and the module read froze whichever it picked for the life of the
-// process. HEADER_TOP is the live binding and is applied at the element
-// below, so it follows a rotation like every other screen (2026-09-17).
+// Keys written only by the old mock version of this screen (a seeded demo
+// queue and a fake "last sync"). Removed by exact name, nothing else.
+const LEGACY_MOCK_KEYS = ['vc_offline_queue', 'vc_last_sync'];
+// One page is plenty for a count; the queue itself drains in pages of 200.
+const OUTBOX_READ_LIMIT = 1000;
 
-
-const QUEUE_KEY = 'vc_offline_queue';
-
-type QueuedMessage = {
-  id: string;
-  chatName: string;
-  preview: string;
-  timestamp: string;
-  status: 'pending' | 'sending' | 'failed';
-};
-
-function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'Just now';
-  if (mins < 60) return `${mins}m ago`;
+function timeAgo(ts: number): string {
+  const mins = Math.floor((Date.now() - ts) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
+  if (hrs < 24) return `${hrs} h ago`;
+  return `${Math.floor(hrs / 24)} d ago`;
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-}
-
-function useS() {
-  const { colors } = useTheme();
-  return useMemo(() => makeStyles(colors), [colors]);
-}
+const OFFLINE_FACTS: { icon: React.ComponentProps<typeof Ionicons>['name']; label: string; works: boolean }[] = [
+  { icon: 'chatbubbles-outline', label: 'Read messages already on this phone', works: true },
+  { icon: 'create-outline', label: 'Write text messages, reactions, edits and deletes — they wait in the outbox', works: true },
+  { icon: 'cloud-upload-outline', label: 'Send photos, files and voice notes (they upload only while online)', works: false },
+  { icon: 'call-outline', label: 'Voice and video calls', works: false },
+];
 
 export default function OfflineModeScreen() {
   const { colors } = useTheme();
-  const s = useS();
+  const s = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
-  const [isOnline, setIsOnline] = useState(true);
-  const [connectionType, setConnectionType] = useState('wifi');
-  const [queue, setQueue] = useState<QueuedMessage[]>([]);
-  const [syncing, setSyncing] = useState(false);
-  const [syncProgress, setSyncProgress] = useState(0);
-  const [lastSync, setLastSync] = useState<string | null>(null);
-  const [cacheSize, setCacheSize] = useState(0);
+  const [isOnline, setIsOnline] = useState<boolean | null>(null);
+  const [connectionType, setConnectionType] = useState('unknown');
+  const [outbox, setOutbox] = useState<OutboxSummary | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
 
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-  const syncAnim = useRef(new Animated.Value(0)).current;
+  const loadOutbox = useCallback(async () => {
+    try {
+      const rows = await queueList<OutboxRow>('msg', OUTBOX_READ_LIMIT);
+      setOutbox(summarizeOutbox(rows));
+      setLoadError(null);
+    } catch (e: any) {
+      setLoadError(e?.message ?? 'Could not read the outbox');
+    }
+  }, []);
 
   useEffect(() => {
-    // Monitor connection
-    const unsub = NetInfo.addEventListener(state => {
+    let alive = true;
+    const refresh = () => { if (alive) loadOutbox(); };
+    const unsubNet = NetInfo.addEventListener(state => {
+      if (!alive) return;
       setIsOnline(!!state.isConnected);
       setConnectionType(state.type || 'unknown');
-
-      // Auto-sync when coming back online
-      if (state.isConnected && queue.length > 0) {
-        // Don't auto-trigger, just update status
-      }
     });
+    // The queue says when a row is added, sent, retried or rejected; recount then.
+    const offs = [on('pending', refresh), on('sent', refresh), on('failed', refresh), on('retry', refresh)];
+    refresh();
+    AsyncStorage.multiRemove(LEGACY_MOCK_KEYS).catch(() => {});
+    return () => { alive = false; unsubNet(); offs.forEach(off => off()); };
+  }, [loadOutbox]);
 
-    loadQueueAndCache();
-    // ONE LOOP, NOT ONE PER QUEUED MESSAGE (2026-09-17). queue.length was in
-    // the deps, so every send re-ran this effect and started a FRESH infinite
-    // loop on the same Animated.Value while orphaning the previous one - N
-    // sends left N loops fighting each other, none ever released. The pulse
-    // depends on the screen being mounted, not on what is in the queue.
-    const pulse = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 0.4, duration: 1000, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1, duration: 1000, useNativeDriver: true }),
-      ])
-    );
-    pulse.start();
+  const unsent = outbox ? outbox.waiting + outbox.failed : 0;
 
-    return () => { unsub(); pulse.stop(); };
-  }, [pulseAnim]);
-
-  const loadQueueAndCache = async () => {
-    try {
-      // Load queued messages
-      const raw = await AsyncStorage.getItem(QUEUE_KEY);
-      if (raw) {
-        setQueue(JSON.parse(raw));
-      } else {
-        // Seed demo queue for display
-        const demo: QueuedMessage[] = [
-          { id: '1', chatName: 'Alice Chen', preview: 'Hey, are you free tonight?', timestamp: new Date(Date.now() - 120000).toISOString(), status: 'pending' },
-          { id: '2', chatName: 'Dev Team', preview: 'Updated the PR, ready for review', timestamp: new Date(Date.now() - 300000).toISOString(), status: 'pending' },
-          { id: '3', chatName: 'Bob Martinez', preview: 'Thanks for the docs!', timestamp: new Date(Date.now() - 600000).toISOString(), status: 'failed' },
-        ];
-        setQueue(demo);
-        await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(demo));
-      }
-
-      // Calculate cache size
-      const keys = await AsyncStorage.getAllKeys();
-      const pairs = await AsyncStorage.multiGet(keys);
-      let total = 0;
-      for (const [k, v] of pairs) {
-        total += (k?.length ?? 0) + (v?.length ?? 0);
-      }
-      setCacheSize(total + 5_200_000); // Add simulated cached media
-
-      // Last sync
-      const ls = await AsyncStorage.getItem('vc_last_sync');
-      setLastSync(ls || new Date(Date.now() - 3600000).toISOString());
-    } catch {}
-  };
-
-  const retryAll = async () => {
+  const retryNow = useCallback(async () => {
+    if (retrying || !outbox) return;
     if (!isOnline) {
-      Alert.alert('Offline', 'You need an internet connection to send messages.');
+      Alert.alert('Offline', 'Messages are sent automatically when the connection comes back.');
       return;
     }
-    if (queue.length === 0) return;
-
     setRetrying(true);
-    setSyncing(true);
-    setSyncProgress(0);
-    syncAnim.setValue(0);
-
-    const total = queue.length;
-    const updated = [...queue];
-
-    for (let i = 0; i < total; i++) {
-      updated[i] = { ...updated[i], status: 'sending' };
-      setQueue([...updated]);
-
-      // Simulate network send
-      await new Promise(r => setTimeout(r, 800));
-
-      const p = (i + 1) / total;
-      setSyncProgress(p);
-      Animated.timing(syncAnim, { toValue: p, duration: 200, useNativeDriver: false }).start();
+    try {
+      // retry() moves a rejected row back to the queue and starts a flush;
+      // flush() sends whatever was already waiting.
+      for (const id of outbox.failedIds) await retry(id);
+      await flush();
+    } catch (e: any) {
+      Alert.alert('Could not retry', e?.message ?? 'Try again');
+    } finally {
+      setRetrying(false);
+      loadOutbox();
     }
+  }, [retrying, outbox, isOnline, loadOutbox]);
 
-    // All sent
-    setQueue([]);
-    await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify([]));
-    const now = new Date().toISOString();
-    setLastSync(now);
-    await AsyncStorage.setItem('vc_last_sync', now);
-
-    setSyncing(false);
-    setRetrying(false);
-    Alert.alert('Synced', `${total} messages sent successfully.`);
-  };
-
-  const clearCache = () => {
-    Alert.alert('Clear Cache', 'Remove cached messages and media?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Clear', style: 'destructive', onPress: async () => {
-          const keys = await AsyncStorage.getAllKeys();
-          const cacheKeys = keys.filter(k => k.includes('cache') || k.includes('temp'));
-          if (cacheKeys.length > 0) await AsyncStorage.multiRemove(cacheKeys);
-          setCacheSize(0);
-          Alert.alert('Done', 'Cache cleared.');
-        },
-      },
-    ]);
-  };
-
-  const syncProgressWidth = syncAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0%', '100%'],
-  });
-
-  const pendingCount = queue.filter(m => m.status === 'pending').length;
-  const failedCount = queue.filter(m => m.status === 'failed').length;
+  const statusColor = isOnline === false ? colors.danger : colors.primary;
 
   return (
     <View style={s.root}>
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
 
-      <LinearGradient colors={['#F9FAFB', colors.bg]} style={s.header}>
-        <View style={[s.headerRow, { marginTop: HEADER_TOP }]}>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={16}>
-            <Ionicons name="arrow-back" size={24} color={colors.text} />
-          </TouchableOpacity>
-          <Text style={s.headerTitle}>Offline Mode</Text>
-          <View style={{ width: 24 }} />
-        </View>
-      </LinearGradient>
+      <View style={[s.headerRow, { marginTop: HEADER_TOP }]}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={16} style={s.backBtn}>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
+        </TouchableOpacity>
+        <Text style={s.headerTitle} accessibilityRole="header">Offline mode</Text>
+        <View style={{ width: 44 }} />
+      </View>
 
       <ScrollView style={s.scroll} contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
 
-        {/* ── Connection Status ───────────────────────── */}
-        <LinearGradient
-          colors={isOnline ? ['#0A2E1A', '#F9FAFB'] : ['#2E0A0A', '#F9FAFB']}
-          style={s.card}
-        >
+        {/* ── Connection ───────────────────────────── */}
+        <View style={s.card} accessible accessibilityLabel={
+          isOnline === null ? 'Checking connection' : isOnline ? `Online, connected via ${connectionType}` : 'Offline, no internet connection'}>
           <View style={s.statusRow}>
-            <Animated.View style={[
-              s.statusDot,
-              { backgroundColor: isOnline ? colors.primary : colors.danger, opacity: pulseAnim },
-            ]} />
+            <View style={[s.statusDot, { backgroundColor: statusColor }]} />
             <View style={{ flex: 1, marginLeft: 14 }}>
-              <Text style={[s.statusTitle, { color: isOnline ? colors.primary : colors.danger }]}>
-                {isOnline ? 'Online' : 'Offline'}
+              <Text style={[s.statusTitle, { color: statusColor }]}>
+                {isOnline === null ? 'Checking…' : isOnline ? 'Online' : 'Offline'}
               </Text>
-              <Text style={s.statusSub}>
-                {isOnline
-                  ? `Connected via ${connectionType.toUpperCase()}`
-                  : 'No internet connection'}
+              <Text style={s.dim}>
+                {isOnline === null ? ' ' : isOnline ? `Connected via ${connectionType}` : 'No internet connection'}
               </Text>
             </View>
-            <Ionicons
-              name={isOnline ? 'wifi' : 'wifi-outline'}
-              size={28}
-              color={isOnline ? colors.primary : colors.danger}
-            />
+            <Ionicons name={isOnline === false ? 'cloud-offline-outline' : 'wifi'} size={26} color={statusColor} />
           </View>
-        </LinearGradient>
+        </View>
 
-        {/* ── Message Queue ──────────────────────────── */}
-        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
+        {/* ── Outbox ───────────────────────────────── */}
+        <View style={s.card}>
           <View style={s.sectionHeader}>
-            <Ionicons name="mail-outline" size={20} color={colors.accent} />
-            <Text style={s.cardTitle}>Message Queue</Text>
-            <View style={s.badge}>
-              <Text style={s.badgeText}>{queue.length}</Text>
-            </View>
+            <Ionicons name="paper-plane-outline" size={20} color={colors.textDim} />
+            <Text style={s.cardTitle}>Outbox</Text>
           </View>
 
-          {pendingCount > 0 && (
-            <View style={s.queueSummary}>
-              <Text style={s.queueText}>{pendingCount} pending</Text>
-              {failedCount > 0 && <Text style={[s.queueText, { color: colors.danger }]}>{failedCount} failed</Text>}
+          {loadError ? (
+            <View accessibilityRole="alert">
+              <Text style={s.dim}>Could not read the outbox. {loadError}</Text>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Try reading the outbox again" onPress={loadOutbox} style={s.outlineBtn} activeOpacity={0.7}>
+                <Text style={s.outlineBtnTxt}>Try again</Text>
+              </TouchableOpacity>
             </View>
-          )}
-
-          {queue.length === 0 ? (
-            <View style={s.emptyQueue}>
-              <Ionicons name="checkmark-circle-outline" size={32} color={colors.primary} />
-              <Text style={s.emptyText}>All messages sent</Text>
+          ) : !outbox ? (
+            <ActivityIndicator color={colors.primary} />
+          ) : unsent === 0 ? (
+            <View style={s.emptyRow}>
+              <Ionicons name="checkmark-circle-outline" size={22} color={colors.primary} />
+              <Text style={s.body}>Nothing waiting to send.</Text>
             </View>
           ) : (
-            queue.map((msg, i) => (
-              <View key={msg.id} style={s.msgRow}>
-                <View style={[
-                  s.msgStatusDot,
-                  {
-                    backgroundColor:
-                      msg.status === 'pending' ? '#FF9F43'
-                      : msg.status === 'sending' ? colors.accent
-                      : colors.danger,
-                  },
-                ]} />
-                <View style={{ flex: 1, marginLeft: 12 }}>
-                  <Text style={s.msgChat}>{msg.chatName}</Text>
-                  <Text style={s.msgPreview} numberOfLines={1}>{msg.preview}</Text>
-                </View>
-                <View style={{ alignItems: 'flex-end' }}>
-                  <Text style={s.msgTime}>{timeAgo(msg.timestamp)}</Text>
-                  <Text style={[s.msgStatus, {
-                    color: msg.status === 'failed' ? colors.danger : colors.textDim,
-                  }]}>
-                    {msg.status === 'sending' ? 'Sending...' : msg.status}
-                  </Text>
-                </View>
-              </View>
-            ))
+            <>
+              {outbox.waiting > 0 && (
+                <Text style={s.body}>
+                  {outbox.waiting} waiting to send{outbox.chats > 1 ? ` across ${outbox.chats} chats` : ''}. They go out on their own when the connection returns.
+                </Text>
+              )}
+              {outbox.failed > 0 && (
+                <Text style={[s.body, { color: colors.danger, marginTop: 6 }]}>
+                  {outbox.failed} not sent — the server refused {outbox.failed === 1 ? 'it' : 'them'}. Each one is marked in its chat.
+                </Text>
+              )}
+              {outbox.oldestAt != null && <Text style={[s.dim, { marginTop: 6 }]}>Oldest from {timeAgo(outbox.oldestAt)}</Text>}
+
+              <TouchableOpacity
+                style={[s.primaryBtn, (!isOnline || retrying) && { opacity: 0.5 }]}
+                onPress={retryNow}
+                disabled={retrying || !isOnline}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel={outbox.failed > 0 ? `Retry ${unsent} unsent messages` : `Send ${unsent} waiting messages now`}
+                accessibilityState={{ disabled: retrying || !isOnline, busy: retrying }}
+              >
+                {retrying ? <ActivityIndicator color="#FFFFFF" /> : (
+                  <Text style={s.primaryBtnTxt}>{outbox.failed > 0 ? 'Retry now' : 'Send now'}</Text>
+                )}
+              </TouchableOpacity>
+              {!isOnline && <Text style={[s.dim, { marginTop: 8 }]}>Connect to the internet to send.</Text>}
+            </>
           )}
+        </View>
 
-          {/* Auto-retry status */}
-          <View style={s.autoRetryRow}>
-            <Ionicons name="refresh-outline" size={16} color={colors.textDim} />
-            <Text style={s.autoRetryText}>Auto-retry: {isOnline ? 'Active' : 'Waiting for connection'}</Text>
-          </View>
-        </LinearGradient>
-
-        {/* ── Retry All Button ───────────────────────── */}
-        {queue.length > 0 && (
-          <TouchableOpacity
-            style={[s.retryBtn, !isOnline && s.retryBtnDisabled]}
-            onPress={retryAll}
-            disabled={retrying || !isOnline}
-            activeOpacity={0.7}
-          >
-            {retrying ? (
-              <ActivityIndicator size="small" color={colors.text} />
-            ) : (
-              <>
-                <Ionicons name="refresh" size={20} color={colors.text} />
-                <Text style={s.retryBtnText}>Retry All ({queue.length})</Text>
-              </>
-            )}
-          </TouchableOpacity>
-        )}
-
-        {/* ── Sync Progress ──────────────────────────── */}
-        {syncing && (
-          <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
-            <Text style={s.cardTitlePlain}>Syncing Data...</Text>
-            <View style={s.syncBarBg}>
-              <Animated.View style={[s.syncBarFill, { width: syncProgressWidth }]} />
-            </View>
-            <Text style={s.syncPct}>{Math.round(syncProgress * 100)}%</Text>
-          </LinearGradient>
-        )}
-
-        {/* ── Last Sync ──────────────────────────────── */}
-        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
+        {/* ── What works offline ───────────────────── */}
+        <View style={s.card}>
           <View style={s.sectionHeader}>
-            <Ionicons name="sync-outline" size={20} color={colors.accent} />
-            <Text style={s.cardTitle}>Last Sync</Text>
+            <Ionicons name="apps-outline" size={20} color={colors.textDim} />
+            <Text style={s.cardTitle}>Without a connection</Text>
           </View>
-          <Text style={s.lastSyncText}>
-            {lastSync ? timeAgo(lastSync) : 'Never synced'}
-          </Text>
-          {lastSync && (
-            <Text style={s.lastSyncDate}>
-              {new Date(lastSync).toLocaleString()}
-            </Text>
-          )}
-        </LinearGradient>
-
-        {/* ── Offline Features Available ──────────────── */}
-        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
-          <View style={s.sectionHeader}>
-            <Ionicons name="apps-outline" size={20} color={colors.accent} />
-            <Text style={s.cardTitle}>Available Offline</Text>
-          </View>
-
-          {[
-            { icon: 'chatbubbles-outline', label: 'Read cached messages', available: true },
-            { icon: 'create-outline', label: 'Compose new messages', available: true },
-            { icon: 'images-outline', label: 'View saved media', available: true },
-            { icon: 'search-outline', label: 'Search message history', available: true },
-            { icon: 'call-outline', label: 'Voice / Video calls', available: false },
-            { icon: 'cloud-upload-outline', label: 'Send media', available: false },
-          ].map((feat, i) => (
-            <View key={i} style={s.featureRow}>
-              <Ionicons name={feat.icon as any} size={18} color={feat.available ? colors.primary : colors.danger} />
-              <Text style={[s.featureLabel, { color: feat.available ? colors.text : colors.textDim }]}>
-                {feat.label}
-              </Text>
-              <Ionicons
-                name={feat.available ? 'checkmark-circle' : 'close-circle'}
-                size={18}
-                color={feat.available ? colors.primary : colors.danger}
-              />
+          {OFFLINE_FACTS.map(f => (
+            <View key={f.label} style={s.featureRow} accessible accessibilityLabel={`${f.label}: ${f.works ? 'works offline' : 'needs a connection'}`}>
+              <Ionicons name={f.icon} size={18} color={colors.textDim} />
+              <Text style={s.featureLabel}>{f.label}</Text>
+              <Ionicons name={f.works ? 'checkmark-circle' : 'close-circle'} size={18} color={f.works ? colors.primary : colors.danger} />
             </View>
           ))}
-        </LinearGradient>
+        </View>
 
-        {/* ── Cache Management ────────────────────────── */}
-        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
-          <View style={s.sectionHeader}>
-            <Ionicons name="folder-outline" size={20} color={'#FF9F43'} />
-            <Text style={s.cardTitle}>Cache</Text>
+        {/* ── Storage ──────────────────────────────── */}
+        <TouchableOpacity
+          style={[s.card, s.linkRow]}
+          onPress={() => router.push('/cache-cleanup' as any)}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Cache cleanup. See what is cached on this phone and free up space"
+        >
+          <Ionicons name="folder-outline" size={20} color={colors.textDim} />
+          <View style={{ flex: 1 }}>
+            <Text style={s.linkTitle}>Cache cleanup</Text>
+            <Text style={s.dim}>See what is cached on this phone and free up space</Text>
           </View>
-
-          <View style={s.cacheRow}>
-            <Text style={s.cacheLabel}>Cache Size</Text>
-            <Text style={s.cacheValue}>{formatBytes(cacheSize)}</Text>
-          </View>
-
-          <TouchableOpacity style={s.clearCacheBtn} onPress={clearCache} activeOpacity={0.7}>
-            <Ionicons name="trash-outline" size={18} color={colors.danger} />
-            <Text style={s.clearCacheText}>Clear Cache</Text>
-          </TouchableOpacity>
-        </LinearGradient>
-
-        <View style={{ height: 40 }} />
+          <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
+        </TouchableOpacity>
       </ScrollView>
     </View>
   );
@@ -395,62 +230,31 @@ export default function OfflineModeScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: 'transparent' },
-  header: { paddingBottom: 16, paddingHorizontal: 20 },
-  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingBottom: 12 },
+  backBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { color: c.text, fontSize: 20, fontWeight: '700' },
   scroll: { flex: 1 },
-  scrollContent: { padding: 16, paddingBottom: 40 },
+  scrollContent: { padding: 16, paddingBottom: 48 },
 
-  card: { borderRadius: 16, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: '#112240' },
+  card: { borderRadius: 16, padding: 18, marginBottom: 14, backgroundColor: c.glass, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
   cardTitle: { color: c.text, fontSize: 17, fontWeight: '700', marginLeft: 10 },
-  cardTitlePlain: { color: c.text, fontSize: 17, fontWeight: '700', marginBottom: 12 },
+  body: { color: c.text, fontSize: 14, lineHeight: 20 },
+  dim: { color: c.textDim, fontSize: 13, lineHeight: 18 },
 
   statusRow: { flexDirection: 'row', alignItems: 'center' },
-  statusDot: { width: 16, height: 16, borderRadius: 8 },
+  statusDot: { width: 14, height: 14, borderRadius: 7 },
   statusTitle: { fontSize: 20, fontWeight: '800' },
-  statusSub: { color: c.textDim, fontSize: 13, marginTop: 2 },
 
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
-  badge: { backgroundColor: c.accent, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, marginLeft: 8 },
-  badgeText: { color: c.text, fontSize: 12, fontWeight: '700' },
+  emptyRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  primaryBtn: { marginTop: 14, minHeight: 48, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: c.primary },
+  primaryBtnTxt: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+  outlineBtn: { marginTop: 10, alignSelf: 'flex-start', minHeight: 44, paddingHorizontal: 16, justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glassSoft },
+  outlineBtnTxt: { color: c.primary, fontWeight: '700' },
 
-  queueSummary: { flexDirection: 'row', gap: 14, marginBottom: 12 },
-  queueText: { color: '#FF9F43', fontSize: 13, fontWeight: '600' },
+  featureRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.hairline },
+  featureLabel: { flex: 1, color: c.text, fontSize: 14, lineHeight: 19 },
 
-  emptyQueue: { alignItems: 'center', paddingVertical: 20, gap: 8 },
-  emptyText: { color: c.primary, fontSize: 14 },
-
-  msgRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#112240' },
-  msgStatusDot: { width: 10, height: 10, borderRadius: 5 },
-  msgChat: { color: c.text, fontSize: 14, fontWeight: '600' },
-  msgPreview: { color: c.textDim, fontSize: 13, marginTop: 2 },
-  msgTime: { color: c.textDim, fontSize: 11 },
-  msgStatus: { fontSize: 11, marginTop: 2, textTransform: 'capitalize' },
-
-  autoRetryRow: { flexDirection: 'row', alignItems: 'center', marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#112240', gap: 8 },
-  autoRetryText: { color: c.textDim, fontSize: 12 },
-
-  retryBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    backgroundColor: c.accent, borderRadius: 12, paddingVertical: 14, marginBottom: 16, gap: 8,
-  },
-  retryBtnDisabled: { opacity: 0.4 },
-  retryBtnText: { color: c.text, fontSize: 16, fontWeight: '700' },
-
-  syncBarBg: { height: 8, borderRadius: 4, backgroundColor: c.surfaceSolid, overflow: 'hidden', marginBottom: 8 },
-  syncBarFill: { height: 8, borderRadius: 4, backgroundColor: c.accent },
-  syncPct: { color: c.accent, fontSize: 14, fontWeight: '700', textAlign: 'center' },
-
-  lastSyncText: { color: c.accent, fontSize: 18, fontWeight: '700', marginTop: 4 },
-  lastSyncDate: { color: c.textDim, fontSize: 13, marginTop: 4 },
-
-  featureRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#112240' },
-  featureLabel: { flex: 1, fontSize: 14, marginLeft: 10 },
-
-  cacheRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10 },
-  cacheLabel: { color: c.text, fontSize: 14 },
-  cacheValue: { color: '#FF9F43', fontSize: 16, fontWeight: '700' },
-
-  clearCacheBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, borderRadius: 10, borderWidth: 1, borderColor: c.danger + '50', marginTop: 10, gap: 8 },
-  clearCacheText: { color: c.danger, fontSize: 14, fontWeight: '600' },
+  linkRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  linkTitle: { color: c.text, fontSize: 15, fontWeight: '600' },
 });

@@ -2,7 +2,7 @@
 
 import { useAuthHeader } from '../hooks/useAuthHeader';
 import { HEADER_TOP } from '../constants/layout';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Alert,
 } from 'react-native';
@@ -33,11 +33,24 @@ export default function StatusPrivacyScreen() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const authHeader = useAuthHeader();
   const [loading, setLoading] = useState(true);
+  // A failed load must not leave the default "My contacts" on screen as if it
+  // were the user's choice: the next tap would PUT it over their real list and
+  // could show their status to people they excluded. Nothing is editable until
+  // the real setting has loaded.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadTick, setLoadTick] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
 
   useEffect(() => {
+    let cancel = false;
+    setLoading(true);
+    setLoadError(null);
     (async () => {
       try {
         const [priv, chats] = await Promise.all([getStatusPrivacy(), listChats()]);
+        if (cancel) return;
         setMode(priv.mode); setSelected(new Set(priv.userIds));
         const seen = new Set<string>();
         const c: Contact[] = [];
@@ -48,21 +61,32 @@ export default function StatusPrivacyScreen() {
           }
         }
         setContacts(c);
-      } catch {} finally { setLoading(false); }
+      } catch (e: any) {
+        if (!cancel) setLoadError(e?.message ?? 'Could not load status privacy');
+      } finally { if (!cancel) setLoading(false); }
     })();
-  }, []);
+    return () => { cancel = true; };
+  }, [loadTick]);
 
-  const save = useCallback(async (m: StatusPrivacyMode, ids: Set<string>) => {
+  // One save at a time, applied optimistically and rolled back on failure, so
+  // two quick taps cannot race and leave the server on the older choice.
+  const commit = useCallback(async (m: StatusPrivacyMode, ids: Set<string>) => {
+    if (saving) return;
+    const prevMode = mode, prevSelected = selected;
+    setMode(m); setSelected(ids); setSaving(true);
     try { await setStatusPrivacy(m, m === 'contacts' ? [] : [...ids]); }
-    catch (e: any) { Alert.alert('Could not save', e?.message ?? 'Try again'); }
-  }, []);
+    catch (e: any) {
+      if (mounted.current) { setMode(prevMode); setSelected(prevSelected); }
+      Alert.alert('Could not save', e?.message ?? 'Try again');
+    } finally { if (mounted.current) setSaving(false); }
+  }, [saving, mode, selected]);
 
-  const pickMode = (m: StatusPrivacyMode) => { setMode(m); save(m, selected); };
-  const toggle = (id: string) => setSelected(prev => {
-    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id);
-    save(mode, n);
-    return n;
-  });
+  const pickMode = (m: StatusPrivacyMode) => { if (m !== mode) commit(m, selected); };
+  const toggle = (id: string) => {
+    const n = new Set(selected);
+    if (n.has(id)) n.delete(id); else n.add(id);
+    commit(mode, n);
+  };
 
   return (
     <View style={S.screen}>
@@ -75,6 +99,14 @@ export default function StatusPrivacyScreen() {
 
       {loading ? (
         <View style={S.center}><ActivityIndicator color={colors.primary} size="large" /></View>
+      ) : loadError ? (
+        <View style={[S.center, { paddingHorizontal: 32, gap: 8 }]} accessibilityRole="alert">
+          <Text style={S.modeLabel}>Could not load status privacy</Text>
+          <Text style={[S.modeSub, { textAlign: 'center' }]}>{loadError}</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Try again" onPress={() => setLoadTick(t => t + 1)} style={S.retryBtn} activeOpacity={0.7}>
+            <Text style={S.retryTxt}>Try again</Text>
+          </TouchableOpacity>
+        </View>
       ) : (
         <FlatList
           data={mode === 'contacts' ? [] : contacts}
@@ -87,8 +119,9 @@ export default function StatusPrivacyScreen() {
                   style={S.modeRow}
                   activeOpacity={0.7}
                   onPress={() => pickMode(m.key)}
+                  disabled={saving}
                   accessibilityRole="radio"
-                  accessibilityState={{ selected: mode === m.key }}
+                  accessibilityState={{ selected: mode === m.key, disabled: saving }}
                 >
                   <Ionicons name={mode === m.key ? 'radio-button-on' : 'radio-button-off'} size={22} color={mode === m.key ? colors.primary : colors.textDim} />
                   <View style={{ flex: 1 }}>
@@ -104,6 +137,11 @@ export default function StatusPrivacyScreen() {
               )}
             </View>
           }
+          ListEmptyComponent={mode === 'contacts' ? null : (
+            <Text style={[S.modeSub, { marginHorizontal: 16, marginTop: 8 }]}>
+              No contacts yet. People you have a direct chat with appear here.
+            </Text>
+          )}
           renderItem={({ item }) => {
             const on = selected.has(item.id);
             return (
@@ -111,8 +149,10 @@ export default function StatusPrivacyScreen() {
                 style={S.contactRow}
                 activeOpacity={0.7}
                 onPress={() => toggle(item.id)}
+                disabled={saving}
                 accessibilityRole="checkbox"
-                accessibilityState={{ checked: on }}
+                accessibilityLabel={item.name}
+                accessibilityState={{ checked: on, disabled: saving }}
               >
                 <Avatar uri={item.photoURL && authHeader ? attachmentUrl(item.photoURL) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={item.name} size={44} ring />
                 <Text style={S.contactName} numberOfLines={1}>{item.name}</Text>
@@ -138,4 +178,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   sectionLabel: { color: c.textDim, fontSize: 12, fontWeight: '700', letterSpacing: 1, marginHorizontal: 16, marginTop: 12, marginBottom: 4 },
   contactRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 16, backgroundColor: c.glass, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
   contactName: { flex: 1, color: c.text, fontSize: 16, fontWeight: '500' },
+  retryBtn: { marginTop: 4, minHeight: 44, paddingHorizontal: 18, justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glassSoft },
+  retryTxt: { color: c.primary, fontWeight: '700' },
 });

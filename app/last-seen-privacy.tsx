@@ -39,14 +39,18 @@ export default function LastSeenPrivacyScreen() {
   const s = useS();
   const router = useRouter();
   const [settings, setSettings] = useState<UserSettings | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadTick, setLoadTick] = useState(0);
   const [busy, setBusy] = useState<keyof UserSettings | null>(null);
 
   useEffect(() => {
-    (async () => {
-      try { setSettings(await getSettings()); }
-      catch { Alert.alert('Could not load', 'Failed to load privacy settings.'); }
-    })();
-  }, []);
+    let cancel = false;
+    setLoadError(null);
+    getSettings()
+      .then((v) => { if (!cancel) setSettings(v); })
+      .catch((e: any) => { if (!cancel) setLoadError(e?.message ?? 'Failed to load privacy settings.'); });
+    return () => { cancel = true; };
+  }, [loadTick]);
 
   const toggle = async (key: keyof UserSettings, value: boolean) => {
     if (!settings) return;
@@ -74,13 +78,21 @@ export default function LastSeenPrivacyScreen() {
             <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={s.headerTitle}>Last Seen & Privacy</Text>
-          <View style={{ width: 24 }} />
+          <View style={{ width: 40 }} />
         </View>
       </View>
 
       {!settings ? (
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <ActivityIndicator color={colors.primary} size="large" />
+        <View style={s.center}>
+          {loadError ? (
+            <View style={{ alignItems: 'center', gap: 8 }} accessibilityRole="alert">
+              <Text style={s.errTitle}>Could not load privacy settings</Text>
+              <Text style={s.errSub}>{loadError}</Text>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Try again" onPress={() => setLoadTick(t => t + 1)} style={s.retryBtn} activeOpacity={0.7}>
+                <Text style={s.retryTxt}>Try again</Text>
+              </TouchableOpacity>
+            </View>
+          ) : <ActivityIndicator color={colors.primary} size="large" />}
         </View>
       ) : (
         <ScrollView style={s.scroll} contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
@@ -93,13 +105,14 @@ export default function LastSeenPrivacyScreen() {
             <View key={row.key} style={s.card}>
               <View style={s.sectionHeader}>
                 <Ionicons name={row.icon} size={20} color={colors.textDim} />
-                <Text numberOfLines={1} style={s.cardTitle}>{row.title}</Text>
+                <Text style={s.cardTitle}>{row.title}</Text>
                 {busy === row.key && <ActivityIndicator color={colors.primary} style={{ marginLeft: 'auto' }} />}
               </View>
               <Text style={s.cardInfo}>{row.info}</Text>
               <View style={s.toggleRow}>
                 <Text style={s.toggleLabel}>{settings[row.key] ? 'On' : 'Off'}</Text>
                 <Switch
+                  accessibilityLabel={row.title}
                   value={!!settings[row.key]}
                   onValueChange={(v) => toggle(row.key, v)}
                   disabled={busy === row.key}
@@ -130,9 +143,15 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   infoText: { color: c.textDim, fontSize: 13, flex: 1, lineHeight: 18 },
 
   card: { backgroundColor: c.glass, borderRadius: 16, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: c.glassStroke },
-  cardTitle: { color: c.text, fontSize: 17, fontWeight: '700', marginLeft: 10 },
+  cardTitle: { flexShrink: 1, color: c.text, fontSize: 17, fontWeight: '700', marginLeft: 10 },
   cardInfo: { color: c.textDim, fontSize: 13, lineHeight: 18, marginBottom: 12 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
   toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4 },
   toggleLabel: { color: c.text, fontSize: 14, fontWeight: '600' },
+
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
+  errTitle: { color: c.text, fontSize: 16, fontWeight: '700', textAlign: 'center' },
+  errSub: { color: c.textDim, fontSize: 13, lineHeight: 18, textAlign: 'center' },
+  retryBtn: { marginTop: 4, minHeight: 44, paddingHorizontal: 18, justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glassSoft },
+  retryTxt: { color: c.primary, fontWeight: '700' },
 });

@@ -207,7 +207,6 @@ purgeRetiredKeys().catch(() => {});
 // second time — the exact double-inset this list's own note warns about.
 const INSET_SCREENS = [
   'creator-channels',
-  'current-location',
   'emergency-sos',
   'filevault',
   'group-chat',
@@ -217,7 +216,6 @@ const INSET_SCREENS = [
   'onboard-mpin',
   'onboard-success',
   'settings',
-  'setup-complete',
   'vaultbeam-settings',
   'vision-comfort',
   'eye-check',
@@ -932,8 +930,6 @@ function RootLayoutInner() {
 
         {/* Auth flow */}
         <Stack.Screen name="index" />
-        <Stack.Screen name="security-questions" />
-        <Stack.Screen name="biometric-setup" />
         {/* Main app — 6-tab navigation */}
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="chat" />
@@ -946,8 +942,6 @@ function RootLayoutInner() {
         <Stack.Screen name="qr-contact" />
         <Stack.Screen name="add/[...segments]" options={{ headerShown: false }} />
         <Stack.Screen name="file-preview" />
-        <Stack.Screen name="voice-transcribe" />
-        <Stack.Screen name="lock" />
         <Stack.Screen name="media-viewer" />
         <Stack.Screen name="whiteboard" />
         <Stack.Screen name="bookmarks" />
@@ -964,7 +958,6 @@ function RootLayoutInner() {
         <Stack.Screen name="in-chat-search" />
         <Stack.Screen name="message-reminder" />
         <Stack.Screen name="contact-info" />
-        <Stack.Screen name="stickers" />
         <Stack.Screen name="create-poll" />
         <Stack.Screen name="schedule-message" />
         <Stack.Screen name="broadcast" />
@@ -976,12 +969,10 @@ function RootLayoutInner() {
         <Stack.Screen name="camera" options={{ headerShown: false, presentation: 'modal' }} />
         {/* status, calls now in (tabs) */}
         <Stack.Screen name="vault" />
-        <Stack.Screen name="vaultdrop" />
         {/* alerts, profile now in (tabs) */}
 
         {/* Features */}
         <Stack.Screen name="contacts" />
-        <Stack.Screen name="location-sharing" />
         <Stack.Screen name="vault-features" />
         <Stack.Screen name="dashboard" />
         {/* The settings screen is NOT declared here — INSET_SCREENS above
@@ -992,11 +983,8 @@ function RootLayoutInner() {
             red error screen instead of booting, on every route. A bare second
             declaration adds nothing the map has not already done. */}
         <Stack.Screen name="story-viewer" />
-        <Stack.Screen name="meeting-scheduler" />
         <Stack.Screen name="finance" options={{ headerShown: false }} />
-        <Stack.Screen name="email-bridge" />
         <Stack.Screen name="group-admin" />
-        <Stack.Screen name="call-recording" />
         <Stack.Screen name="app-lock-chats" />
         <Stack.Screen name="privacy-dashboard" />
         <Stack.Screen name="storage-manager" />
@@ -1010,7 +998,6 @@ function RootLayoutInner() {
         <Stack.Screen name="shelf" />
         <Stack.Screen name="archive-viewer" />
         <Stack.Screen name="video-player" />
-        <Stack.Screen name="slideshow" />
         <Stack.Screen name="group-calls" />
         <Stack.Screen name="group-info" />
 
@@ -1024,17 +1011,13 @@ function RootLayoutInner() {
         <Stack.Screen name="permissions" />
 
         {/* Social & Contacts */}
-        <Stack.Screen name="contact" />
         <Stack.Screen name="communities" />
-        <Stack.Screen name="sync-contact" />
-        <Stack.Screen name="msgrequests" />
         <Stack.Screen name="create-group" />
 
         {/* Utility */}
         <Stack.Screen name="search" />
         <Stack.Screen name="scheduled" />
         <Stack.Screen name="perf-debug" />
-        <Stack.Screen name="scanner" />
         <Stack.Screen name="docscanner" />
         <Stack.Screen name="notifications" />
         <Stack.Screen name="location" />

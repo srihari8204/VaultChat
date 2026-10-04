@@ -234,7 +234,6 @@ ok(
 const insetPinned: Array<[string, RegExp]> = [
   ['app/create-group.tsx', /paddingBottom:\s*16\s*\+\s*SCREEN_BOTTOM/],
   ['components/MessageActionSheet.tsx', /paddingBottom:\s*Math\.max\(34,\s*12\s*\+\s*SCREEN_BOTTOM\)/],
-  ['components/VaultFeatureSheet.tsx', /paddingBottom:\s*SCREEN_BOTTOM/],
   ['components/GifPicker.tsx', /paddingBottom:\s*SCREEN_BOTTOM/],
   ['app/finance/ledger/index.tsx', /bottom:\s*insets\.bottom\s*\+\s*20/],
   ['app/finance/chitti/index.tsx', /bottom:\s*insets\.bottom\s*\+\s*20/],

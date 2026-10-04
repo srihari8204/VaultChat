@@ -30,7 +30,7 @@ const EXEMPT = new Set([
   'components/call/CallChatSheet.tsx', 'components/call/CallExtras.tsx',
   // Content surfaces: anything but neutral behind the media is wrong.
   'app/media-viewer.tsx', 'app/file-preview.tsx', 'app/image-editor.tsx',
-  'app/docscanner.tsx', 'app/scanner.tsx', 'app/reader.tsx',
+  'app/docscanner.tsx', 'app/reader.tsx',
   'app/story-viewer.tsx', 'app/whiteboard.tsx', 'app/live-view.tsx',
   // Camera viewfinders.
   'app/camera.tsx',

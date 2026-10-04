@@ -3,7 +3,6 @@ export { AppText, FontReadyContext, useFontsReady } from './Text';
 export { Avatar } from './Avatar';
 export { Button } from './Button';
 export { Card } from './Card';
-export { ChatRow, type ChatRowProps } from './ChatRow';
 export { Header } from './Header';
 export { Sheet, type SheetAction } from './Sheet';
 export { GlassView, type GlassViewProps } from './GlassView';

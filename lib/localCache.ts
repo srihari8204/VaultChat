@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { cacheKeyReady, decField, encField } from './cacheCrypto';
 
 const PREFIX = 'vc_cache_';
 
@@ -31,6 +32,43 @@ export async function writeCache<T>(key: string, data: T): Promise<void> {
 
 export async function clearCache(key: string): Promise<void> {
   try { await AsyncStorage.removeItem(PREFIX + key); } catch {}
+}
+
+// ─── Sealed-or-nothing cache ────────────────────────────────────────────
+//
+// For data that must not sit in plain AsyncStorage — who you hide from (Ghost
+// Mode), the IP addresses and user agents of your signed-in devices. It is
+// sealed with the same at-rest key as the message cache (lib/cacheCrypto), and
+// when that key is not loaded (VAULT_CACHE_ENCRYPTED off, or the app locked)
+// NOTHING is written: the entry is removed instead, and the screen loads from
+// the network like a cold start. Plaintext entries left by older builds are
+// deleted on first read.
+//
+// ponytail: with VAULT_CACHE_ENCRYPTED off (the current default) these screens
+// lose their offline first paint. That is the price of not storing the data in
+// the clear; it comes back by itself once the cache key is provisioned.
+const SEALED_MARK = 'enc:v1:';   // lib/cacheCrypto's sealed-field prefix
+
+export async function writeSealedCache<T>(key: string, data: T): Promise<void> {
+  try {
+    const sealed = cacheKeyReady() ? encField(JSON.stringify(data)) : null;
+    if (sealed && sealed.startsWith(SEALED_MARK)) await AsyncStorage.setItem(PREFIX + key, sealed);
+    else await AsyncStorage.removeItem(PREFIX + key);
+  } catch {}
+}
+
+export async function readSealedCache<T>(key: string): Promise<T | null> {
+  try {
+    const v = await AsyncStorage.getItem(PREFIX + key);
+    if (!v) return null;
+    if (!v.startsWith(SEALED_MARK)) {            // plaintext from an older build
+      await AsyncStorage.removeItem(PREFIX + key);
+      return null;
+    }
+    const pt = decField(v);
+    if (!pt || pt === v) return null;            // locked, or sealed under another key
+    return JSON.parse(pt) as T;
+  } catch { return null; }
 }
 
 /**

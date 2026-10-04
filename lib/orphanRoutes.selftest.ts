@@ -90,10 +90,6 @@ ok('Device-to-device status is reachable from Settings', refsTo('/d2de-status').
 
 // permissions.tsx must come BACK to Settings, not fall into the old
 // onboarding's success screen, which is what all three of its exits did.
-//
-// Counting the exits is what makes this falsifiable. The old check named one
-// exact spelling of one call, so a second exit added in any other style — or
-// the same call written with single quotes — was invisible to it.
 const perms = code('app/permissions.tsx');
 ok('permissions reads where it was opened from', /from\s*===\s*['"`]settings['"`]/.test(perms));
 const doneAt = perms.indexOf('const done');
@@ -101,56 +97,56 @@ ok('permissions has one exit helper', doneAt !== -1);
 const done = blockAt(perms, doneAt);
 ok('permissions returns to Settings instead of onboarding',
    /fromSettings/.test(done) && /router\s*\.\s*back\s*\(\s*\)/.test(done));
-ok('setup-complete is reached from exactly one place in this screen',
-   (perms.match(/['"`]\/setup-complete(?=['"`?#/])/g) ?? []).length === 1);
-ok('...and that place is the done() helper, on its non-Settings branch',
-   /['"`]\/setup-complete(?=['"`?#/])/.test(done));
 
-// ── The hazard in the screen that is NOT routed ───────────────────────
-// handleCodeVerify had a third way in: "no PIN and no secret code are set" let
-// any 4-digit code through. Counting the exits catches that however it comes
-// back — a different guard name, router.push, a <Link>, an early return — where
-// matching the one deleted `if` only caught it verbatim.
-const lock = code('app/lock.tsx');
-const verifyAt = lock.indexOf('const handleCodeVerify');
-ok('lock.tsx still has the code-entry path this guard is about', verifyAt !== -1);
-const verify = blockAt(lock, verifyAt);
-const CHATS = /['"`]\/\(tabs\)\/chats(?=['"`?#/])/g;
-ok('lock.tsx has exactly two ways into the app from a typed code',
-   (verify.match(CHATS) ?? []).length === 2);
-// The condition itself, not just the name: `if (pinOk)` weakened to `if (true)`
-// left `const pinOk = …` sitting close enough above the redirect to satisfy a
-// bare /\bpinOk\b/ (2026-09-17).
-ok('...the first is behind the PIN comparison',
-   /if\s*\(\s*pinOk\s*\)[\s\S]{0,200}?['"`]\/\(tabs\)\/chats/.test(verify));
-ok('...the second is behind the secret-code hash comparison',
-   /if\s*\([^)]*hash\s*===\s*stored[^)]*\)[\s\S]{0,200}?['"`]\/\(tabs\)\/chats/.test(verify));
-ok('lock.tsx never opens the app on the ABSENCE of a credential',
-   !/!\s*[A-Za-z_$][\w$]*(?:[Pp]in|[Ss]ecret|[Cc]ode|[Hh]ash|[Ss]tored)\b[\s\S]{0,300}?['"`]\/\(tabs\)\//.test(verify));
+// ── Deleted, and nothing may navigate to them ─────────────────────────
+// 2026-10-04 screen audit: mock screens that claimed things the app never did
+// (a 2-second setTimeout "sent with D2DE", a seeded demo queue, a fake scan),
+// the legacy onboarding chain, and unwired duplicates of live screens
+// (/location, /chat-code, the GifPicker stickers tab). An unrouted file is
+// still a deep-linkable URL (see the top of this file), so they were deleted
+// rather than left to rot. A literal pointing at one of them is now a dead end
+// — expo-router's "Unmatched route" screen — so any caller fails this check.
+//
+// PENDING_HANDOFF names a caller that lives in a file another change owns and
+// still points at the removed legacy chain (permissions.tsx's non-Settings
+// exit, reachable only by deep link now that biometric-setup is gone). It is
+// tolerated, not required: once that file drops the push, delete the entry and
+// this check stays green. A caller anywhere else fails.
+const DELETED = [
+  '/scanner', '/email-bridge', '/vaultdrop', '/contact', '/lock',
+  '/security-questions', '/biometric-setup', '/setup-complete', '/call-recording',
+  '/voice-effects', '/meeting-scheduler', '/stickers', '/voice-speed',
+  '/voice-transcribe', '/slideshow', '/current-location', '/location-sharing',
+  '/sync-contact', '/msgrequests',
+];
+const PENDING_HANDOFF: Record<string, string[]> = {
+  '/setup-complete': ['app/permissions.tsx'],
+};
+for (const route of DELETED) {
+  ok(`app${route}.tsx is deleted`, !fs.existsSync(`app${route}.tsx`));
+  const tolerated = PENDING_HANDOFF[route] ?? [];
+  const stray = refsTo(route).filter((f) => !tolerated.includes(f));
+  ok(`nothing navigates to deleted ${route}` + (stray.length ? ` — found: ${stray.join(', ')}` : ''),
+     stray.length === 0);
+}
+// The components that only ever linked to those screens went with them.
+for (const f of ['components/VaultFeatureSheet.tsx', 'components/ui/ChatRow.tsx']) {
+  ok(`${f} is deleted`, !fs.existsSync(f));
+}
+ok('nothing imports the deleted components',
+   !SOURCES.some((s) => /import[^;]*\b(VaultFeatureSheet|ChatRow)\b[^;]*from\s+['"][^'"]*(VaultFeatureSheet|components\/ui|ChatRow)['"]/.test(s.src)));
 
 // ── The duplicates, written down ──────────────────────────────────────
 // Each is a second implementation of something the live app already does. The
 // property worth guarding is NOT that the files survive — deleting dead code is
 // an improvement — it is that nothing navigates to them, because routing them
 // would give the user two ways to set the same thing, which is how the two PIN
-// systems in this repo came about.
-//
-// Two of them are not in fact orphans, and pretending otherwise would make this
-// guard red on day one: the legacy onboarding chain still walks through both.
-// So each route names the callers it is ALLOWED, and a caller appearing
-// anywhere else fails — which is the thing being watched for.
+// systems in this repo came about. Each route names the callers it is
+// ALLOWED, and a caller appearing anywhere else fails. (The legacy onboarding
+// screens that used to be listed here are deleted — see DELETED above.)
 const REACHABLE_FROM: Record<string, string[]> = {
-  // Genuinely unrouted. app/onboard-security.tsx is the live one.
-  '/security-questions': [],
   // Genuinely unrouted. The live group path is /chat plus /group-info.
   '/group-chat': [],
-  // Genuinely unrouted. app/app-lock.tsx is the live cold-launch gate.
-  '/lock': [],
-  // Still on the onboarding chain, which is why the old "unrouted" framing was
-  // wrong about it. app/onboard-success.tsx is the live post-signup screen.
-  '/setup-complete': ['app/permissions.tsx'],
-  // Likewise. Settings enrols device MFA itself (settings.tsx, DEVICE MFA).
-  '/biometric-setup': ['app/backup-pin.tsx'],
 };
 for (const [route, allowed] of Object.entries(REACHABLE_FROM)) {
   const found = refsTo(route).sort();

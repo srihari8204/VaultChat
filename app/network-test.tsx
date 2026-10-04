@@ -1,11 +1,16 @@
 // app/network-test.tsx — Built-in Network Speed Test
 // Download/upload speed, ping/latency, jitter, animated gauge
 // Connection type from NetInfo, history in AsyncStorage
+//
+// The test runs against Cloudflare's public speed endpoints (TEST_HOST), not a
+// crazzychat server, so the screen says so: Cloudflare sees this device's IP
+// address. Only requests that succeeded are measured (lib/speedTest.ts); a run
+// where nothing got through shows as failed instead of an invented speed.
 
 import React, { useState, useEffect, useRef , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  ActivityIndicator, Platform, Animated, Easing, useWindowDimensions } from 'react-native';
+  ActivityIndicator, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
@@ -14,12 +19,15 @@ import { LinearGradient } from 'expo-linear-gradient';
 import NetInfo from '@react-native-community/netinfo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AuroraBackground } from '../components/ui';
+import { pingStats, throughputMbps, type TransferSample } from '../lib/speedTest';
 
 
 const STORAGE_KEY = 'vaultchat_speedtest_history';
 const GAUGE_SIZE = 220;
 const GAUGE_STROKE = 12;
-const UPLOAD_URL = 'https://speed.cloudflare.com/__up';
+const TEST_HOST = 'speed.cloudflare.com';
+const UPLOAD_URL = `https://${TEST_HOST}/__up`;
+const DOWN_URL = (bytes: number) => `https://${TEST_HOST}/__down?bytes=${bytes}`;
 
 type TestResult = {
   id: string;
@@ -31,7 +39,9 @@ type TestResult = {
   timestamp: number;
 };
 
-type TestPhase = 'idle' | 'ping' | 'download' | 'upload' | 'done';
+type TestPhase = 'idle' | 'ping' | 'download' | 'upload' | 'done' | 'failed';
+/** Final figures; null = every request for that metric failed. */
+type Outcome = { download: number | null; upload: number | null; ping: number | null; jitter: number | null };
 
 function useS() {
   // Reactive size. The module-level Dimensions.get above is captured ONCE at
@@ -49,19 +59,22 @@ export default function NetworkTestScreen() {
   const { colors } = useTheme();
   const styles = useS();
   const router = useRouter();
-  const needleAnim = useRef(new Animated.Value(0)).current;
 
   // State
   const [phase, setPhase] = useState<TestPhase>('idle');
   const [progress, setProgress] = useState(0);
   const [download, setDownload] = useState(0);
   const [upload, setUpload] = useState(0);
-  const [ping, setPing] = useState(0);
-  const [jitter, setJitter] = useState(0);
   const [, setConnectionType] = useState('Unknown');
   const [connectionDetails, setConnectionDetails] = useState('');
   const [history, setHistory] = useState<TestResult[]>([]);
   const [serverOnline, setServerOnline] = useState<boolean | null>(null);
+  const [outcome, setOutcome] = useState<Outcome | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
+  // Async test steps keep resolving after the user leaves; nothing may set
+  // state then.
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
 
   useEffect(() => {
     loadHistory();
@@ -69,40 +82,30 @@ export default function NetworkTestScreen() {
     checkServerStatus();
   }, []);
 
-  useEffect(() => {
-    // Animate needle based on current speed
-    const speed = phase === 'download' ? download : phase === 'upload' ? upload : 0;
-    const maxSpeed = 200; // 200 Mbps max gauge
-    const ratio = Math.min(speed / maxSpeed, 1);
-    Animated.timing(needleAnim, {
-      toValue: ratio,
-      duration: 400,
-      easing: Easing.out(Easing.quad),
-      useNativeDriver: false,
-    }).start();
-  }, [download, upload, phase, needleAnim]);
 
-  const checkConnection = async () => {
+  /** Reads the connection, shows it, and returns the label — the caller uses
+   *  the returned value, because state set here is not visible to it until the
+   *  next render. */
+  const checkConnection = async (): Promise<string> => {
     const state = await NetInfo.fetch();
-    setConnectionType(state.type || 'Unknown');
-    if (state.type === 'wifi') {
-      setConnectionDetails('WiFi');
-    } else if (state.type === 'cellular') {
+    let details: string;
+    if (state.type === 'wifi') details = 'WiFi';
+    else if (state.type === 'cellular') {
       const gen = (state as any).details?.cellularGeneration || '';
-      setConnectionDetails(gen ? gen.toUpperCase() : 'Cellular');
-    } else {
-      setConnectionDetails(state.type || 'Unknown');
-    }
+      details = gen ? gen.toUpperCase() : 'Cellular';
+    } else details = state.type || 'Unknown';
+    if (mounted.current) { setConnectionType(state.type || 'Unknown'); setConnectionDetails(details); }
+    return details;
   };
 
   const checkServerStatus = async () => {
     try {
       const start = Date.now();
-      await fetch('https://speed.cloudflare.com/__down?bytes=1', { method: 'HEAD' });
+      const resp = await fetch(DOWN_URL(1), { method: 'HEAD' });
       const elapsed = Date.now() - start;
-      setServerOnline(elapsed < 5000);
+      if (mounted.current) setServerOnline(resp.ok && elapsed < 5000);
     } catch {
-      setServerOnline(false);
+      if (mounted.current) setServerOnline(false);
     }
   };
 
@@ -121,123 +124,123 @@ export default function NetworkTestScreen() {
     } catch {}
   };
 
-  // ── Ping Test ──
-  const testPing = async (): Promise<{ avgPing: number; jitter: number }> => {
-    const pings: number[] = [];
+  const progressTo = (p: number) => { if (mounted.current) setProgress(p); };
+
+  // ── Ping Test ── (a failed request is not a round trip)
+  const testPing = async () => {
+    const trips: (number | null)[] = [];
     for (let i = 0; i < 5; i++) {
       const start = Date.now();
       try {
-        await fetch('https://speed.cloudflare.com/__down?bytes=1', { cache: 'no-store' });
-      } catch {}
-      pings.push(Date.now() - start);
-      setProgress((i + 1) / 5 * 100);
+        const resp = await fetch(DOWN_URL(1), { cache: 'no-store' });
+        trips.push(resp.ok ? Date.now() - start : null);
+      } catch { trips.push(null); }
+      progressTo((i + 1) / 5 * 100);
     }
-    const avg = pings.reduce((a, b) => a + b, 0) / pings.length;
-    // Jitter = avg deviation from mean
-    const j = pings.reduce((a, b) => a + Math.abs(b - avg), 0) / pings.length;
-    return { avgPing: Math.round(avg), jitter: Math.round(j) };
+    return pingStats(trips);
   };
 
-  // ── Download Test ──
-  const testDownload = async (): Promise<number> => {
+  // ── Download Test ── (only bytes actually received count)
+  const testDownload = async (): Promise<number | null> => {
     const sizes = [1000000, 2000000, 5000000]; // 1MB, 2MB, 5MB
-    let totalBytes = 0;
-    let totalTime = 0;
-
+    const samples: TransferSample[] = [];
     for (let i = 0; i < sizes.length; i++) {
-      const url = `https://speed.cloudflare.com/__down?bytes=${sizes[i]}`;
       const start = Date.now();
       try {
-        const resp = await fetch(url, { cache: 'no-store' });
+        const resp = await fetch(DOWN_URL(sizes[i]), { cache: 'no-store' });
         const blob = await resp.blob();
-        totalBytes += blob.size;
+        samples.push({ ok: resp.ok, bytes: blob.size, ms: Date.now() - start });
       } catch {
-        totalBytes += sizes[i] * 0.8; // estimate
+        samples.push({ ok: false, bytes: 0, ms: Date.now() - start });
       }
-      totalTime += Date.now() - start;
-      const speed = (totalBytes * 8) / (totalTime / 1000) / 1000000; // Mbps
-      setDownload(parseFloat(speed.toFixed(2)));
-      setProgress((i + 1) / sizes.length * 100);
+      const sofar = throughputMbps(samples);
+      if (mounted.current && sofar != null) setDownload(sofar);
+      progressTo((i + 1) / sizes.length * 100);
     }
-
-    const finalSpeed = (totalBytes * 8) / (totalTime / 1000) / 1000000;
-    return parseFloat(finalSpeed.toFixed(2));
+    return throughputMbps(samples);
   };
 
-  // ── Upload Test ──
-  const testUpload = async (): Promise<number> => {
+  // ── Upload Test ── (an upload counts only if the server accepted it)
+  const testUpload = async (): Promise<number | null> => {
     const sizes = [100000, 500000, 1000000]; // 100KB, 500KB, 1MB
-    let totalBytes = 0;
-    let totalTime = 0;
-
+    const samples: TransferSample[] = [];
     for (let i = 0; i < sizes.length; i++) {
       const data = new Uint8Array(sizes[i]);
       const start = Date.now();
       try {
-        await fetch(UPLOAD_URL, {
+        const resp = await fetch(UPLOAD_URL, {
           method: 'POST',
           body: data,
           headers: { 'Content-Type': 'application/octet-stream' },
         });
-      } catch {}
-      totalBytes += sizes[i];
-      totalTime += Date.now() - start;
-      const speed = (totalBytes * 8) / (totalTime / 1000) / 1000000;
-      setUpload(parseFloat(speed.toFixed(2)));
-      setProgress((i + 1) / sizes.length * 100);
+        samples.push({ ok: resp.ok, bytes: sizes[i], ms: Date.now() - start });
+      } catch {
+        samples.push({ ok: false, bytes: 0, ms: Date.now() - start });
+      }
+      const sofar = throughputMbps(samples);
+      if (mounted.current && sofar != null) setUpload(sofar);
+      progressTo((i + 1) / sizes.length * 100);
     }
-
-    const finalSpeed = (totalBytes * 8) / (totalTime / 1000) / 1000000;
-    return parseFloat(finalSpeed.toFixed(2));
+    return throughputMbps(samples);
   };
 
   // ── Run full test ──
   const runTest = async () => {
     setPhase('ping');
+    setOutcome(null);
+    setRunError(null);
     setDownload(0);
     setUpload(0);
-    setPing(0);
-    setJitter(0);
     setProgress(0);
 
-    await checkConnection();
+    try {
+      const connection = await checkConnection();
 
-    // Ping
-    const { avgPing, jitter: j } = await testPing();
-    setPing(avgPing);
-    setJitter(j);
+      const pg = await testPing();
+      if (!mounted.current) return;
 
-    // Download
-    setPhase('download');
-    setProgress(0);
-    const dl = await testDownload();
-    setDownload(dl);
+      setPhase('download');
+      setProgress(0);
+      const dl = await testDownload();
+      if (!mounted.current) return;
 
-    // Upload
-    setPhase('upload');
-    setProgress(0);
-    const ul = await testUpload();
-    setUpload(ul);
+      setPhase('upload');
+      setProgress(0);
+      const ul = await testUpload();
+      if (!mounted.current) return;
 
-    // Done
-    setPhase('done');
-    setProgress(100);
+      const result: Outcome = { download: dl, upload: ul, ping: pg?.ping ?? null, jitter: pg?.jitter ?? null };
+      setOutcome(result);
+      setDownload(dl ?? 0);
+      setUpload(ul ?? 0);
+      setProgress(100);
+      const nothingWorked = dl == null && ul == null && pg == null;
+      setPhase(nothingWorked ? 'failed' : 'done');
 
-    const result: TestResult = {
-      id: Date.now().toString(),
-      download: dl,
-      upload: ul,
-      ping: avgPing,
-      jitter: j,
-      connectionType: connectionDetails,
-      timestamp: Date.now(),
-    };
-    saveHistory(result);
+      // History keeps complete measurements only — a partial run would sit
+      // there looking like a real (and very slow) connection.
+      if (dl != null && ul != null && pg != null) {
+        saveHistory({
+          id: Date.now().toString(),
+          download: dl,
+          upload: ul,
+          ping: pg.ping,
+          jitter: pg.jitter,
+          connectionType: connection,
+          timestamp: Date.now(),
+        });
+      }
+    } catch (e: any) {
+      if (!mounted.current) return;
+      setRunError(e?.message ?? 'The test stopped unexpectedly');
+      setPhase('failed');
+    }
   };
 
   // ── Gauge rendering ──
   const renderGauge = () => {
     const speed = phase === 'download' ? download : phase === 'upload' ? upload : (phase === 'done' ? download : 0);
+    const running = phase !== 'idle' && phase !== 'done' && phase !== 'failed';
     const maxSpeed = 200;
     const ratio = Math.min(speed / maxSpeed, 1);
     // Semicircle from -135deg to 135deg (270 deg arc)
@@ -246,7 +249,8 @@ export default function NetworkTestScreen() {
     const ticks = [0, 25, 50, 100, 150, 200];
 
     return (
-      <View style={styles.gaugeContainer}>
+      <View style={styles.gaugeContainer} accessible accessibilityRole="progressbar"
+        accessibilityLabel={phase === 'failed' ? 'Speed test failed' : `${phase === 'upload' ? 'Upload' : 'Download'} ${speed.toFixed(1)} megabits per second`}>
         {/* Gauge background arc */}
         <View style={[styles.gauge, { width: GAUGE_SIZE, height: GAUGE_SIZE / 2 + 20 }]}>
           {/* Background semicircle */}
@@ -276,7 +280,7 @@ export default function NetworkTestScreen() {
         {/* Speed display */}
         <Text style={styles.gaugeSpeed}>{speed.toFixed(1)}</Text>
         <Text style={styles.gaugeUnit}>Mbps</Text>
-        {phase !== 'idle' && phase !== 'done' && (
+        {running && (
           <Text style={styles.gaugePhase}>
             {phase === 'ping' ? 'Testing Ping...' : phase === 'download' ? 'Download Test...' : 'Upload Test...'}
           </Text>
@@ -330,61 +334,77 @@ export default function NetworkTestScreen() {
           </View>
           <View style={[styles.serverDot, { backgroundColor: serverOnline === null ? '#FBBF24' : serverOnline ? colors.primary : colors.danger }]} />
           <Text style={styles.serverLabel}>
-            {serverOnline === null ? 'Checking...' : serverOnline ? 'Server Online' : 'Server Offline'}
+            {serverOnline === null ? 'Checking...' : serverOnline ? 'Test server reachable' : 'Test server unreachable'}
           </Text>
         </View>
+        <Text style={styles.disclosure}>
+          Tests run against {TEST_HOST} (Cloudflare), not crazzychat. Cloudflare sees this device&apos;s IP address while the test runs.
+        </Text>
 
         {/* Gauge */}
         {renderGauge()}
 
         {/* Progress bar */}
-        {phase !== 'idle' && phase !== 'done' && (
+        {phase !== 'idle' && phase !== 'done' && phase !== 'failed' && (
           <View style={styles.progressBar}>
             <View style={[styles.progressFill, { width: `${progress}%` }]} />
           </View>
         )}
 
         {/* Test Button */}
-        <TouchableOpacity
-          onPress={runTest}
-          disabled={phase !== 'idle' && phase !== 'done'}
-          style={[styles.testButton, (phase !== 'idle' && phase !== 'done') && styles.testButtonDisabled]}
-        >
-          <LinearGradient
-            colors={(phase !== 'idle' && phase !== 'done') ? ['#D1D5DB', '#E5E7EB'] : [colors.accent, '#2D7AE0']}
-            style={styles.testButtonGradient}
-          >
-            {(phase !== 'idle' && phase !== 'done') ? (
-              <ActivityIndicator color="#FFF" />
-            ) : (
-              <Text style={styles.testButtonText}>{phase === 'done' ? 'Test Again' : 'Start Test'}</Text>
-            )}
-          </LinearGradient>
-        </TouchableOpacity>
+        {(() => {
+          const running = phase !== 'idle' && phase !== 'done' && phase !== 'failed';
+          return (
+            <TouchableOpacity
+              onPress={runTest}
+              disabled={running}
+              style={[styles.testButton, running && styles.testButtonDisabled]}
+              accessibilityRole="button"
+              accessibilityLabel={running ? 'Speed test running' : phase === 'idle' ? 'Start speed test' : 'Run the speed test again'}
+              accessibilityState={{ disabled: running, busy: running }}
+            >
+              <LinearGradient
+                colors={running ? [colors.border, colors.border] : [colors.accent, '#2D7AE0']}
+                style={styles.testButtonGradient}
+              >
+                {running ? (
+                  <ActivityIndicator color="#FFF" />
+                ) : (
+                  <Text style={styles.testButtonText}>{phase === 'idle' ? 'Start Test' : 'Test Again'}</Text>
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
+          );
+        })()}
 
-        {/* Results */}
-        {phase === 'done' && (
+        {/* Failed */}
+        {phase === 'failed' && (
+          <View style={styles.failedBox} accessibilityRole="alert">
+            <Text style={styles.failedTitle}>Test failed</Text>
+            <Text style={styles.failedText}>
+              {runError ?? `No request reached ${TEST_HOST}. Check your connection and try again.`}
+            </Text>
+          </View>
+        )}
+
+        {/* Results — a metric whose every request failed shows "Failed", not a number */}
+        {phase === 'done' && outcome && (
           <View style={styles.resultsGrid}>
-            <View style={[styles.resultCard, { borderLeftColor: colors.accent }]}>
-              <Text style={styles.resultLabel}>Download</Text>
-              <Text style={styles.resultValue}>{download.toFixed(1)}</Text>
-              <Text style={styles.resultUnit}>Mbps</Text>
-            </View>
-            <View style={[styles.resultCard, { borderLeftColor: colors.accent }]}>
-              <Text style={styles.resultLabel}>Upload</Text>
-              <Text style={styles.resultValue}>{upload.toFixed(1)}</Text>
-              <Text style={styles.resultUnit}>Mbps</Text>
-            </View>
-            <View style={[styles.resultCard, { borderLeftColor: colors.primary }]}>
-              <Text style={styles.resultLabel}>Ping</Text>
-              <Text style={styles.resultValue}>{ping}</Text>
-              <Text style={styles.resultUnit}>ms</Text>
-            </View>
-            <View style={[styles.resultCard, { borderLeftColor: '#FBBF24' }]}>
-              <Text style={styles.resultLabel}>Jitter</Text>
-              <Text style={styles.resultValue}>{jitter}</Text>
-              <Text style={styles.resultUnit}>ms</Text>
-            </View>
+            {([
+              ['Download', outcome.download, 'Mbps', colors.accent],
+              ['Upload', outcome.upload, 'Mbps', colors.accent],
+              ['Ping', outcome.ping, 'ms', colors.primary],
+              ['Jitter', outcome.jitter, 'ms', '#FBBF24'],
+            ] as const).map(([label, value, unit, edge]) => (
+              <View key={label} style={[styles.resultCard, { borderLeftColor: edge }]} accessible
+                accessibilityLabel={value == null ? `${label} failed` : `${label} ${unit === 'Mbps' ? value.toFixed(1) : value} ${unit}`}>
+                <Text style={styles.resultLabel}>{label}</Text>
+                <Text style={[styles.resultValue, value == null && { color: colors.danger }]}>
+                  {value == null ? 'Failed' : unit === 'Mbps' ? value.toFixed(1) : value}
+                </Text>
+                {value != null && <Text style={styles.resultUnit}>{unit}</Text>}
+              </View>
+            ))}
           </View>
         )}
 
@@ -427,9 +447,10 @@ export default function NetworkTestScreen() {
 
 const makeStyles = (c: Palette, SW: number) => StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: Platform.OS === 'ios' ? 56 : 40, paddingHorizontal: 16, paddingBottom: 14 },
+  // The status-bar inset comes from INSET_SCREENS (app/_layout.tsx), which pads
+  // this screen already; a second 40/56 here doubled it.
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 4, paddingHorizontal: 16, paddingBottom: 14 },
   backBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(74,159,255,0.08)', justifyContent: 'center', alignItems: 'center' },
-  backArrow: { color: c.accent, fontSize: 20 },
   headerTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
   scroll: { flex: 1 },
   scrollContent: { paddingHorizontal: 16 },
@@ -441,6 +462,10 @@ const makeStyles = (c: Palette, SW: number) => StyleSheet.create({
   connectionLabel: { color: c.text, fontSize: 14, fontWeight: '600' },
   serverDot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
   serverLabel: { color: c.textDim, fontSize: 13 },
+  disclosure: { color: c.textDim, fontSize: 12, lineHeight: 17, textAlign: 'center', marginTop: -6, marginBottom: 12, paddingHorizontal: 12 },
+  failedBox: { marginBottom: 16, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: c.danger, backgroundColor: c.glassSoft },
+  failedTitle: { color: c.danger, fontSize: 15, fontWeight: '700', marginBottom: 4 },
+  failedText: { color: c.textDim, fontSize: 13, lineHeight: 18 },
 
   // Gauge
   gaugeContainer: { alignItems: 'center', marginVertical: 16 },

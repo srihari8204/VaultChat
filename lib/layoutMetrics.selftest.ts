@@ -166,14 +166,16 @@ console.log('\nScreens that still snapshot these values once (ponytail ceiling):
 // rotate. Convert one to the factory pattern if it ever needs to be correct in
 // landscape.
 const FROZEN_STYLE_SCREENS = [
-  'app/backup-pin.tsx', 'app/biometric-setup.tsx', 'app/email-verify.tsx',
+  'app/backup-pin.tsx', 'app/email-verify.tsx',
   'app/mpin-entry.tsx', 'app/mpin-recover.tsx',
   'app/onboard-profile.tsx', 'app/onboard-security.tsx', 'app/permissions.tsx',
-  'app/security-questions.tsx', 'components/CallBar.tsx',
+  'components/CallBar.tsx',
 ];
+// 10 → 8 on 2026-10-04: biometric-setup and security-questions were deleted
+// with the rest of the orphaned legacy onboarding chain.
 check(
-  'the documented ceiling is 10 screens',
-  FROZEN_STYLE_SCREENS.length === 10,
+  'the documented ceiling is 8 screens',
+  FROZEN_STYLE_SCREENS.length === 8,
   'update this list and the note in constants/layout.ts together',
 );
 

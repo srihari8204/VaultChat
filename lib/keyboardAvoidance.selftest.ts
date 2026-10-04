@@ -152,13 +152,12 @@ ok(
   unhandled.length === 0,
 );
 
-// ── 3. The account-recovery repair stays repaired ─────────────────────
+// ── 3. (retired 2026-10-04) ─────────────────────────────────────────────
 //
-// Rule 1 already fails if this screen goes back to an undefined behavior, but
-// it is worth naming: security-questions is the last door a locked-out user
-// has, and a silent regression here is not visible until someone is locked out.
-const recovery = fs.readFileSync('app/security-questions.tsx', 'utf8');
-ok('account recovery routes its form through KeyboardSafe', /<KeyboardSafe\b/.test(recovery));
+// This pinned the KeyboardSafe repair on app/security-questions.tsx. That
+// screen was the orphaned legacy recovery form and has been deleted (see
+// lib/orphanRoutes.selftest.ts); the live recovery path is app/mpin-recover.tsx,
+// which already routes its form through KeyboardSafe.
 
 // ── 4. KeyboardSafe itself still pads rather than translates ──────────
 //

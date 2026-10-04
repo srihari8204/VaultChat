@@ -16,8 +16,8 @@
 import { useAuthHeader } from '../hooks/useAuthHeader';
 import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState , useMemo} from 'react';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useEffect, useRef, useState , useMemo} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -26,13 +26,14 @@ import {
   ScrollView,
   StyleSheet,
   Switch,
-  Text,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
-import { readCache, writeCache } from '../lib/localCache';
+// Sealed-or-nothing: the list of people you hide from is not kept in plain
+// AsyncStorage (see lib/localCache.ts).
+import { readSealedCache as readCache, writeSealedCache as writeCache } from '../lib/localCache';
 import { initialOf } from '../lib/format';
 import {
   attachmentUrl,
@@ -42,7 +43,7 @@ import {
   setGhostMode,
   type GhostMode,
 } from '../lib/chatService';
-import { AuroraBackground } from '../components/ui';
+import { AppText as Text, AuroraBackground } from '../components/ui';
 
 function useS() {
   const { colors } = useTheme();
@@ -64,45 +65,60 @@ function ListView() {
   const S = useS();
   const { colors } = useTheme();
   const router = useRouter();
-  const [rows,    setRows]    = useState<GhostMode[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [rows,    setRows]    = useState<GhostMode[] | null>(null);
+  const [error,   setError]   = useState<string | null>(null);
   const authHeader = useAuthHeader();
+  const loadSeq = useRef(0);
 
-  useEffect(() => {
-    let cancel = false;
-    (async () => {
-      // Local-first: paint last-known overrides instantly, then refresh.
-      const cached = await readCache<GhostMode[]>('ghost-mode');
-      if (!cancel && cached) { setRows(cached); setLoading(false); }
-      try {
-        const list = await listGhostMode();
-        if (!cancel) {
-          setRows(list);
-        }
-        writeCache('ghost-mode', list);
-      } catch (e: any) {
-        // Keep painted cache for offline read; only surface error when nothing shown.
-        if (!cancel && !cached) Alert.alert('Could not load', e?.message ?? 'Try again');
-      } finally {
-        if (!cancel) setLoading(false);
-      }
-    })();
-    return () => { cancel = true; };
+  // Re-read on every focus: the per-contact editor is pushed on top of this
+  // list, and clearing or changing an override there must show here on return.
+  const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
+    setError(null);
+    // Local-first: paint last-known overrides instantly, then refresh.
+    const cached = await readCache<GhostMode[]>('ghost-mode');
+    if (seq === loadSeq.current && cached) setRows(prev => prev ?? cached);
+    try {
+      const list = await listGhostMode();
+      if (seq !== loadSeq.current) return;
+      setRows(list);
+      writeCache('ghost-mode', list);
+    } catch (e: any) {
+      // Keep painted rows for offline read; a failure with nothing to show is
+      // an error, not "No overrides set".
+      if (seq === loadSeq.current) setError(e?.message ?? 'Could not load Ghost Mode');
+    }
   }, []);
+  useFocusEffect(useCallback(() => {
+    load();
+    return () => { loadSeq.current++; };
+  }, [load]));
 
-  if (loading) {
-    return <View style={[S.screen, S.center]}>
-      <AuroraBackground /><ActivityIndicator color={colors.primary} size="large" /></View>;
+  const header = (
+    <View style={S.header}>
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
+        <Ionicons name="arrow-back" size={24} color={colors.text} />
+      </TouchableOpacity>
+      <Text style={S.title}>Ghost Mode</Text>
+    </View>
+  );
+
+  if (rows === null) {
+    return (
+      <View style={S.screen}>
+        <AuroraBackground />
+        {header}
+        {error ? <LoadError message={error} onRetry={load} /> : (
+          <View style={[S.center, { flex: 1 }]}><ActivityIndicator color={colors.primary} size="large" /></View>
+        )}
+      </View>
+    );
   }
 
   return (
     <View style={S.screen}>
-      <View style={S.header}>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={S.title}>Ghost Mode</Text>
-      </View>
+      <AuroraBackground />
+      {header}
 
       <View style={S.intro}>
         <Text style={S.introTxt}>
@@ -127,6 +143,8 @@ function ListView() {
             <TouchableOpacity
               style={S.row}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={`${item.name || item.email || 'Contact'}. ${summarise(item)}`}
               onPress={() => router.push({
                 pathname: '/ghost-mode' as any,
                 params: { targetId: item.targetId, targetName: item.name || item.email || '' },
@@ -155,6 +173,19 @@ function ListView() {
   );
 }
 
+function LoadError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  const S = useS();
+  return (
+    <View style={[S.center, { flex: 1, paddingHorizontal: 32, gap: 8 }]} accessibilityRole="alert">
+      <Text style={S.emptyTitle}>Could not load Ghost Mode</Text>
+      <Text style={S.emptySub}>{message}</Text>
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel="Try again" onPress={onRetry} style={S.retryBtn} activeOpacity={0.7}>
+        <Text style={S.retryTxt}>Try again</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 function summarise(g: GhostMode): string {
   const hidden: string[] = [];
   if (g.hideOnline)   hidden.push('online');
@@ -171,10 +202,14 @@ function PerTargetEditor({ targetId, targetName }: { targetId: string; targetNam
   const router = useRouter();
   const [state,   setState]   = useState<GhostMode | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState<string | null>(null);
   const [saving,  setSaving]  = useState<null | keyof GhostMode>(null);
+  const [loadTick, setLoadTick] = useState(0);
 
   useEffect(() => {
     let cancel = false;
+    setLoading(true);
+    setError(null);
     (async () => {
       // Local-first: paint this contact's last-known overrides, then refresh.
       const cached = await readCache<GhostMode>('ghost-mode:' + targetId);
@@ -184,13 +219,13 @@ function PerTargetEditor({ targetId, targetName }: { targetId: string; targetNam
         if (!cancel) setState(g);
         writeCache('ghost-mode:' + targetId, g);
       } catch (e: any) {
-        if (!cancel && !cached) Alert.alert('Could not load', e?.message ?? 'Try again');
+        if (!cancel && !cached) setError(e?.message ?? 'Could not load Ghost Mode');
       } finally {
         if (!cancel) setLoading(false);
       }
     })();
     return () => { cancel = true; };
-  }, [targetId]);
+  }, [targetId, loadTick]);
 
   const toggle = useCallback(async (key: keyof Pick<GhostMode, 'hideOnline' | 'hideTyping' | 'hideRead' | 'hideLastSeen'>) => {
     if (!state || saving) return;
@@ -226,20 +261,34 @@ function PerTargetEditor({ targetId, targetName }: { targetId: string; targetNam
     );
   }, [targetId, router]);
 
+  const header = (
+    <View style={S.header}>
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
+        <Ionicons name="arrow-back" size={24} color={colors.text} />
+      </TouchableOpacity>
+      <Text style={S.title}>Ghost Mode</Text>
+    </View>
+  );
+
   if (loading || !state) {
-    return <View style={[S.screen, S.center]}><ActivityIndicator color={colors.primary} size="large" /></View>;
+    return (
+      <View style={S.screen}>
+        <AuroraBackground />
+        {header}
+        {error && !loading ? <LoadError message={error} onRetry={() => setLoadTick(t => t + 1)} /> : (
+          <View style={[S.center, { flex: 1 }]}><ActivityIndicator color={colors.primary} size="large" /></View>
+        )}
+      </View>
+    );
   }
 
   const anySet = state.hideOnline || state.hideTyping || state.hideRead || state.hideLastSeen;
 
   return (
+    <View style={S.screen}>
+    <AuroraBackground />
     <ScrollView style={S.screen} contentContainerStyle={{ paddingBottom: 64 }}>
-      <View style={S.header}>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={S.title}>Ghost Mode</Text>
-      </View>
+      {header}
 
       <View style={S.intro}>
         <Text style={S.introTxt}>
@@ -280,11 +329,12 @@ function PerTargetEditor({ targetId, targetName }: { targetId: string; targetNam
       </View>
 
       {anySet && (
-        <TouchableOpacity style={S.clearBtn} onPress={onClearAll} activeOpacity={0.85}>
+        <TouchableOpacity style={S.clearBtn} onPress={onClearAll} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel="Clear all overrides">
           <Text style={S.clearBtnTxt}>Clear all overrides</Text>
         </TouchableOpacity>
       )}
     </ScrollView>
+    </View>
   );
 }
 
@@ -298,16 +348,17 @@ function ToggleRow({
   return (
     <View style={S.toggleRow}>
       <View style={{ flex: 1 }}>
-        <Text numberOfLines={1} style={S.toggleTitle}>{title}</Text>
+        <Text style={S.toggleTitle}>{title}</Text>
         <Text style={S.toggleSub}>{sub}</Text>
       </View>
       {busy ? (
         <ActivityIndicator color={colors.primary} style={{ marginLeft: 8 }} />
       ) : (
         <Switch
+          accessibilityLabel={title}
           value={value}
           onValueChange={onChange}
-          trackColor={{ true: colors.primary, false: '#374151' }}
+          trackColor={{ true: colors.primary, false: colors.border }}
           thumbColor="#fff"
         />
       )}
@@ -322,7 +373,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backTxt:       { color: c.text, fontSize: 26, fontWeight: '600' },
   title:         { color: c.text, fontSize: 22, fontWeight: '800' },
 
   intro:         { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 },
@@ -337,7 +387,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   avatarTxt:     { color: '#fff', fontWeight: '700' },
   rowName:       { color: c.text, fontSize: 15, fontWeight: '600' },
   rowSub:        { color: c.textDim, fontSize: 12, marginTop: 2 },
-  rowChev:       { color: c.textDim, fontSize: 22, fontWeight: '600' },
 
   section:       { paddingHorizontal: 16, marginTop: 8 },
   toggleRow:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
@@ -346,4 +395,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   clearBtn:      { marginHorizontal: 20, marginTop: 32, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: c.danger, backgroundColor: c.glassSoft, alignItems: 'center' },
   clearBtnTxt:   { color: c.danger, fontWeight: '700' },
+  retryBtn:      { marginTop: 8, minHeight: 44, paddingHorizontal: 18, justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glassSoft },
+  retryTxt:      { color: c.primary, fontWeight: '700' },
 });

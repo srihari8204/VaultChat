@@ -48,10 +48,6 @@ const ALLOWED: Record<string, string> = {
     'the sign-up ROOT — there is nothing behind it, and Back must exit the app',
   'app/permissions.tsx':
     'orphaned legacy onboarding chain (nothing pushes to it); delete rather than decorate',
-  'app/security-questions.tsx':
-    'orphaned legacy onboarding chain (nothing pushes to it)',
-  'app/biometric-setup.tsx':
-    'orphaned legacy onboarding chain (nothing pushes to it)',
 };
 
 function walk(dir: string, out: string[] = []): string[] {

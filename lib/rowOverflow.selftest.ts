@@ -208,13 +208,12 @@ for (const style of ['videoWrap', 'videoLoading']) {
   ok(`${style} is capped by the bubble slot, not a literal 240`, /Math\.min\(240, m\.cardMax\)/.test(line));
 }
 
-// 2c. The two rows section 1 DOES catch, pinned by name so a revert is named in
-//     the failure rather than reported as an anonymous count. group-call is the
-//     one with real consequence: without the wrap, End call is off-screen and a
-//     user cannot hang up.
+// 2c. The row section 1 DOES catch, pinned by name so a revert is named in the
+//     failure rather than reported as an anonymous count: without the wrap, End
+//     call is off-screen and a user cannot hang up. (app/call-recording.tsx was
+//     pinned here too until it was deleted on 2026-10-04.)
 for (const [file, style] of [
   ['app/group-call-active.tsx', 'controls'],
-  ['app/call-recording.tsx', 'actionRow'],
 ] as const) {
   const line = read(file).split('\n').find((l) => l.trimStart().startsWith(style + ':')) ?? '';
   ok(`${file} ${style} still wraps`, /flexWrap:\s*'wrap'/.test(line));

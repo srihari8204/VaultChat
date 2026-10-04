@@ -17,9 +17,10 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ThreatDetail } from '../services/securityService';
 import type { Palette } from '../constants/theme';
 import { useColors } from '../lib/theme';
@@ -120,8 +121,14 @@ const THREAT_LABELS: Record<string, { label: string; icon: IoniconName; desc: st
 export default function BlockedScreen() {
   const c = useColors();
   const styles = useMemo(() => makeStyles(c), [c]);
+  const router = useRouter();
   const params = useLocalSearchParams<{ threats: string; level: string }>();
   const [threats, setThreats] = useState<ThreatDetail[]>([]);
+  // The root layout only ever opens this screen with a `restrict` or `wipe`
+  // verdict. Opened any other way (a stale link, the old Privacy Dashboard
+  // "Blocked contacts" row) there is no verdict to enforce, so the screen must
+  // not hold the user hostage: Back works and an on-screen exit is shown.
+  const verdict = params.level === 'restrict' || params.level === 'wipe';
   // Only a `wipe` verdict ran wipeAllKeys(). Anything else (including a missing
   // param from an older navigation) left the keys alone, and saying otherwise
   // would be the lie this screen shipped with.
@@ -137,13 +144,19 @@ export default function BlockedScreen() {
       }
     }
 
-    // Block Android back button — user cannot navigate away
+    // Block Android back button — user cannot navigate away from a verdict.
+    if (!verdict) return;
     const handler = BackHandler.addEventListener('hardwareBackPress', () => {
       return true; // true = event consumed = back button disabled
     });
 
     return () => handler.remove();
-  }, [params.threats]);
+  }, [params.threats, verdict]);
+
+  const leave = () => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/' as any);
+  };
 
   const handleContactSupport = () => {
     Alert.alert(
@@ -151,9 +164,34 @@ export default function BlockedScreen() {
       'Email: security@vaultchat.app\n\n' + (wiped
         ? 'Your encryption keys were wiped to protect your data. To restore access, reinstall crazzychat on a clean, unrooted device.'
         : 'Your encryption keys are still on this device. Clear the indicator below and reopen crazzychat to regain access.'),
-      [{ text: 'OK' }]
+      [
+        { text: 'Close', style: 'cancel' },
+        { text: 'Email support', onPress: () => {
+            Linking.openURL('mailto:security@vaultchat.app?subject=crazzychat%20security%20block').catch(() => {});
+          } },
+      ]
     );
   };
+
+  if (!verdict) {
+    return (
+      <View style={styles.container}>
+        <AuroraBackground />
+        <View style={[styles.scroll, { flex: 1, justifyContent: 'center' }]}>
+          <View style={styles.iconWrap}>
+            <Ionicons name="shield-checkmark" size={42} color={c.primary} />
+          </View>
+          <Text style={styles.title} accessibilityRole="header">Nothing is blocked</Text>
+          <Text style={styles.subtitle}>
+            This screen only appears when crazzychat finds a security problem on this device. No problem was reported.
+          </Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" style={styles.supportBtn} onPress={leave}>
+            <Text style={styles.supportBtnText}>Go back</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -172,7 +210,7 @@ export default function BlockedScreen() {
           <Ionicons name="shield" size={42} color={c.danger} />
         </View>
 
-        <Text style={styles.title}>crazzychat Blocked</Text>
+        <Text style={styles.title} accessibilityRole="header">crazzychat Blocked</Text>
         <Text style={styles.subtitle}>
           {wiped
             ? 'A serious security threat was detected on this device. All encryption keys have been permanently wiped to protect your messages.'
@@ -190,7 +228,7 @@ export default function BlockedScreen() {
                 desc: t.detail,
               };
               return (
-                <View key={i} style={styles.threatCard}>
+                <View key={`${t.type}:${i}`} style={styles.threatCard}>
                   <View style={styles.threatHeader}>
                     <Ionicons name={info.icon} size={18} color={c.danger} />
                     <Text style={styles.threatLabel}>{info.label}</Text>
@@ -237,7 +275,7 @@ export default function BlockedScreen() {
             'Disable accessibility services you do not recognise',
             'Reopen crazzychat — it re-checks on every launch',
           ]).map((step, i) => (
-            <View key={i} style={styles.stepRow}>
+            <View key={step} style={styles.stepRow}>
               <View style={styles.stepNum}>
                 <Text style={styles.stepNumText}>{i + 1}</Text>
               </View>

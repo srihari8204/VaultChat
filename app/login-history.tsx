@@ -11,7 +11,7 @@
 import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useState , useMemo} from 'react';
+import { useCallback, useEffect, useRef, useState , useMemo} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -23,7 +23,9 @@ import {
 } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
-import { readCache, writeCache } from '../lib/localCache';
+// Sealed-or-nothing: session IPs and user agents are not kept in plain
+// AsyncStorage (see lib/localCache.ts).
+import { readSealedCache as readCache, writeSealedCache as writeCache } from '../lib/localCache';
 import {
   listSessions,
   revokeAllOtherSessions,
@@ -47,28 +49,34 @@ export default function LoginHistoryScreen() {
   const [loading,    setLoading]    = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error,      setError]      = useState<string | null>(null);
+  // One sign-out at a time: a double tap on a confirmed Sign out used to fire
+  // the DELETE twice.
+  const [revoking,   setRevoking]   = useState(false);
+  const mounted = useRef(true);
+  const rowsRef = useRef<SessionRow[]>([]);
+  rowsRef.current = rows;
+  useEffect(() => () => { mounted.current = false; }, []);
 
   const fetchAll = useCallback(async () => {
     try {
       const list = await listSessions();
+      if (!mounted.current) return;
       setRows(list);
       setError(null);
       writeCache(CACHE_KEY, list);
     } catch (e: any) {
       // Keep cached rows if we have them; only surface the error on a cold load.
-      setRows(prev => {
-        if (prev.length === 0) setError(e?.message ?? 'Failed to load sessions');
-        return prev;
-      });
+      if (mounted.current && rowsRef.current.length === 0) setError(e?.message ?? 'Failed to load sessions');
     }
   }, []);
 
   useEffect(() => {
     (async () => {
       const cached = await readCache<SessionRow[]>(CACHE_KEY);
+      if (!mounted.current) return;
       if (cached) { setRows(cached); setLoading(false); }
       await fetchAll();
-      setLoading(false);
+      if (mounted.current) setLoading(false);
     })();
   }, [fetchAll]);
 
@@ -79,44 +87,51 @@ export default function LoginHistoryScreen() {
   }, [fetchAll]);
 
   const onRevoke = useCallback((row: SessionRow) => {
-    if (row.isCurrent) return; // guarded in the UI too
+    if (row.isCurrent || revoking) return; // guarded in the UI too
     Alert.alert(
       'Sign out this device?',
       `${describeDevice(row.userAgent)} will be signed out immediately and need to log in again to access this account.`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Sign out', style: 'destructive', onPress: async () => {
+            setRevoking(true);
             try {
               await revokeSession(row.id);
-              setRows(prev => prev.filter(r => r.id !== row.id));
+              if (mounted.current) setRows(prev => prev.filter(r => r.id !== row.id));
             } catch (e: any) {
               Alert.alert('Could not revoke', e?.message ?? 'Try again');
+            } finally {
+              if (mounted.current) setRevoking(false);
             }
           }
         },
       ],
     );
-  }, []);
+  }, [revoking]);
 
   const onRevokeAllOthers = useCallback(() => {
+    if (revoking) return;
     Alert.alert(
       'Sign out other devices?',
       'Every other signed-in device will be revoked immediately. This device stays signed in.',
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Sign out others', style: 'destructive', onPress: async () => {
+            setRevoking(true);
             try {
               const r = await revokeAllOtherSessions();
               Alert.alert('Done', `${r.revoked} device(s) signed out.`);
               await fetchAll();
             } catch (e: any) {
               Alert.alert('Failed', e?.message ?? 'Try again');
+            } finally {
+              if (mounted.current) setRevoking(false);
             }
           }
         },
       ],
     );
-  }, [fetchAll]);
+  }, [fetchAll, revoking]);
 
   if (loading) {
     return (
@@ -139,7 +154,14 @@ export default function LoginHistoryScreen() {
         <Text style={S.title}>Active devices</Text>
       </View>
 
-      {error && <Text style={S.errorTxt}>{error}</Text>}
+      {error && (
+        <View style={S.errorRow} accessibilityRole="alert">
+          <Text style={[S.errorTxt, { flex: 1 }]}>{error}</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Try loading devices again" onPress={onRefresh} disabled={refreshing} style={S.retryBtn} activeOpacity={0.7}>
+            <Text style={S.retryTxt}>Try again</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       <FlatList
         data={rows}
@@ -158,10 +180,10 @@ export default function LoginHistoryScreen() {
             style={[S.row, r.isCurrent && S.rowCurrent]}
             onPress={() => onRevoke(r)}
             activeOpacity={r.isCurrent ? 1 : 0.7}
-            disabled={r.isCurrent}
+            disabled={r.isCurrent || revoking}
             accessibilityRole="button"
             accessibilityLabel={r.isCurrent ? `${describeDevice(r.userAgent)}, this device` : `Sign out ${describeDevice(r.userAgent)}`}
-            accessibilityState={{ disabled: r.isCurrent }}
+            accessibilityState={{ disabled: r.isCurrent || revoking }}
           >
             <View style={{ flex: 1 }}>
               <View style={S.rowTop}>
@@ -178,7 +200,7 @@ export default function LoginHistoryScreen() {
         )}
         ListFooterComponent={
           others.length > 0 ? (
-            <TouchableOpacity accessibilityRole="button" style={S.revokeAllBtn} onPress={onRevokeAllOthers} activeOpacity={0.85}>
+            <TouchableOpacity accessibilityRole="button" accessibilityState={{ disabled: revoking }} disabled={revoking} style={[S.revokeAllBtn, revoking && { opacity: 0.5 }]} onPress={onRevokeAllOthers} activeOpacity={0.85}>
               <Text style={S.revokeAllTxt}>Sign out all other devices ({others.length})</Text>
             </TouchableOpacity>
           ) : null
@@ -229,7 +251,10 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   backTxt:       { color: c.text, fontSize: 26, fontWeight: '600' },
   title:         { color: c.text, fontSize: 22, fontWeight: '800' },
 
-  errorTxt:      { color: c.danger, paddingHorizontal: 16, paddingVertical: 8, fontSize: 12 },
+  errorTxt:      { color: c.danger, paddingVertical: 8, fontSize: 12 },
+  errorRow:      { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16 },
+  retryBtn:      { minHeight: 44, paddingHorizontal: 14, justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glassSoft },
+  retryTxt:      { color: c.primary, fontWeight: '700', fontSize: 13 },
 
   intro:         { marginHorizontal: 16, marginTop: 12, marginBottom: 8, padding: 14, borderRadius: 16, backgroundColor: c.glass, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
   introTxt:      { color: c.textDim, fontSize: 12, lineHeight: 16 },
