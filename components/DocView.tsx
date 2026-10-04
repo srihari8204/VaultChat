@@ -57,6 +57,42 @@ function Runs({ runs, style }: { runs: Run[]; style?: StyleProp<TextStyle> }) {
 // pane in that same scroller, so it stays put vertically and moves with the
 // columns horizontally. Smaller grids flow into the page as before. Layout maths:
 // lib/media/sheetGrid.ts.
+//
+// The pane must NOT join the page list's virtualisation. A VirtualizedList that
+// finds a same-orientation VirtualizedList above it in context treats itself as
+// part of that list (VirtualizedList._isNestedWithSameOrientation): it takes its
+// window from the PAGE's scroll metrics, shifted by its own offset on the page,
+// and runs even its own scroll events through that shift. The window then
+// tracks the wrong offset (worse the lower the sheet sits on the page), so rows
+// scroll into the pane blank. (Without GHFlatList's scroll component it would
+// not scroll at all: a nested list renders a plain View.) PaneRoot cuts both
+// contexts, exactly as RN's own Modal does for content it portals
+// (react-native/Libraries/Modal/Modal.js), so the pane is a root list that
+// windows over its own bounded viewport. Pinned by
+// lib/media/sheetPaneNesting.selftest.ts.
+
+// ponytail: VirtualizedListContextResetter is exported by the installed
+// @react-native/virtualized-lists (react-native's own pinned dependency, the
+// copy RN's lists use) but is missing from its .d.ts, and ScrollView.Context is
+// untyped; hence the typed require and cast. Replace with a typed import if RN
+// publishes either; the selftest fails if the installed export disappears.
+type Passthrough = React.ComponentType<{ children: React.ReactNode }>;
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const VirtualizedListContextResetter: Passthrough = require('@react-native/virtualized-lists').default
+  .VirtualizedListContextResetter;
+const ScrollViewContext = (ScrollView as unknown as { Context: React.Context<unknown> }).Context;
+
+/** Makes its children a ROOT list: no parent list context, no parent scroller orientation. */
+function PaneRoot({ children }: { children: React.ReactNode }) {
+  return (
+    <VirtualizedListContextResetter>
+      {/* Nulled too, as Modal does: the pane bounds and scrolls itself, so RN's
+          dev-only "VirtualizedList nested in a plain ScrollView" check (the
+          only reader of this context) would be a false alarm here. */}
+      <ScrollViewContext.Provider value={null}>{children}</ScrollViewContext.Provider>
+    </VirtualizedListContextResetter>
+  );
+}
 
 type DocStyles = ReturnType<typeof makeStyles>;
 
@@ -107,19 +143,21 @@ function Grid({
       {plan.virtual ? (
         <>
           {plan.pinned === 1 && <GridRow row={rows[0]} ri={0} cols={cols} widths={widths} head s={s} />}
-          <GHFlatList
-            data={body}
-            renderItem={renderRow}
-            keyExtractor={rowKey}
-            // Fixed width = the column sum, so the pane never relies on the
-            // horizontal scroller's content to size a vertical list.
-            style={{ width: total, maxHeight: paneHeight }}
-            nestedScrollEnabled
-            showsVerticalScrollIndicator
-            initialNumToRender={30}
-            maxToRenderPerBatch={30}
-            windowSize={7}
-          />
+          <PaneRoot>
+            <GHFlatList
+              data={body}
+              renderItem={renderRow}
+              keyExtractor={rowKey}
+              // Fixed width = the column sum, so the pane never relies on the
+              // horizontal scroller's content to size a vertical list.
+              style={{ width: total, maxHeight: paneHeight }}
+              nestedScrollEnabled
+              showsVerticalScrollIndicator
+              initialNumToRender={30}
+              maxToRenderPerBatch={30}
+              windowSize={7}
+            />
+          </PaneRoot>
         </>
       ) : (
         rows.map((row, ri) => (

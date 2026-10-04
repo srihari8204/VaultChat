@@ -66,6 +66,9 @@ export default function ShelfScreen() {
 
   const [files, setFiles] = useState<ShelfFile[]>([]);
   const [loadFailed, setLoadFailed] = useState(false);
+  // The lock table could not be read, so every file was held back (fail
+  // closed). The list is empty for that reason, not because there are no files.
+  const [lockUnknown, setLockUnknown] = useState(false);
   const [myId, setMyId] = useState<string | null>(null);
   const [pins, setPins] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -102,6 +105,7 @@ export default function ShelfScreen() {
       const pinned = stale ? pinsRef.current : new Set<string>(pinList);
       if (!stale) setPins(pinned);
       setMyId(me?.id != null ? String(me.id) : null);
+      setLockUnknown(locked === null);
       setFiles(rows.filter(r => shelfListable(r) && !isLockedIn(locked, r.chatId)).map(r => ({
         ...r,
         kind: classify(r.filename, r.mime),
@@ -232,6 +236,16 @@ export default function ShelfScreen() {
           <TouchableOpacity onPress={() => { setLoading(true); load(); }} style={S.retry}
             accessibilityRole="button" accessibilityLabel="Retry loading the shelf">
             <Text style={S.retryTxt}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      ) : lockUnknown ? (
+        <View style={S.empty} accessibilityLiveRegion="polite">
+          <Ionicons name="lock-closed-outline" size={44} color={colors.textDim} />
+          <Text style={S.emptyTitle}>{"Couldn't check which chats are locked"}</Text>
+          <Text style={S.emptyBody}>Files stay hidden until the lock settings on this device can be read, so nothing from a locked chat is shown by mistake.</Text>
+          <TouchableOpacity onPress={() => { setLoading(true); load(); }} style={S.retry}
+            accessibilityRole="button" accessibilityLabel="Try reading the lock settings again">
+            <Text style={S.retryTxt}>Try again</Text>
           </TouchableOpacity>
         </View>
       ) : (
