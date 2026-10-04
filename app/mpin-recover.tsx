@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BRAND_GRADIENT_CTA } from '../constants/theme';
+import { BRAND_CTA_INK } from '../constants/brandCtaInk';
 import { questionLabel } from '../constants/securityQuestionPool';
 import { MpinInput } from '../components/auth/MpinInput';
 import {
@@ -204,7 +205,7 @@ export default function MpinRecover() {
                   end={{ x: 1, y: 1 }}
                   style={s.cta}
                 >
-                  {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.ctaTxt}>Verify ({filled}/3+)</Text>}
+                  {busy ? <ActivityIndicator color={BRAND_CTA_INK} /> : <Text style={s.ctaTxt}>Verify ({filled}/3+)</Text>}
                 </LinearGradient>
               </Pressable>
             </>
@@ -285,5 +286,5 @@ const makeStyles = (AUTH: AuthPalette) => StyleSheet.create({
   cta: { minHeight: 56, paddingVertical: 10, alignItems: 'center', justifyContent: 'center' },
   ctaOff: { opacity: 0.38 },
   ctaDown: { opacity: 0.88 },
-  ctaTxt: { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.2 },
+  ctaTxt: { color: BRAND_CTA_INK, fontSize: 16, fontWeight: '800', letterSpacing: 0.2 },
 });

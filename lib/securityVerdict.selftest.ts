@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { clearRestrictVerdict, holdSecurityVerdict, securityVerdict } from './securityVerdict';
+import { readRootLayout } from '../scripts/rootLayoutSources';
 
 let failures = 0;
 function ok(label: string, cond: boolean) {
@@ -47,7 +48,8 @@ ok('the screen reads the held verdict', /useState\(securityVerdict\)/.test(scree
 ok('and no longer takes the level from its route params', !/params\.level/.test(screen));
 ok('a clean re-check releases only restrict, then leaves',
   /if \(report\.clean\) \{ clearRestrictVerdict\(\); leave\(\); return; \}/.test(screen));
-const layout = readFileSync(join(__dirname, '..', 'app', '_layout.tsx'), 'utf8');
+// app/_layout.tsx plus the boot sequence that runs the launch scan (scripts/rootLayoutSources).
+const layout = readRootLayout();
 ok('the launch scan holds its report, then routes to /blocked after the launch gate',
   /holdSecurityVerdict\(report\);[\s\S]{0,400}await launchAllowed;\s*router\.replace\('\/blocked'/.test(layout));
 

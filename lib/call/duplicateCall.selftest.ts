@@ -33,12 +33,14 @@
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { readRootLayout } from '../../scripts/rootLayoutSources';
 
 const ROOT = join(__dirname, '..', '..');
 const strip = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, '')
   .split('\n').filter(l => !/^\s*(\/\/|\*)/.test(l)).join('\n');
 const ENGINE = strip(readFileSync(join(ROOT, 'lib/call/engine.ts'), 'utf8'));
-const LAYOUT = strip(readFileSync(join(ROOT, 'app/_layout.tsx'), 'utf8'));
+// app/_layout.tsx plus the boot sequence that defines routeToCall (scripts/rootLayoutSources).
+const LAYOUT = strip(readRootLayout());
 
 let failed = 0;
 function A(ok: boolean, what: string): void {

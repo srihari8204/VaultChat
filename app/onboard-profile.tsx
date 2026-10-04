@@ -25,6 +25,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BRAND_GRADIENT_CTA } from '../constants/theme';
+import { BRAND_CTA_INK } from '../constants/brandCtaInk';
 import { onboarding } from '../lib/onboarding';
 import { Sheet, type SheetAction } from '../components/ui/Sheet';
 import { AuthSky, BrandMark, KeyboardSafe, StepRail } from '../components/ui';
@@ -301,5 +302,5 @@ const makeStyles = (AUTH: AuthPalette) => StyleSheet.create({
   cta: { minHeight: 56, paddingVertical: 10, alignItems: 'center', justifyContent: 'center' },
   ctaOff: { opacity: 0.38 },
   ctaDown: { opacity: 0.88 },
-  ctaTxt: { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.2 },
+  ctaTxt: { color: BRAND_CTA_INK, fontSize: 16, fontWeight: '800', letterSpacing: 0.2 },
 });

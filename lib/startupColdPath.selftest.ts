@@ -1,10 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { readRootLayout } from '../scripts/rootLayoutSources';
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 const gate = read('lib/restoreGate.ts');
 const index = read('app/index.tsx');
-const layout = read('app/_layout.tsx');
+// app/_layout.tsx plus the boot sequence it calls (components/root/useBootSequence).
+const layout = readRootLayout();
 const api = read('lib/api.ts');
 const pkg = JSON.parse(read('package.json'));
 
@@ -76,17 +78,17 @@ check('root uses only the tiny LiveKit DOMException shim',
   layout.includes("import '../lib/domExceptionPolyfill'") &&
   !layout.includes("import '@livekit/react-native'"));
 check('localDb warmup is deferred and dynamically imported',
-  !layout.includes("import { getLocalDb } from '../lib/localDb'") &&
-  layout.indexOf("import('../lib/localDb')") > deferredAt);
+  !/import \{ getLocalDb \} from '(\.\.\/)+lib\/localDb'/.test(layout) &&
+  layout.indexOf("import('../../lib/localDb')") > deferredAt);
 check('PDF thumbnail host is loaded after interactions',
-  !layout.includes("import { PdfThumbnailerHost } from '../components/PdfThumbnailer'") &&
-  layout.indexOf("import('../components/PdfThumbnailer')") > deferredAt);
+  !/from '(\.\.\/)+(components\/)?PdfThumbnailer'/.test(layout) &&
+  layout.indexOf("import('../PdfThumbnailer')") > deferredAt);
 check('leftover chat-export sweep is deferred and dynamically imported',
-  !layout.includes("from '../components/chattools/chatExportFile'") &&
-  layout.indexOf("import('../components/chattools/chatExportFile')") > deferredAt);
+  !/from '(\.\.\/)+(components\/)?chattools\/chatExportFile'/.test(layout) &&
+  layout.indexOf("import('../chattools/chatExportFile')") > deferredAt);
 check('scheduled runner stays off the static root import graph',
-  !layout.includes("from '../lib/scheduledRunner'") &&
-  layout.includes("import('../lib/scheduledRunner')"));
+  !/from '(\.\.\/)+lib\/scheduledRunner'/.test(layout) &&
+  layout.includes("import('../../lib/scheduledRunner')"));
 check('embedded fonts remove root runtime font loading',
   !layout.includes('useFonts(') &&
   !layout.includes('@expo-google-fonts') &&

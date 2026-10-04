@@ -12,6 +12,7 @@ import { useMemo, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, BackHandler, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BRAND_GRADIENT_CTA } from '../constants/theme';
+import { BRAND_CTA_INK } from '../constants/brandCtaInk';
 import { resetTo } from '../lib/authNav';
 import { onboarding, verifyMpinRemote, uploadAndSetProfilePhoto, onboardingError } from '../lib/onboarding';
 import { deviceSecurityAvailable, enableMfa } from '../lib/mfa';
@@ -166,7 +167,7 @@ export default function OnboardSuccess() {
             end={{ x: 1, y: 1 }}
             style={s.cta}
           >
-            {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.ctaTxt}>Continue to Chats</Text>}
+            {busy ? <ActivityIndicator color={BRAND_CTA_INK} /> : <Text style={s.ctaTxt}>Continue to Chats</Text>}
           </LinearGradient>
         </Pressable>
 
@@ -218,7 +219,7 @@ const makeStyles = (AUTH: AuthPalette) => StyleSheet.create({
   // the label is genuinely taller.
   cta: { minHeight: 56, paddingVertical: 10, alignItems: 'center', justifyContent: 'center' },
   ctaDown: { opacity: 0.88 },
-  ctaTxt: { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.2 },
+  ctaTxt: { color: BRAND_CTA_INK, fontSize: 16, fontWeight: '800', letterSpacing: 0.2 },
   secondary: { width: '100%', marginTop: 12, marginBottom: 32, paddingVertical: 12, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   secondaryTxt: { color: AUTH.cyan, fontSize: 14, fontWeight: '700' },
 });

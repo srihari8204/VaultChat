@@ -28,6 +28,7 @@
 // spirit as localDb.queue.selftest.ts lifting DDL out of the source.
 
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { readRootLayout } from '../scripts/rootLayoutSources';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -247,8 +248,9 @@ try {
 
   // ── cross-file wiring the harness stubs out, so assert it directly ──────
   console.log('boot wiring');
-  const LAYOUT = readFileSync(join(HERE, '..', 'app', '_layout.tsx'), 'utf8');
-  check('_layout.tsx starts the TEXT outbox at boot, not just the media one',
+  // app/_layout.tsx plus the boot sequence it calls (scripts/rootLayoutSources).
+  const LAYOUT = readRootLayout();
+  check('the root boot starts the TEXT outbox, not just the media one',
     /initQueue\(\)/.test(LAYOUT),
     'no boot drain, no reconnect flush, no periodic tick until a chat is opened — and `online` stays stale-true');
   const API = readFileSync(join(HERE, 'api.ts'), 'utf8');

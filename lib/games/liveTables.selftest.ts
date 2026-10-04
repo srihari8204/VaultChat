@@ -18,6 +18,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { liveTableOf, agoLabel } from './liveTable';
+import { readRootLayout } from '../../scripts/rootLayoutSources';
 
 const ROOT = join(__dirname, '..', '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
@@ -28,7 +29,7 @@ const HOOK   = code(read('lib/games/useLiveTables.ts'));
 const SOCKET = code(read('lib/games/useGameSocket.ts'));
 const HUB    = code(read('app/games.tsx'));
 const PUSH   = code(read('lib/push.ts'));
-const LAYOUT = code(read('app/_layout.tsx'));
+const LAYOUT = code(readRootLayout()); // app/_layout.tsx + components/root/useBootSequence.ts
 const NOTIFY = code(read('vaultchat-backend-go/internal/routes/games_notify.go'));
 const GAMES  = code(read('vaultchat-backend-go/internal/routes/games.go'));
 const JOBS   = code(read('vaultchat-backend-go/internal/jobs/jobs.go'));

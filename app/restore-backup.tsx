@@ -214,7 +214,11 @@ export default function RestoreBackupScreen() {
             : lookupFailed
               ? 'Couldn’t check for a backup — you may be offline. Try again, or carry on: while this phone has no chats yet, crazzychat offers this again the next time it opens, and you can restore any time from Settings → Chat backup. Until it can check, this phone won’t back up over a backup it hasn’t seen.'
             : meta.exists
-              ? 'We found a backup for this account. Restoring brings your messages and media onto this phone.'
+              // ponytail: the backup meta does not say whether the backup is
+              // end-to-end encrypted (lib/cloudBackup BackupMeta has no mode), so
+              // this names the case up front for everyone; show it only for an
+              // e2ee backup once the server meta carries the mode.
+              ? 'We found a backup for this account. Restoring brings your messages and media onto this phone. If you protected it with a backup password or 64-character key, restore it from Settings → Chat backup, where you can enter it.'
               : 'No backup was found for this account. You can carry on — new messages will be backed up from here.'}
         </Text>
 

@@ -11,6 +11,7 @@
 // The two properties worth pinning are opposites, which is why both are here:
 // the link must survive the redirect, and it must be GONE on the way out.
 
+import { readRootLayout } from '../scripts/rootLayoutSources';
 import {
   clearLaunchLink,
   consumeLaunchLink,
@@ -217,9 +218,9 @@ ok('…and consumes the link there', /consumeLaunchLink\(\)/.test(nav));
 ok('…and CLEARS it on the other branch, which is the sign-out crossing',
   /else\s*\{[\s\S]{0,80}clearLaunchLink\(\)/.test(nav));
 
-const layout = fs.readFileSync(
-  require('node:path').join(__dirname, '..', 'app', '_layout.tsx'), 'utf8');
-console.log('\nThe wiring in app/_layout.tsx:');
+// app/_layout.tsx plus the boot sequence it calls, which wires the taps.
+const layout = readRootLayout();
+console.log('\nThe wiring in app/_layout.tsx and components/root/useBootSequence.ts:');
 // Three redirecting branches: signed-out, locked, and the .catch(). All three
 // must stash, and the .catch() is the one most likely to be forgotten — it is
 // also the branch a SecureStore failure takes on the device this was found on.

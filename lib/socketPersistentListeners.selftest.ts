@@ -10,7 +10,7 @@
  * while the FIRST getSocket() comes from addPersistentListener itself — which
  * is how it used to work by accident.
  *
- * The boot warm-up in app/_layout.tsx deliberately breaks that ordering: it
+ * The boot warm-up (app/_layout.tsx → components/root/useBootSequence) deliberately breaks that ordering: it
  * opens the socket BEFORE any listener exists, so the construction-time copy
  * sees an empty map, and a handler registered mid-handshake attaches to
  * nothing. Calls then stop ringing with nothing in any log to say why.
@@ -23,10 +23,12 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { readRootLayout } from '../scripts/rootLayoutSources';
 
 const root = join(__dirname, '..');
 const socketSrc = readFileSync(join(root, 'lib', 'socket.ts'), 'utf8');
-const layoutSrc = readFileSync(join(root, 'app', '_layout.tsx'), 'utf8');
+// app/_layout.tsx plus the boot sequence it calls (scripts/rootLayoutSources).
+const layoutSrc = readRootLayout();
 
 console.log('\nPersistent listeners survive a socket opened before they exist:');
 
@@ -59,13 +61,20 @@ console.log('  ✓ off() precedes on() — re-applying cannot double-register ha
 console.log('\nThe boot warm-up that depends on all of the above:');
 assert.ok(
   /getSocket\(\)\.catch\(/.test(layoutSrc),
-  'app/_layout.tsx should start the handshake at module scope',
+  'the root should start the handshake at boot, fire-and-forget',
 );
-console.log('  ✓ _layout starts the handshake at boot, fire-and-forget');
+console.log('  ✓ the root starts the handshake at boot, fire-and-forget');
+// The warm-up moved from module scope into the boot sequence, as its FIRST
+// step (see the note above it). It must stay ahead of the rest of that work,
+// or the handshake stops overlapping the render.
+const bootAt = layoutSrc.indexOf("mark('boot_effect_start')");
+const warmAt = layoutSrc.indexOf('void getSocket()');
 assert.ok(
-  layoutSrc.indexOf('getSocket()') < layoutSrc.indexOf('export default'),
-  'the warm-up must be at module scope, before the component — that is the point',
+  bootAt > -1 && warmAt > bootAt &&
+    ['runSecurityCheck()', 'getAccessToken()', 'InteractionManager.runAfterInteractions']
+      .every((w) => layoutSrc.indexOf(w) > warmAt),
+  'the warm-up must be the first step of the boot sequence, before the scan, the token read and deferred work',
 );
-console.log('  ✓ at module scope, so it overlaps the handshake with React mounting');
+console.log('  ✓ first step of the boot sequence, so it overlaps the handshake with the render');
 
 console.log('\nAll persistent-listener checks passed.\n');

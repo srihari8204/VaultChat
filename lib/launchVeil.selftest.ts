@@ -29,6 +29,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { ROOT_LAYOUT_SOURCES } from '../scripts/rootLayoutSources';
 
 const read = (p: string) => readFileSync(resolve(process.cwd(), p), 'utf8');
 const layout = read('app/_layout.tsx');
@@ -62,7 +63,8 @@ ok('the splash still hides only once ready', /if \(launchReady\) SplashScreen\.h
 
 console.log('\nThe symptom patch is gone (it shipped blank twice):');
 ok('launchGate.ts no longer exports clearLaunchGate', !/clearLaunchGate/.test(gate.replace(/\/\/.*$/gm, '')));
-for (const f of ['app/_layout.tsx', 'app/app-lock.tsx', 'app/mpin-entry.tsx', 'app/onboard-success.tsx']) {
+// Every root source (scripts/rootLayoutSources), not only the layout file.
+for (const f of [...ROOT_LAYOUT_SOURCES, 'app/app-lock.tsx', 'app/mpin-entry.tsx', 'app/onboard-success.tsx']) {
   ok(`${f} does not call clearLaunchGate`, !/clearLaunchGate\(\)/.test(read(f)));
 }
 
