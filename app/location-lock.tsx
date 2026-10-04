@@ -177,7 +177,7 @@ export default function LocationLockScreen() {
 
   const setMode = (mode: LockMode) => {
     setLockSettings({ mode }).then(() => applyAlertSettings()).catch((e: unknown) => {
-      Alert.alert('Mode not saved', `${errText(e, 'Could not save the lock mode')}. The previous mode is still in use.`);
+      Alert.alert('Mode not saved', `${errText(e, 'Could not save the lock mode')}. The new mode applies now but will not survive an app restart.`);
     });
   };
 

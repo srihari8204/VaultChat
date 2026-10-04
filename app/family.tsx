@@ -917,7 +917,12 @@ export default function FamilySpaceScreen() {
     (async () => {
       try {
         const { fetchMatrix } = require('../lib/nav/routing');
-        const res = await fetchMatrix(targets.map((t) => t.pos), origin, 'auto');
+        // Same coarseness as the live map (~110 m): a road distance needs no more,
+        // and the routing server need not see anyone's exact position.
+        const q = (n: number) => Math.round(n * 1000) / 1000;
+        const res = await fetchMatrix(
+          targets.map((t) => ({ lat: q(t.pos!.lat), lng: q(t.pos!.lng) })),
+          { lat: q(origin.lat), lng: q(origin.lng) }, 'auto');
         if (cancel) return;
         const next: Record<string, number> = {};
         for (const r of res) {

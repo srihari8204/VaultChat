@@ -45,7 +45,7 @@ export default function FamilySetupScreen() {
       const r = await joinCircle(code);
       if (r.pending) {
         Alert.alert('Request sent', 'An admin of this circle has to approve you. You will be notified when you are in.');
-        router.back();
+        if (router.canGoBack()) router.back(); else router.replace('/(tabs)/chats' as any);
         return;
       }
       if (r.alreadyMember) Alert.alert('Already a member', `You are already in "${r.name}".`);
