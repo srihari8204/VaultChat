@@ -171,7 +171,7 @@ export default function SpaceIncidentsScreen() {
             {/* One element for the summary; the buttons below stay separate. */}
             <View
               style={s.row} accessible
-              accessibilityLabel={[meta.label, vehicle, when(i.createdAt), done ? 'resolved' : i.status === 'ack' ? 'acknowledged' : 'open',
+              accessibilityLabel={[meta.label, vehicle, when(i.createdAt), pressedNote(i), done ? 'resolved' : i.status === 'ack' ? 'acknowledged' : 'open',
                 i.note ? 'note attached, readable in the space chat' : null].filter(Boolean).join(', ')}
             >
               {/* Resolved cards fade only the icon: fading the card took its
@@ -185,6 +185,7 @@ export default function SpaceIncidentsScreen() {
                 </Text>
                 <Text style={s.muted} numberOfLines={1}>
                   {vehicle ? `${vehicle} · ` : ''}{when(i.createdAt)}
+                  {pressedNote(i) ? ` · ${pressedNote(i)}` : ''}
                   {done ? ' · resolved' : i.status === 'ack' ? ' · acknowledged' : ''}
                 </Text>
               </View>
@@ -257,6 +258,15 @@ export default function SpaceIncidentsScreen() {
     />
     </View>
   );
+}
+
+/** "pressed 08:14" when a queued SOS reached the server more than a minute
+ *  after it was pressed (the server sends pressedAt from migration 146 on). */
+function pressedNote(i: { createdAt: string; pressedAt?: string | null }): string | null {
+  if (!i.pressedAt) return null;
+  const p = Date.parse(i.pressedAt), c = Date.parse(i.createdAt);
+  if (!Number.isFinite(p) || !Number.isFinite(c) || c - p < 60_000) return null;
+  return `pressed ${new Date(p).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
 }
 
 function when(iso: string): string {

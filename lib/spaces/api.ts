@@ -49,6 +49,8 @@ export interface Incident {
   status: 'open' | 'ack' | 'resolved';
   createdAt: string;
   resolvedAt: string | null;
+  /** When an SOS was pressed (server migration 146); absent on older servers. */
+  pressedAt?: string | null;
 }
 
 export interface VisitorPass {
