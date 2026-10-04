@@ -7,7 +7,10 @@
 // files, the same key, sealed in chunks so they stream from disk to disk, and
 // (v4) bound to their file id. Pure-JS
 // @noble primitives so it works under Hermes (unlike crypto.subtle);
-// Node-testable (vaultCrypto.selftest.ts).
+// Node-testable (vaultCrypto.selftest.ts). The v3/v4 chunk cipher uses native
+// AES-256-GCM (react-native-quick-crypto → OpenSSL) when it is present and
+// passes a known-answer check against @noble; the bytes are identical either
+// way (vaultCryptoNative.selftest.ts).
 
 import 'react-native-get-random-values';
 import { gcm } from '@noble/ciphers/aes.js';
@@ -147,27 +150,50 @@ export function newVaultKeys(pin: string): VaultKeys {
   return { dek: randomBytes(32), legacy: keyFromPin(pin) };
 }
 
-export function sealVaultKeys(pin: string, keys: VaultKeys): VaultKeyRecord {
-  const salt = randomBytes(16);
+function wrapVaultKeys(wrapKey: Uint8Array, salt: Uint8Array, keys: VaultKeys): VaultKeyRecord {
   const iv = randomBytes(12);
   const body = new Uint8Array(64);
   body.set(keys.dek, 0);
   body.set(keys.legacy, 32);
-  const ct = gcm(pbkdf2Bytes(pin, salt, WRAP_ITERATIONS), iv).encrypt(body);
+  const ct = gcm(wrapKey, iv).encrypt(body);
   return { v: 2, salt: b64(salt), iv: b64(iv), ct: b64(ct) };
 }
 
-/** The keys in `rec`, or null when `pin` is not the PIN it was sealed under. */
-export function openVaultKeys(pin: string, rec: VaultKeyRecord | null | undefined): VaultKeys | null {
-  if (!rec || rec.v !== 2 || !rec.salt || !rec.iv || !rec.ct) return null;
+export function sealVaultKeys(pin: string, keys: VaultKeys): VaultKeyRecord {
+  const salt = randomBytes(16);
+  return wrapVaultKeys(pbkdf2Bytes(pin, salt, WRAP_ITERATIONS), salt, keys);
+}
+
+/** sealVaultKeys with the PIN derivation off the JS thread (lib/vaultKeyStore uses this). */
+export async function sealVaultKeysAsync(pin: string, keys: VaultKeys): Promise<VaultKeyRecord> {
+  const salt = randomBytes(16);
+  return wrapVaultKeys(await pbkdf2BytesAsync(pin, salt, WRAP_ITERATIONS), salt, keys);
+}
+
+const isRecord = (rec: VaultKeyRecord | null | undefined): rec is VaultKeyRecord =>
+  !!rec && rec.v === 2 && !!rec.salt && !!rec.iv && !!rec.ct;
+
+function unwrapVaultKeys(wrapKey: Uint8Array, rec: VaultKeyRecord): VaultKeys | null {
   try {
-    const key = pbkdf2Bytes(pin, unb64(rec.salt), WRAP_ITERATIONS);
-    const body = gcm(key, unb64(rec.iv)).decrypt(unb64(rec.ct));
+    const body = gcm(wrapKey, unb64(rec.iv)).decrypt(unb64(rec.ct));
     if (body.length !== 64) return null;
     return { dek: body.slice(0, 32), legacy: body.slice(32, 64) };
   } catch {
     return null;   // GCM tag mismatch: wrong PIN (or a damaged record)
   }
+}
+
+/** The keys in `rec`, or null when `pin` is not the PIN it was sealed under. */
+export function openVaultKeys(pin: string, rec: VaultKeyRecord | null | undefined): VaultKeys | null {
+  if (!isRecord(rec)) return null;
+  try { return unwrapVaultKeys(pbkdf2Bytes(pin, unb64(rec.salt), WRAP_ITERATIONS), rec); } catch { return null; }
+}
+
+/** openVaultKeys with the PIN derivation off the JS thread: an unlock runs one
+ *  per archived key, which held the UI on the JS fallback (lib/vaultKeyStore uses this). */
+export async function openVaultKeysAsync(pin: string, rec: VaultKeyRecord | null | undefined): Promise<VaultKeys | null> {
+  if (!isRecord(rec)) return null;
+  try { return unwrapVaultKeys(await pbkdf2BytesAsync(pin, unb64(rec.salt), WRAP_ITERATIONS), rec); } catch { return null; }
 }
 
 /** v2 under the DEK. Without keys (the record could not be opened) this FAILS:
@@ -275,6 +301,107 @@ function v3Aad(header: Uint8Array, fileId: string): Uint8Array {
   return aad;
 }
 
+// ─── The chunk cipher: native AES-256-GCM when present, @noble otherwise ─────
+//
+// @noble's AES-GCM is pure JS on the JS thread: a large video took long enough
+// to seal or open that the UI stalled between chunks. OpenSSL (through
+// react-native-quick-crypto's createCipheriv) does the same AES-256-GCM —
+// same 12-byte IV, same AAD, 16-byte tag appended — so a file sealed by one
+// opens with the other and the format does not change. The native path is
+// used only after it reproduces @noble's output on a fixed vector (a build
+// whose native module is missing or misbehaves keeps using @noble).
+
+/** Seals or opens one chunk: `seal` returns ct ‖ tag(16); `open` throws on a bad tag. */
+export interface ChunkCipher {
+  name: 'native' | 'js';
+  seal(key: Uint8Array, iv: Uint8Array, aad: Uint8Array, pt: Uint8Array): Uint8Array;
+  open(key: Uint8Array, iv: Uint8Array, aad: Uint8Array, ctTag: Uint8Array): Uint8Array;
+}
+
+export const jsChunkCipher: ChunkCipher = {
+  name: 'js',
+  seal: (key, iv, aad, pt) => gcm(key, iv, aad).encrypt(pt),
+  open: (key, iv, aad, ct) => gcm(key, iv, aad).decrypt(ct),
+};
+
+/** The subset of Node's crypto API (react-native-quick-crypto mirrors it) used here. */
+interface GcmLib {
+  createCipheriv(alg: string, key: Uint8Array, iv: Uint8Array): {
+    setAAD(b: Uint8Array): unknown; update(b: Uint8Array): Uint8Array; final(): Uint8Array; getAuthTag(): Uint8Array;
+  };
+  createDecipheriv(alg: string, key: Uint8Array, iv: Uint8Array): {
+    setAAD(b: Uint8Array): unknown; setAuthTag(b: Uint8Array): unknown; update(b: Uint8Array): Uint8Array; final(): Uint8Array;
+  };
+}
+
+// quick-crypto's setAAD hands `buffer.buffer` (the WHOLE backing store) to
+// native, so the AAD must sit in a buffer of exactly its own length.
+const exactBuffer = (b: Uint8Array) => { const c = new Uint8Array(b.length); c.set(b); return Buffer.from(c.buffer); };
+const join = (...parts: Uint8Array[]) => {
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let o = 0;
+  for (const p of parts) { out.set(p, o); o += p.length; }
+  return out;
+};
+const EMPTY = new Uint8Array(0);
+
+/** A ChunkCipher over a Node-style crypto library (quick-crypto on a phone, node:crypto in tests). */
+export function nodeStyleChunkCipher(lib: GcmLib): ChunkCipher {
+  return {
+    name: 'native',
+    seal(key, iv, aad, pt) {
+      const c = lib.createCipheriv('aes-256-gcm', key, iv);
+      c.setAAD(exactBuffer(aad));
+      const body = pt.length ? c.update(pt) : EMPTY;
+      return join(body, c.final(), c.getAuthTag());
+    },
+    open(key, iv, aad, ct) {
+      if (ct.length < V3_TAG) throw new Error('chunk too short');
+      const d = lib.createDecipheriv('aes-256-gcm', key, iv);
+      d.setAAD(exactBuffer(aad));
+      d.setAuthTag(ct.slice(ct.length - V3_TAG));
+      const body = ct.length > V3_TAG ? d.update(ct.subarray(0, ct.length - V3_TAG)) : EMPTY;
+      return join(body, d.final());   // final() throws when the tag does not match
+    },
+  };
+}
+
+/** `candidate` if it matches @noble on a fixed vector (both ways, a wrong tag
+ *  rejected), else null. Any throw — a missing native module — is a no. */
+export function verifiedChunkCipher(candidate: ChunkCipher): ChunkCipher | null {
+  try {
+    const key = new Uint8Array(32).map((_, i) => i * 7 + 1);
+    const iv = new Uint8Array(12).map((_, i) => 0xa0 + i);
+    const aad = join(V4_MAGIC, iv.subarray(0, 8), new TextEncoder().encode('kat-file-id'));
+    for (const len of [0, 1, 33]) {
+      const pt = new Uint8Array(len).map((_, i) => (i * 31 + 5) & 0xff);
+      const want = jsChunkCipher.seal(key, iv, aad, pt);
+      const got = candidate.seal(key, iv, aad, pt);
+      if (got.length !== want.length || got.some((x, i) => x !== want[i])) return null;
+      const back = candidate.open(key, iv, aad, want);
+      if (back.length !== len || back.some((x, i) => x !== pt[i])) return null;
+      const bad = want.slice(); bad[bad.length - 1] ^= 1;
+      let rejected = false;
+      try { candidate.open(key, iv, aad, bad); } catch { rejected = true; }
+      if (!rejected) return null;
+    }
+    return candidate;
+  } catch {
+    return null;
+  }
+}
+
+let chosenCipher: ChunkCipher | null = null;
+/** The chunk cipher this build uses: native when verified, else @noble (decided once). */
+export function chunkCipher(): ChunkCipher {
+  if (!chosenCipher) {
+    const native = typeof QC?.createCipheriv === 'function' && typeof QC?.createDecipheriv === 'function'
+      ? verifiedChunkCipher(nodeStyleChunkCipher(QC as GcmLib)) : null;
+    chosenCipher = native ?? jsChunkCipher;
+  }
+  return chosenCipher;
+}
+
 /** Thrown when the caller cancelled a seal or open (no partial output is kept). */
 export class VaultCancelledError extends Error {
   constructor() { super('Cancelled.'); this.name = 'VaultCancelledError'; }
@@ -282,9 +409,11 @@ export class VaultCancelledError extends Error {
 
 type ReadFn = (n: number) => Uint8Array | Promise<Uint8Array>;
 type WriteFn = (b: Uint8Array) => void | Promise<void>;
-/** `onProgress(done, total)` after each chunk; `cancelled()` is checked before each one. */
-export interface V3StreamOptions { onProgress?: (done: number, total: number) => void; cancelled?: () => boolean }
-// Lets the UI breathe between chunks (the cipher is pure JS on the JS thread).
+/** `onProgress(done, total)` after each chunk; `cancelled()` is checked before each one.
+ *  `cipher` overrides chunkCipher() (the speed test and the selftests compare the two). */
+export interface V3StreamOptions { onProgress?: (done: number, total: number) => void; cancelled?: () => boolean; cipher?: ChunkCipher }
+// Lets the UI breathe between chunks (both ciphers run on the JS thread; the
+// native one is just much faster).
 const yieldToUi = () => new Promise<void>((r) => setTimeout(r, 0));
 
 /**
@@ -300,6 +429,7 @@ export async function v3SealStream(
   header.set(V4_MAGIC, 0);
   header.set(randomBytes(8), 4);
   const aad = v3Aad(header, fileId);
+  const cipher = opts.cipher ?? chunkCipher();
   await write(header);
   const n = v3ChunkCount(plainSize);
   for (let i = 0; i < n; i++) {
@@ -308,7 +438,7 @@ export async function v3SealStream(
     const want = last ? plainSize - i * V3_CHUNK : V3_CHUNK;
     const pt = await read(want);
     if (pt.length !== want) throw new Error('The file changed while it was being added. Try again.');
-    await write(gcm(dek, v3Iv(header, i, last), aad).encrypt(pt));
+    await write(cipher.seal(dek, v3Iv(header, i, last), aad, pt));
     opts.onProgress?.(i + 1, n);
     if (!last) await yieldToUi();
   }
@@ -329,6 +459,7 @@ export async function v3OpenStream(
   if (header.length !== V3_HEADER_BYTES || !isV3(header)) throw new Error('Not a vault file');
   const aad = v3Aad(header, fileId);
   const n = v3ChunkCount(plainSize);
+  const cipher = opts.cipher ?? chunkCipher();
   let dek: Uint8Array | null = null;
   for (let i = 0; i < n; i++) {
     if (opts.cancelled?.()) throw new VaultCancelledError();
@@ -339,7 +470,7 @@ export async function v3OpenStream(
     const iv = v3Iv(header, i, last);
     let pt: Uint8Array | null = null;
     for (const k of dek ? [dek] : deks) {
-      try { pt = gcm(k, iv, aad).decrypt(ct); dek = k; break; } catch { /* next key */ }
+      try { pt = cipher.open(k, iv, aad, ct); dek = k; break; } catch { /* next key */ }
     }
     if (!pt) {
       throw new Error(i === 0

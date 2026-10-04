@@ -33,6 +33,7 @@ import {
   type SessionRow,
 } from '../lib/chatService';
 import { AppText as Text, AuroraBackground } from '../components/ui';
+import { userErrorText } from '../lib/userErrorText';
 
 const CACHE_KEY = 'sessions';
 
@@ -62,10 +63,10 @@ export default function LoginHistoryScreen() {
       setRows(list);
       setError(null);
       writeCache(CACHE_KEY, list);
-    } catch (e: any) {
+    } catch (e: unknown) {
       // Cached rows stay on screen, and the notice above them says they are
       // the saved list (a cold-load failure has no list and says so instead).
-      if (mounted.current) setError(e?.message ?? 'Failed to load sessions');
+      if (mounted.current) setError(userErrorText(e, 'Failed to load sessions'));
     }
   }, []);
 

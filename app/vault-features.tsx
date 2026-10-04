@@ -5,7 +5,8 @@
 // 2. Auto Screen Lock — how long the app may be in the background before it
 //    asks for biometrics / MPIN again (components/ResumeLock reads it; applies
 //    when Device MFA is on or a Device PIN is set — lib/resumeLockPolicy)
-// 3. Links to the real notification-privacy controls and the Vault
+// 3. Links to the real notification-privacy controls and the Vault, with a
+//    "Test encryption speed" readout (components/vault/CipherSpeedTest)
 //
 // REMOVED 2026-10-04, because nothing read them: a "default disappearing timer"
 // saved only here (the real one is Settings → Default message timer, which the
@@ -33,6 +34,8 @@ import { HEADER_TOP } from '../constants/layout';
 import { isMfaEnabled } from '../lib/mfa';
 import { hasPIN } from './(constants)/authService';
 import { DEFAULT_LOCK_TIMER, LOCK_SETTINGS_KEY, lockAppliesTo, parseLockTimer, type LockTimer } from '../lib/resumeLockPolicy';
+import { userErrorText } from '../lib/userErrorText';
+import { CipherSpeedTest } from '../components/vault/CipherSpeedTest';
 
 // ─────────────────────────────────────────────────────────────────
 // Types
@@ -208,8 +211,8 @@ export default function VaultFeaturesScreen() {
       // does not make the code any less valid.
       await SecureStore.setItemAsync(CODE_KEY, code).catch(() => {});
       await SecureStore.setItemAsync(CODE_EXPIRY_KEY, expiryStr).catch(() => {});
-    } catch (e: any) {
-      Alert.alert('Could not create a code', e?.message ?? 'Try again.');
+    } catch (e: unknown) {
+      Alert.alert('Could not create a code', userErrorText(e, 'Try again.'));
     } finally {
       setGeneratingCode(false);
     }
@@ -260,8 +263,8 @@ export default function VaultFeaturesScreen() {
           setRevoking(true);
           try {
             await createSyncCode();
-          } catch (e: any) {
-            Alert.alert('Not revoked', `The code is still valid. ${e?.message ?? 'Try again.'}`);
+          } catch (e: unknown) {
+            Alert.alert('Not revoked', `The code is still valid. ${userErrorText(e, 'Try again.')}`);
             return;
           } finally {
             setRevoking(false);
@@ -385,6 +388,10 @@ export default function VaultFeaturesScreen() {
           <Text style={styles.toggleSectionLabel} accessibilityRole="header">VAULT</Text>
           <LinkRow icon="lock-closed-outline" title="Vault" desc="Encrypted files, stored on this phone only"
             onPress={() => router.push('/vault')} styles={styles} c={c} />
+          <Text style={[styles.sectionDesc, { marginTop: 6, marginBottom: 10 }]}>
+            How fast this phone encrypts vault files (large videos take longer on a slower one).
+          </Text>
+          <CipherSpeedTest />
         </View>
 
         <View style={{ height: 40 }} />

@@ -16,8 +16,11 @@ import {
   type StatusPrivacyMode,
 } from '../lib/chatService';
 import { modeSwitchClearsList, privacyUserIds, selectionAfterModeSwitch } from '../lib/statusPrivacySelection';
+import { api } from '../lib/api';
+import { parseAudienceBase, pickerPeople, type AudiencePerson } from '../lib/statusAudienceBase';
+import { userErrorText } from '../lib/userErrorText';
 
-type Contact = { id: string; name: string; photoURL: string | null };
+type Contact = AudiencePerson;
 const MODES: { key: StatusPrivacyMode; label: string; sub: string }[] = [
   { key: 'contacts', label: 'My contacts', sub: 'Everyone you share a chat with' },
   { key: 'except', label: 'My contacts except…', sub: 'Hide your status from some people' },
@@ -45,6 +48,10 @@ export default function StatusPrivacyScreen() {
   // still loads and stays editable; the list says it could not load.
   const [contactsError, setContactsError] = useState<string | null>(null);
   const [contactsTick, setContactsTick] = useState(0);
+  // True once the server listed everyone the status reaches, groups included
+  // (lib/statusAudienceBase); false on today's server, which lists only what
+  // the direct chats give.
+  const [fullList, setFullList] = useState(false);
   const mounted = useRef(true);
   useEffect(() => () => { mounted.current = false; }, []);
   // What the server last accepted, and the newest state waiting to be saved.
@@ -62,7 +69,7 @@ export default function StatusPrivacyScreen() {
         setMode(priv.mode); setSelected(new Set(priv.userIds));
         saved.current = { mode: priv.mode, ids: new Set(priv.userIds) };
       })
-      .catch((e: any) => { if (!cancel) setLoadError(e?.message ?? 'Could not load status privacy'); })
+      .catch((e: unknown) => { if (!cancel) setLoadError(userErrorText(e, 'Try again.')); })
       .finally(() => { if (!cancel) setLoading(false); });
     return () => { cancel = true; };
   }, [loadTick]);
@@ -70,20 +77,22 @@ export default function StatusPrivacyScreen() {
   useEffect(() => {
     let cancel = false;
     setContactsError(null);
-    listChats()
-      .then((chats) => {
+    // The server's own list (?base=1) is optional: any failure, or today's
+    // server that does not send it, keeps the direct-chat list.
+    const base = api<unknown>('/stories/audience?base=1').then(parseAudienceBase, () => null);
+    Promise.all([listChats(), base])
+      .then(([chats, people]) => {
         if (cancel) return;
-        const seen = new Set<string>();
         const c: Contact[] = [];
         for (const ch of chats) {
-          if (ch.type === 'direct' && ch.peerUserId && !seen.has(ch.peerUserId)) {
-            seen.add(ch.peerUserId);
+          if (ch.type === 'direct' && ch.peerUserId) {
             c.push({ id: ch.peerUserId, name: ch.peerName || 'crazzychat user', photoURL: ch.peerPhotoURL ?? null });
           }
         }
-        setContacts(c);
+        setContacts(pickerPeople(people, c));
+        setFullList(people !== null);
       })
-      .catch((e: any) => { if (!cancel) setContactsError(e?.message ?? 'Could not load your contacts'); });
+      .catch((e: unknown) => { if (!cancel) setContactsError(userErrorText(e, 'Try again.')); });
     return () => { cancel = true; };
   }, [loadTick, contactsTick]);
 
@@ -102,11 +111,11 @@ export default function StatusPrivacyScreen() {
         try {
           await setStatusPrivacy(w.mode, privacyUserIds(w.mode, w.ids));
           saved.current = w;
-        } catch (e: any) {
+        } catch (e: unknown) {
           wanted.current = null;
           if (mounted.current) {
             setMode(saved.current.mode); setSelected(new Set(saved.current.ids));
-            Alert.alert('Could not save', e?.message ?? 'Try again');
+            Alert.alert('Could not save', userErrorText(e, 'Try again.'));
           }
         }
       }
@@ -193,9 +202,10 @@ export default function StatusPrivacyScreen() {
                 </TouchableOpacity>
               ))}
               {/* The server's "contacts" is everyone sharing an active chat, groups
-                  included (backend stories.go audienceIDs); this list only has
-                  direct-chat peers, so say what that means for the rest. */}
-              {mode !== 'contacts' && (
+                  included (backend stories.go audienceIDs). Until the server sends
+                  that list (?base=1), this one only has direct-chat peers, so say
+                  what that means for the rest. */}
+              {mode !== 'contacts' && !fullList && (
                 <Text style={S.listNote}>
                   Only people you have a direct chat with are listed. People you share only a group with
                   {mode === 'except' ? ' cannot be excluded here and still see your status.' : ' cannot be picked here, so they do not see it.'}
@@ -222,7 +232,7 @@ export default function StatusPrivacyScreen() {
             </View>
           ) : (
             <Text style={[S.modeSub, { marginHorizontal: 16, marginTop: 8 }]}>
-              No contacts yet. People you have a direct chat with appear here.
+              {fullList ? 'No contacts yet. People you share a chat with appear here.' : 'No contacts yet. People you have a direct chat with appear here.'}
             </Text>
           )}
           renderItem={({ item }) => {

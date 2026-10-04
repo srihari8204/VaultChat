@@ -15,6 +15,9 @@ import {
 } from '../../lib/notesVault';
 import { useNotesStyles } from './notesStyles';
 
+// The notes vault throws user copy (lib/notesVault); anything else gets the generic line.
+const errMsg = (e: unknown) => (e instanceof Error && e.message ? e.message : 'Try again');
+
 export function NotesBackupModal({ visible, onClose, loadFailed, withSystemUi, onKeyRestored }: {
   visible: boolean;
   onClose: () => void;
@@ -56,8 +59,8 @@ export function NotesBackupModal({ visible, onClose, loadFailed, withSystemUi, o
         'Backup passphrase set',
         'Your notes key is now included in backups, sealed with this passphrase.\n\nWrite it down. It is never stored and never sent — if you forget it, nobody can recover these notes, including us.',
       );
-    } catch (e: any) {
-      Alert.alert('Could not set passphrase', e?.message ?? 'Try again');
+    } catch (e: unknown) {
+      Alert.alert('Could not set passphrase', errMsg(e));
     } finally { setBkBusy(false); }
   };
 
@@ -85,8 +88,8 @@ export function NotesBackupModal({ visible, onClose, loadFailed, withSystemUi, o
         await FileSystem.deleteAsync(path, { idempotent: true }).catch(() => {});
       }
       setBkPass(''); setBkPass2('');
-    } catch (e: any) {
-      Alert.alert('Export failed', e?.message ?? 'Try again');
+    } catch (e: unknown) {
+      Alert.alert('Export failed', errMsg(e));
     } finally { setBkBusy(false); }
   };
 
@@ -112,7 +115,7 @@ export function NotesBackupModal({ visible, onClose, loadFailed, withSystemUi, o
               try {
                 const f = await restoreBundle(bkPass, JSON.parse(raw), true);
                 if (f.status === 'ok') { await onKeyRestored(); onClose(); Alert.alert('Restored', `Notes and ${f.attachments} attachment(s) restored.`); }
-              } catch (e: any) { Alert.alert('Restore failed', e?.message ?? 'Try again'); }
+              } catch (e: unknown) { Alert.alert('Restore failed', errMsg(e)); }
             }},
           ],
         );
@@ -121,8 +124,8 @@ export function NotesBackupModal({ visible, onClose, loadFailed, withSystemUi, o
       await onKeyRestored();
       onClose(); setBkPass('');
       Alert.alert('Restored', `Notes and ${r.attachments} attachment(s) restored.`);
-    } catch (e: any) {
-      Alert.alert('Restore failed', e?.message ?? 'Try again');
+    } catch (e: unknown) {
+      Alert.alert('Restore failed', errMsg(e));
     } finally { setBkBusy(false); }
   };
 
@@ -147,7 +150,7 @@ export function NotesBackupModal({ visible, onClose, loadFailed, withSystemUi, o
                 await restoreKeyFromWrap(bkPass, true);
                 await onKeyRestored(); onClose();
                 Alert.alert('Key recovered', 'Your notes should be readable again.');
-              } catch (e: any) { Alert.alert('Could not recover', e?.message ?? 'Try again'); }
+              } catch (e: unknown) { Alert.alert('Could not recover', errMsg(e)); }
             }},
           ],
         );
@@ -156,8 +159,8 @@ export function NotesBackupModal({ visible, onClose, loadFailed, withSystemUi, o
       await onKeyRestored();
       onClose(); setBkPass('');
       Alert.alert('Key recovered', 'Your notes should be readable again.');
-    } catch (e: any) {
-      Alert.alert('Could not recover', e?.message ?? 'Try again');
+    } catch (e: unknown) {
+      Alert.alert('Could not recover', errMsg(e));
     } finally { setBkBusy(false); }
   };
 
@@ -169,8 +172,8 @@ export function NotesBackupModal({ visible, onClose, loadFailed, withSystemUi, o
     try {
       if (!(await checkPassphrase(bkPass))) { Alert.alert('Wrong passphrase', 'That is not your current backup passphrase.'); return; }
       setBkHasPass(false); setBkPass(''); setBkPass2('');
-    } catch (e: any) {
-      Alert.alert('Could not check passphrase', e?.message ?? 'Try again');
+    } catch (e: unknown) {
+      Alert.alert('Could not check passphrase', errMsg(e));
     } finally { setBkBusy(false); }
   };
 

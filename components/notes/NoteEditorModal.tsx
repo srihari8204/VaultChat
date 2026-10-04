@@ -12,6 +12,7 @@ import { useDatePicker } from '../ui/useDatePicker';
 import { useTheme } from '../../lib/theme';
 import { isImage, prettySize, type NoteAttachment } from '../../lib/notesAttachments';
 import { CATEGORIES, TAG_COLORS } from './notesModel';
+import { noteHueInk } from './noteHueInk';
 import { mdStyles, useNotesStyles } from './notesStyles';
 import type { NoteEditor } from './useNoteEditor';
 
@@ -30,7 +31,7 @@ export function NoteEditorModal({
   onOpenAttachment: (att: NoteAttachment) => void;
   onCopy: (text: string) => void;
 }) {
-  const { colors } = useTheme();
+  const { colors, scheme } = useTheme();
   const s = useNotesStyles();
   const f = ed.fields;
   // inModal: on iOS the sheet is drawn inline over this Modal instead of as a
@@ -85,7 +86,7 @@ export function NoteEditorModal({
             <TouchableOpacity key={cat.key} hitSlop={4} style={[s.edCatChip, f.category === cat.key && { backgroundColor: cat.color + '20', borderColor: cat.color }]} onPress={() => ed.setCategory(cat.key)}
               accessibilityRole="radio" accessibilityLabel={`Category ${cat.name}`} accessibilityState={{ checked: f.category === cat.key, selected: f.category === cat.key }}>
               <Text style={{ fontSize: 14 }} importantForAccessibility="no" accessibilityElementsHidden>{cat.icon}</Text>
-              <Text numberOfLines={1} style={[s.edCatTxt, f.category === cat.key && { color: cat.color }]}>{cat.name}</Text>
+              <Text numberOfLines={1} style={[s.edCatTxt, f.category === cat.key && { color: noteHueInk(cat.color, scheme) }]}>{cat.name}</Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
@@ -171,7 +172,7 @@ export function NoteEditorModal({
             {f.tags.map((t, i) => (
               <TouchableOpacity key={`${t}-${i}`} hitSlop={6} style={[s.tag, s.tagChip, { backgroundColor: f.tagColor + '20' }]} onPress={() => ed.setTags(f.tags.filter((_, j) => j !== i))}
                 accessibilityRole="button" accessibilityLabel={`Remove tag ${t}`}>
-                <Text style={[s.tagTxt, { color: f.tagColor }]}>{t} {'\u2715'}</Text>
+                <Text style={[s.tagTxt, { color: noteHueInk(f.tagColor, scheme) }]}>{t} {'\u2715'}</Text>
               </TouchableOpacity>
             ))}
           </View>

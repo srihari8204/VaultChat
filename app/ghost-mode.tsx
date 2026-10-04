@@ -44,6 +44,7 @@ import {
   type GhostMode,
 } from '../lib/chatService';
 import { AppText as Text, AuroraBackground } from '../components/ui';
+import { userErrorText } from '../lib/userErrorText';
 
 function useS() {
   const { colors } = useTheme();
@@ -80,10 +81,10 @@ function ListView() {
       if (seq !== loadSeq.current) return;
       setRows(list);
       writeCache('ghost-mode', list);
-    } catch (e: any) {
+    } catch (e: unknown) {
       // Keep painted rows for offline read; a failure with nothing to show is
       // an error, not "No overrides set".
-      if (seq === loadSeq.current) setError(e?.message ?? 'Could not load Ghost Mode');
+      if (seq === loadSeq.current) setError(userErrorText(e, 'Could not load Ghost Mode'));
     }
   }, []);
   useFocusEffect(useCallback(() => {
@@ -230,8 +231,8 @@ function PerTargetEditor({ targetId, targetName }: { targetId: string; targetNam
         const g = await getGhostMode(targetId);
         if (!cancel) setState(g);
         writeCache('ghost-mode:' + targetId, g);
-      } catch (e: any) {
-        const msg = e?.message ?? 'Could not load Ghost Mode';
+      } catch (e: unknown) {
+        const msg = userErrorText(e, 'Could not load Ghost Mode');
         if (!cancel) { if (cached) setStale(msg); else setError(msg); }
       } finally {
         if (!cancel) setLoading(false);
@@ -247,9 +248,9 @@ function PerTargetEditor({ targetId, targetName }: { targetId: string; targetNam
     setSaving(key);
     try {
       await setGhostMode(targetId, { [key]: next[key] });
-    } catch (e: any) {
+    } catch (e: unknown) {
       setState(state); // rollback
-      Alert.alert('Save failed', e?.message ?? 'Try again');
+      Alert.alert('Save failed', userErrorText(e, 'Try again.'));
     } finally {
       setSaving(null);
     }
@@ -267,9 +268,9 @@ function PerTargetEditor({ targetId, targetName }: { targetId: string; targetNam
             try {
               await clearGhostMode(targetId);
               router.back();
-            } catch (e: any) {
+            } catch (e: unknown) {
               setClearing(false);
-              Alert.alert('Failed', e?.message ?? 'Try again');
+              Alert.alert('Failed', userErrorText(e, 'Try again.'));
             }
           }
         },

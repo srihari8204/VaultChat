@@ -44,6 +44,7 @@ import {
   emptyFields, fieldsOf, openDraft, pinCheckError, sealDraft, snapshotOf,
   type Draft, type EditorFields, type Note,
 } from '../components/notes/notesModel';
+import { noteHueInk } from '../components/notes/noteHueInk';
 import { useNotesStyles } from '../components/notes/notesStyles';
 import { useNoteEditor } from '../components/notes/useNoteEditor';
 import { useNoteAttachments } from '../components/notes/useNoteAttachments';
@@ -54,7 +55,7 @@ import {
 } from '../components/notes/NotesModals';
 
 export default function EncryptedNotesScreen() {
-  const { colors } = useTheme();
+  const { colors, scheme } = useTheme();
   const s = useNotesStyles();
   const router = useRouter();
   const [notes, setNotes] = useState<Note[]>([]);
@@ -567,8 +568,8 @@ export default function EncryptedNotesScreen() {
           <TouchableOpacity key={cat.key} hitSlop={4} style={[s.catChip, activeCategory === cat.key && { backgroundColor: cat.color + '20', borderColor: cat.color }]} onPress={() => setActiveCategory(activeCategory === cat.key ? null : cat.key)}
             accessibilityRole="button" accessibilityLabel={`${cat.name}, ${catCounts[cat.key] ?? 0}`} accessibilityState={{ selected: activeCategory === cat.key }}>
             <Text style={s.catIcon} importantForAccessibility="no" accessibilityElementsHidden>{cat.icon}</Text>
-            <Text numberOfLines={1} style={[s.catTxt, activeCategory === cat.key && { color: cat.color }]}>{cat.name}</Text>
-            {(catCounts[cat.key] ?? 0) > 0 && <Text style={[s.catCount, { color: cat.color }]}>{catCounts[cat.key]}</Text>}
+            <Text numberOfLines={1} style={[s.catTxt, activeCategory === cat.key && { color: noteHueInk(cat.color, scheme) }]}>{cat.name}</Text>
+            {(catCounts[cat.key] ?? 0) > 0 && <Text style={[s.catCount, { color: noteHueInk(cat.color, scheme) }]}>{catCounts[cat.key]}</Text>}
           </TouchableOpacity>
         ))}
       </ScrollView>
@@ -612,7 +613,7 @@ export default function EncryptedNotesScreen() {
                   <View style={s.tagRow}>
                     {n.tags.slice(0, 3).map((t, i) => (
                       <View key={`${t}-${i}`} style={[s.tag, { backgroundColor: tagColor + '20' }]}>
-                        <Text style={[s.tagTxt, { color: tagColor }]}>{t}</Text>
+                        <Text style={[s.tagTxt, { color: noteHueInk(tagColor, scheme) }]}>{t}</Text>
                       </View>
                     ))}
                   </View>

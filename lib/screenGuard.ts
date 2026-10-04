@@ -161,9 +161,10 @@ async function applySecure(enabled: boolean): Promise<boolean> {
  *
  * ponytail: this is the flag as last applied — by setSecure, or reported via
  * noteWindowSecure by the VaultCalls.setWindowSecure paths (lib/call/engine.ts,
- * lib/golive/native.ts) — not a read of the window itself. Replace with a
- * native read of the window flag (a VaultViewGuard.isSecure method) once one
- * ships.
+ * lib/golive/native.ts) — not a read of the window itself. The async
+ * readSecureStateSettled reads the window through VaultViewGuard.isSecure when
+ * a build has that method (plugins/android/VaultViewModule.kt; not there yet),
+ * and falls back to this.
  */
 export function readSecureState(): boolean | 'unknown' {
   if (__DEV__ || Platform.OS !== 'android') return false;
@@ -172,9 +173,18 @@ export function readSecureState(): boolean | 'unknown' {
 
 /** readSecureState, after any setSecure call still running has settled — so a
  *  screen that loads while the root layout is applying the flag does not read
- *  'unknown' just because the call had not finished. */
+ *  'unknown' just because the call had not finished. When the native module
+ *  can read the window's FLAG_SECURE itself (VaultViewGuard.isSecure), that
+ *  read wins; a build without it, or a read that fails, uses the last applied
+ *  value. */
 export async function readSecureStateSettled(): Promise<boolean | 'unknown'> {
   if (inFlight) await inFlight.catch(() => false);
+  if (!__DEV__ && Platform.OS === 'android' && typeof Native?.isSecure === 'function') {
+    try {
+      const v: unknown = await Native.isSecure();
+      if (typeof v === 'boolean') return v;
+    } catch { /* fall back to the last applied value */ }
+  }
   return readSecureState();
 }
 

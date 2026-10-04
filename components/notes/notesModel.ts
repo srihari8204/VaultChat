@@ -1,30 +1,29 @@
 // components/notes/notesModel.ts — the data model behind app/encrypted-notes.tsx
 // (moved out of the screen file in the round-4 split; behaviour unchanged).
 
-import { BRAND_ACCENT } from '../../constants/theme';
+import { DEFAULT_NOTE_TAG_COLOR, NOTE_CATEGORY_HUE, NOTE_TAG_COLORS } from '../../constants/notesPalette';
 import { encryptBytesToString, openSealedBytesStrict } from '../../lib/notesCrypto';
 import type { NoteAttachment } from '../../lib/notesAttachments';
 
-// Category and tag colours are NOT theme colours, so they are not tokens: a
-// note stores its tag colour as this hex string (`tagColor`), and each category
-// keeps one identity hue in both themes. They only ever tint a chip (at 20%
-// alpha) or colour short label text, never body text on a fill.
+// Category and tag colours are fixed, documented in constants/notesPalette
+// (a note stores its tag colour as one of those hex strings). Label text in a
+// hue goes through components/notes/noteHueInk, never the raw hue.
 // 9 Categories from PDF
 export const CATEGORIES = [
-  { key: 'passwords',    icon: '🔑', name: 'Passwords',     color: '#EF4444' },
-  { key: 'ideas',        icon: '💡', name: 'Ideas',         color: '#F59E0B' },
-  { key: 'personal',     icon: '📝', name: 'Personal',      color: '#3B82F6' },
-  { key: 'bank',         icon: '💳', name: 'Bank/Cards',    color: BRAND_ACCENT },
-  { key: 'medical',      icon: '🏥', name: 'Medical',       color: '#EC4899' },
-  { key: 'documents',    icon: '📁', name: 'Documents',     color: '#8B5CF6' },
-  { key: 'recovery',     icon: '🔐', name: 'Recovery Keys', color: BRAND_ACCENT },
-  { key: 'bookmarks',    icon: '🔖', name: 'Bookmarks',     color: '#06B6D4' },
-  { key: 'custom',       icon: '📂', name: 'Custom',        color: '#6B7280' },
+  { key: 'passwords',    icon: '🔑', name: 'Passwords',     color: NOTE_CATEGORY_HUE.passwords },
+  { key: 'ideas',        icon: '💡', name: 'Ideas',         color: NOTE_CATEGORY_HUE.ideas },
+  { key: 'personal',     icon: '📝', name: 'Personal',      color: NOTE_CATEGORY_HUE.personal },
+  { key: 'bank',         icon: '💳', name: 'Bank/Cards',    color: NOTE_CATEGORY_HUE.bank },
+  { key: 'medical',      icon: '🏥', name: 'Medical',       color: NOTE_CATEGORY_HUE.medical },
+  { key: 'documents',    icon: '📁', name: 'Documents',     color: NOTE_CATEGORY_HUE.documents },
+  { key: 'recovery',     icon: '🔐', name: 'Recovery Keys', color: NOTE_CATEGORY_HUE.recovery },
+  { key: 'bookmarks',    icon: '🔖', name: 'Bookmarks',     color: NOTE_CATEGORY_HUE.bookmarks },
+  { key: 'custom',       icon: '📂', name: 'Custom',        color: NOTE_CATEGORY_HUE.custom },
 ];
 
-export const TAG_COLORS = ['#EF4444', '#F59E0B', BRAND_ACCENT, '#3B82F6', '#8B5CF6', '#EC4899', '#06B6D4', '#6B7280'];
+export const TAG_COLORS: readonly string[] = NOTE_TAG_COLORS;
 /** The tag colour of a note that never picked one (stored data, see above). */
-export const DEFAULT_TAG_COLOR = '#3B82F6';
+export const DEFAULT_TAG_COLOR: string = DEFAULT_NOTE_TAG_COLOR;
 
 export interface Note {
   id: string;
@@ -84,7 +83,8 @@ export async function openDraft(raw: string): Promise<Draft | null> {
 /** What to tell the user when the server PIN check throws. A 423 is the
  *  server's attempt limit (written, not yet deployed — fixes/R4BE C1); today
  *  every throw is a network or server failure. */
-export function pinCheckError(e: any): string {
-  if (e?.status === 423) return e?.message || 'Too many attempts. Try again later.';
+export function pinCheckError(e: unknown): string {
+  const x = e as { status?: number; message?: string } | null | undefined;
+  if (x?.status === 423) return x.message || 'Too many attempts. Try again later.';
   return 'Could not verify. Check your connection.';
 }

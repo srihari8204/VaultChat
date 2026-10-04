@@ -35,7 +35,7 @@
 
 import * as SecureStore from 'expo-secure-store';
 import {
-  newVaultKeys, openVaultKeys, sealVaultKeys,
+  newVaultKeys, openVaultKeysAsync, sealVaultKeysAsync,
   type VaultKeyRecord, type VaultKeys,
 } from './vaultCrypto';
 
@@ -112,11 +112,11 @@ async function moveStaged(name: string, next: VaultKeyRecord): Promise<void> {
  *  PIN change staged a copy of it that does, the PIN change got as far as
  *  saving the PIN: finish it, and use the staged copy even if the move fails. */
 async function openOrFinish(name: string, rec: VaultKeyRecord | null | undefined, pin: string): Promise<VaultKeys | null> {
-  const keys = openVaultKeys(pin, rec);
+  const keys = await openVaultKeysAsync(pin, rec);
   if (keys) return keys;
   let next: VaultKeyRecord | null = null;
   try { next = await stagedFor(name, rec); } catch { return null; }
-  const staged = openVaultKeys(pin, next);
+  const staged = await openVaultKeysAsync(pin, next);
   if (staged && next) await moveStaged(name, next).catch(() => { /* the next unlock tries again */ });
   return staged;
 }
@@ -162,7 +162,7 @@ export async function unlockVaultKeys(pin: string, keyedFilesExist: () => Promis
   if (dependent) return { ...base, keys: null, miss: 'lost' };
   const keys = newVaultKeys(pin);
   try {
-    await SecureStore.setItemAsync(KEY, JSON.stringify(sealVaultKeys(pin, keys)));
+    await SecureStore.setItemAsync(KEY, JSON.stringify(await sealVaultKeysAsync(pin, keys)));
   } catch {
     return { ...base, keys: null, miss: 'storage' };
   }
@@ -189,9 +189,9 @@ async function openArchives(pin: string): Promise<{ opened: VaultKeys[]; locked:
 /** Re-seal the record at `name` from `fromPin` to `toPin` when `fromPin` opens
  *  it. Returns whether it did. Throws when SecureStore fails. */
 async function rewrapOne(name: string, fromPin: string, toPin: string): Promise<boolean> {
-  const keys = openVaultKeys(fromPin, await readRecord(name));
+  const keys = await openVaultKeysAsync(fromPin, await readRecord(name));
   if (!keys) return false;
-  await SecureStore.setItemAsync(name, JSON.stringify(sealVaultKeys(toPin, keys)));
+  await SecureStore.setItemAsync(name, JSON.stringify(await sealVaultKeysAsync(toPin, keys)));
   return true;
 }
 
@@ -223,9 +223,9 @@ export async function stageVaultRewrap(oldPin: string, newPin: string): Promise<
     const { names } = await readArchiveIndex();
     for (const name of [KEY, ...names]) {
       const rec = await readRecord(name);
-      const keys = openVaultKeys(oldPin, rec);
+      const keys = await openVaultKeysAsync(oldPin, rec);
       if (!keys || !rec) continue;
-      const s: StagedRecord = { rec: sealVaultKeys(newPin, keys), from: rec.iv };
+      const s: StagedRecord = { rec: await sealVaultKeysAsync(newPin, keys), from: rec.iv };
       staged.push(name);
       await SecureStore.setItemAsync(stagedName(name), JSON.stringify(s));
     }
@@ -309,7 +309,7 @@ export async function tryOldVaultPin(oldPin: string, pin: string, now: number = 
   let recovered = 0;
   const { names } = await readArchiveIndex();
   for (const name of [KEY, ...names]) {
-    if (openVaultKeys(pin, await readRecord(name))) continue;
+    if (await openVaultKeysAsync(pin, await readRecord(name))) continue;
     if (await rewrapOne(name, oldPin, pin)) recovered++;
   }
   if (recovered > 0) await SecureStore.deleteItemAsync(OLD_PIN_TRIES_KEY).catch(() => {});
@@ -345,7 +345,7 @@ export async function replaceVaultKeys(pin: string): Promise<VaultKeys> {
       // Never replace a record this PIN can open.
       let rec: VaultKeyRecord | null = null;
       try { rec = JSON.parse(raw) as VaultKeyRecord; } catch { /* damaged: archive it */ }
-      const current = openVaultKeys(pin, rec);
+      const current = await openVaultKeysAsync(pin, rec);
       if (current) return current;
       const index = await readArchiveIndex();
       let stamp = Date.now();
@@ -362,7 +362,7 @@ export async function replaceVaultKeys(pin: string): Promise<VaultKeys> {
       archived = true;
     }
     const keys = newVaultKeys(pin);
-    await SecureStore.setItemAsync(KEY, JSON.stringify(sealVaultKeys(pin, keys)));
+    await SecureStore.setItemAsync(KEY, JSON.stringify(await sealVaultKeysAsync(pin, keys)));
     return keys;
   } catch (e) {
     if (e instanceof VaultNewKeyError) throw e;

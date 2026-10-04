@@ -21,6 +21,7 @@ import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
 import { getMedia } from '../lib/mediaStore';
 import { verifyMedia, formatReport, type VaultCheckReport } from '../lib/vaultcheck';
+import { userErrorText } from '../lib/userErrorText';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
 // Colours are palette ROLES so they keep contrast in both themes: success,
@@ -92,8 +93,8 @@ export default function VaultCheckScreen() {
         });
         const r = await Promise.race([run, timeout]);
         if (!cancelled) setReport(r);
-      } catch (e: any) {
-        if (!cancelled) setError(e?.message || 'Verification failed');
+      } catch (e: unknown) {
+        if (!cancelled) setError(userErrorText(e, 'Verification failed. Try again.'));
       } finally {
         clearInterval(tick);
         if (timer) clearTimeout(timer);

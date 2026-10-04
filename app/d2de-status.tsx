@@ -2,10 +2,12 @@
 // Encryption status — which encryption layers THIS BUILD uses. It is a readout
 // of compile-time flags (services/d2deService.getD2DEStatus → E2EE_ENABLED), not
 // a live per-conversation check, and the copy says so. With E2EE on, it links
-// to a chosen direct chat's safety number (app/verify-contact).
+// to a chosen direct chat's safety number (app/verify-contact), and the picker
+// shows each contact's live state (verified, not verified, code changed, no
+// E2EE yet), worked out as verify-contact does (lib/peerSafetyStatus).
 
 import { AppText as Text, AuroraBackground } from '../components/ui';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, View, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
@@ -14,6 +16,13 @@ import { Sheet, type SheetAction } from '../components/ui/Sheet';
 import { listChats } from '../lib/chatService';
 import { getD2DEStatus } from '../services/d2deService';
 import { E2EE_ENABLED } from '../constants/flags';
+import { getCachedUser } from '../lib/api';
+import { fetchIdentityKey, getVerifiedContacts, safetyFingerprint, verificationStatus } from '../lib/verification';
+import { checkKeyChange, getVerifiedFingerprint } from '../lib/keyChange';
+import { computeSafetyNumber } from '../services/security/safetyNumber';
+import { forEachLimited, peerSafetyLabel, type PeerSafetyStatus } from '../lib/peerSafetyStatus';
+
+type Peer = { id: string; name: string };
 
 // Keyed by the layer names services/d2deService.ts returns — a key that does
 // not match leaves the card's explanation blank ('Android Keystore' vs
@@ -40,32 +49,82 @@ export default function D2DEStatusScreen() {
   const active = layers.filter(l => l.active).length;
 
   // Pick a direct chat, then compare its safety number (app/verify-contact
-  // needs a peer). Group chats have no single safety number.
-  const [peers, setPeers] = useState<SheetAction[] | null>(null);
+  // needs a peer). Group chats have no single safety number. While the picker
+  // is open, each contact's state fills in beside its name.
+  const [peers, setPeers] = useState<Peer[] | null>(null);
+  const [states, setStates] = useState<Record<string, PeerSafetyStatus>>({});
   const [loadingPeers, setLoadingPeers] = useState(false);
+  // Bumped when the picker closes or the screen goes: the state checks stop.
+  const pickerRun = useRef(0);
+  useEffect(() => () => { pickerRun.current++; }, []);
+  const closePicker = () => { pickerRun.current++; setPeers(null); };
+
+  const checkStates = async (list: Peer[], run: number) => {
+    const live = () => pickerRun.current === run;
+    const put = (id: string, st: PeerSafetyStatus) => { if (live()) setStates((m) => ({ ...m, [id]: st })); };
+    let myId = '';
+    let myKey: string | null = null;
+    let verifiedList: string[] | null = null;
+    try {
+      myId = (await getCachedUser())?.id ?? '';
+      [myKey, verifiedList] = await Promise.all([myId ? fetchIdentityKey(myId) : null, getVerifiedContacts().catch(() => null)]);
+    } catch { /* every row says it could not check */ }
+    if (!myId || !myKey || verifiedList === null) {
+      for (const p of list) put(p.id, 'unknown');
+      return;
+    }
+    const verified = verifiedList;
+    await forEachLimited(list, 3, async (p) => {
+      try {
+        const [peerKey, recorded, change] = await Promise.all([
+          fetchIdentityKey(p.id), getVerifiedFingerprint(p.id).catch(() => null), checkKeyChange(p.id),
+        ]);
+        if (!peerKey) { put(p.id, 'nokey'); return; }
+        const fp = safetyFingerprint(computeSafetyNumber(myId, myKey!, p.id, peerKey));
+        put(p.id, verificationStatus(verified.includes(p.id), recorded, fp, change != null));
+      } catch {
+        put(p.id, 'unknown');
+      }
+    }, () => !live());
+  };
+
   const pickContact = async () => {
     if (loadingPeers) return;
     setLoadingPeers(true);
     try {
       const chats = await listChats();
       const seen = new Set<string>();
-      const actions: SheetAction[] = [];
+      const list: Peer[] = [];
       for (const ch of chats) {
         if (ch.type !== 'direct' || !ch.peerUserId || seen.has(ch.peerUserId)) continue;
         seen.add(ch.peerUserId);
-        const peerId = ch.peerUserId;
-        const name = ch.peerName || 'this contact';
-        actions.push({ label: name, icon: 'person-outline', onPress: () => {
-          setPeers(null);
-          router.push({ pathname: '/verify-contact', params: { peerId, peerName: name } });
-        } });
+        list.push({ id: ch.peerUserId, name: ch.peerName || 'this contact' });
       }
-      if (actions.length) setPeers(actions);
-      else Alert.alert('No direct chats yet', 'A safety number belongs to a one-to-one chat. Start one, then check it here.');
+      if (!list.length) {
+        Alert.alert('No direct chats yet', 'A safety number belongs to a one-to-one chat. Start one, then check it here.');
+        return;
+      }
+      const run = ++pickerRun.current;
+      setStates({});
+      setPeers(list);
+      checkStates(list, run);
     } catch {
       Alert.alert('Could not load your chats', 'Check your connection and try again.');
     } finally { setLoadingPeers(false); }
   };
+
+  const actions: SheetAction[] = (peers ?? []).map((p) => {
+    const st = states[p.id];
+    return {
+      label: st ? `${p.name} · ${peerSafetyLabel(st)}` : `${p.name} · Checking…`,
+      icon: st === 'verified' ? 'shield-checkmark-outline' : st === 'changed' ? 'warning-outline' : 'person-outline',
+      accessibilityLabel: `${p.name}, ${st ? peerSafetyLabel(st) : 'checking'}. Opens the safety number.`,
+      onPress: () => {
+        closePicker();
+        router.push({ pathname: '/verify-contact', params: { peerId: p.id, peerName: p.name } });
+      },
+    };
+  });
 
   return (
     <>
@@ -130,7 +189,7 @@ export default function D2DEStatusScreen() {
         <View style={{ height: 40 }} />
       </ScrollView>
       {/* A sibling of the ScrollView: a Modal is never scroll content. */}
-      <Sheet visible={!!peers} title="Whose safety number?" actions={peers ?? []} onClose={() => setPeers(null)} />
+      <Sheet visible={!!peers} title="Whose safety number?" actions={actions} onClose={closePicker} />
       </View>
     </>
   );
