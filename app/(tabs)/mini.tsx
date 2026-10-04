@@ -36,6 +36,9 @@ type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 // Each gradient is the tile's own brand artwork under a white glyph, the same
 // in both themes. Notes is the exception: white on its amber is 2.15:1 (under
 // the 3:1 a graphic needs), so its glyph is dark ink (≥5.58:1 on both stops).
+// The darkest remaining white-glyph tile (Shelf's #D97706 stop) is 3.19:1.
+const TILE_GLYPH = '#FFFFFF';
+const TILE_GLYPH_DARK = AuroraLight.text;
 const MINI_APPS_MAIN = [
   // Broadcast. The ONLY mode that is not end-to-end encrypted \u2014 app/live.tsx
   // states that before anything is published, rather than leaving someone to
@@ -132,7 +135,7 @@ export default function MiniAppsScreen() {
               accessibilityLabel={app.name}
             >
               <LinearGradient colors={app.gradient} style={styles.appIconWrap}>
-                <Ionicons name={app.icon} size={24} color={'darkGlyph' in app && app.darkGlyph ? AuroraLight.text : '#FFFFFF'} />
+                <Ionicons name={app.icon} size={24} color={'darkGlyph' in app && app.darkGlyph ? TILE_GLYPH_DARK : TILE_GLYPH} />
               </LinearGradient>
               <AppText variant="tiny" style={styles.appName}>{app.name}</AppText>
             </TouchableOpacity>

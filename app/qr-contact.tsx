@@ -17,8 +17,8 @@ import { getMyProfile, resolveVaultId, createDirectChat } from '../lib/chatServi
 import { AuroraBackground } from '../components/ui';
 import { AppText as Text } from '../components/ui/Text';
 import { parseVaultIdPayload } from '../lib/vaultIdLink';
+import { userErrorText } from '../lib/userErrorText';
 
-const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message) || fallback;
 const errStatus = (e: unknown) => (e as { status?: number } | null)?.status;
 
 function useS() {
@@ -42,6 +42,10 @@ export default function QRContactScreen() {
   const [processing, setProcessing] = useState(false);
   // A resolved code waiting for "Open chat" — shown in the scan tab, like /add's confirm.
   const [found, setFound] = useState<{ userId: string; name: string; vaultId: string } | null>(null);
+  // A scan that found no one to add, shown in the same card as a match. The
+  // camera stays paused until "Scan again" (an Alert re-armed it at once, so
+  // the same code fired the same Alert over and over).
+  const [scanMsg, setScanMsg] = useState<{ title: string; body: string } | null>(null);
   const [opening, setOpening] = useState(false);
 
   useEffect(() => {
@@ -53,7 +57,7 @@ export default function QRContactScreen() {
         const p = await getMyProfile();
         if (active) { setMyVaultId(p.vaultId || ''); setMyName(p.name || 'crazzychat User'); }
       } catch (e: unknown) {
-        if (active) setLoadError(errText(e, 'Could not load your VaultID.'));
+        if (active) setLoadError(userErrorText(e, 'Could not load your VaultID.'));
       } finally {
         if (active) setLoading(false);
       }
@@ -80,23 +84,23 @@ export default function QRContactScreen() {
     try {
       // Only our own payloads (lib/vaultIdLink.ts); any other QR is "not ours".
       const vaultId = parseVaultIdPayload(data);
-      if (!vaultId) { Alert.alert('Invalid', 'Not a crazzychat QR code.'); setScanned(false); return; }
-      if (vaultId === myVaultId) { Alert.alert('That’s you', "That's your own QR code!"); setScanned(false); return; }
+      if (!vaultId) { setScanMsg({ title: 'Not a crazzychat code', body: 'This QR code isn’t a crazzychat contact code.' }); return; }
+      if (vaultId === myVaultId) { setScanMsg({ title: 'That’s you', body: 'That’s your own QR code. Scan someone else’s.' }); return; }
 
       const peer = await resolveVaultId(vaultId);
       setFound({ userId: peer.userId, name: peer.name || vaultId, vaultId: peer.vaultId || vaultId });
     } catch (e: unknown) {
       // Only a 404 means "no such user"; anything else (offline, a server
       // error) must not tell the user the code is wrong. Same split as /add.
-      if (errStatus(e) === 404) Alert.alert('Not found', 'No crazzychat user with that ID.');
-      else Alert.alert('Couldn’t look up this code', `${errText(e, 'Check your connection.')} Try scanning again.`);
-      setScanned(false);
+      if (errStatus(e) === 404) setScanMsg({ title: 'Not found', body: 'No crazzychat user with that ID.' });
+      else setScanMsg({ title: 'Couldn’t look up this code', body: `${userErrorText(e, 'Check your connection.')} Try scanning again.` });
     } finally {
       setProcessing(false);
     }
   }, [scanned, processing, myVaultId]);
 
   const cancelFound = () => { setFound(null); setScanned(false); };
+  const scanAgain = () => { setScanMsg(null); setScanned(false); };
   const openFound = async () => {
     if (!found || opening) return;
     setOpening(true);
@@ -104,7 +108,7 @@ export default function QRContactScreen() {
       const { id } = await createDirectChat({ userId: found.userId });
       router.replace({ pathname: '/chat', params: { id, peerUid: found.userId, peerName: found.name } });
     } catch (e: unknown) {
-      Alert.alert('Couldn’t start the chat', errText(e, 'Try again.'));
+      Alert.alert('Couldn’t start the chat', userErrorText(e, 'Try again.'));
       setOpening(false);
     }
   };
@@ -126,7 +130,7 @@ export default function QRContactScreen() {
           accessibilityRole="tab" accessibilityState={{ selected: tab === 'my' }}>
           <Text style={[s.tabTxt, tab === 'my' && s.tabTxtActive]}>My QR</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[s.tab, tab === 'scan' && s.tabActive]} onPress={() => { setTab('scan'); setScanned(false); setFound(null); }}
+        <TouchableOpacity style={[s.tab, tab === 'scan' && s.tabActive]} onPress={() => { setTab('scan'); setScanned(false); setFound(null); setScanMsg(null); }}
           accessibilityRole="tab" accessibilityState={{ selected: tab === 'scan' }}>
           <Text style={[s.tabTxt, tab === 'scan' && s.tabTxtActive]}>Scan</Text>
         </TouchableOpacity>
@@ -201,6 +205,14 @@ export default function QRContactScreen() {
                   <TouchableOpacity style={s.foundGhost} onPress={cancelFound} disabled={opening}
                     accessibilityRole="button" accessibilityLabel="Cancel and scan again" accessibilityState={{ disabled: opening }}>
                     <Text style={s.foundGhostTxt}>Cancel</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : scanMsg ? (
+                <View style={s.foundCard} accessibilityLiveRegion="polite">
+                  <Text style={s.foundTitle} accessibilityRole="header">{scanMsg.title}</Text>
+                  <Text style={s.foundSub}>{scanMsg.body}</Text>
+                  <TouchableOpacity style={s.foundBtn} onPress={scanAgain} accessibilityRole="button">
+                    <Text style={s.foundBtnTxt}>Scan again</Text>
                   </TouchableOpacity>
                 </View>
               ) : scanned && !processing && (

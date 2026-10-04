@@ -836,7 +836,7 @@ export interface LastMessagePreview { content: string | null; type: string | nul
  */
 export async function getLastMessagePerChat(): Promise<Map<string, LastMessagePreview>> {
   const db = await getLocalDb();
-  // One bridge crossing, with one idx_messages_preview seek per visible chat.
+  // One bridge crossing, with one idx_messages_preview seek per cached chat.
   // A window function produced the same result but scanned every cached
   // message, making chat-list startup grow with years of local history.
   const rows = await db.getAllAsync(
@@ -866,6 +866,9 @@ export async function getLastMessagePerChat(): Promise<Map<string, LastMessagePr
  * knowledge). Decrypts the at-rest cache in JS and substring-matches plaintext.
  * View-once / Invisible Ink messages are never hits (same rule as in-chat
  * search), and messages in `skipChats` (locked chats) are not searched.
+ * Only chats the main list may show are searched (visibleCachedChatIds):
+ * hidden (PIN-gated) chats, unreadable rows and chats with no cached row are
+ * skipped, and an unreadable chats table rejects instead of searching.
  */
 export async function searchAllMessages(
   query: string, limit = 40, skipChats?: ReadonlySet<string>,
@@ -873,6 +876,8 @@ export async function searchAllMessages(
   const q = query.trim().toLowerCase();
   if (!q) return [];
   const db = await getLocalDb();
+  const visible = await visibleCachedChatIds();
+  const skip = (chatId: string) => !visible.has(chatId) || !!skipChats?.has(chatId);
 
   // P4.2: blind-index search first — O(matches) via FTS5 over HMAC tokens
   // instead of decrypting up to 5000 rows in JS per keystroke. The first call
@@ -896,7 +901,7 @@ export async function searchAllMessages(
               : [toks.map(t => `"${t}"`).join(' '), candidateBefore],
           ) as any[];
           for (const r of rows) {
-            if (skipChats?.has(r.chat_id) || searchHidden(r.meta)) continue;
+            if (skip(r.chat_id) || searchHidden(r.meta)) continue;
             const text = decField(r.content);
             if (!text || text.startsWith('enc:v1:') || looksLikeEnvelope(text)) continue;
             // MATCH is an unordered token conjunction. Keep paging candidates
@@ -931,7 +936,7 @@ export async function searchAllMessages(
       before == null ? [] : [before],
     ) as any[];
     for (const r of rows) {
-      if (skipChats?.has(r.chat_id) || searchHidden(r.meta)) continue;
+      if (skip(r.chat_id) || searchHidden(r.meta)) continue;
       const text = decField(r.content);
       // Skip un-decrypted envelopes ({..."v":"dr1"...} / GSK1:) and match plaintext.
       if (!text || text.startsWith('enc:v1:') || looksLikeEnvelope(text)) continue;
@@ -1089,7 +1094,8 @@ export async function getAttachmentChatMap(): Promise<Record<string, string>> {
  * cached message carrying meta.attachmentId, so there is no second store to
  * keep consistent, it works offline, and it is exactly as complete as the
  * cache. Deleted messages are excluded — a file whose message was revoked must
- * not reappear in a library view.
+ * not reappear in a library view — and so are files from chats the main list
+ * does not show (hidden, PIN-gated chats; see visibleCachedChatIds).
  */
 export async function listAllAttachments(limit = 2000): Promise<Array<{
   attachmentId: string; chatId: string; messageId: number; senderId: string | null;
@@ -1100,6 +1106,7 @@ export async function listAllAttachments(limit = 2000): Promise<Array<{
   viewOnce: boolean;
 }>> {
   const db = await getLocalDb();
+  const visible = await visibleCachedChatIds();
   const rows = await db.getAllAsync(
     `SELECT id, chat_id, sender_id, meta, created_at FROM messages
       WHERE meta IS NOT NULL AND deleted_at IS NULL
@@ -1108,6 +1115,7 @@ export async function listAllAttachments(limit = 2000): Promise<Array<{
   const out: any[] = [];
   const seen = new Set<string>();
   for (const r of rows as any[]) {
+    if (!visible.has(r.chat_id)) continue;
     let meta: any;
     try { meta = JSON.parse(decField(r.meta) || ''); } catch { continue; }
     const aid = meta?.attachmentId;
@@ -1244,12 +1252,58 @@ export async function cacheChats(chats: Array<{ id: string; lastMessageAt?: stri
   });
 }
 
+/** Every cached chat row, hidden ones included (sign-out key purge needs them
+ *  all). Anything that LISTS chats to the user uses getCachedVisibleChats. */
 export async function getCachedChats(): Promise<any[]> {
   const db = await getLocalDb();
   const rows = await db.getAllAsync(
     `SELECT data FROM chats ORDER BY (last_message_at IS NULL), last_message_at DESC`,
   );
   return rows.map((r: any) => safeParse(decField(r.data) || '')).filter(Boolean);
+}
+
+/** A cached row the main chat list may show: readable, with an id, not hidden. */
+export function isVisibleChatRow(c: any): boolean {
+  return !!c && typeof c.id === 'string' && !!c.id && c.hidden !== true;
+}
+
+/**
+ * The cached chats the main list may show. Hidden (PIN-gated) chats can be in
+ * the table even though cacheChats only receives the non-hidden list:
+ * cacheChatDetail writes a chat's row when it is OPENED, including from
+ * app/hidden-chats.tsx, and that row carries `hidden: true`.
+ */
+export async function getCachedVisibleChats(): Promise<any[]> {
+  return (await getCachedChats()).filter(isVisibleChatRow);
+}
+
+/**
+ * Ids of the chats the main list may show — the allow-list for cross-chat
+ * listings of message content (global search, the Bookshelf). Fails closed: a
+ * hidden or unreadable row and a chat with no cached row are all left out, and
+ * an unreadable table rejects.
+ */
+export async function visibleCachedChatIds(): Promise<Set<string>> {
+  return new Set((await getCachedVisibleChats()).map(c => c.id as string));
+}
+
+/**
+ * Record a hide/unhide on this device's cached row at once, so the visible-only
+ * readers above stop (or resume) listing the chat even if the next list fetch
+ * fails. A row that cannot be read is dropped when hiding (fail closed).
+ */
+export async function setCachedChatHidden(chatId: string, hidden: boolean): Promise<void> {
+  if (!chatId) return;
+  const db = await getLocalDb();
+  const rows = await db.getAllAsync(`SELECT data FROM chats WHERE id = ? LIMIT 1`, [chatId]);
+  const row: any = rows[0];
+  if (!row) return;
+  const data = safeParse(decField(row.data) || '');
+  if (!data || typeof data !== 'object') {
+    if (hidden) await db.runAsync(`DELETE FROM chats WHERE id = ?`, [chatId]);
+    return;
+  }
+  await db.runAsync(`UPDATE chats SET data = ? WHERE id = ?`, [encField(JSON.stringify({ ...data, hidden })), chatId]);
 }
 
 // Persist ONE chat's full detail (members, timers, pinned…) so the chat header

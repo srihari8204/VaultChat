@@ -7,7 +7,8 @@
 // The old comparator ignored the handler props (they were fresh closures every
 // render), which kept the memo working only by trusting that every closure it
 // skipped was still current. The preview line comes from ./chatPreview, which
-// hides locked chats' text and drafts and view-once / Invisible Ink text.
+// hides locked chats' text and drafts and view-once / Invisible Ink text; a
+// locked row also shows no receipt tick and no "typing…".
 
 import { memo, useRef } from 'react';
 // RN Text, not AppText: the styles already apply the vision-comfort scale.
@@ -18,7 +19,7 @@ import { useTheme } from '../../lib/theme';
 import { Avatar } from '../ui';
 import { attachmentUrl, type ChatSummary } from '../../lib/chatService';
 import { useChatListStyles } from './chatListStyles';
-import { chatRowPreview, type LastMsg } from './chatPreview';
+import { chatRowPreview, chatRowTick, type LastMsg } from './chatPreview';
 
 export type { LastMsg };
 
@@ -51,6 +52,12 @@ export const ChatListRow = memo(function ChatListRow({
   const time = chat.lastMessageAt ? formatRelative(chat.lastMessageAt) : '';
   // Preview text: never a locked chat's text or draft, never view-once / Ink text.
   const { draftText, preview } = chatRowPreview({ lastMsg, hasLastMessage: !!chat.lastMessageId, meId, draft, locked });
+  // Nor its activity: no receipt tick, no "typing…".
+  const tick = chatRowTick({
+    lastMsg, meId, locked, draftText, direct: chat.type === 'direct',
+    peerReadId: chat.peerLastReadMessageId, peerDeliveredId: chat.peerLastDeliveredMessageId,
+  });
+  const typing = !!isTyping && !locked;
 
   const close = () => swipeRef.current?.close();
   const act = (fn: RowAction) => { close(); fn(chat); };
@@ -159,15 +166,15 @@ export const ChatListRow = memo(function ChatListRow({
             </Text>
           </View>
           <View style={S.rowBottom}>
-            {isTyping ? (
+            {typing ? (
               <Text style={[S.rowPreview, { color: colors.primary }]} numberOfLines={1}>typing…</Text>
             ) : (
               <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-                {!draftText && !!lastMsg && !!meId && lastMsg.senderId === meId && chat.type === 'direct' && (
+                {tick && (
                   <Ionicons
-                    name={((chat.peerLastReadMessageId ?? 0) >= lastMsg.id || (chat.peerLastDeliveredMessageId ?? 0) >= lastMsg.id) ? 'checkmark-done' : 'checkmark'}
+                    name={tick === 'sent' ? 'checkmark' : 'checkmark-done'}
                     size={15}
-                    color={(chat.peerLastReadMessageId ?? 0) >= lastMsg.id ? colors.accentOn : colors.textDim}
+                    color={tick === 'read' ? colors.accentOn : colors.textDim}
                     style={{ marginRight: 3 }}
                   />
                 )}

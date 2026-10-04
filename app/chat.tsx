@@ -63,6 +63,9 @@ import { ChatHeader } from '../components/chat/ChatHeader';
 import { MessageRow } from '../components/chat/MessageRow';
 import { InChatSearchBar } from '../components/chat/InChatSearchBar';
 import { ErrorBar, NoticeBar, KeyChangeBanner, ScreenshotBanner, MemoryBanner, LiveLocationBanner, PinnedBar } from '../components/chat/ChatBanners';
+import { forwardFeedback, nextForwardNote, type ForwardNote } from '../components/chat/forwardFeedback';
+import { userErrorText } from '../lib/userErrorText';
+import { chatActionErrorText } from '../components/chat/chatErrorText';
 import { getShareViewing } from '../lib/viewerPrefs';
 import type { ViewerActivity } from '../lib/socket';
 import { extractFirstUrl, fetchPreviewFromDevice, type LinkPreviewData } from '../lib/linkPreview';
@@ -393,11 +396,11 @@ export default function ChatScreen({ chatIdProp, embedded, onClosePane }: { chat
   const [forwardChats, setForwardChats] = useState<ChatSummary[]>([]);
   const [forwardLoading, setForwardLoading] = useState(false);
   // "Forwarding to X" after a forward is queued, and the forwards still in
-  // flight (outbox tempId → target name) so a later rejection can say which
+  // flight (components/chat/forwardFeedback) so a later rejection can say which
   // chat it was for — the red bubble itself is in the TARGET chat.
-  const [forwardNote, setForwardNote] = useState<string | null>(null);
+  const [forwardNote, setForwardNote] = useState<ForwardNote | null>(null);
   const clearForwardNote = useCallback(() => setForwardNote(null), []);
-  const forwardsInFlight = useRef(new Map<string, string>());
+  const forwards = useRef<ReturnType<typeof forwardFeedback> | null>(null);
 
   // Composer growth is capped against THIS pane, not the window. The cap was a
   // flat maxHeight: 120, which is fine full-screen but is a third of a stacked
@@ -889,8 +892,8 @@ export default function ChatScreen({ chatIdProp, embedded, onClosePane }: { chat
           // Offline / transient — keep the painted cache silently; the connection
           // banner already tells the user. A failed background refresh is not an error.
         }
-      } catch (e: any) {
-        if (alive()) setError(e?.message ?? 'Failed to load chat');
+      } catch (e: unknown) {
+        if (alive()) setError(userErrorText(e, 'Failed to load chat'));
       } finally {
         if (alive()) setLoading(false);
       }
@@ -1537,9 +1540,9 @@ export default function ChatScreen({ chatIdProp, embedded, onClosePane }: { chat
         setInput('');
         // The 'sent' / 'failed' queue events update this bubble's state.
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       undoEdit?.();
-      Alert.alert(editingId != null ? 'Edit failed' : 'Send failed', e?.message ?? 'Try again');
+      Alert.alert(editingId != null ? 'Edit failed' : 'Send failed', chatActionErrorText(e, 'Try again'));
     } finally {
       setSending(false);
     }
@@ -1604,8 +1607,8 @@ export default function ChatScreen({ chatIdProp, embedded, onClosePane }: { chat
     try {
       const all = await listChats();
       setForwardChats(all.filter(c => c.id !== chatId));
-    } catch (e: any) {
-      Alert.alert('Could not load chats', e?.message ?? 'Try again');
+    } catch (e: unknown) {
+      Alert.alert('Could not load chats', userErrorText(e, 'Try again'));
       setForwardMsg(null);
     } finally {
       setForwardLoading(false);
@@ -1725,8 +1728,8 @@ export default function ChatScreen({ chatIdProp, embedded, onClosePane }: { chat
     let q;
     try {
       q = await enqueueReaction(chatId, msg.id, emoji, removing ? 'remove' : 'add');
-    } catch (e: any) {
-      Alert.alert('Could not react', e?.message ?? 'Try again');
+    } catch (e: unknown) {
+      Alert.alert('Could not react', chatActionErrorText(e, 'Try again'));
       return;
     }
     // Optimistic: inject a local reaction MESSAGE keyed by the QUEUE tempId, so
@@ -1756,29 +1759,22 @@ export default function ChatScreen({ chatIdProp, embedded, onClosePane }: { chat
       });
       const q = await enqueueMessage(target.id, { type: p.type as DisplayMessage['type'], plaintext: p.plaintext, meta: p.meta });
       const name = target.name || target.peerName || 'that chat';
-      forwardsInFlight.current.set(q.tempId, name);
-      setForwardNote(`Forwarding to ${name}`);
-    } catch (e: any) {
-      Alert.alert('Forward failed', e?.message ?? 'Try again');
+      forwards.current?.track(q.tempId, name);
+      setForwardNote(prev => nextForwardNote(prev, name));
+    } catch (e: unknown) {
+      Alert.alert('Forward failed', chatActionErrorText(e, 'Try again.'));
     }
   }, [forwardMsg]);
 
   // A forward the server REJECTS (blocked, not a member, too large) turns red
   // in the target chat only; say so here, where the user forwarded it. Offline
   // is not a rejection — the outbox keeps the clock and retries, so no alert.
-  // ponytail: only while this screen is mounted; a rejection after the user
-  // leaves shows just as the red bubble in the target chat. Move this to an
-  // app-level outbox listener if forwards need feedback from anywhere.
+  // Only while this screen is mounted (the ponytail: note in forwardFeedback).
   useEffect(() => {
-    const offFailed = onQueue('failed', ({ tempId, error }) => {
-      const name = forwardsInFlight.current.get(tempId);
-      if (name == null) return;
-      forwardsInFlight.current.delete(tempId);
-      Alert.alert(`Not forwarded to ${name}`,
-        `${error || 'The server refused it.'}\n\nIt is marked “not sent” in ${name}, where you can retry or cancel it.`);
-    });
-    const offSent = onQueue('sent', ({ tempId }) => { forwardsInFlight.current.delete(tempId); });
-    return () => { offFailed(); offSent(); };
+    const f = forwardFeedback(onQueue, (name, error) => Alert.alert(`Not forwarded to ${name}`,
+      `${error || 'The server refused it.'}\n\nIt is marked “not sent” in ${name}, where you can retry or cancel it.`));
+    forwards.current = f;
+    return () => { f.dispose(); forwards.current = null; };
   }, []);
 
   const onCancelEdit = useCallback(() => {
@@ -1870,8 +1866,8 @@ export default function ChatScreen({ chatIdProp, embedded, onClosePane }: { chat
       const filename = asset.name || `file-${Date.now()}`;
       const mime     = asset.mimeType || 'application/octet-stream';
       await enqueueMediaOptimistic('file', { uri: asset.uri, filename, mime });
-    } catch (e: any) {
-      Alert.alert('Upload failed', e?.message ?? 'Try again');
+    } catch (e: unknown) {
+      Alert.alert('Upload failed', chatActionErrorText(e, 'Try again'));
     } finally {
       setSending(false);
     }
@@ -1907,8 +1903,8 @@ export default function ChatScreen({ chatIdProp, embedded, onClosePane }: { chat
         name: asset.name || `file-${Date.now()}`, mime: asset.mimeType || 'application/octet-stream', size,
       });
       setMessages(prev => prev.some(x => x.id === msg.id) ? prev : [msg, ...prev]);
-    } catch (e: any) {
-      Alert.alert('VaultBeam', e?.message ?? 'Could not start the transfer.');
+    } catch (e: unknown) {
+      Alert.alert('VaultBeam', chatActionErrorText(e, 'Could not start the transfer.'));
     } finally {
       setSending(false);
     }
@@ -1949,8 +1945,8 @@ export default function ChatScreen({ chatIdProp, embedded, onClosePane }: { chat
         createdAt: new Date().toISOString(), _tempId: q.tempId, _state: 'pending',
       };
       setMessages(prev => [optimistic, ...prev]);
-    } catch (e: any) {
-      Alert.alert('Could not send GIF', e?.message ?? 'Try again');
+    } catch (e: unknown) {
+      Alert.alert('Could not send GIF', chatActionErrorText(e, 'Try again'));
     }
   }, [chatId, meId]);
 
@@ -2323,7 +2319,8 @@ export default function ChatScreen({ chatIdProp, embedded, onClosePane }: { chat
 
       {error && <ErrorBar error={error} onRetry={() => { setError(null); setLoadNonce(n => n + 1); }} />}
 
-      {forwardNote && <NoticeBar text={forwardNote} onDismiss={clearForwardNote} />}
+      {/* Keyed by count: the same "Forwarding to X" twice is announced twice. */}
+      {forwardNote && <NoticeBar key={forwardNote.n} text={forwardNote.text} onDismiss={clearForwardNote} />}
 
       <KeyChangeBanner otherMembers={otherMembers} chatName={chat?.name} />
 
@@ -2350,7 +2347,7 @@ export default function ChatScreen({ chatIdProp, embedded, onClosePane }: { chat
             const prev = pinnedId;
             setPinnedId(null);
             try { await pinMessage(chatId, null); }
-            catch (e: any) { setPinnedId(prev); Alert.alert('Could not unpin', e?.message ?? 'Try again'); }
+            catch (e: unknown) { setPinnedId(prev); Alert.alert('Could not unpin', userErrorText(e, 'Try again')); }
           }}
         />
       )}

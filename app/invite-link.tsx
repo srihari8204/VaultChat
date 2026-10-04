@@ -6,7 +6,7 @@
 
 import { HEADER_TOP } from '../constants/layout';
 import { brandAlpha, type Palette } from '../constants/theme';
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { memo, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { View, TouchableOpacity, StyleSheet, FlatList, Alert, Share, ActivityIndicator, Modal, RefreshControl } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,8 +17,7 @@ import { listInviteLinks, createInviteLink, revokeInviteLink, type InviteLink } 
 import { AuroraBackground } from '../components/ui';
 import { AppText as Text } from '../components/ui/Text';
 import { tint } from '../lib/tintColor';
-
-const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message) || fallback;
+import { userErrorText } from '../lib/userErrorText';
 
 const JOIN_BASE = 'https://vaultchat.app/join/';
 const EXPIRY_OPTS = [
@@ -32,6 +31,60 @@ function useS() {
   const { colors } = useTheme();
   return useMemo(() => makeStyles(colors), [colors]);
 }
+
+const isExpired = (l: InviteLink) => !!l.expiresAt && new Date(l.expiresAt).getTime() < Date.now();
+
+function formatExpiry(iso: string | null): string {
+  if (!iso) return 'Never expires';
+  const d = new Date(iso);
+  if (d.getTime() < Date.now()) return 'Expired';
+  const hrs = Math.round((d.getTime() - Date.now()) / 3600000);
+  return hrs < 24 ? `${hrs}h remaining` : `${Math.round(hrs / 24)}d remaining`;
+}
+
+type LinkAction = (link: InviteLink) => void;
+
+/** One invite link. Hoisted and memoised: the screen passes stable handlers. */
+const LinkRow = memo(function LinkRow({ item, revokeBusy, onCopy, onShare, onQr, onRevoke }: {
+  item: InviteLink; revokeBusy: boolean;
+  onCopy: LinkAction; onShare: LinkAction; onQr: LinkAction; onRevoke: LinkAction;
+}) {
+  const { colors } = useTheme();
+  const s = useS();
+  // An expired link no longer works either: nothing to copy, share or show.
+  const dead = item.revoked || isExpired(item);
+  return (
+    <View style={[s.linkRow, dead && { opacity: 0.45 }]}>
+      <Text style={s.linkCode} numberOfLines={1}>vaultchat.app/join/{item.code}</Text>
+      <View style={{ flexDirection: 'row', gap: 12, marginTop: 4 }}>
+        <Text style={s.linkMeta}>{item.uses} joins</Text>
+        <Text style={s.linkMeta}>{formatExpiry(item.expiresAt)}</Text>
+        {item.revoked && <Text style={[s.linkMeta, { color: colors.danger }]}>Revoked</Text>}
+      </View>
+      {!dead && (
+        <View style={s.linkBtns}>
+          <TouchableOpacity style={s.linkBtn} accessibilityRole="button" accessibilityLabel={`Copy link ${item.code}`} onPress={() => onCopy(item)}>
+            <Ionicons name="copy-outline" size={15} color={colors.text} />
+            <Text style={s.linkBtnTxt}>Copy</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.linkBtn} accessibilityRole="button" accessibilityLabel={`Share link ${item.code}`} onPress={() => onShare(item)}>
+            <Ionicons name="share-social-outline" size={15} color={colors.text} />
+            <Text style={s.linkBtnTxt}>Share</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.linkBtn} accessibilityRole="button" accessibilityLabel={`Show QR code for link ${item.code}`} onPress={() => onQr(item)}>
+            <Ionicons name="qr-code-outline" size={15} color={colors.text} />
+            <Text style={s.linkBtnTxt}>QR</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.linkBtn} accessibilityRole="button" accessibilityLabel={`Revoke link ${item.code}`} onPress={() => onRevoke(item)}
+            disabled={revokeBusy} accessibilityState={{ disabled: revokeBusy }}>
+            <Ionicons name="trash-outline" size={15} color={colors.danger} />
+            <Text style={[s.linkBtnTxt, { color: colors.danger }]}>Revoke</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  );
+});
 
 export default function InviteLinkScreen() {
   const { colors } = useTheme();
@@ -51,7 +104,7 @@ export default function InviteLinkScreen() {
     // A missing id used to render an empty list, indistinguishable from "no links".
     if (!chatId) { setError('This screen did not say which group to show.'); setLoading(false); return; }
     try { setLinks(await listInviteLinks(chatId)); setError(null); }
-    catch (e: unknown) { setError(errText(e, 'Failed to load links')); }
+    catch (e: unknown) { setError(userErrorText(e, 'Failed to load links')); }
     finally { setLoading(false); }
   }, [chatId]);
 
@@ -83,34 +136,42 @@ export default function InviteLinkScreen() {
       setLinks(prev => [link, ...prev]);
       Alert.alert('Link created', JOIN_BASE + link.code);
     } catch (e: unknown) {
-      Alert.alert('Error', errText(e, 'Could not create link'));
+      Alert.alert('Error', userErrorText(e, 'Could not create link'));
     } finally {
       setCreating(false);
     }
   };
 
-  const shareLink = async (code: string) => {
+  const shareLink = useCallback(async ({ code }: InviteLink) => {
     try {
       await Share.share({ message: `Join ${groupName || 'our group'} on crazzychat!\n${JOIN_BASE}${code}` });
     } catch {
       Alert.alert('Could not share', 'Try again, or use Copy.');
     }
-  };
+  }, [groupName]);
 
-  const copyLink = async (code: string) => {
+  const copyLink = useCallback(async ({ code }: InviteLink) => {
     try {
       await copyAndAutoClear(JOIN_BASE + code);
       Alert.alert('Copied', 'Invite link copied to clipboard');
     } catch {
       Alert.alert('Could not copy', 'Try again, or use Share.');
     }
-  };
+  }, []);
 
-  const revoke = (link: InviteLink) => {
-    if (revokingId != null) return;
+  const showQr = useCallback(({ code }: InviteLink) => setQrCode(code), []);
+
+  // Read through a ref so `revoke` stays stable for the memoised rows, and the
+  // guard is re-checked at confirm time (another revoke may have started).
+  const revokingRef = useRef(revokingId);
+  revokingRef.current = revokingId;
+  const revoke = useCallback((link: InviteLink) => {
+    if (revokingRef.current != null) return;
     Alert.alert('Revoke link?', 'This link will no longer work.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Revoke', style: 'destructive', onPress: async () => {
+        if (revokingRef.current != null) return;
+        revokingRef.current = link.id;
         setRevokingId(link.id);
         setLinks(list => list.map(l => l.id === link.id ? { ...l, revoked: true } : l));
         try { await revokeInviteLink(chatId!, link.id); }
@@ -118,23 +179,13 @@ export default function InviteLinkScreen() {
           // Undo only this row: restoring a snapshot taken at the tap would also
           // undo anything else that changed meanwhile (a new link, another revoke).
           setLinks(list => list.map(l => l.id === link.id ? { ...l, revoked: link.revoked } : l));
-          Alert.alert('Error', errText(e, 'Revoke failed'));
+          Alert.alert('Error', userErrorText(e, 'Revoke failed'));
         } finally {
           setRevokingId(null);
         }
       } },
     ]);
-  };
-
-  const isExpired = (l: InviteLink) => !!l.expiresAt && new Date(l.expiresAt).getTime() < Date.now();
-
-  const formatExpiry = (iso: string | null) => {
-    if (!iso) return 'Never expires';
-    const d = new Date(iso);
-    if (d.getTime() < Date.now()) return 'Expired';
-    const hrs = Math.round((d.getTime() - Date.now()) / 3600000);
-    return hrs < 24 ? `${hrs}h remaining` : `${Math.round(hrs / 24)}d remaining`;
-  };
+  }, [chatId]);
 
   // Expired links still list (with "Expired") but are not active.
   const activeCount = useMemo(() => links.filter(l => !l.revoked && !isExpired(l)).length, [links]);
@@ -189,41 +240,10 @@ export default function InviteLinkScreen() {
             data={links}
             keyExtractor={l => String(l.id)}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} colors={[colors.primary]} />}
-            renderItem={({ item }) => {
-              // An expired link no longer works either: nothing to copy, share or show.
-              const dead = item.revoked || isExpired(item);
-              return (
-              <View style={[s.linkRow, dead && { opacity: 0.45 }]}>
-                <Text style={s.linkCode} numberOfLines={1}>vaultchat.app/join/{item.code}</Text>
-                <View style={{ flexDirection: 'row', gap: 12, marginTop: 4 }}>
-                  <Text style={s.linkMeta}>{item.uses} joins</Text>
-                  <Text style={s.linkMeta}>{formatExpiry(item.expiresAt)}</Text>
-                  {item.revoked && <Text style={[s.linkMeta, { color: colors.danger }]}>Revoked</Text>}
-                </View>
-                {!dead && (
-                  <View style={s.linkBtns}>
-                    <TouchableOpacity style={s.linkBtn} accessibilityRole="button" accessibilityLabel={`Copy link ${item.code}`} onPress={() => copyLink(item.code)}>
-                      <Ionicons name="copy-outline" size={15} color={colors.text} />
-                      <Text style={s.linkBtnTxt}>Copy</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={s.linkBtn} accessibilityRole="button" accessibilityLabel={`Share link ${item.code}`} onPress={() => shareLink(item.code)}>
-                      <Ionicons name="share-social-outline" size={15} color={colors.text} />
-                      <Text style={s.linkBtnTxt}>Share</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={s.linkBtn} accessibilityRole="button" accessibilityLabel={`Show QR code for link ${item.code}`} onPress={() => setQrCode(item.code)}>
-                      <Ionicons name="qr-code-outline" size={15} color={colors.text} />
-                      <Text style={s.linkBtnTxt}>QR</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={s.linkBtn} accessibilityRole="button" accessibilityLabel={`Revoke link ${item.code}`} onPress={() => revoke(item)}
-                      disabled={revokingId != null} accessibilityState={{ disabled: revokingId != null }}>
-                      <Ionicons name="trash-outline" size={15} color={colors.danger} />
-                      <Text style={[s.linkBtnTxt, { color: colors.danger }]}>Revoke</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-              </View>
-              );
-            }}
+            renderItem={({ item }) => (
+              <LinkRow item={item} revokeBusy={revokingId != null}
+                onCopy={copyLink} onShare={shareLink} onQr={showQr} onRevoke={revoke} />
+            )}
             ListEmptyComponent={<View style={{ alignItems: 'center', padding: 30 }}><Text style={s.empty}>No invite links yet</Text></View>}
           />
         )}

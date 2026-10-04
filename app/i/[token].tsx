@@ -29,8 +29,8 @@ import { tint } from '../../lib/tintColor';
 import { redeemInvitation } from '../../lib/chatService';
 import { AuroraBackground } from '../../components/ui';
 import { AppText as Text } from '../../components/ui/Text';
+import { userErrorText } from '../../lib/userErrorText';
 
-const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message) || fallback;
 const errStatus = (e: unknown) => (e as { status?: number } | null)?.status;
 
 type Phase =
@@ -67,7 +67,7 @@ export default function InviteTokenScreen() {
         kind: 'error',
         // The server distinguishes expired / superseded / full; surface its
         // wording rather than flattening every case to "invalid".
-        message: errText(e, 'This invitation is no longer valid.'),
+        message: userErrorText(e, 'This invitation is no longer valid.'),
         retry: errStatus(e) !== 410 && errStatus(e) !== 400,
       });
     }

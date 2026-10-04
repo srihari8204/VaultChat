@@ -57,6 +57,7 @@ import { uploadEncryptedAttachment } from '../../lib/mediaAttachments';
 import { putMediaKey } from '../../lib/mediaKeyStore';
 import { AuroraBackground } from '../../components/ui';
 import { permissionDenied } from '../../lib/permissionDenied';
+import { userErrorText } from '../../lib/userErrorText';
 
 /** The gate for an UNENCRYPTED story. A question gate is impossible here — with
  *  no content key to lock there is nothing for the answer to protect, so it
@@ -78,7 +79,6 @@ const FEED_CACHE = FEED_CACHE_KEY;   // shared with the viewer; never re-declare
 // so they do not follow the account to another phone. The mute dialog says so.
 const MUTED_KEY  = 'vc_muted_status';
 const RECENT_EMOJI_KEY = 'vc_recent_emojis';
-const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message) || fallback;
 
 function useS() {
   const { colors } = useTheme();
@@ -142,7 +142,7 @@ export default function StatusScreen() {
       setFeed(f);
       setError(null);
     } catch (e: unknown) {
-      if (alive.current) setError(errText(e, 'Failed to load stories'));
+      if (alive.current) setError(userErrorText(e, 'Failed to load stories'));
     }
   }, []);
 
@@ -196,7 +196,7 @@ export default function StatusScreen() {
       setTextOpen(false); setStoryText(''); setStoryBg(TEXT_BG_DEFAULT);
       await load();
     } catch (e: unknown) {
-      Alert.alert('Could not post', errText(e, 'Try again'));
+      Alert.alert('Could not post', userErrorText(e, 'Try again'));
     } finally { if (alive.current) setPosting(false); }
   }, [storyText, storyBg, posting, load]);
 
@@ -357,8 +357,8 @@ export default function StatusScreen() {
       Alert.alert(
         'Could not post story',
         posted > 0
-          ? `${posted} posted. ${errText(e, 'The rest failed')} — tap Post to retry the remaining ones.`
-          : errText(e, 'Try again'),
+          ? `${posted} posted. ${userErrorText(e, 'The rest failed')} — tap Post to retry the remaining ones.`
+          : userErrorText(e, 'Try again'),
       );
     } finally {
       if (alive.current) setPosting(false);

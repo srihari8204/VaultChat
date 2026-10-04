@@ -8,7 +8,7 @@ import { Alert } from 'react-native';
 import type { Router } from 'expo-router';
 import type { SheetAction as MenuAction } from '../ui';
 import { NOTIF_CHANNELS } from '../../lib/push';
-import { clearChatMessages } from '../../lib/localDb';
+import { clearChatMessages, setCachedChatHidden } from '../../lib/localDb';
 import type { VisionProfileKey } from '../../lib/visionComfortModel';
 import {
   blockUser,
@@ -245,6 +245,9 @@ export function useChatMenu({
           const next = !chat.hidden;
           try {
             await setHidden(chatId, next);
+            // This device's cached row too, so global search and the Bookshelf
+            // follow at once even if the next list refresh fails.
+            await setCachedChatHidden(chatId, next).catch(() => {});
             // From a pane, replace would swap out the whole split screen.
             if (next) { if (embedded) onPaneEnded?.('Chat hidden.'); else router.replace('/(tabs)/chats'); }
             else setChat(prev => prev ? { ...prev, hidden: next } : prev);

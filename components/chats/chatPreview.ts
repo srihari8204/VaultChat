@@ -31,6 +31,20 @@ export function chatRowPreview({ lastMsg, hasLastMessage, meId, draft, locked }:
   return { draftText, preview: draftText || previewBody(lastMsg, hasLastMessage, meId) };
 }
 
+/**
+ * The receipt tick before your own newest message in a direct chat, or null.
+ * A locked row shows none: sent / delivered / read is activity in the chat the
+ * lock hides (same for "typing…", which ChatListRow drops for locked rows).
+ */
+export function chatRowTick({ lastMsg, meId, locked, draftText, direct, peerReadId, peerDeliveredId }: {
+  lastMsg?: LastMsg; meId?: string | null; locked?: boolean; draftText: string; direct: boolean;
+  peerReadId?: number | null; peerDeliveredId?: number | null;
+}): 'sent' | 'delivered' | 'read' | null {
+  if (locked || draftText || !direct || !lastMsg || !meId || lastMsg.senderId !== meId) return null;
+  if ((peerReadId ?? 0) >= lastMsg.id) return 'read';
+  return (peerDeliveredId ?? 0) >= lastMsg.id ? 'delivered' : 'sent';
+}
+
 function previewBody(lastMsg: LastMsg | undefined, hasLastMessage: boolean, meId?: string | null): string {
   if (!lastMsg) return hasLastMessage ? 'Tap to open chat' : 'No messages yet';
   // View-once / Invisible Ink: only the bubble may show the text. Checked

@@ -18,6 +18,7 @@ import { looksEncrypted, unvotePoll, voteOnPoll, type PollVoteSummary } from '..
 import { useS, type DisplayMessage } from './chatStyles';
 import { bumpPollVote, formatTtlRemaining, type TickState } from './chatFormat';
 import { obscureForInk, renderRichText, type BubbleInk } from './bubbleText';
+import { fillInks } from './bubbleFillInk';
 
 // ─── Poll bubble (in-chat voting) ────────────────────────────
 // Renders the question + the options as horizontal rows with a fill bar
@@ -316,17 +317,23 @@ export function TextBody({ msg, plain, isMine, inkHidden, txtColor, highlight, i
  * The time · origin · edited · progress · timer · tick line. It sits ON your
  * filled bubble, or on the chat ground for media (transparent bubble) and
  * received messages; the read tick must stand out from the line on both:
- * tickRead on the fill, the accent off it.
+ * tickRead on the fill, the accent off it. A custom bubble colour (`fill`)
+ * gets inks chosen against that colour (./bubbleFillInk), not the theme's.
  */
-export function BubbleMetaLine({ msg, tickState, isMine, isMedia }: {
+export function BubbleMetaLine({ msg, tickState, isMine, isMedia, fill }: {
   msg: DisplayMessage; tickState: TickState; isMine: boolean; isMedia: boolean;
+  /** Your bubble's custom colour (lib/chatBubbleTheme), if any. */
+  fill?: string | null;
 }) {
   const S = useS();
   const { colors } = useTheme();
   const { profile: visionProfile } = useVisionComfort();
   const metaOnFill = isMine && !isMedia;
-  const metaInk = metaOnFill ? null : (visionProfile.highContrast ? colors.bubbleInText : colors.bubbleMetaIn);
+  const custom = metaOnFill && fill ? fillInks(fill, visionProfile.highContrast) : null;
+  const metaInk = custom ? custom.meta
+    : metaOnFill ? null : (visionProfile.highContrast ? colors.bubbleInText : colors.bubbleMetaIn);
   const fillInk = visionProfile.highContrast ? colors.bubbleOutText : colors.bubbleMetaOut;   // = S.bubbleMeta
+  const readInk = custom ? custom.tickRead : metaOnFill ? colors.tickRead : colors.accentOn;
   return (
     <Text style={[S.bubbleMeta, metaInk ? { color: metaInk } : null, isMedia && { paddingHorizontal: 4 }]}>
       {/* createdAt IS the original timestamp for an imported message — it is
@@ -365,7 +372,7 @@ export function BubbleMetaLine({ msg, tickState, isMine, isMedia }: {
         <Ionicons
           name={tickState === 'pending' ? 'time-outline' : tickState === 'sent' ? 'checkmark' : 'checkmark-done'}
           size={14}
-          color={tickState === 'read' ? (metaOnFill ? colors.tickRead : colors.accentOn) : (metaInk ?? fillInk)}
+          color={tickState === 'read' ? readInk : (metaInk ?? fillInk)}
           accessibilityLabel={tickState === 'pending' ? 'Sending message' : `Message ${tickState}`}
           testID={`message-status-${msg.id}`}
           style={{ marginLeft: 3 }}

@@ -24,8 +24,8 @@ import { useTheme } from '../../lib/theme';
 import { joinViaInvite, previewInvite } from '../../lib/chatService';
 import { AuroraBackground } from '../../components/ui';
 import { AppText as Text } from '../../components/ui/Text';
+import { userErrorText } from '../../lib/userErrorText';
 
-const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message) || fallback;
 const errStatus = (e: unknown) => (e as { status?: number } | null)?.status;
 
 const PREVIEW_WAIT_MS = 4000;
@@ -68,7 +68,7 @@ export default function JoinScreen() {
       if (cancelledRef.current) return;
       // 410 = revoked, expired or used up (as the preview says): retrying the
       // same code cannot work. Anything else (offline, a 5xx) can.
-      setPhase({ kind: 'error', message: errText(e, 'This link is invalid, expired, or revoked.'), retry: errStatus(e) !== 410 });
+      setPhase({ kind: 'error', message: userErrorText(e, 'This link is invalid, expired, or revoked.'), retry: errStatus(e) !== 410 });
     }
   }, [code, router]);
 

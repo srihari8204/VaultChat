@@ -32,6 +32,7 @@ import { AppText as Text } from '../components/ui/Text';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
 import { compareSafetyQr, safetyQrPayload } from '../lib/safetyQr';
 import { permissionDenied } from '../lib/permissionDenied';
+import { userErrorText } from '../lib/userErrorText';
 
 type State =
   | { kind: 'loading' }
@@ -57,6 +58,8 @@ export default function VerifyContactScreen() {
   const [codeChanged, setCodeChanged] = useState(false);
   // An unacknowledged key-change banner for this peer; re-verifying clears it.
   const keyChange = useRef<KeyChange | null>(null);
+  // The verified list could not be read: "not verified" below is unknown, not a fact.
+  const [statusUnknown, setStatusUnknown] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showQr, setShowQr] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
@@ -75,10 +78,10 @@ export default function VerifyContactScreen() {
       const myId = me?.id;
       if (!myId || !peerId) { set({ kind: 'unavailable', reason: 'Missing account or contact.', retryable: false }); return; }
 
-      const [myKey, peerKey, verifiedList, recorded, change] = await Promise.all([
+      const [myKey, peerKey, verifiedRead, recorded, change] = await Promise.all([
         fetchIdentityKey(myId),
         fetchIdentityKey(peerId),
-        getVerifiedContacts().catch(() => [] as string[]),
+        getVerifiedContacts().catch(() => null),
         getVerifiedFingerprint(peerId).catch(() => null),
         checkKeyChange(peerId),
       ]);
@@ -89,7 +92,9 @@ export default function VerifyContactScreen() {
 
       const number = computeSafetyNumber(myId, myKey, peerId, peerKey);
       const fp = safetyFingerprint(number);
+      const verifiedList = verifiedRead ?? [];
       const status = verificationStatus(verifiedList.includes(peerId), recorded, fp, change != null);
+      setStatusUnknown(verifiedRead === null);
       // A verification with no recorded number (older, or from another device)
       // that still holds is bound to today's number from now on.
       if (status === 'verified' && !recorded) setVerifiedFingerprint(peerId, fp).catch(() => {});
@@ -98,7 +103,7 @@ export default function VerifyContactScreen() {
       setCodeChanged(status === 'changed');
       set({ kind: 'ready', number });
     } catch (e: unknown) {
-      set({ kind: 'unavailable', reason: e instanceof Error && e.message ? e.message : 'Could not load the safety number.', retryable: true });
+      set({ kind: 'unavailable', reason: userErrorText(e, 'Could not load the safety number.'), retryable: true });
     }
   }, [peerId, peerName]);
 
@@ -123,8 +128,8 @@ export default function VerifyContactScreen() {
         if (change) await acknowledgeKeyChange(change.peerId, change.currentHex);
       }
     } catch (e: unknown) {
-      setVerified(!next); // revert on failure
-      Alert.alert('Could not save', e instanceof Error && e.message ? e.message : 'Try again');
+      if (alive.current) setVerified(!next); // revert on failure
+      Alert.alert('Could not save', userErrorText(e, 'Try again.'));
     } finally {
       if (alive.current) setSaving(false);
     }
@@ -233,6 +238,16 @@ export default function VerifyContactScreen() {
               not being intercepted. If the numbers ever differ, the keys changed — do not trust
               the chat until you re-verify.
             </Text>
+
+            {statusUnknown && (
+              <TouchableOpacity style={S.changed} onPress={load} accessibilityRole="button" accessibilityLiveRegion="polite"
+                accessibilityLabel={`Couldn't load whether you verified ${peerName}. Tap to try again`}>
+                <Ionicons name="cloud-offline-outline" size={18} color={colors.textDim} />
+                <Text style={S.changedTxt}>
+                  Couldn’t load whether you verified {peerName}, so the button below may be out of date. Tap to try again.
+                </Text>
+              </TouchableOpacity>
+            )}
 
             {codeChanged && (
               <View style={S.changed} accessibilityLiveRegion="polite">

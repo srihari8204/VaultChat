@@ -37,8 +37,7 @@ import { initialOf } from '../../lib/format';
 import { currentVersionName } from '../../lib/appVersion';
 import { permissionDenied } from '../../lib/permissionDenied';
 import { profileFromProtobuf } from '../../lib/userProfilePolicy';
-
-const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message) || fallback;
+import { userErrorText } from '../../lib/userErrorText';
 
 interface UserProfile {
   id: string;
@@ -117,7 +116,7 @@ export default function ProfileScreen() {
       setPhone(p.phone ?? '');
     } catch (e: unknown) {
       // Keep cached data for offline read; only surface if nothing painted.
-      if (!cached && alive.current) setLoadError(errText(e, 'Check your connection and try again.'));
+      if (!cached && alive.current) setLoadError(userErrorText(e, 'Check your connection and try again.'));
     } finally {
       if (alive.current) setLoading(false);
     }
@@ -140,10 +139,10 @@ export default function ProfileScreen() {
       setProfile(updated);
       return true;
     } catch (e: unknown) {
-      Alert.alert('Save failed', errText(e, 'Try again'));
+      Alert.alert('Save failed', userErrorText(e, 'Try again'));
       return false;
     } finally {
-      setSaving(false);
+      if (alive.current) setSaving(false);
     }
   }, [name, status, saving]);
 
@@ -184,9 +183,9 @@ export default function ProfileScreen() {
       });
       setProfile(updated);
     } catch (e: unknown) {
-      Alert.alert('Photo upload failed', errText(e, 'Try again'));
+      Alert.alert('Photo upload failed', userErrorText(e, 'Try again'));
     } finally {
-      setPhotoBusy(false);
+      if (alive.current) setPhotoBusy(false);
     }
   }, [photoBusy]);
 
@@ -200,9 +199,9 @@ export default function ProfileScreen() {
       });
       setProfile(updated);
     } catch (e: unknown) {
-      Alert.alert('Could not remove photo', errText(e, 'Try again'));
+      Alert.alert('Could not remove photo', userErrorText(e, 'Try again'));
     } finally {
-      setPhotoBusy(false);
+      if (alive.current) setPhotoBusy(false);
     }
   }, [photoBusy, profile?.photoURL]);
 
@@ -233,9 +232,9 @@ export default function ProfileScreen() {
       setPhoneCode('');
       setResendIn(30);
     } catch (e: unknown) {
-      Alert.alert('Could not send code', errText(e, 'Try again'));
+      Alert.alert('Could not send code', userErrorText(e, 'Try again'));
     } finally {
-      setVerifying(false);
+      if (alive.current) setVerifying(false);
     }
   }, [phone]);
 
@@ -248,9 +247,9 @@ export default function ProfileScreen() {
       // Reload the profile to pick up the verified phone
       await load();
     } catch (e: unknown) {
-      Alert.alert('Verification failed', errText(e, 'Try again'));
+      Alert.alert('Verification failed', userErrorText(e, 'Try again'));
     } finally {
-      setVerifying(false);
+      if (alive.current) setVerifying(false);
     }
   }, [phone, phoneCode, load]);
 
@@ -274,7 +273,7 @@ export default function ProfileScreen() {
           } catch (e: unknown) {
             registerPushToken().catch(() => {});
             getSocket().catch(() => {});
-            Alert.alert('Could not sign out', `${errText(e, 'Something went wrong.')} You are still signed in. Try again.`);
+            Alert.alert('Could not sign out', `${userErrorText(e, 'Something went wrong.')} You are still signed in. Try again.`);
             return;
           }
           // resetTo, not replace: anything pushed above the tabs stayed in the

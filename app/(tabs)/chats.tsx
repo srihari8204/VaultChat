@@ -34,7 +34,7 @@ import { mark } from '../../lib/perf';
 import { takePrimedChats } from '../../lib/chatsPrefetch';
 import { applyLocalReadPointers, setUnreadTotal } from '../../lib/unreadStore';
 import { getDraftMap } from '../../lib/drafts';
-import { getLastMessagePerChat, getCachedChats, cacheChats } from '../../lib/localDb';
+import { getLastMessagePerChat, getCachedChats, cacheChats, isVisibleChatRow, setCachedChatHidden } from '../../lib/localDb';
 import { isLockedIn, lockedChatIds } from '../../lib/lockedChats';
 import { getCurrentUserAsync } from '../(constants)/authService';
 // The row, the avatar popup and the styles live in components/chats/ (split
@@ -42,12 +42,11 @@ import { getCurrentUserAsync } from '../(constants)/authService';
 import { ChatListRow, ChatListSeparator, type LastMsg } from '../../components/chats/ChatListRow';
 import { AvatarPopup } from '../../components/chats/AvatarPopup';
 import { useChatListStyles } from '../../components/chats/chatListStyles';
+import { userErrorText } from '../../lib/userErrorText';
 
 // Row previews and the lock table, read together: a locked chat's text is never
 // painted before its lock is known. lockedChatIds() never rejects (null = the
 // lock table is unreadable → every row is treated as locked).
-const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message) || fallback;
-
 async function readPreviews() {
   const [msgs, locked] = await Promise.all([
     getLastMessagePerChat().then(hydrateOwnPreviews).catch(() => null),
@@ -204,7 +203,7 @@ export default function ChatsScreen() {
       setUnreadTotal(list.reduce((n, c) => n + (c.archived ? 0 : (c.unreadCount > 0 ? 1 : 0)), 0));
     } catch (e: unknown) {
       mark('chats_fetch_error');
-      setError(errText(e, 'Failed to load chats'));
+      setError(userErrorText(e, 'Failed to load chats'));
     }
   }, []);
 
@@ -239,7 +238,9 @@ export default function ChatsScreen() {
       // Paint cached chats instantly (WhatsApp-style) so there's no spinner on
       // cold start; the network fetch then reconciles in the background.
       try {
-        const cached = await getCachedChats();
+        // Not the hidden (PIN-gated) chats: opening one from Hidden chats
+        // caches its row too (lib/localDb.getCachedVisibleChats).
+        const cached = (await getCachedChats()).filter(isVisibleChatRow);
         // Same read-pointer correction listChats applies, because this row can
         // be OLDER than the list that wrote it: lib/localDb.cacheChatDetail
         // re-writes a chat's cached row from the ChatDetail fetched when the
@@ -391,7 +392,7 @@ export default function ChatsScreen() {
           s.off('message_edited', refresh); s.off('presence_changed', onPresence);
           s.off('typing_start', onTyping); s.off('typing_stop', onTypingStop);
         };
-      } catch (e: unknown) { if (!cancelled) setError(errText(e, 'Realtime unavailable')); }
+      } catch (e: unknown) { if (!cancelled) setError(userErrorText(e, 'Realtime unavailable')); }
     })();
     return () => { cancelled = true; if (off) off(); };
   }, [scheduleRefresh]);
@@ -466,19 +467,19 @@ export default function ChatsScreen() {
     const next = !chat.pinned;
     patch(chat.id, { pinned: next });
     try { await pinChat(chat.id, next); await fetchList(); }
-    catch (e: unknown) { patch(chat.id, { pinned: !next }); setError(errText(e, 'Pin failed')); }
+    catch (e: unknown) { patch(chat.id, { pinned: !next }); setError(userErrorText(e, 'Pin failed')); }
   }, [patch, fetchList]);
   const doMute = useCallback(async (chat: ChatSummary) => {
     const next = !chat.muted;
     patch(chat.id, { muted: next });
     try { await muteChat(chat.id, next); await fetchList(); }
-    catch (e: unknown) { patch(chat.id, { muted: !next }); setError(errText(e, 'Mute failed')); }
+    catch (e: unknown) { patch(chat.id, { muted: !next }); setError(userErrorText(e, 'Mute failed')); }
   }, [patch, fetchList]);
   const doArchive = useCallback(async (chat: ChatSummary) => {
     const next = !chat.archived;
     patch(chat.id, { archived: next });
     try { await archiveChat(chat.id, next); await fetchList(); }
-    catch (e: unknown) { patch(chat.id, { archived: !next }); setError(errText(e, 'Archive failed')); }
+    catch (e: unknown) { patch(chat.id, { archived: !next }); setError(userErrorText(e, 'Archive failed')); }
   }, [patch, fetchList]);
   const doDelete = useCallback((chat: ChatSummary) => {
     Alert.alert(
@@ -489,8 +490,8 @@ export default function ChatsScreen() {
         {
           text: 'Delete', style: 'destructive', onPress: async () => {
             setChats(prev => prev.filter(c => c.id !== chat.id));
-            try { await setHidden(chat.id, true); await fetchList(); }
-            catch (e: unknown) { setError(errText(e, 'Delete failed')); fetchList(); }
+            try { await setHidden(chat.id, true); await setCachedChatHidden(chat.id, true).catch(() => {}); await fetchList(); }
+            catch (e: unknown) { setError(userErrorText(e, 'Delete failed')); fetchList(); }
           },
         },
       ],
@@ -552,6 +553,9 @@ export default function ChatsScreen() {
         exitSelect();
         setChats(prev => prev.filter(c => !ids.includes(c.id)));
         const results = await Promise.allSettled(ids.map(id => setHidden(id, true)));
+        // This device's cached rows too, so global search and the Bookshelf
+        // drop the hidden ones at once even if the refetch below fails.
+        await Promise.all(ids.map((id, i) => (results[i].status === 'fulfilled' ? setCachedChatHidden(id, true).catch(() => {}) : null)));
         const failed = results.filter(r => r.status === 'rejected').length;
         await fetchList();
         // The refetch puts an undeleted chat straight back in the list, so the
@@ -704,6 +708,17 @@ export default function ChatsScreen() {
           </Text>
           <Text style={S.inviteBannerCta}>View</Text>
           <Ionicons name="chevron-forward" size={16} color={colors.primary} />
+        </TouchableOpacity>
+      )}
+
+      {/* Every row reads "Locked chat" when the lock table can't be read
+          (fail closed); say why once, with a retry. */}
+      {lockedIds === null && (
+        <TouchableOpacity style={S.inviteBanner} onPress={onRefresh} disabled={refreshing} activeOpacity={0.8}
+          accessibilityRole="button" accessibilityState={{ disabled: refreshing, busy: refreshing }}
+          accessibilityLabel="Couldn't read your chat locks, so message previews are hidden. Tap to try again">
+          <Ionicons name="lock-closed-outline" size={18} color={colors.primary} />
+          <Text style={S.inviteBannerTxt}>Couldn’t read your chat locks, so previews are hidden. Tap to try again.</Text>
         </TouchableOpacity>
       )}
 

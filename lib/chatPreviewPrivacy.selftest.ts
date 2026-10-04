@@ -7,6 +7,9 @@
 //   • A view-once / Invisible Ink newest message never prints its text, even
 //     after lib/chatService.hydrateOwnPreviews filled `content` back in for an
 //     own message (it spreads the row, so the `protected` flag survives).
+//   • A locked row shows no receipt tick and no "typing…" either.
+//   • Global search shows message hits only from chats in its loaded list, so
+//     hidden (PIN-gated) chats are never hits (lib/localDb also skips them).
 // Runs the REAL lib/chatLock.ts with React Native stubbed (as
 // lib/chatLockMigration.selftest.ts does) and the real preview function.
 
@@ -66,6 +69,17 @@ async function main() {
   assert.equal(P.chatRowPreview({ ...base, lastMsg: { ...text, content: null } }).preview, '🔒 Encrypted message');
   assert.equal(P.chatRowPreview({ hasLastMessage: false }).preview, 'No messages yet');
 
+  // ── receipt tick: none on a locked row ─────────────────────────────────
+  const mine = { content: 'hi', type: 'text', senderId: 'me', id: 20 };
+  const tk = { lastMsg: mine, meId: 'me', draftText: '', direct: true };
+  assert.equal(P.chatRowTick(tk), 'sent');
+  assert.equal(P.chatRowTick({ ...tk, peerDeliveredId: 20 }), 'delivered');
+  assert.equal(P.chatRowTick({ ...tk, peerReadId: 25 }), 'read');
+  assert.equal(P.chatRowTick({ ...tk, peerReadId: 25, locked: true }), null, 'locked: no read tick');
+  assert.equal(P.chatRowTick({ ...tk, draftText: 'x' }), null, 'a draft replaces the tick');
+  assert.equal(P.chatRowTick({ ...tk, direct: false }), null, 'groups have no row tick');
+  assert.equal(P.chatRowTick({ ...tk, lastMsg: text }), null, 'not your message: no tick');
+
   // hydrateOwnPreviews must keep spreading the row, or the flag is lost.
   const svc = readFileSync('lib/chatService.ts', 'utf8');
   const hydrate = svc.match(/export async function hydrateOwnPreviews[\s\S]*?\n}/)?.[0] ?? '';
@@ -78,10 +92,23 @@ async function main() {
   const row = readFileSync('components/chats/ChatListRow.tsx', 'utf8');
   assert.match(row, /chatRowPreview\(\{[^}]*locked \}\)/, 'the row renders chatRowPreview');
   assert.doesNotMatch(row, /lastMsg\.content/, 'the row reads no message text itself');
+  assert.match(row, /chatRowTick\(\{[\s\S]*?locked,/, 'the row tick gets the lock');
+  assert.match(row, /const typing = !!isTyping && !locked;/, 'a locked row shows no "typing…"');
+  assert.doesNotMatch(row, /\{isTyping \?/, 'the row does not render typing from the raw prop');
   const search = readFileSync('app/search.tsx', 'utf8');
   assert.match(search, /searchAllMessages\(q, 50, locked\)/, 'global search passes the locked set');
   assert.match(search, /locked === null \? \[\]/, 'an unreadable lock table searches no messages');
+  // Hidden (PIN-gated) chats: hits only from chats in the loaded list.
+  assert.match(search, /msgs\.filter\(h => chatTitle\.has\(h\.chatId\)\)/, 'search lists hits only from listed chats');
+  assert.match(search, /getCachedVisibleChats\(\)/, 'offline search lists only visible cached chats');
+  assert.doesNotMatch(search, /getCachedChats\(/, 'search never lists hidden cached rows');
 
-  console.log('chat preview privacy: locked rows, drafts, protected messages and search lock wiring checks passed');
+  // contact-info: a locked chat's messages are not even fetched.
+  const info = readFileSync('app/contact-info.tsx', 'utf8');
+  assert.match(info, /if \(chatLocked === null\) return;/, 'contact-info waits for the lock before loading');
+  assert.match(info, /chatId && !locked \? getMessages\(/, 'contact-info fetches no messages for a locked chat');
+  assert.match(info, /const unioned = locked \? \[\] : await unionWithLocalHistory\(/, 'contact-info reads no local history for a locked chat');
+
+  console.log('chat preview privacy: locked rows (text, tick, typing), drafts, protected messages, search lock/hidden wiring and contact-info lock checks passed');
 }
 main().catch((e) => { console.error(e); process.exitCode = 1; });

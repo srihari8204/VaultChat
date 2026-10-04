@@ -32,6 +32,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Linking,
   Platform,
   SectionList,
@@ -52,8 +53,7 @@ import { AppText as Text, AuroraBackground } from '../components/ui';
 import { initialOf } from '../lib/format';
 import { readSealedCache, writeSealedCache } from '../lib/localCache';
 import { tint } from '../lib/tintColor';
-
-const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message) || fallback;
+import { userErrorText } from '../lib/userErrorText';
 
 interface PhoneEntry {
   hash:        string;
@@ -179,7 +179,7 @@ export default function ContactsScreen() {
           results.push(...partial);
         } catch (err: unknown) {
           chunkFailed = true;
-          console.warn('[contacts] match chunk failed:', errText(err, String(err)));
+          console.warn('[contacts] match chunk failed:', err instanceof Error ? err.message : String(err));
         }
         if (!alive.current) return;
       }
@@ -218,7 +218,7 @@ export default function ContactsScreen() {
         writeSealedCache<CachedScan>(CACHE_KEY, { at, matched: matchedRows, invite: inviteRows });
       }
     } catch (e: unknown) {
-      if (alive.current) setError(errText(e, 'Contact scan failed'));
+      if (alive.current) setError(userErrorText(e, 'Contact scan failed'));
     } finally {
       if (alive.current) { setScanning(false); setProgress(null); }
     }
@@ -245,6 +245,19 @@ export default function ContactsScreen() {
     return () => { cancel = true; };
   }, [scan]);
 
+  // Back from Settings with access turned on: scan, instead of leaving the
+  // "permission needed" card up until the user finds a button to tap.
+  useEffect(() => {
+    if (permission !== 'denied') return;
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st !== 'active') return;
+      Contacts.getPermissionsAsync()
+        .then((p) => { if (alive.current && p.status === 'granted') scan(); })
+        .catch(() => {});
+    });
+    return () => sub.remove();
+  }, [permission, scan]);
+
   const openChat = useCallback(async (m: MatchedRow, call?: 'voice' | 'video') => {
     if (openingId) return;
     setOpeningId(m.id);
@@ -260,7 +273,7 @@ export default function ContactsScreen() {
         router.replace({ pathname: '/chat', params: { id: res.id } });
       }
     } catch (e: unknown) {
-      Alert.alert(call ? 'Could not start the call' : 'Could not open chat', errText(e, 'Try again'));
+      Alert.alert(call ? 'Could not start the call' : 'Could not open chat', userErrorText(e, 'Try again'));
     } finally {
       setOpeningId(null);
     }
@@ -280,7 +293,7 @@ export default function ContactsScreen() {
         await Share.share({ message, title: 'Invite to crazzychat' });
       }
     } catch (e: unknown) {
-      Alert.alert('Could not open invite', errText(e, 'Try again'));
+      Alert.alert('Could not open invite', userErrorText(e, 'Try again'));
     }
   }, []);
 
@@ -379,11 +392,12 @@ export default function ContactsScreen() {
       )}
 
       {permission === 'denied' && !scanning && (
-        <View style={S.center}>
+        <View style={S.center} accessibilityLiveRegion="polite">
           <Text style={S.icon} accessible={false} importantForAccessibility="no">📇</Text>
           <Text style={S.heading} accessibilityRole="header">Contacts permission needed</Text>
           <Text style={S.sub}>{error ?? 'Allow crazzychat to read your contacts so you can find friends who are on the app.'}</Text>
-          <TouchableOpacity style={S.ctaBtn} onPress={blocked ? () => { Linking.openSettings().catch(() => {}); } : scan} activeOpacity={0.85} accessibilityRole="button">
+          <TouchableOpacity style={S.ctaBtn} onPress={blocked ? () => { Linking.openSettings().catch(() => {}); } : scan} activeOpacity={0.85} accessibilityRole="button"
+            accessibilityHint={blocked ? 'Opens this app’s settings. Turn on Contacts, then come back.' : 'Asks for Contacts access again'}>
             <Text style={S.ctaTxt}>{blocked ? 'Open settings' : 'Try again'}</Text>
           </TouchableOpacity>
         </View>

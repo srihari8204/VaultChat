@@ -9,9 +9,15 @@
 //   * it must carry a real hue (chroma), because every colour that clears 3:1
 //     on this mid-blue fill is light, so luminance alone cannot separate it
 //     from the white-ish meta line — the hue does.
+// A custom bubble colour (lib/chatBubbleTheme BUBBLE_THEMES) gets its own inks
+// (components/chat/bubbleFillInk): checked here for EVERY preset, in normal and
+// high contrast — body and meta text >= 4.5:1, read tick >= 3:1 with a hue
+// apart from the meta ink the sent / delivered ticks use.
 
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { PALETTES } from '../constants/theme';
+import { fillInks, contrastOn, chroma } from '../components/chat/bubbleFillInk';
 
 function rgba(v: string): [number, number, number, number] {
   if (v.startsWith('#')) {
@@ -45,5 +51,24 @@ for (const [scheme, p] of Object.entries(PALETTES)) {
   const chroma = Math.max(r, g, b) - Math.min(r, g, b);
   assert.ok(chroma >= 100, `${scheme}: read tick has no clear hue (chroma ${chroma.toFixed(0)}) — it would read as the white meta line`);
   console.log(`${scheme}: tickRead ${p.tickRead} on ${fill} = ${onFill.toFixed(2)}:1; delivered ink ${p.bubbleMetaOut} = ${contrast(p.bubbleMetaOut, fill).toFixed(2)}:1; high-contrast ink ${p.bubbleOutText} = ${contrast(p.bubbleOutText, fill).toFixed(2)}:1`);
+}
+// Presets read from source: lib/chatBubbleTheme.ts imports AsyncStorage.
+const themeSrc = readFileSync('lib/chatBubbleTheme.ts', 'utf8');
+const presets = [...themeSrc.matchAll(/id: '(\w+)',\s*name: '[^']+',\s*color: '(#[0-9A-Fa-f]{6})'/g)].map(m => [m[1], m[2]] as const);
+assert.ok(presets.length >= 11, `found ${presets.length} bubble presets in lib/chatBubbleTheme.ts`);
+for (const [id, fill] of presets) {
+  for (const hc of [false, true]) {
+    const ink = fillInks(fill, hc);
+    const text = contrastOn(ink.text, fill);
+    const meta = contrast(ink.meta, fill);
+    const read = contrastOn(ink.tickRead, fill);
+    const tag = `${id} ${fill}${hc ? ' (high contrast)' : ''}`;
+    assert.ok(text >= 4.5, `${tag}: body text ${ink.text} is ${text.toFixed(2)}:1 (< 4.5:1)`);
+    assert.ok(meta >= 4.5, `${tag}: time/meta ink ${ink.meta} is ${meta.toFixed(2)}:1 (< 4.5:1)`);
+    assert.ok(read >= 3, `${tag}: read tick ${ink.tickRead} is ${read.toFixed(2)}:1 (< 3:1)`);
+    assert.ok(chroma(ink.tickRead) >= 100, `${tag}: read tick ${ink.tickRead} has no clear hue`);
+    assert.ok(chroma(ink.text) < 40, `${tag}: meta ink is neutral, so the read tick's hue sets it apart`);
+    if (!hc) console.log(`${tag}: text ${text.toFixed(2)}:1, meta ${ink.meta} ${meta.toFixed(2)}:1, read ${ink.tickRead} ${read.toFixed(2)}:1`);
+  }
 }
 console.log('chatBubbleTick: ok');

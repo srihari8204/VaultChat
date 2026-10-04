@@ -399,7 +399,7 @@ const makeStyles = (c: Palette, m: ReturnType<typeof useVisionComfort>['metrics'
   notice:       { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginBottom: 6, paddingHorizontal: 12, paddingVertical: 9, minHeight: 44, borderRadius: 12, backgroundColor: c.glassSoft, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
   noticeTxt:    { flex: 1, color: c.textDim, fontSize: 12.5, lineHeight: 17 },
   infoWrap:     { flex: 1, justifyContent: 'flex-end' },
-  // Scrim over whatever is behind the modal: dark in both themes by design.
+  // Scrim over whatever is behind the modal: the theme's black scrim token (0.6 dark, 0.45 light).
   infoBackdrop: { backgroundColor: c.scrim },
   infoSheet:    { backgroundColor: c.surfaceSolid, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 18, paddingTop: 8, paddingBottom: 28 },
   grip:         { alignSelf: 'center', width: 38, height: 4, borderRadius: 2, backgroundColor: c.border, marginBottom: 12 },

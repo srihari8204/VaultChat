@@ -15,6 +15,7 @@ import { type Palette, ELEVATION, brandAlpha } from '../../constants/theme';
 import { type Message } from '../../lib/chatService';
 import { chatCardMax } from '../../constants/layoutMath';
 import { tint } from '../../lib/tintColor';
+import { fillInks } from './bubbleFillInk';
 
 
 // Optimistic bubbles carry a few extra fields beyond a server Message.
@@ -88,13 +89,11 @@ export function useS() {
   }, [colors, m.topInset, m.bottomInset, m.narrow, m.cardMax, metrics, profile.highContrast]);
 }
 
-// Pick black or white text for legibility on an arbitrary bubble color.
+// Pick black or white text for legibility on an arbitrary bubble color: the
+// higher WCAG contrast (./bubbleFillInk). A perceived-brightness cut-off put
+// white on Emerald at 2.54:1.
 export function idealText(hex: string): string {
-  const h = hex.replace('#', '');
-  if (h.length < 6) return '#fff';
-  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
-  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  return lum > 0.6 ? '#0e0e14' : '#ffffff';
+  return hex.replace('#', '').length < 6 ? '#fff' : fillInks(hex).text;
 }
 
 // The search-hit mark (renderWithHighlight). Deliberately fixed: yellow under

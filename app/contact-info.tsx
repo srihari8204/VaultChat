@@ -28,8 +28,7 @@ import { AppText as Text, Avatar, AuroraBackground } from '../components/ui';
 import { HEADER_TOP } from '../constants/layout';
 import { tint } from '../lib/tintColor';
 import { isChatLocked } from '../lib/chatLock';
-
-const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message) || fallback;
+import { userErrorText } from '../lib/userErrorText';
 
 const URL_RE = /(https?:\/\/[^\s]+)/gi;
 
@@ -154,6 +153,10 @@ export default function ContactInfoScreen() {
   }, [peerUid, reloadKey]);
 
   useEffect(() => {
+    // Wait for the lock: a locked chat's messages are not fetched, decrypted,
+    // classified or painted here at all (only shown after unlocking the chat).
+    if (chatLocked === null) return;
+    const locked = chatLocked;
     let active = true;
     // Cache key includes the chat id so different conversations don't collide.
     const cacheKey = 'contact-info:' + (chatId || peerUid || '');
@@ -170,9 +173,11 @@ export default function ContactInfoScreen() {
         if (cached.peer) setPeer(cached.peer);
         setMuted(cached.muted);
         setBlocked(cached.blocked);
-        setMedia(cached.media);
-        setFiles(cached.files);
-        setLinks(cached.links);
+        if (!locked) {
+          setMedia(cached.media);
+          setFiles(cached.files);
+          setLinks(cached.links);
+        }
         setLoading(false);
         painted = true;
       }
@@ -182,7 +187,7 @@ export default function ContactInfoScreen() {
         const [blocks, chat, msgs] = await Promise.all([
           listBlocks(),
           chatId ? getChat(chatId) : null,
-          chatId ? getMessages(chatId, { limit: 200 }) : null,
+          chatId && !locked ? getMessages(chatId, { limit: 200 }) : null,
         ]);
 
         if (!active) return;
@@ -204,13 +209,16 @@ export default function ContactInfoScreen() {
         // nulls a delivered body and the media sweep purges its bytes, so the
         // server list alone drops shared media the device can still render —
         // and writing that back to the cache erased it for good.
-        const unioned = await unionWithLocalHistory(chatId, msgs ?? [], 400);
+        // Locked: the saved snapshot's shared items are kept as they are, unread.
+        const unioned = locked ? [] : await unionWithLocalHistory(chatId, msgs ?? [], 400);
         const buckets = unioned.length ? classify(unioned)
           : { media: cached?.media ?? [], files: cached?.files ?? [], links: cached?.links ?? [] };
         if (!active) return;
-        setMedia(buckets.media);
-        setFiles(buckets.files);
-        setLinks(buckets.links);
+        if (!locked) {
+          setMedia(buckets.media);
+          setFiles(buckets.files);
+          setLinks(buckets.links);
+        }
 
         if (chatId || peerUid) {
           writeCache<ContactInfoCache>(cacheKey, {
@@ -227,7 +235,7 @@ export default function ContactInfoScreen() {
       }
     })();
     return () => { active = false; };
-  }, [chatId, peerUid, reloadKey]);
+  }, [chatId, peerUid, reloadKey, chatLocked]);
 
   const lastSeenText = useCallback(() => {
     if (peer?.online) return 'Online';
@@ -241,7 +249,7 @@ export default function ContactInfoScreen() {
     if (!chatId) return;
     const next = !muted;
     setMuted(next);
-    try { await muteChat(chatId, next); } catch (e: unknown) { setMuted(!next); Alert.alert('Error', errText(e, 'Mute failed')); }
+    try { await muteChat(chatId, next); } catch (e: unknown) { setMuted(!next); Alert.alert('Error', userErrorText(e, 'Mute failed')); }
   };
 
   const toggleBlock = () => {
@@ -251,7 +259,7 @@ export default function ContactInfoScreen() {
         { text: 'Cancel', style: 'cancel' },
         { text: 'Unblock', onPress: async () => {
           setBlocked(false);
-          try { await unblockUser(peerUid); } catch (e: unknown) { setBlocked(true); Alert.alert('Error', errText(e, 'Failed')); }
+          try { await unblockUser(peerUid); } catch (e: unknown) { setBlocked(true); Alert.alert('Error', userErrorText(e, 'Failed')); }
         } },
       ]);
       return;
@@ -260,7 +268,7 @@ export default function ContactInfoScreen() {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Block', style: 'destructive', onPress: async () => {
         setBlocked(true);
-        try { await blockUser(peerUid); } catch (e: unknown) { setBlocked(false); Alert.alert('Error', errText(e, 'Failed')); }
+        try { await blockUser(peerUid); } catch (e: unknown) { setBlocked(false); Alert.alert('Error', userErrorText(e, 'Failed')); }
       } },
     ]);
   };
@@ -275,7 +283,7 @@ export default function ContactInfoScreen() {
         try {
           await reportUser(peerUid, 'reported_from_contact_info', chatId ? String(chatId) : undefined);
         } catch (e: unknown) {
-          Alert.alert('Report not sent', `${errText(e, 'Something went wrong.')} ${displayName} was not reported or blocked.`);
+          Alert.alert('Report not sent', `${userErrorText(e, 'Something went wrong.')} ${displayName} was not reported or blocked.`);
           return;
         }
         setBlocked(true);
@@ -284,7 +292,7 @@ export default function ContactInfoScreen() {
           Alert.alert('Done', `${displayName} was reported and blocked.`);
         } catch (e: unknown) {
           setBlocked(false);
-          Alert.alert('Reported, but not blocked', `Your report was sent. Blocking failed: ${errText(e, 'try again')} — you can block from this screen.`);
+          Alert.alert('Reported, but not blocked', `Your report was sent. Blocking failed: ${userErrorText(e, 'try again')} — you can block from this screen.`);
         }
       } },
     ]);
@@ -297,7 +305,7 @@ export default function ContactInfoScreen() {
 
       <ScrollView contentContainerStyle={{ paddingBottom: 60 }}>
         <View style={s.hero}>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/chats'))} style={s.backBtn} hitSlop={10}>
             <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
 
@@ -344,13 +352,17 @@ export default function ContactInfoScreen() {
         )}
 
         {loading && <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />}
-        {loadFailed && !loading && (
-          <TouchableOpacity style={[s.section, s.loadErr]} onPress={() => setReloadKey(k => k + 1)}
-            accessibilityRole="button" accessibilityLabel="Couldn't load shared media, files and links. Tap to retry.">
-            <Ionicons name="cloud-offline-outline" size={18} color={colors.danger} />
-            <Text style={s.loadErrTxt}>Couldn’t load shared media, files and links. Tap to retry.</Text>
-          </TouchableOpacity>
-        )}
+        {loadFailed && !loading && (() => {
+          // A locked chat loads no shared items, so only the details failed.
+          const what = chatLocked ? 'Couldn’t load this contact’s details.' : 'Couldn’t load shared media, files and links.';
+          return (
+            <TouchableOpacity style={[s.section, s.loadErr]} onPress={() => setReloadKey(k => k + 1)}
+              accessibilityRole="button" accessibilityLabel={`${what} Tap to retry.`}>
+              <Ionicons name="cloud-offline-outline" size={18} color={colors.danger} />
+              <Text style={s.loadErrTxt}>{what} Tap to retry.</Text>
+            </TouchableOpacity>
+          );
+        })()}
         {(staleShown || groupsFailed) && !loading && (() => {
           // Names every part that failed: both can fail at once (offline).
           const what = [staleShown && 'Showing saved info — couldn’t refresh.', groupsFailed && 'Couldn’t load groups in common.']

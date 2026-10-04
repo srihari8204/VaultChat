@@ -17,11 +17,10 @@ import { useTheme } from '../lib/theme';
 import { AppText as Text, Avatar, AuroraBackground, KeyboardSafe } from '../components/ui';
 import { PhoneField, toE164 } from '../components/auth/PhoneField';
 import { createDirectChat, listChats, attachmentUrl, setDisappearing, type ChatSummary } from '../lib/chatService';
-import { getCachedChats } from '../lib/localDb';
+import { getCachedVisibleChats } from '../lib/localDb';
 import { getCachedUser } from '../lib/api';
 import { dialCodeOf } from '../lib/dialCodeOf';
-
-const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message) || fallback;
+import { userErrorText } from '../lib/userErrorText';
 
 type Contact = { chatId: string; userId: string; name: string; photoURL: string | null; online: boolean };
 
@@ -74,7 +73,7 @@ export default function NewChatScreen() {
       } catch (e: unknown) {
         Alert.alert(
           'Could not make this chat temporary',
-          `Messages here will NOT disappear. ${errText(e, 'Try again from the chat’s settings.')}`,
+          `Messages here will NOT disappear. ${userErrorText(e, 'Try again from the chat’s settings.')}`,
         );
       }
     }
@@ -117,7 +116,7 @@ export default function NewChatScreen() {
         // Offline: fall back to the cached chat list (as the Chats tab does)
         // and say so, instead of claiming there are no contacts.
         offline = true;
-        list = ((await getCachedChats().catch(() => [])) ?? []) as ChatSummary[];
+        list = ((await getCachedVisibleChats().catch(() => [])) ?? []) as ChatSummary[];
       }
       if (isCancelled()) return;
       setListError(offline);
@@ -155,7 +154,7 @@ export default function NewChatScreen() {
       const res = await createDirectChat({ phone: e164 });
       await openWithTtl(res.id, true);
     } catch (e: unknown) {
-      Alert.alert('Could not start chat', errText(e, 'The number may not be on crazzychat yet.'));
+      Alert.alert('Could not start chat', userErrorText(e, 'The number may not be on crazzychat yet.'));
     } finally { setAdding(false); }
   };
 

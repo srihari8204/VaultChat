@@ -26,6 +26,7 @@ import { holdSecurityVerdict } from '../../lib/securityVerdict';
 import { AppText as Text } from '../../components/ui/Text';
 import { AuroraBackground } from '../../components/ui';
 import { tint } from '../../lib/tintColor';
+import { userErrorText } from '../../lib/userErrorText';
 
 // Severity ink, all palette roles (danger, warning, caution, success, accentOn
 // — each AA on this theme's ground). Medium's caution yellow is kept distinct
@@ -38,7 +39,6 @@ function sevColor(sev: AuditSeverity, c: Palette): string {
   return c.accentOn;
 }
 
-const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message) || fallback;
 
 function iconForType(type: string): keyof typeof Ionicons.glyphMap {
   switch (type) {
@@ -102,7 +102,7 @@ export default function AlertsScreen() {
       setEvents(evs);
       setStatus(st);
     } catch (e) {
-      if (alive.current) setError(errText(e, 'Could not load security events'));
+      if (alive.current) setError(userErrorText(e, 'Could not load security events'));
     } finally {
       if (alive.current) setLoading(false);
     }
@@ -150,7 +150,7 @@ export default function AlertsScreen() {
           : `${report.threats.length} low-risk signal${report.threats.length === 1 ? '' : 's'} noted (for example developer options). Nothing was blocked; details are in the log below.`,
       );
     } catch (e) {
-      Alert.alert('Scan failed', errText(e, 'The device scan could not run. Nothing was changed — try again.'));
+      Alert.alert('Scan failed', userErrorText(e, 'The device scan could not run. Nothing was changed — try again.'));
     } finally {
       setScanning(false);
       load();

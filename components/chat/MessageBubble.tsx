@@ -736,7 +736,7 @@ function MessageBubble({
           ) : null;
         })()}
 
-        <BubbleMetaLine msg={msg} tickState={tickState} isMine={isMine} isMedia={!!(isImage || isVideo || isGif)} />
+        <BubbleMetaLine msg={msg} tickState={tickState} isMine={isMine} isMedia={!!(isImage || isVideo || isGif)} fill={bubbleBg} />
 
         {/* Upload ring over visual media only — the WhatsApp read. File/voice
             bubbles get the meta-row text above instead, where a scrim over a

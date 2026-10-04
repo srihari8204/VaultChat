@@ -1,8 +1,11 @@
 // app/search.tsx — global search (WhatsApp-style). Filters chats by name AND
 // searches message CONTENT across all chats, entirely on-device against the
 // local plaintext cache (zero-knowledge — the server never sees the query).
-// Messages in locked chats are not searched, and view-once / Invisible Ink
-// messages are never hits (lib/localDb.searchAllMessages).
+// Messages in locked and hidden (PIN-gated) chats are not searched, and
+// view-once / Invisible Ink messages are never hits (lib/localDb.searchAllMessages).
+// A message hit is shown only when its chat is in the list this screen loaded
+// (the server's non-hidden list, or offline the cached visible rows), so a hit
+// can never open a chat around the Hidden-chats PIN.
 
 import { useAuthHeader } from '../hooks/useAuthHeader';
 import { HEADER_TOP, SCREEN_BOTTOM } from '../constants/layout';
@@ -17,7 +20,7 @@ import { useTheme } from '../lib/theme';
 import { Avatar, AuroraBackground } from '../components/ui';
 import { AppText as Text } from '../components/ui/Text';
 import { attachmentUrl, listChats, chatTitle as chatDisplayName, type ChatSummary } from '../lib/chatService';
-import { searchAllMessages, getCachedChats } from '../lib/localDb';
+import { searchAllMessages, getCachedVisibleChats } from '../lib/localDb';
 import { setPendingJump } from '../lib/chatJump';
 import { searchSnippet } from '../lib/searchSnippet';
 import { lockedChatIds } from '../lib/lockedChats';
@@ -68,7 +71,7 @@ export default function SearchScreen() {
       } catch {
         // Offline: chat names still come from the device cache, as on the Chats tab.
         if (!cancel) setChatsOffline(true);
-        const cached = await getCachedChats().catch(() => []);
+        const cached = await getCachedVisibleChats().catch(() => []);
         if (!cancel) setChats((cached ?? []) as ChatSummary[]);
       }
       finally { if (!cancel) setLoading(false); }
@@ -80,7 +83,7 @@ export default function SearchScreen() {
   useEffect(() => {
     clearTimeout(debounce.current);
     const q = query.trim();
-    if (q.length < 2) { setFound({ q: '', hits: [] }); setMsgError(false); return; }
+    if (q.length < 2) { setFound({ q: '', hits: [] }); setMsgError(false); setLocksUnreadable(false); return; }
     // `stale` stops an older, slower search from overwriting a newer query's hits.
     let stale = false;
     debounce.current = setTimeout(() => {
@@ -108,12 +111,16 @@ export default function SearchScreen() {
     return chats.filter(c => titleOf(c).toLowerCase().includes(q));
   }, [query, chats]);
 
+  // Only hits whose chat is in the loaded list: a hidden chat (or one this
+  // device cannot name) is never shown or opened from here.
+  const listedMsgs = useMemo(() => msgs.filter(h => chatTitle.has(h.chatId)), [msgs, chatTitle]);
+
   const sections = useMemo(() => {
     const out: Section[] = [];
     if (filteredChats.length) out.push({ title: 'Chats', kind: 'chat', data: filteredChats });
-    if (msgs.length) out.push({ title: 'Messages', kind: 'msg', data: msgs });
+    if (listedMsgs.length) out.push({ title: 'Messages', kind: 'msg', data: listedMsgs });
     return out;
-  }, [filteredChats, msgs]);
+  }, [filteredChats, listedMsgs]);
 
   const openChat = (id: string, jumpTo?: number) => {
     if (jumpTo) setPendingJump(id, jumpTo);   // chat.tsx consumes this on focus → scrolls to the message
@@ -148,10 +155,11 @@ export default function SearchScreen() {
         </View>
       )}
       {locksUnreadable && !loading && !!query.trim() && (
-        <View style={S.notice} accessibilityLiveRegion="polite">
+        <TouchableOpacity style={S.notice} onPress={() => setRetry(n => n + 1)} accessibilityLiveRegion="polite"
+          accessibilityRole="button" accessibilityLabel="Couldn't read your chat locks, so messages aren't searched. Tap to try again">
           <Ionicons name="lock-closed-outline" size={16} color={colors.textDim} />
-          <Text style={S.noticeTxt}>Couldn’t read your chat locks, so messages aren’t searched. Chat names still are.</Text>
-        </View>
+          <Text style={S.noticeTxt}>Couldn’t read your chat locks, so messages aren’t searched. Chat names still are. Tap to try again.</Text>
+        </TouchableOpacity>
       )}
       {msgError && !loading && (
         <TouchableOpacity style={S.notice} onPress={() => setRetry(n => n + 1)} accessibilityLiveRegion="polite"
@@ -166,7 +174,7 @@ export default function SearchScreen() {
       ) : sections.length === 0 ? (
         <View style={S.empty}>
           <Text style={S.emptyTitle}>{!query.trim() ? 'Search your chats' : msgError || locksUnreadable ? 'No chats match' : 'Nothing found'}</Text>
-          {!!query.trim() && !msgError && !locksUnreadable && <Text style={S.emptySub}>Try a different name or word. Messages in locked chats aren’t searched.</Text>}
+          {!!query.trim() && !msgError && !locksUnreadable && <Text style={S.emptySub}>Try a different name or word. Messages in locked and hidden chats aren’t searched.</Text>}
         </View>
       ) : (
         <SectionList<ChatSummary | MsgHit, Section>
