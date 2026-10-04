@@ -33,7 +33,12 @@ export default function OnboardSecurity() {
     setSlots(prev => prev.map((sl, j) => (j === i ? { ...sl, ...patch } : sl)));
 
   const chosen = slots.map(sl => sl.questionCode).filter(Boolean) as string[];
-  const valid = slots.every(sl => sl.questionCode && sl.answer.trim().length >= MIN_ANSWER);
+  const done = slots.filter(sl => sl.questionCode && sl.answer.trim().length >= MIN_ANSWER).length;
+  const valid = done === slots.length;
+  // A row with no question picked has no field to show a hint under, so the
+  // reason Next is off is stated by the button.
+  const why = valid ? null
+    : `Choose and answer all ${slots.length} questions to continue (${done} of ${slots.length} done).`;
 
   const next = () => {
     if (!valid) return;
@@ -87,6 +92,7 @@ export default function OnboardSecurity() {
             disabled={!valid}
             accessibilityRole="button"
             accessibilityLabel="Next, create your MPIN"
+            accessibilityHint={why ?? undefined}
             accessibilityState={{ disabled: !valid }}
             style={({ pressed }) => [s.ctaWrap, !valid && s.ctaOff, pressed && valid && s.ctaDown]}
           >
@@ -99,6 +105,7 @@ export default function OnboardSecurity() {
               <Text style={s.ctaTxt}>Next</Text>
             </LinearGradient>
           </Pressable>
+          {!!why && <Text style={s.why}>{why}</Text>}
         </ScrollView>
       </KeyboardSafe>
     </View>
@@ -125,6 +132,7 @@ const makeStyles = (AUTH: AuthPalette) => StyleSheet.create({
     paddingBottom: 2,
   },
 
+  why: { color: AUTH.dim, fontSize: 12, textAlign: 'center', marginTop: 10 },
   ctaWrap: { marginTop: 24, borderRadius: 16, overflow: 'hidden' },
   // 2026-09-18: minHeight, not height. A pinned 56 clipped the 16sp label at
   // font scale 1.5, and this is the step that sets the MPIN — nobody should be

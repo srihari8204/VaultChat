@@ -21,6 +21,8 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   checkAppVersion, currentBuild, fetchVersionGate, verdictFor, type VersionGate, type VersionVerdict,
 } from '../lib/appVersion';
+// The catalog's update.* keys, as TermsGate uses terms.* (lib/i18n).
+import { t, useLang } from '../lib/i18n';
 
 /** Re-ask the server on foreground at most this often: a floor raised while the
  *  app sat in the background must still apply, without a request per resume. */
@@ -28,10 +30,16 @@ const RECHECK_MS = 60 * 60_000;
 
 /**
  * Where "Update" goes when the server sent no updateUrl. On Android the Play
- * listing for this package (market:// first, the web page if no store app);
- * elsewhere null — the screen then says where to update instead of a dead button.
+ * listing for this package (market:// first, the web page if no store app); on
+ * iOS app.json's ios.appStoreUrl when it is set; otherwise false — the screen
+ * then says where to update instead of a dead button.
  */
 async function openStoreFallback(): Promise<boolean> {
+  if (Platform.OS === 'ios') {
+    const url = Constants.expoConfig?.ios?.appStoreUrl;
+    if (!url) return false;
+    try { await Linking.openURL(url); return true; } catch { return false; }
+  }
   const pkg = Constants.expoConfig?.android?.package;
   if (Platform.OS !== 'android' || !pkg) return false;
   try { await Linking.openURL(`market://details?id=${pkg}`); return true; } catch { /* no Play Store app */ }
@@ -39,6 +47,7 @@ async function openStoreFallback(): Promise<boolean> {
 }
 
 export function UpdateGate({ children }: { children: React.ReactNode }) {
+  useLang();   // re-render if the language changes while this is on screen
   const [verdict, setVerdict] = useState<VersionVerdict>('ok');
   const [gate, setGate] = useState<VersionGate | null>(null);
   const [dismissed, setDismissed] = useState(false);
@@ -78,14 +87,12 @@ export function UpdateGate({ children }: { children: React.ReactNode }) {
     return (
       <View style={styles.block}>
         <View style={styles.icon} accessibilityElementsHidden importantForAccessibility="no"><Ionicons name="arrow-up-circle" size={44} color="#fff" /></View>
-        <Text style={styles.title} accessibilityRole="header">Update crazzychat to continue</Text>
+        <Text style={styles.title} accessibilityRole="header">{t('update.blocked.title')}</Text>
         <Text style={styles.body}>
-          {gate?.message?.trim()
-            ? gate.message
-            : 'This version can no longer connect safely. Updating takes a moment and keeps your messages and backups readable.'}
+          {gate?.message?.trim() ? gate.message : t('update.blocked.body')}
         </Text>
         <TouchableOpacity style={styles.cta} onPress={openStore} activeOpacity={0.85} accessibilityRole="button">
-          <Text style={styles.ctaTxt}>Update now</Text>
+          <Text style={styles.ctaTxt}>{t('update.button')}</Text>
         </TouchableOpacity>
         {noStore && (
           <Text style={styles.body} accessibilityLiveRegion="polite">
@@ -104,7 +111,7 @@ export function UpdateGate({ children }: { children: React.ReactNode }) {
       {verdict === 'advise' && !dismissed && (
         <View style={[styles.bar, { paddingTop: 9 + insets.top }]}>
           <Ionicons name="arrow-up-circle-outline" size={17} color="#fff" />
-          <Text style={styles.barTxt} numberOfLines={1}>A newer version of crazzychat is available</Text>
+          <Text style={styles.barTxt} numberOfLines={1}>{t('update.advise.body')}</Text>
           <TouchableOpacity onPress={openStore} accessibilityRole="button" accessibilityLabel="Update crazzychat" hitSlop={12}>
             <Text style={styles.barCta}>Update</Text>
           </TouchableOpacity>

@@ -60,7 +60,7 @@ export function ResumeLock(): null {
         .catch(() => false);
       if (state === 'active') setResumeLockCheck(lock);
       lock.then((l) => {
-        if (l) router.push({ pathname: '/app-lock', params: { resume: '1' } } as any);
+        if (l) router.push({ pathname: '/app-lock', params: { resume: '1' } });
       }).catch(() => {});
     });
     return () => sub.remove();

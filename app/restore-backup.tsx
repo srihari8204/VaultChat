@@ -20,7 +20,7 @@
 // restore prompt that implies "now or never" pressures people into a slow
 // operation on mobile data at the worst moment.
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
@@ -60,34 +60,44 @@ export default function RestoreBackupScreen() {
   const [meta, setMeta] = useState<BackupMeta | null>(null);
   const [busy, setBusy] = useState<null | 'cloud' | 'drive'>(null);
   const [restored, setRestored] = useState<number | null>(null);
+  // A restore can finish after the screen is gone (resetTo from elsewhere).
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
 
   // `unavailable` means the lookup failed — NOT "no backup". Showing "No
   // backup was found" for a dead connection invited the user to carry on and
   // lose a backup that exists; offer a retry instead.
   const lookUp = useCallback(() => {
     setMeta(null);
-    cloudBackupMeta().then(setMeta).catch(() => setMeta({ exists: false, unavailable: true }));
+    cloudBackupMeta()
+      .then((m) => { if (alive.current) setMeta(m); })
+      .catch(() => { if (alive.current) setMeta({ exists: false, unavailable: true }); });
   }, []);
   useEffect(() => { lookUp(); }, [lookUp]);
   const lookupFailed = !!meta?.unavailable;
 
-  // Leaving — by any route — must mark the prompt seen, or a user who skips is
-  // asked again on the next cold start, which reads as the app nagging.
+  // Leaving after a real answer marks the prompt seen, or a user who skips is
+  // asked again on the next cold start, which reads as the app nagging. NOT
+  // after a failed or unfinished lookup: someone who was offline never saw
+  // whether a backup exists, so they are offered it again next launch.
+  const answered = meta !== null && !meta.unavailable;
   const leave = useCallback(async () => {
-    await markRestorePromptSeen();
+    if (answered) await markRestorePromptSeen();
     // resetTo: replays a launch deep link stashed before sign-in
     // (lib/postSignIn.ts deliberately leaves it in place on the way here).
     resetTo('/(tabs)/chats');
-  }, []);
+  }, [answered]);
 
   const run = useCallback(async (from: 'cloud' | 'drive') => {
     if (busy) return;
     setBusy(from);
     try {
       const n = from === 'cloud' ? await restoreCloudBackup() : await restoreFromGoogleDrive();
-      setRestored(n);
       await markRestorePromptSeen();
+      if (!alive.current) return;
+      setRestored(n);
     } catch (e: any) {
+      if (!alive.current) return;
       setBusy(null);
       // Named plainly: the two real causes are "there isn't one" and "the
       // network went away mid-download", and the user can act on both.
@@ -101,7 +111,7 @@ export default function RestoreBackupScreen() {
       );
       return;
     }
-    setBusy(null);
+    if (alive.current) setBusy(null);
   }, [busy]);
 
   if (restored !== null) {
@@ -150,7 +160,7 @@ export default function RestoreBackupScreen() {
         )}
 
         {lookupFailed && (
-          <TouchableOpacity style={S.cta} onPress={lookUp} activeOpacity={0.85} accessibilityRole="button">
+          <TouchableOpacity style={S.cta} onPress={lookUp} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel="Try again to check for a backup">
             <Text style={S.ctaTxt}>Try again</Text>
           </TouchableOpacity>
         )}
@@ -166,7 +176,7 @@ export default function RestoreBackupScreen() {
               accessibilityState={{ disabled: !!busy, busy: busy === 'cloud' }}
             >
               {busy === 'cloud'
-                ? <ActivityIndicator color="#fff" />
+                ? <ActivityIndicator color={colors.onPrimary} />
                 : <Text style={S.ctaTxt}>Restore now</Text>}
             </TouchableOpacity>
 
@@ -253,7 +263,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', paddingVertical: 12,
   },
   ctaOff: { opacity: 0.45 },
-  ctaTxt: { color: '#fff', fontSize: 16.5, fontWeight: '800' },
+  ctaTxt: { color: c.onPrimary, fontSize: 16.5, fontWeight: '800' },
 
   secondary: {
     width: '100%', minHeight: 48, borderRadius: 14, marginTop: 10,

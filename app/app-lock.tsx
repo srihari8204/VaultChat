@@ -10,7 +10,7 @@
 // failure with a user-chosen re-login escape — never a silent bounce to
 // /onboard, which would look like the app forgot the account.
 
-import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { type Href, Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Animated, BackHandler, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
 import { type Palette } from '../constants/theme';
@@ -37,7 +37,7 @@ export default function AppLock() {
   /** A Device PIN exists, so it is offered as another way in. */
   const [devicePin, setDevicePin] = useState(false);
   const alive = useRef(true);
-  useEffect(() => () => { alive.current = false; }, []);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const [pin, setPin] = useState('');
   const [userId, setUserId] = useState<string | null>(null);
   const [mpin, setMpin] = useState('');
@@ -53,7 +53,7 @@ export default function AppLock() {
       // it (lib/pendingLink.openWhenUnlocked) — open it now, above the screen
       // the user returns to. The cold path replays it inside resetTo instead.
       const held = consumeLaunchLink();
-      if (held) router.push(held as any);
+      if (held) router.push(held as Href);
     } else resetTo('/(tabs)/chats');
   };
 
@@ -106,25 +106,32 @@ export default function AppLock() {
     setBusy(true); setError(null);
     try {
       const ok = mode === 'pin' ? await verifyPin(pin) : await loadSealedSession(pin);
+      if (!alive.current) return;
       if (ok) { enter(); return; }
       setPin(''); doShake();
       const wait = mode === 'pin' ? await pinBackoffMs() : 0;
+      if (!alive.current) return;
       setError(wait > 0
         ? `Too many attempts. Try again in ${Math.ceil(wait / 1000)} s.`
         : 'That PIN did not unlock this device. Your messages are still here — try again.');
     } catch {
-      setError("Couldn't check your PIN. Try again.");
+      if (alive.current) setError("Couldn't check your PIN. Try again.");
     } finally { if (alive.current) setBusy(false); }
   };
 
   // The honest last resort, and it is the USER'S choice, not a silent redirect.
   // Signing in again replaces the sealed session; anything sealed under the old
   // PIN (cached message bodies) is unreadable afterwards, so say so first.
+  // In `pin` mode the session is open, so the MPIN unlocks without losing
+  // anything: offer that before the destructive way out.
   const forgotPin = () => Alert.alert(
     'Forgotten PIN',
-    'Your PIN is only on this device, so it cannot be reset or recovered. You can sign in again with your account — your chats sync back from the server, but anything stored only on this device under the old PIN is lost.',
+    mode === 'pin'
+      ? 'Your PIN is only on this device, so it cannot be reset or recovered. You can unlock with your MPIN instead. Signing in again also works, but anything stored only on this device under the old PIN is lost.'
+      : 'Your PIN is only on this device, so it cannot be reset or recovered. You can sign in again with your account — your chats sync back from the server, but anything stored only on this device under the old PIN is lost.',
     [
       { text: 'Keep trying', style: 'cancel' },
+      ...(mode === 'pin' ? [{ text: 'Use MPIN instead', onPress: () => { setError(null); setMode('mpin'); } }] : []),
       { text: 'Sign in again', style: 'destructive', onPress: async () => {
         await clearTokens().catch(() => {});
         await setCachedUser(null).catch(() => {});
@@ -136,7 +143,7 @@ export default function AppLock() {
   // MPIN mode's way out when the MPIN itself is the problem. Same recovery as
   // the sign-in screen (app/mpin-entry.tsx) — security questions, new MPIN.
   const forgotMpin = () => {
-    if (userId) { router.push({ pathname: '/mpin-recover', params: { userId } } as any); return; }
+    if (userId) { router.push({ pathname: '/mpin-recover', params: { userId } }); return; }
     signInAgain();
   };
   // No cached user id means the MPIN cannot be checked at all; offer the exit
@@ -152,8 +159,9 @@ export default function AppLock() {
     setBusy(true); setError(null);
     try {
       await verifyMpinRemote(userId, value);
-      enter();
+      if (alive.current) enter();
     } catch (e: any) {
+      if (!alive.current) return;
       setMpin(''); doShake();
       // The MPIN is checked by the server; offline, only biometrics (or the
       // Device PIN) can unlock.
@@ -170,7 +178,7 @@ export default function AppLock() {
       <KeyboardSafe style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
         <Text style={s.lock} accessibilityElementsHidden importantForAccessibility="no">🔐</Text>
-        <Text style={s.title}>crazzychat is locked</Text>
+        <Text style={s.title} accessibilityRole="header">crazzychat is locked</Text>
 
         {mode === 'seal' || mode === 'pin' ? (
           <>
@@ -205,11 +213,11 @@ export default function AppLock() {
             {mode === 'pin' && (
               // The session is open in memory here (unlike a sealed one), so the
               // server-checked MPIN can unlock it too.
-              <TouchableOpacity onPress={() => { setError(null); setMode('mpin'); }} style={{ marginTop: 20 }} accessibilityRole="button">
+              <TouchableOpacity onPress={() => { setError(null); setMode('mpin'); }} style={[s.altHit, { marginTop: 10 }]} accessibilityRole="button">
                 <Text style={s.alt}>Use MPIN instead</Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity onPress={forgotPin} style={{ marginTop: 20 }} accessibilityRole="button">
+            <TouchableOpacity onPress={forgotPin} style={[s.altHit, { marginTop: 10 }]} accessibilityRole="button">
               <Text style={s.alt}>Forgotten your PIN?</Text>
             </TouchableOpacity>
           </>
@@ -219,11 +227,11 @@ export default function AppLock() {
             <TouchableOpacity style={s.bioBtn} onPress={tryBiometric} activeOpacity={0.85} accessibilityRole="button">
               <Text style={s.bioTxt}>Use biometrics</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => setMode('mpin')} style={{ marginTop: 18 }} accessibilityRole="button">
+            <TouchableOpacity onPress={() => setMode('mpin')} style={[s.altHit, { marginTop: 8 }]} accessibilityRole="button">
               <Text style={s.alt}>Use MPIN instead</Text>
             </TouchableOpacity>
             {devicePin && (
-              <TouchableOpacity onPress={() => { setError(null); setMode('pin'); }} style={{ marginTop: 18 }} accessibilityRole="button">
+              <TouchableOpacity onPress={() => { setError(null); setMode('pin'); }} style={[s.altHit, { marginTop: 8 }]} accessibilityRole="button">
                 <Text style={s.alt}>Use device PIN</Text>
               </TouchableOpacity>
             )}
@@ -236,15 +244,15 @@ export default function AppLock() {
             </View>
             {busy && <ActivityIndicator color={colors.primary} />}
             {!!error && <Text style={s.error} accessibilityLiveRegion="polite">{error}</Text>}
-            <TouchableOpacity onPress={tryBiometric} style={{ marginTop: 16 }} accessibilityRole="button">
+            <TouchableOpacity onPress={tryBiometric} style={[s.altHit, { marginTop: 6 }]} accessibilityRole="button">
               <Text style={s.alt}>Use biometrics</Text>
             </TouchableOpacity>
             {devicePin && (
-              <TouchableOpacity onPress={() => { setError(null); setMode('pin'); }} style={{ marginTop: 16 }} accessibilityRole="button">
+              <TouchableOpacity onPress={() => { setError(null); setMode('pin'); }} style={[s.altHit, { marginTop: 6 }]} accessibilityRole="button">
                 <Text style={s.alt}>Use device PIN</Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity onPress={forgotMpin} style={{ marginTop: 16 }} accessibilityRole="button">
+            <TouchableOpacity onPress={forgotMpin} style={[s.altHit, { marginTop: 6 }]} accessibilityRole="button">
               <Text style={s.alt}>{userId ? 'Forgot MPIN?' : 'Sign in again'}</Text>
             </TouchableOpacity>
           </>
@@ -268,8 +276,10 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   // large text was then looking at a button with no readable way in. 54 is also
   // the tap floor; the padding keeps it pixel-identical at scale 1.0.
   bioBtn: { marginTop: 28, minHeight: 54, paddingVertical: 16, paddingHorizontal: 40, borderRadius: 16, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
-  bioTxt: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  bioTxt: { color: c.onPrimary, fontSize: 16, fontWeight: '800' },
   alt: { color: c.primary, fontSize: 14, fontWeight: '700' },
+  // 44pt touch floor for the 14pt text links.
+  altHit: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 12 },
   error: { color: c.danger, fontSize: 13, marginTop: 12, fontWeight: '600', textAlign: 'center' },
   pinInput: { marginTop: 24, height: 56, borderRadius: 16, borderWidth: 1, borderColor: c.border, backgroundColor: c.card, color: c.text, fontSize: 24, fontWeight: '800', letterSpacing: 8, textAlign: 'center' },
 });

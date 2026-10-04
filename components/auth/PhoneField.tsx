@@ -102,6 +102,9 @@ export function PhoneField({
         onClose={() => setPick(false)}
         actions={COUNTRIES.map(item => ({
           label: `${item.flag}  ${item.name}  ${item.code}`,
+          // Spoken without the flag emoji ("flag: India…"). Read once
+          // components/ui/Sheet passes SheetAction.accessibilityLabel through.
+          accessibilityLabel: `${item.name} ${item.code}`,
           selected: item.code === dialCode,
           // Trim to the new country's ceiling — 10 Indian digits are not
           // a Singapore number, and carrying them over silently is how

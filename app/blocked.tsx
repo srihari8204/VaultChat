@@ -26,7 +26,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { securityVerdict } from '../lib/securityVerdict';
+import { holdSecurityVerdict, securityVerdict } from '../lib/securityVerdict';
+import { runSecurityCheck } from '../services/securityService';
 import type { Palette } from '../constants/theme';
 import { useColors } from '../lib/theme';
 import { tint } from '../lib/tintColor';
@@ -131,7 +132,10 @@ export default function BlockedScreen() {
   // Only an in-app scan holds a `restrict` or `wipe` verdict. Opened any other
   // way (a crafted or stale link) there is no verdict to enforce, so the screen
   // must not hold the user hostage: Back works and an on-screen exit is shown.
-  const [held] = useState(securityVerdict);
+  const [held, setHeld] = useState(securityVerdict);
+  // Raw detector output is for technical users; behind a disclosure.
+  const [showRaw, setShowRaw] = useState(false);
+  const [recheck, setRecheck] = useState<'idle' | 'busy' | 'clean' | 'still' | 'failed'>('idle');
   const verdict = held !== null;
   const threats = held?.threats ?? [];
   // Only a `wipe` verdict ran wipeAllKeys(). A `restrict` left the keys alone,
@@ -151,6 +155,25 @@ export default function BlockedScreen() {
   const leave = () => {
     if (router.canGoBack()) router.back();
     else router.replace('/' as any);
+  };
+
+  // A `restrict` verdict re-checked in place, instead of only "reopen the app".
+  // A `wipe` is not offered this: its keys are already gone.
+  // ponytail: a clean re-scan cannot release the verdict in this process —
+  // lib/securityVerdict has no clear yet — so it says to reopen the app. Once a
+  // clear for `restrict` exists, call it here and leave().
+  const checkAgain = async () => {
+    if (recheck === 'busy') return;
+    setRecheck('busy');
+    try {
+      const report = await runSecurityCheck();
+      if (report.clean) { setRecheck('clean'); return; }
+      holdSecurityVerdict(report);
+      setHeld(securityVerdict());
+      setRecheck('still');
+    } catch {
+      setRecheck('failed');
+    }
   };
 
   const handleContactSupport = () => {
@@ -215,7 +238,7 @@ export default function BlockedScreen() {
         {/* Threat list */}
         {threats.length > 0 && (
           <View style={styles.threatList}>
-            <Text style={styles.threatListTitle}>Threats Detected</Text>
+            <Text style={styles.threatListTitle} accessibilityRole="header">Threats Detected</Text>
             {threats.map((t, i) => {
               const info = THREAT_LABELS[t.type] || {
                 label: t.type,
@@ -229,13 +252,23 @@ export default function BlockedScreen() {
                     <Text style={styles.threatLabel}>{info.label}</Text>
                   </View>
                   <Text style={styles.threatDesc}>{info.desc}</Text>
-                  {/* Raw detail for technical users */}
-                  <Text style={styles.threatRaw} numberOfLines={2}>
-                    {t.detail}
-                  </Text>
+                  {/* Raw detail for technical users, on request */}
+                  {showRaw && (
+                    <Text style={styles.threatRaw} numberOfLines={2}>
+                      {t.detail}
+                    </Text>
+                  )}
                 </View>
               );
             })}
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityState={{ expanded: showRaw }}
+              onPress={() => setShowRaw(v => !v)}
+              style={styles.linkHit}
+            >
+              <Text style={styles.linkTxt}>{showRaw ? 'Hide technical details' : 'Show technical details'}</Text>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -268,7 +301,7 @@ export default function BlockedScreen() {
             'Turn off USB debugging / developer options if they are on',
             'Disconnect any debugger or instrumentation tool',
             'Disable accessibility services you do not recognise',
-            'Reopen crazzychat — it re-checks on every launch',
+            'Tap Check again, or reopen crazzychat — it re-checks on every launch',
           ]).map((step, i) => (
             <View key={step} style={styles.stepRow}>
               <View style={styles.stepNum}>
@@ -278,6 +311,29 @@ export default function BlockedScreen() {
             </View>
           ))}
         </View>
+
+        {!wiped && (
+          <>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityState={{ busy: recheck === 'busy', disabled: recheck === 'busy' }}
+              disabled={recheck === 'busy'}
+              style={styles.supportBtn}
+              onPress={checkAgain}
+            >
+              <Text style={styles.supportBtnText}>{recheck === 'busy' ? 'Checking…' : 'Check again'}</Text>
+            </TouchableOpacity>
+            {recheck !== 'idle' && recheck !== 'busy' && (
+              <Text style={styles.recheckTxt} accessibilityLiveRegion="polite">
+                {recheck === 'clean'
+                  ? 'The indicator is gone. Close crazzychat completely and open it again to continue.'
+                  : recheck === 'still'
+                    ? 'Still detected — see the list above.'
+                    : 'Couldn’t run the check. Try again.'}
+              </Text>
+            )}
+          </>
+        )}
 
         {/* Support button */}
         <TouchableOpacity accessibilityRole="button" style={styles.supportBtn} onPress={handleContactSupport}>
@@ -306,8 +362,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   topBarText: {
     fontSize: 13,
     fontWeight: 'bold',
-    // White on the danger bar in both themes (both palettes' danger is a deep red).
-    color: '#FFFFFF',
+    // On the solid danger bar.
+    color: c.onDanger,
     letterSpacing: 2,
   },
   scroll: {
@@ -379,6 +435,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     lineHeight: 20,
     marginBottom: 4,
   },
+  linkHit: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
+  linkTxt: { fontSize: 13, fontWeight: '700', color: c.primary },
+  recheckTxt: { fontSize: 13, color: c.textDim, textAlign: 'center', marginTop: -12, marginBottom: 20, maxWidth: 320 },
   threatRaw: {
     fontSize: 10,
     color: c.textDim,

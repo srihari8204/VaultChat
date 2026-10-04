@@ -6,9 +6,9 @@
 // first screen: the restore offer on a new phone, otherwise Chats — with any
 // notification tap that arrived meanwhile opened on top (lib/pendingLink).
 
-import { router } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
-import { Image, StyleSheet, TouchableOpacity, View } from "react-native";
+import { type Href, router } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Image, StyleSheet, TouchableOpacity, View } from "react-native";
 import { AppText as Text } from "../components/ui/Text";
 import { AuroraDark, BRAND_NIGHT } from "../constants/theme";
 import { launchAllowed } from "../lib/launchGate";
@@ -18,8 +18,17 @@ import { securityVerdict } from "../lib/securityVerdict";
 
 export default function IndexScreen() {
   const [failed, setFailed] = useState(false);
+  // Shown only if this fallback is still up after the native splash would
+  // normally have handed over, so a quick launch never flashes a spinner.
+  const [slow, setSlow] = useState(false);
+  useEffect(() => { const id = setTimeout(() => setSlow(true), 1500); return () => clearTimeout(id); }, []);
+  // One routing run at a time: a double tap on Retry ran two replaces and
+  // could push a held link twice. Released only by a failure.
+  const inFlight = useRef(false);
 
   const route = useCallback(async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setFailed(false);
     try {
       // THE ROOT OWNS THE LAUNCH DECISION (app/_layout.tsx).
@@ -46,7 +55,7 @@ export default function IndexScreen() {
       // Any held tap stays in lib/pendingLink: restore-backup's resetTo
       // replays it on the way into the tabs.
       if (await shouldCheckRestore().catch(() => false)) {
-        router.replace("/restore-backup" as any);
+        router.replace("/restore-backup");
         markLaunchRouted();
         return;
       }
@@ -57,14 +66,15 @@ export default function IndexScreen() {
       // BACK from it lands on the list.
       // Synchronous from here on, so no tap can slip between the mark that
       // lets later taps open directly and the consume of the held one.
-      router.replace("/(tabs)/chats" as any);
+      router.replace("/(tabs)/chats");
       markLaunchRouted();
       const held = consumeLaunchLink();
-      if (held) router.push(held as any);
+      if (held) router.push(held as Href);
     } catch (e) {
       // No silent splash: a throw here used to leave the user on the logo with
       // nothing to press. Offer a retry.
       console.warn('[index] launch routing failed', e);
+      inFlight.current = false;
       setFailed(true);
     }
   }, []);
@@ -105,6 +115,9 @@ export default function IndexScreen() {
         accessibilityElementsHidden
         importantForAccessibility="no"
       />
+      {slow && !failed && (
+        <ActivityIndicator style={S.wait} color={AuroraDark.accentOn} accessibilityLabel="Opening crazzychat" />
+      )}
       {failed && (
         <TouchableOpacity
           style={S.retry}
@@ -126,6 +139,7 @@ const S = StyleSheet.create({
   // 200 and contain are app.json's expo-splash-screen values, verbatim.
   mark: { width: 200, height: 200 },
   // Always on the night ground, so the dark palette's ink, not the theme's.
+  wait: { marginTop: 32 },
   retry: { marginTop: 32, minHeight: 44, paddingHorizontal: 20, justifyContent: "center" },
   retryTxt: { color: AuroraDark.accentOn, fontSize: 15, fontWeight: "700", textAlign: "center" },
 });

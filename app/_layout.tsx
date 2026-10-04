@@ -11,6 +11,11 @@
 //   5. Register push notifications (physical device only)
 //   6. Wire notification tap listeners → navigate to correct chat
 //   7. Handle notification that launched app from killed state
+//
+// Self-contained pieces of that work live in components/root/: call routing,
+// launch intents, the inbound-message ingest, foreground upkeep, the verdict
+// guard and the route declarations. The launch gate, the veil, the boot
+// sequence and routeToCall stay here; several selftests read them from this file.
 
 // MUST BE FIRST — installs DOMException that Hermes does not have.
 //
@@ -27,7 +32,7 @@ import '../lib/domExceptionPolyfill';
 
 import { Buffer } from 'buffer';
 
-import { Stack, useGlobalSearchParams, usePathname, useRouter, useSegments } from 'expo-router';
+import { type Href, Stack, useGlobalSearchParams, usePathname, useRouter, useSegments } from 'expo-router';
 import { type ComponentType, useEffect, useRef, useState } from 'react';
 import { setSecure } from '../lib/screenGuard';
 import { installAlertGuard } from '../lib/alertGuard';
@@ -60,12 +65,17 @@ import { VisionComfortProvider } from '../lib/visionComfort';
 
 import { runSecurityCheck } from '../services/securityService';
 import { attachTapHandler } from '../lib/push';
-import { notify as notifyMessage, setSelfId } from '../lib/messageNotifications';
-import { addPersistentListener, getSocket } from '../lib/socket';
-import { registerForCalls, refreshCallRegistration, getInitialCallIntent, drainDeclinedCall } from '../lib/CallService';
-import { getActiveCall } from '../lib/callState';
-import { getRingingPeer, setRingingPeer, getRingScreenPeer, setRingScreenPeer, consumePendingCall } from '../lib/ringTracker';
+import { getSocket } from '../lib/socket';
+import { registerForCalls } from '../lib/CallService';
+import { setRingingPeer, setRingScreenPeer } from '../lib/ringTracker';
 import { cancelIncomingCall } from '../lib/callNotification';
+// The root's boot pieces, split out of this file (components/root/).
+import { type AnsweredCall, type IncomingCall, attachIncomingCallListener, makeCallActionHandler, openIncomingCall } from '../components/root/callRouting';
+import { consumeLaunchNotifications, makeNativeLaunchIntentConsumer } from '../components/root/launchIntents';
+import { attachMessageIngest, attachRekeyListener } from '../components/root/messageIngest';
+import { useCallRegistrationRefresh, useScheduledMessages } from '../components/root/useForegroundUpkeep';
+import { useVerdictGuard } from '../components/root/useVerdictGuard';
+import { ROOT_SCREENS } from '../components/root/rootScreens';
 import '../lib/callBackground';   // registers notifee bg event + bg notification task
 // Registers the VaultChatSync headless task at JS-load time, so a chat push can
 // sync and acknowledge delivery while the app is backgrounded or killed. Same
@@ -79,10 +89,10 @@ import '../lib/lock/background';   // registers the Location Lock geofence task 
                                    // rule: headless wakes need it defined at load
 import { getAccessToken, getLaunchSessionState } from '../lib/api';
 import { launchAllowed, settleLaunchGate } from '../lib/launchGate';
-import { deliverTap, hrefWithQuery, onDeliveredTap, openWhenUnlocked, stashLaunchLink } from '../lib/pendingLink';
-import { holdSecurityVerdict, securityVerdict } from '../lib/securityVerdict';
+import { hrefWithQuery, onDeliveredTap, openWhenUnlocked, stashLaunchLink } from '../lib/pendingLink';
+import { holdSecurityVerdict } from '../lib/securityVerdict';
 import { isMfaEnabled } from '../lib/mfa';
-import { E2EE_ENABLED, SCHEDULED_LOCAL } from '../constants/flags';
+import { E2EE_ENABLED } from '../constants/flags';
 import { mark } from '../lib/perf';
 global.Buffer = Buffer;
 
@@ -226,9 +236,6 @@ function RootLayoutInner() {
   // Spaces > Devices: heartbeat + command collector. Idle unless this phone was
   // registered as a space device (lib/spaces/deviceAgent.ts).
   useSpaceDeviceAgent();
-  /** My user id, for the famEvent ingest below — a ref because the persistent
-   *  listener closure outlives any render. */
-  const selfIdRef = useRef<string | null>(null);
   const router = useRouter();
   const pathname = usePathname();
   // The launch URL WITH its query: usePathname() drops `?code=` and the like,
@@ -279,12 +286,12 @@ function RootLayoutInner() {
           stashLaunchLink(launchHref);
           settleLaunchGate(false);
           setLaunchGate('/onboard');
-          router.replace('/onboard' as any);
+          router.replace('/onboard');
         } else if (mfaOn || session.sealedLocked) {
           stashLaunchLink(launchHref);
           settleLaunchGate(false);
           setLaunchGate('/app-lock');
-          router.replace('/app-lock' as any);
+          router.replace('/app-lock');
         } else {
           settleLaunchGate(true);
           setLaunchGate('allow');
@@ -298,7 +305,7 @@ function RootLayoutInner() {
         stashLaunchLink(launchHref);
         settleLaunchGate(false);
         setLaunchGate('/onboard');
-        router.replace('/onboard' as any);
+        router.replace('/onboard');
       });
     return () => { live = false; };
   }, [router]);
@@ -328,16 +335,8 @@ function RootLayoutInner() {
   }, [launchGate, pathname]);
   const launchReady = launchGate === 'allow' || landed || launchGate === pathname;
 
-  // A HELD SECURITY VERDICT OWNS THE SCREEN. Taps are already held while
-  // /blocked is up (lib/pendingLink), but a deep link that expo-router opens
-  // itself never passes through that gate, so it could stack a chat on top of
-  // the verdict. Any route other than /blocked goes back to it — except the
-  // call screens, which stay answerable as they are from the OS lock screen.
-  useEffect(() => {
-    if (launchGate === 'checking' || pathname === '/blocked' || !securityVerdict()) return;
-    if (/^\/(incoming-call|voicecall|videocall|group-call-active)(\/|$)/.test(pathname)) return;
-    router.replace('/blocked' as any);
-  }, [launchGate, pathname, router]);
+  // A held security verdict owns the screen (components/root/useVerdictGuard).
+  useVerdictGuard(launchGate, pathname, router);
   useEffect(() => {
     if (launchReady) SplashScreen.hideAsync().catch(() => {});
   }, [launchReady]);
@@ -401,7 +400,7 @@ function RootLayoutInner() {
             // AFTER the launch gate: its replace('/onboard' | '/app-lock') would
             // otherwise land on top of the verdict and hide it.
             await launchAllowed;
-            router.replace('/blocked' as any);
+            router.replace('/blocked');
           }
         })
         .catch(() => { /* fail open */ });
@@ -443,7 +442,7 @@ function RootLayoutInner() {
     // the lock screen, as the OS full-screen call already is.
     const openHref = (href: string) => {
       void openWhenUnlocked(href, launchAllowed, () => pathRef.current,
-        (h) => router.push(h as any)).catch(() => {});
+        (h) => router.push(h as Href)).catch(() => {});
     };
     const openLink = ({ pathname: path, params }: { pathname: string; params?: Record<string, string> }) =>
       openHref(hrefWithQuery(path, params));
@@ -451,109 +450,76 @@ function RootLayoutInner() {
     // alert pressed while the app was backgrounded, or before this mounted.
     const offDeliveredTap = onDeliveredTap(openHref);
 
-    // Open the in-app ringing screen for a call. `offer` may be empty (push /
-    // backgrounded) — incoming-call captures the caller's re-sent offer live.
-    const routeToIncoming = (p: { chatId?: string; peerUid: string; peerName: string; type: string; offer?: string; group?: boolean; groupName?: string; waiting?: boolean }) => {
-      // ONE RING SCREEN PER CALLER — the guard lives HERE, not at the call sites.
+    // Open the in-app ringing screen (components/root/callRouting).
+    const routeToIncoming = (p: IncomingCall) => openIncomingCall(router, p);
+
+    // ── Notifee full-screen call events (foreground) ────────────────────
+    // ANSWERED FROM THE OS — go straight into the call.
+    //
+    // The OS ring IS the ring. Routing an explicit Answer through the in-app
+    // ring screen made the user accept twice: the notification's Answer, then
+    // a second full-screen overlay that appeared on top of it. Reported on
+    // device exactly that way.
+    //
+    // Safe now because the call screen no longer needs the caller's envelope to
+    // answer — the chat identifies the call (see engine.acceptIncoming).
+    // ONE CALL SCREEN PER ANSWER.
+    //
+    // routeToCall is reachable from FOUR places: the native answer intent
+    // (consumeNativeLaunchIntent) and three notifee handlers — the foreground
+    // event, the initial notification, and the background handler. More than one
+    // firing for a single answer is NORMAL, not exceptional, and each did its
+    // own router.push. Two pushes mount two call screens, and each screen's
+    // effect starts its own session — the second replacing the first via
+    // bootstrap's hangUp('replaced').
+    //
+    // That is the "it makes too many calls" report: two call ids seconds apart
+    // on one chat, ringing the callee twice. The engine now holds a setup claim
+    // too (lib/call/engine.ts); stopping it here means the duplicate screen is
+    // never mounted at all.
+    //
+    // Keyed by peer+kind and TIME-BOXED, so a genuine second call to the same
+    // person a minute later still opens a screen.
+    const routedCalls = new Map<string, number>();
+    // 2s, not 10s. The duplicate handlers fire within MILLISECONDS of each
+    // other (same answer event, several listeners), so a short window collapses
+    // them just as well. Ten seconds was over-aggressive: answer, hang up, and
+    // answer again inside that window and the second call screen would never
+    // open — a worse bug than the one being fixed.
+    const ROUTE_DEDUPE_MS = 2_000;
+    const routeToCall = (p: AnsweredCall) => {
+      const dedupeKey = `${p.peerUid}|${p.type}|${p.group ? 'g' : 'd'}`;
+      if (Date.now() - (routedCalls.get(dedupeKey) ?? 0) < ROUTE_DEDUPE_MS) return;
+      routedCalls.set(dedupeKey, Date.now());
+      cancelIncomingCall();
+      // CLAIM the ring, do not release it.
       //
-      // This is a router.push, so every invocation stacks another
-      // /incoming-call screen. The socket listener checked getRingingPeer()
-      // before calling and was fine; the two notification paths
-      // (consumeNativeLaunchIntent and the notifee answer/decline handler) did
-      // not. Since the caller re-rings every 3s and each ring can produce a
-      // notification, tapping them piled ring screens on top of each other —
-      // reported as "so many overlays", with answering the in-app overlay
-      // directly working normally because that path only ever routes once.
+      // Clearing these was a bug I introduced with this route: the caller keeps
+      // re-ringing every 3s until the call connects, and routeToIncoming's
+      // guard is exactly `getRingScreenPeer() === peerUid`. With it cleared,
+      // the next ring opened the in-app ring screen ON TOP of the call the user
+      // had just answered — the overlay that survived the first fix.
       //
-      // Re-entering for a peer we are ALREADY ringing is a no-op: the screen is
-      // up, it owns the ringtone, and it is listening for the caller's re-sealed
-      // offer. Bringing it forward is what the OS is already doing.
-      // Guard on the RING SCREEN, not on ringingPeer: the latter is already set
-      // by the time a backgrounded device shows its notification, so using it
-      // here refused to open the screen on the tap that was supposed to open it.
-      if (getRingScreenPeer() === p.peerUid) {
-        cancelIncomingCall();           // the in-app UI owns the ring; drop the OS one
-        return;
-      }
-      cancelIncomingCall();             // clear any OS full-screen call once the in-app UI takes over
+      // Claiming it means "this peer's ring is already being handled here". The
+      // call screens release it when they unmount.
       setRingingPeer(p.peerUid);
       setRingScreenPeer(p.peerUid);
+      if (p.group) {
+        router.push({ pathname: '/group-call-active',
+          params: { chatId: p.chatId || '', video: p.type === 'video' ? '1' : '0', name: p.groupName || p.peerName } });
+        return;
+      }
       router.push({
-        pathname: '/incoming-call' as any,
-        params: {
-          chatId: p.chatId || '', peerUid: p.peerUid, peerName: p.peerName,
-          type: p.type === 'video' ? 'video' : 'audio',
-          offer: p.offer || '',
-          group: p.group ? '1' : '', groupName: p.groupName ?? '',
-          waiting: p.waiting ? '1' : '',
-        },
+        pathname: p.type === 'video' ? '/videocall' : '/voicecall',
+        params: { chatId: p.chatId || '', peerUid: p.peerUid, peerName: p.peerName, isIncoming: 'true' },
       });
     };
+    const onNotifeeAnswerOrDecline = makeCallActionHandler(routeToCall);
 
     // ── Incoming-call listener (realtime) ──────────────────────────────
-    const onIncoming = (data: any) => {
-      if (!data?.from || !data?.chatId) return;
-
-      // WARM THE ICE/TURN FETCH THE MOMENT THE RING ARRIVES.
-      //
-      // joinCallRoom needs ice servers before it can connect, and asking for
-      // them is a network round trip to a server in Germany. Starting it here
-      // — while the phone is still ringing and the user has not decided yet —
-      // means the answer does not pay for it. getIceServers caches, never
-      // throws, and degrades to STUN, so this is free if the user declines.
-      //
-      // Deliberately NOT a full pre-warm: opening the call session early would
-      // create the call_participants row before the user answered, and the
-      // CALLER would see them as joined while the phone was still ringing.
-      // Slow is better than lying about who is on the call.
-      void import('../lib/iceConfig').then(m => m.getIceServers()).catch(() => {});
-      const active = getActiveCall();
-      if (active && active.peerUid === data.from && !data.group) return;   // call-waiting same peer
-      if (getRingingPeer() === data.from) return;                          // de-dupe repeated rings
-      setRingingPeer(data.from);
-      // EMPTY, not the placeholder string, when the signal carries no name.
-      //
-      // The call screens resolve a blank peerName via getChat(chatId) — but the
-      // guard is `if (peerName || !chatId) return`, so handing them the literal
-      // 'crazzychat user' looks like a REAL name, skips the lookup, and pins the
-      // placeholder on screen for the whole call. That is the reported
-      // "usernames not getting displayed, instead getting crazzychat user": the
-      // fallback was being injected upstream as data rather than rendered
-      // downstream as a last resort.
-      const name = data.group ? (data.groupName || 'Group call') : (data.callerName ?? data.fromName ?? '');
-      const type = (data.type === 'video' || data.video === '1') ? 'video' : 'audio';
-      // App in the FOREGROUND (or a group call) → show the in-app screen.
-      // App BACKGROUNDED with a live socket → raise the OS full-screen call UI
-      // (lock screen). Answering it routes into the app via the notifee events.
-      if (AppState.currentState === 'active' || data.group) {
-        routeToIncoming({ chatId: data.chatId, peerUid: data.from, peerName: name, type, offer: data.offer ? JSON.stringify(data.offer) : '', group: !!data.group, groupName: data.groupName, waiting: !!active });
-      }
-      // NOT backgrounded → do NOT raise a notifee ring here.
-      //
-      // The native VaultCallMessagingService owns every OS ring (it is the only
-      // one that can ring a killed app, and it carries the caller's photo). Two
-      // owners is what produced the second, avatar-less notification on channel
-      // "calls". The server now pushes on every call rather than guessing from
-      // hasLiveSocket, and the native side stays silent while we are foreground,
-      // so exactly one of us rings in every state.
-    };
-    const cleanupCallListener = addPersistentListener('call_incoming', onIncoming);
-
-    // E2EE Stage-2 auto-recovery: a peer that couldn't decrypt us asks us to
-    // reset our session so our next message re-runs X3DH (persistent so it
-    // survives socket reconnects, like the call listener).
-    const cleanupRekey = addPersistentListener('e2ee_rekey', (data: any) => {
-      const from = data?.from ?? data?.fromUid;
-      // `force` marks a peer whose CALL setup failed — honoured immediately
-      // rather than being held back by the anti-thrash window.
-      //
-      // `epoch` identifies WHICH breakage the peer is reporting, so a repeat of
-      // a complaint we have already acted on can be recognised and dropped
-      // instead of tearing down the session we rebuilt for it. Left undefined
-      // by peers on older builds, which falls back to the timer alone.
-      const epoch = typeof data?.epoch === 'number' ? data.epoch : undefined;
-      if (from) import('../lib/chatService').then(m => m.handleRekeyRequest(String(from), data?.force === true, epoch)).catch(() => {});
-    });
+    const cleanupCallListener = attachIncomingCallListener(routeToIncoming);
+    // E2EE rekey requests and inbound-message notifications (components/root/messageIngest).
+    const cleanupRekey = attachRekeyListener();
 
     // ── Boot work that the user is WAITING for ─────────────────────────
     // These four decide what the first screen shows, so they start now:
@@ -619,203 +585,15 @@ function RootLayoutInner() {
       }
     });
 
-    // No-GMS background delivery (Phase 4): raise a local notification for each
-    // inbound message. Global + persistent so it fires while the app is
-    // backgrounded-but-alive (foreground-service connection). notify() self-gates
-    // (skips push-capable devices, foregrounded app, own echo, duplicates).
-    import('./(constants)/authService').then(m => m.getCurrentUserAsync().then((u: any) => {
-      setSelfId(u?.id ?? null);
-      selfIdRef.current = u?.id != null ? String(u.id) : null;   // famEvent ingest skips my own events
-    })).catch(() => {});
-    const cleanupMsgNotif = addPersistentListener('new_message', (m: any) => {
-      // famEvent envelopes ride `system`-type messages, and `type` is a
-      // plaintext DB column — only `content` is E2EE (group chats default to
-      // GROUP_E2EE=true). So `m.content` here is CIPHERTEXT for any encrypted
-      // group, and a plain string match against it can never see the marker.
-      // Found by review: the very first shipped version of this check tested
-      // ciphertext and therefore never fired — every crossing kept buzzing the
-      // phone as "new message" and the alerts inbox never filled remotely.
-      //
-      // Only `system`-type messages pay the decrypt cost here; every ordinary
-      // text/media message skips straight to notifyMessage below, unchanged —
-      // this does not weaken "never decrypt in the background" for the common
-      // case. decryptFromChat self-routes on the envelope prefix and passes
-      // plaintext/legacy content through untouched, so this is safe even for
-      // a real (non-famEvent) system message like "X was added to the group".
-      //
-      // THE MESSAGE ID IS LOAD-BEARING, and it arrives as a STRING.
-      // chatsPublicMsg emits `ID string` (fmt.Sprintf("%d")) — an in-repo
-      // comment claiming the socket delivers a number is wrong. Getting this
-      // wrong is not cosmetic: groupDecryptMessage only writes the plaintext
-      // cache `if (messageId > 0)`, while the sender-key ratchet advances
-      // UNCONDITIONALLY and does not retain the consumed iteration as a
-      // skipped key (senderKey.ts: "too old / already used"). So decrypting
-      // here without a real id would consume the ratchet step and cache
-      // nothing — and the chat thread's own later decrypt of that same
-      // message would throw, leaving EVERY group system message permanently
-      // unreadable. With the real id, the plaintext is cached and the thread
-      // gets a cache hit instead of a second ratchet step.
-      const msgId = Number(m?.id);
-      // No usable id → do NOT decrypt at all. Falling through to a plain
-      // notification is the old behaviour (a famEvent may buzz once); a
-      // corrupted ratchet is not recoverable.
-      if (m?.type === 'system' && typeof m?.content === 'string' && m?.chatId
-          && Number.isFinite(msgId) && msgId > 0) {
-        Promise.all([import('../lib/chatService'), import('../lib/family/alerts')])
-          .then(async ([cs, a]) => {
-            const plain = await cs.decryptFromChat(
-              String(m.chatId), String(m.senderId ?? ''), m.content, msgId);
-            if (a.isFamEvent(m.type, plain)) {
-              a.ingestFamEvent(String(m.chatId), plain, String(selfIdRef.current ?? ''));
-              return; // muted — the alerts badge is this message's surface, not a banner
-            }
-            notifyMessage(m).catch(() => {});
-          })
-          // Decrypt/import itself failed (not "not a famEvent" — parseFamEvent
-          // already returns null for that) — fail OPEN to a notification. A
-          // spurious "New message" banner is recoverable; a silently dropped
-          // real message is not.
-          .catch(() => { notifyMessage(m).catch(() => {}); });
-        return;
-      }
-      notifyMessage(m).catch(() => {});
-      // VaultBeam auto-download (flag-gated; no-op when off / not a vaultbeam msg).
-      if (m?.meta?.vaultbeam) import('../lib/vaultBeamIngest').then(v => v.onIncomingVaultbeamMessage(m)).catch(() => {});
-    });
+    const cleanupMsgNotif = attachMessageIngest();
 
-    // ── native launch intent (message tap / call tap) ────────────────────
-    //
-    // MUST BE RE-READ ON RESUME, NOT ONLY AT MOUNT.
-    //
-    // MainActivity is launchMode="singleTask", so when the app is already in
-    // memory — the normal case — a notification tap is delivered to
-    // onNewIntent, which calls setIntent() so getIntent() is current. But this
-    // block used to run once inside the mount effect, and nothing read the
-    // intent again afterwards. The extras arrived and were simply never
-    // consumed: the app came to the foreground on whatever screen it was
-    // already showing, so tapping a message notification opened the chat LIST
-    // instead of the chat.
-    //
-    // Verified on the Redmi: `am start` with the notification's own extras
-    // reported "intent has been delivered to currently running top-most
-    // instance" and the screen stayed on the list. It only ever worked from a
-    // COLD start, where the notification intent happens to BE the launch
-    // intent this effect reads.
-    //
-    // So the consumer is named and also fired on AppState 'active', which is
-    // exactly when a tap brings the app forward. getInitialCallIntent clears
-    // the extras as it reads them, so an ordinary resume with no pending tap
-    // reads null and does nothing — no navigation, no visual change.
-    const consumeNativeLaunchIntent = async () => {
-      try {
-        const ci = await getInitialCallIntent();
-        if (ci?.action === 'open_chat' && ci.chatId) {
-          // Native message-notification tap (F2 content-free doorbell).
-          openLink({ pathname: '/chat', params: { id: ci.chatId } });
-        } else if (ci?.action === 'open_game') {
-          // VaultGames turn/invite tap. game+room are carried through so the
-          // WebView opens the exact table the push was about — landing on the
-          // hub instead would make the player hunt for their own game.
-          openLink({ pathname: '/games', params: { game: ci.game ?? '', room: ci.room ?? '' } });
-        } else if (ci?.callId && ci.action !== 'open_calls') {
-          // A GROUP ring answered from the lock screen must open the GROUP call.
-          //
-          // Every field here is shaped for 1:1 — peerUid is the caller, and the
-          // 1:1 screens would place a call to THAT PERSON rather than joining the
-          // group call the notification was about. `isGroup` rides the intent
-          // from VaultCallMessagingService and defaults false, so a 1:1 ring and
-          // any intent built by an older native build behave exactly as before.
-          const to = ci.action === 'answer' ? routeToCall : routeToIncoming;
-          to({
-            // Blank, not the placeholder — see the note on the socket ring above.
-            // peerUid stays the CALLER even for a group: it is the de-dupe key
-            // both routers guard on, and an empty one would collide with "no
-            // ring on screen" and silently refuse to open the ring screen. The
-            // `group` flag is what decides the destination, not this.
-            chatId: ci.callId, peerUid: ci.callerId || '',
-            peerName: ci.callerName || '',
-            type: ci.isVideo ? 'video' : 'audio', offer: '',
-            group: !!ci.isGroup, groupName: ci.callerName || '',
-          });
-        }
-      } catch {}
-    };
+    // A tap delivered as the native launch/resume intent; re-read on every
+    // foreground (components/root/launchIntents).
+    const consumeNativeLaunchIntent = makeNativeLaunchIntentConsumer({ openLink, routeToCall, routeToIncoming });
     const launchIntentSub = AppState.addEventListener('change', (s) => {
       if (s === 'active') consumeNativeLaunchIntent();
     });
 
-    // ── Notifee full-screen call events (foreground) ────────────────────
-    // ANSWERED FROM THE OS — go straight into the call.
-    //
-    // The OS ring IS the ring. Routing an explicit Answer through the in-app
-    // ring screen made the user accept twice: the notification's Answer, then
-    // a second full-screen overlay that appeared on top of it. Reported on
-    // device exactly that way.
-    //
-    // Safe now because the call screen no longer needs the caller's envelope to
-    // answer — the chat identifies the call (see engine.acceptIncoming).
-    // ONE CALL SCREEN PER ANSWER.
-    //
-    // routeToCall is reachable from FOUR places: the native answer intent
-    // (consumeNativeLaunchIntent) and three notifee handlers — the foreground
-    // event, the initial notification, and the background handler. More than one
-    // firing for a single answer is NORMAL, not exceptional, and each did its
-    // own router.push. Two pushes mount two call screens, and each screen's
-    // effect starts its own session — the second replacing the first via
-    // bootstrap's hangUp('replaced').
-    //
-    // That is the "it makes too many calls" report: two call ids seconds apart
-    // on one chat, ringing the callee twice. The engine now holds a setup claim
-    // too (lib/call/engine.ts); stopping it here means the duplicate screen is
-    // never mounted at all.
-    //
-    // Keyed by peer+kind and TIME-BOXED, so a genuine second call to the same
-    // person a minute later still opens a screen.
-    const routedCalls = new Map<string, number>();
-    // 2s, not 10s. The duplicate handlers fire within MILLISECONDS of each
-    // other (same answer event, several listeners), so a short window collapses
-    // them just as well. Ten seconds was over-aggressive: answer, hang up, and
-    // answer again inside that window and the second call screen would never
-    // open — a worse bug than the one being fixed.
-    const ROUTE_DEDUPE_MS = 2_000;
-    const routeToCall = (p: { chatId?: string; peerUid: string; peerName: string; type: string; group?: boolean; groupName?: string }) => {
-      const dedupeKey = `${p.peerUid}|${p.type}|${p.group ? 'g' : 'd'}`;
-      if (Date.now() - (routedCalls.get(dedupeKey) ?? 0) < ROUTE_DEDUPE_MS) return;
-      routedCalls.set(dedupeKey, Date.now());
-      cancelIncomingCall();
-      // CLAIM the ring, do not release it.
-      //
-      // Clearing these was a bug I introduced with this route: the caller keeps
-      // re-ringing every 3s until the call connects, and routeToIncoming's
-      // guard is exactly `getRingScreenPeer() === peerUid`. With it cleared,
-      // the next ring opened the in-app ring screen ON TOP of the call the user
-      // had just answered — the overlay that survived the first fix.
-      //
-      // Claiming it means "this peer's ring is already being handled here". The
-      // call screens release it when they unmount.
-      setRingingPeer(p.peerUid);
-      setRingScreenPeer(p.peerUid);
-      if (p.group) {
-        router.push({ pathname: '/group-call-active' as any,
-          params: { chatId: p.chatId || '', video: p.type === 'video' ? '1' : '0', name: p.groupName || p.peerName } });
-        return;
-      }
-      router.push({
-        pathname: (p.type === 'video' ? '/videocall' : '/voicecall') as any,
-        params: { chatId: p.chatId || '', peerUid: p.peerUid, peerName: p.peerName, isIncoming: 'true' },
-      });
-    };
-
-    const onNotifeeAnswerOrDecline = (action: string, data: any) => {
-      if (data?.type !== 'call' || !data?.fromUid) return;
-      cancelIncomingCall();
-      if (action === 'decline') {
-        setRingingPeer(null);
-        getSocket().then(s => s.emit('webrtc_end', { to: data.fromUid, chatId: data.chatId })).catch(() => {});
-        return;
-      }
-      routeToCall({ chatId: data.chatId, peerUid: data.fromUid, peerName: data.callerName || '', type: data.callType });
-    };
     const notifeeFg = notifee.onForegroundEvent(({ type, detail }) => {
       // Scheduled-message trigger fired (#73) → send any due items.
       if (detail?.notification?.data?.type === 'scheduled_fire') {
@@ -826,34 +604,8 @@ function RootLayoutInner() {
       onNotifeeAnswerOrDecline(detail?.pressAction?.id === 'decline' ? 'decline' : 'answer', detail?.notification?.data);
     });
 
-    // App launched/woken BY a call notification → act on it once up.
-    (async () => {
-      try {
-        const initial = await notifee.getInitialNotification();
-        if (initial?.notification?.data?.type === 'call') {
-          onNotifeeAnswerOrDecline(initial.pressAction?.id === 'decline' ? 'decline' : 'answer', initial.notification.data);
-        }
-        // A family alert tapped while the app was killed opens that circle's
-        // alerts, as a foreground tap does (lib/push.ts attachTapHandler).
-        // deliverTap, not openLink: the background handler may already have
-        // delivered this same press, and it de-duplicates.
-        else if (initial?.notification?.data?.type === 'family-alert') {
-          deliverTap(hrefWithQuery('/family-alerts', { circleId: String(initial.notification.data.circleId ?? '') }));
-        }
-      } catch {}
-      const pending = consumePendingCall();   // chosen from a bg notification action
-      if (pending) onNotifeeAnswerOrDecline(pending.action, pending.data);
-
-      // Native full-screen-intent (FCM) launch → open the in-app ringing screen.
-      // The caller re-emits the offer over the socket; incoming-call captures it live.
-      await consumeNativeLaunchIntent();
-
-      // A decline tapped on the killed lock-screen notification → stop the caller's ring.
-      try {
-        const declined = await drainDeclinedCall();
-        if (declined) getSocket().then(s => s.emit('webrtc_end', { chatId: declined })).catch(() => {});
-      } catch {}
-    })();
+    // App launched/woken BY a notification → act on it once up.
+    void consumeLaunchNotifications({ onCallAction: onNotifeeAnswerOrDecline, consumeNativeLaunchIntent });
 
     // Expo notification tap / actions (heads-up call push fallback).
     const onCallNotification = (data: any, action: string) =>
@@ -898,40 +650,8 @@ function RootLayoutInner() {
     };
   }, [router]);
 
-  // Scheduled messages (#73): fire due items on start + every foreground, and
-  // re-arm OS triggers (some OEMs clear alarms on force-stop). Sends fail-soft
-  // if not signed in yet and retry on the next sweep.
-  useEffect(() => {
-    if (!SCHEDULED_LOCAL) return;
-    import('../lib/scheduledRunner')
-      .then(m => { m.runDueScheduled(); m.rearmAllTriggers(); })
-      .catch(() => {});
-    const sub = AppState.addEventListener('change', (s) => {
-      if (s === 'active') import('../lib/scheduledRunner').then(m => m.runDueScheduled()).catch(() => {});
-    });
-    return () => sub.remove();
-  }, []);
-
-  // KEEP THE CALL DOORBELL ALIVE.
-  //
-  // registerForCalls() runs once at boot, and that is not enough: FCM rotates
-  // tokens (reinstall, data clear, restore, expiry), a phone can boot before its
-  // network is up, and a user can sign in after launch. In all three the server
-  // ends up holding a token that no longer reaches this device, so it stops
-  // ringing while killed — silently, and until the next cold start.
-  //
-  // refreshCallRegistration is cheap: it reads the current token locally and
-  // returns without any network request unless the token actually changed or the
-  // last attempt did not succeed, which is the case on essentially every
-  // foreground. Registered here rather than inside the boot effect so it keeps
-  // running for the whole life of the process.
-  useEffect(() => {
-    void refreshCallRegistration().catch(() => {});
-    const sub = AppState.addEventListener('change', (s) => {
-      if (s === 'active') void refreshCallRegistration().catch(() => {});
-    });
-    return () => sub.remove();
-  }, []);
+  useScheduledMessages();
+  useCallRegistrationRefresh();
 
   return (
     <FontReadyContext.Provider value={true}>
@@ -990,105 +710,8 @@ function RootLayoutInner() {
           />
         ))}
 
-        {/* Security — gesture disabled so user can't swipe back */}
-        <Stack.Screen name="blocked" options={{ gestureEnabled: false }} />
-
-        {/* Auth flow */}
-        <Stack.Screen name="index" />
-        {/* Main app — 6-tab navigation */}
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="chat" />
-        <Stack.Screen name="join/[code]" options={{ headerShown: false }} />
-        {/* Private Live invitation redeem — the /live/join/<code> link the host
-            copies, and vaultchat://live/join/<code>. */}
-        <Stack.Screen name="live/join/[code]" options={{ headerShown: false }} />
-        <Stack.Screen name="videocall" />
-        <Stack.Screen name="voicecall" />
-        <Stack.Screen name="qr-contact" />
-        <Stack.Screen name="add/[...segments]" options={{ headerShown: false }} />
-        <Stack.Screen name="file-preview" />
-        <Stack.Screen name="media-viewer" />
-        <Stack.Screen name="whiteboard" />
-        <Stack.Screen name="bookmarks" />
-        {/* NOT declared here: `emergency-sos` is already registered by the
-            INSET_SCREENS map above. A SECOND <Stack.Screen> with the same name
-            throws "Screen names must be unique" out of expo-router's
-            withLayoutContext on every non-production build, and in production
-            silently logs `No route named "emergency-sos" exists` because the
-            first declaration has already consumed the route. */}
-        <Stack.Screen name="receipt-control" />
-        <Stack.Screen name="chat-themes" />
-        <Stack.Screen name="chat-wallpaper" />
-        <Stack.Screen name="chat-export" />
-        <Stack.Screen name="in-chat-search" />
-        <Stack.Screen name="message-reminder" />
-        <Stack.Screen name="contact-info" />
-        <Stack.Screen name="create-poll" />
-        <Stack.Screen name="schedule-message" />
-        <Stack.Screen name="broadcast" />
-        <Stack.Screen name="media-gallery" />
-        <Stack.Screen name="invite-link" />
-        <Stack.Screen name="trusted-contacts" />
-        <Stack.Screen name="login-history" />
-        <Stack.Screen name="hidden-chats" />
-        <Stack.Screen name="camera" options={{ headerShown: false, presentation: 'modal' }} />
-        {/* status, calls now in (tabs) */}
-        <Stack.Screen name="vault" />
-        {/* alerts, profile now in (tabs) */}
-
-        {/* Features */}
-        <Stack.Screen name="contacts" />
-        <Stack.Screen name="vault-features" />
-        <Stack.Screen name="dashboard" />
-        {/* The settings screen is NOT declared here — INSET_SCREENS above
-            already registers it, and that is the declaration carrying the
-            status-bar padding it needs. It was declared in both places, which
-            made expo-router throw "Screen names must be unique" out of
-            useFilterScreenChildren. That error is FATAL: the app rendered a
-            red error screen instead of booting, on every route. A bare second
-            declaration adds nothing the map has not already done. */}
-        <Stack.Screen name="story-viewer" />
-        <Stack.Screen name="finance" options={{ headerShown: false }} />
-        <Stack.Screen name="group-admin" />
-        <Stack.Screen name="app-lock-chats" />
-        <Stack.Screen name="privacy-dashboard" />
-        <Stack.Screen name="storage-manager" />
-        <Stack.Screen name="chat-backup" />
-        <Stack.Screen name="last-seen-privacy" />
-        <Stack.Screen name="offline-mode" />
-        <Stack.Screen name="image-editor" />
-        <Stack.Screen name="file-viewer" />
-        <Stack.Screen name="reader" options={{ presentation: 'modal' }} />
-        <Stack.Screen name="split" />
-        <Stack.Screen name="shelf" />
-        <Stack.Screen name="archive-viewer" />
-        <Stack.Screen name="video-player" />
-        <Stack.Screen name="group-calls" />
-        <Stack.Screen name="group-info" />
-
-        {/* Security & Privacy */}
-        <Stack.Screen name="ghost-mode" />
-        <Stack.Screen name="chat-code" />
-        <Stack.Screen name="restore-backup" options={{ gestureEnabled: false }} />
-        <Stack.Screen name="delete-account" />
-        <Stack.Screen name="aiguardian" />
-        <Stack.Screen name="backup-pin" />
-        <Stack.Screen name="permissions" />
-
-        {/* Social & Contacts */}
-        <Stack.Screen name="communities" />
-        <Stack.Screen name="create-group" />
-
-        {/* Utility */}
-        <Stack.Screen name="search" />
-        <Stack.Screen name="scheduled" />
-        <Stack.Screen name="perf-debug" />
-        <Stack.Screen name="docscanner" />
-        <Stack.Screen name="notifications" />
-        <Stack.Screen name="location" />
-
-        {/* Mini Apps destinations */}
-        <Stack.Screen name="encrypted-notes" />
+        {/* Every other route declaration, in order (components/root/rootScreens). */}
+        {ROOT_SCREENS}
       </Stack>
     </TermsGate>
     </UpdateGate>

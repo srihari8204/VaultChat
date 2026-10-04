@@ -74,11 +74,15 @@ export default function BackupPINScreen() {
 
   // A forgotten Device PIN cannot be reset from here: it is the key the Vault
   // and the sealed session are wrapped under, and nothing else can re-derive
-  // it. Say so, and point at the one real way out (the lock's sign-in again).
+  // it. Say so, and open the one real way out: the lock screen, whose
+  // "Forgotten your PIN?" signs in again (MPIN unlocks it back to here too).
   const forgotCurrent = () => Alert.alert(
     'Forgotten your PIN?',
     'Your Device PIN is only on this phone, so it cannot be reset or recovered here. To start over, lock the app and choose "Forgotten your PIN?" there to sign in again — anything kept only on this phone under the old PIN, such as Vault files, is lost.',
-    [{ text: 'OK' }],
+    [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Lock now', onPress: () => router.push({ pathname: '/app-lock', params: { resume: '1' } }) },
+    ],
   );
 
   const advance = async (val:string) => {
@@ -153,7 +157,7 @@ export default function BackupPINScreen() {
             )}
             {busy && <ActivityIndicator color={AUTH.text} style={{ marginTop: 12 }} />}
             {stage==="current" && (
-              <TouchableOpacity onPress={forgotCurrent} style={S.forgot} accessibilityRole="button">
+              <TouchableOpacity onPress={forgotCurrent} style={S.forgot} accessibilityRole="button" accessibilityHint="Explains the options and can lock the app">
                 <Text style={S.forgotTxt}>Forgotten your current PIN?</Text>
               </TouchableOpacity>
             )}

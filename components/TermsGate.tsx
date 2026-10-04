@@ -19,9 +19,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { usePathname } from 'expo-router';
 
 import { SERVER_URL } from '../constants/server';
 import { hasSession } from '../lib/api';
+import { isLockOrAuthRoute } from '../lib/pendingLink';
 // AUDIT F8. The first screen a new user sees is the worst place to be speaking
 // the wrong language, so the gates are the first consumers of the app catalog.
 import { t, useLang } from '../lib/i18n';
@@ -37,6 +39,11 @@ export function TermsGate({ children }: { children: React.ReactNode }) {
   stateRef.current = state;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Signed out, there is nothing to poll for: the ask waits for the user to
+  // leave the sign-in/lock routes (which is what signing in does), see below.
+  const pathname = usePathname();
+  const askRef = useRef<((force?: boolean) => Promise<void>) | null>(null);
+  const waitingForSignIn = useRef(false);
 
   useEffect(() => {
     let alive = true;
@@ -64,19 +71,21 @@ export function TermsGate({ children }: { children: React.ReactNode }) {
     };
     const ask = async (force = false) => {
       // Signed out there is nothing to ask the SERVER about: check the local
-      // session only (no request) and keep waiting for a sign-in.
-      if (!(await hasSession().catch(() => false))) { if (alive) again(); return; }
+      // session only (no request), and wait for the navigation that signing in
+      // makes instead of waking on a timer.
+      if (!(await hasSession().catch(() => false))) { waitingForSignIn.current = true; return; }
+      waitingForSignIn.current = false;
       fetchTermsState(force)
         .then((s) => {
           if (!alive) return;
           if (s) { setState(s); return; }   // an answer, of either kind — done
-          // No answer yet: not signed in, offline, or a server without the
-          // endpoint. Ask again, but give up climbing past half a minute so an
-          // app that is simply signed out is not polling forever.
+          // No answer yet: offline, or a server without the endpoint. Ask
+          // again, backing off to at most every half minute.
           again();
         })
         .catch(() => {});
     };
+    askRef.current = ask;
     void ask();
 
     // Coming back to the foreground is the other moment the answer can change —
@@ -93,10 +102,17 @@ export function TermsGate({ children }: { children: React.ReactNode }) {
 
     return () => {
       alive = false;
+      askRef.current = null;
       if (timer) clearTimeout(timer);
       sub.remove();
     };
   }, []);
+
+  // Every sign-in path ends by leaving the auth and lock routes (resetTo the
+  // tabs, restore-backup, a replayed link), so that is when to look again.
+  useEffect(() => {
+    if (waitingForSignIn.current && !isLockOrAuthRoute(pathname)) void askRef.current?.();
+  }, [pathname]);
 
   const onAccept = useCallback(async () => {
     if (!state || busy) return;
@@ -105,11 +121,12 @@ export function TermsGate({ children }: { children: React.ReactNode }) {
     try {
       await acceptTerms(state);
       setState({ ...state, acceptedVersion: state.requiredVersion });
-    } catch (e: any) {
+    } catch {
       // Stay on the screen and say so. Silently continuing would leave the app
       // believing an acceptance was recorded when it was not, which defeats the
       // only purpose this screen has.
-      setError(e?.message ?? t('terms.error'));
+      // The catalog's words, not the raw request error ("Network request failed").
+      setError(t('terms.error'));
     } finally {
       setBusy(false);
     }

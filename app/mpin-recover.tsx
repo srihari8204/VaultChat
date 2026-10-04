@@ -8,7 +8,7 @@
 import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useMemo, useEffect, useRef, useState } from 'react';
+import { useCallback, useMemo, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator, Alert, Animated, Pressable,
   ScrollView, StyleSheet, Text, TextInput, View,
@@ -33,7 +33,7 @@ export default function MpinRecover() {
   const router = useRouter();
   const { userId } = useLocalSearchParams<{ userId: string }>();
 
-  const [phase, setPhase] = useState<'loading' | 'answer' | 'setmpin'>('loading');
+  const [phase, setPhase] = useState<'loading' | 'loadError' | 'answer' | 'setmpin'>('loading');
   const [questions, setQuestions] = useState<string[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [ticket, setTicket] = useState('');
@@ -50,15 +50,24 @@ export default function MpinRecover() {
     Animated.sequence([12, -12, 8, -8, 0].map(t => Animated.timing(shake, { toValue: t, duration: 55, useNativeDriver: true }))).start();
   };
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const qs = await getRecoveryQuestions(userId);
-        if (!qs.length) { Alert.alert('No questions', 'No security questions are set for this account.'); router.back(); return; }
-        setQuestions(qs); setPhase('answer');
-      } catch (e: any) { Alert.alert('Error', onboardingError(e, 'Could not load')); router.back(); }
-    })();
+  // A failed load stays on this screen with a retry: being thrown back to the
+  // MPIN screen by a dropped connection left no way to try again from here.
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  const load = useCallback(async () => {
+    setPhase('loading'); setError(null);
+    try {
+      const qs = await getRecoveryQuestions(userId);
+      if (!alive.current) return;
+      if (!qs.length) { Alert.alert('No questions', 'No security questions are set for this account.'); router.back(); return; }
+      setQuestions(qs); setPhase('answer');
+    } catch (e: any) {
+      if (!alive.current) return;
+      setError(onboardingError(e, 'Could not load your security questions.'));
+      setPhase('loadError');
+    }
   }, [router, userId]);
+  useEffect(() => { void load(); }, [load]);
 
   const filled = questions.filter(q => (answers[q] ?? '').trim().length >= 2).length;
 
@@ -80,7 +89,7 @@ export default function MpinRecover() {
 
   const onSet = (v: string) => { if (isWeakPin(v)) { setError('That MPIN is too easy to guess.'); setFirst(''); doShake(); return; } setError(null); setMpinPhase('confirm'); };
   const onConfirm = async (v: string) => {
-    if (v !== first) { setError('PINs don’t match.'); setConfirm(''); setFirst(''); setMpinPhase('set'); doShake(); return; }
+    if (v !== first) { setError('The confirmation didn’t match the new MPIN. Create it again.'); setConfirm(''); setFirst(''); setMpinPhase('set'); doShake(); return; }
     setBusy(true);
     try {
       await recoverMpin(userId, ticket, v);
@@ -112,7 +121,25 @@ export default function MpinRecover() {
             <Ionicons name="arrow-back" size={24} color={AUTH.text} />
           </Pressable>
 
-          {phase === 'loading' && <ActivityIndicator color={AUTH.accent} style={{ marginTop: 80 }} />}
+          {phase === 'loading' && <ActivityIndicator color={AUTH.accent} style={{ marginTop: 80 }} accessibilityLabel="Loading your security questions" />}
+
+          {phase === 'loadError' && (
+            <View style={s.head}>
+              <BrandMark size={52} markOnly />
+              <Text style={s.title} accessibilityRole="header">Reset your MPIN</Text>
+              {!!error && <Text style={s.error} accessibilityLiveRegion="polite">{error}</Text>}
+              <Pressable
+                onPress={() => { void load(); }}
+                accessibilityRole="button"
+                accessibilityLabel="Try again"
+                style={({ pressed }) => [s.ctaWrap, s.retryWrap, pressed && s.ctaDown]}
+              >
+                <LinearGradient colors={[...BRAND_GRADIENT_CTA]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.cta}>
+                  <Text style={s.ctaTxt}>Try again</Text>
+                </LinearGradient>
+              </Pressable>
+            </View>
+          )}
 
           {phase === 'answer' && (
             <>
@@ -166,7 +193,7 @@ export default function MpinRecover() {
           {phase === 'setmpin' && (
             <View style={s.head}>
               <BrandMark size={52} markOnly />
-              <Text style={s.title}>{mpinPhase === 'set' ? 'New MPIN' : 'Confirm MPIN'}</Text>
+              <Text style={s.title} accessibilityRole="header">{mpinPhase === 'set' ? 'New MPIN' : 'Confirm MPIN'}</Text>
               <Text style={s.sub}>{mpinPhase === 'set' ? 'Choose a new 6-digit PIN' : 'Re-enter to confirm'}</Text>
 
               <View style={s.pinCard}>
@@ -230,6 +257,7 @@ const makeStyles = (AUTH: AuthPalette) => StyleSheet.create({
   error: { color: AUTH.danger, fontSize: 13, marginTop: 10, textAlign: 'center', fontWeight: '600' },
 
   ctaWrap: { marginTop: 20, borderRadius: 16, overflow: 'hidden' },
+  retryWrap: { alignSelf: 'stretch' },
   // 2026-09-18: minHeight, not height, for the same reason `input` above is
   // minHeight. At font scale 1.5 the 16sp label outgrew a pinned 56 and
   // clipped — on the one screen that exists to get a locked-out user back in.

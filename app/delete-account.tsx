@@ -139,20 +139,22 @@ export default function DeleteAccountScreen() {
     } catch (e: any) {
       setBusy(false);
       // The MPIN answers belong next to the MPIN field; anything else is a
-      // failed request, said in words rather than a raw error.
+      // failed request, said in words rather than a raw error. Keyed on the
+      // server's error code only: a bare 403/400 from anything else on the way
+      // (a proxy, an expired session) is not "wrong MPIN".
       const code = e?.body?.error?.code;
-      if (code === 'invalid_mpin' || e?.status === 403) {
+      if (code === 'invalid_mpin') {
         setMpin('');
         setAuthErr('Incorrect MPIN. Your account was not deleted.');
         return;
       }
-      if (code === 'locked' || e?.status === 423) {
+      if (code === 'locked') {
         setMpin('');
         const mins = Math.max(1, Math.ceil(retryAfterSec(e) / 60));
         setAuthErr(`Too many MPIN attempts. Try again in about ${mins} minute${mins === 1 ? '' : 's'}. Your account was not deleted.`);
         return;
       }
-      if (code === 'mpin_required' || e?.status === 400) {
+      if (code === 'mpin_required') {
         setAuthErr('Enter your 6-digit MPIN to delete this account.');
         return;
       }
@@ -278,7 +280,7 @@ export default function DeleteAccountScreen() {
               activeOpacity={0.85}
               accessibilityRole="button"
               accessibilityState={{ disabled: !armed || busy, busy }}>
-              {busy ? <ActivityIndicator color="#fff" />
+              {busy ? <ActivityIndicator color={colors.onDanger} />
                     : <Text style={S.ctaTxt}>Delete my account</Text>}
             </TouchableOpacity>
           </>
@@ -323,7 +325,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   cta: { marginTop: 26, minHeight: 50, borderRadius: 14, backgroundColor: c.danger, alignItems: 'center', justifyContent: 'center', paddingVertical: 12 },
   ctaOff: { opacity: 0.4 },
-  ctaTxt: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  ctaTxt: { color: c.onDanger, fontSize: 16, fontWeight: '800' },
 
   retry: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 28 },
   retryTxt: { color: c.primary, fontSize: 13.5, fontWeight: '700' },

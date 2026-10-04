@@ -8,8 +8,8 @@
 // sign-up is the point, not a splash rerun.
 
 import { Stack } from 'expo-router';
-import { useMemo, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, BackHandler, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useMemo, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, BackHandler, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BRAND_GRADIENT_CTA } from '../constants/theme';
 import { resetTo } from '../lib/authNav';
@@ -25,6 +25,9 @@ export default function OnboardSuccess() {
   const [mfaOn, setMfaOn] = useState(false);
   const [hasDeviceSecurity, setHasDeviceSecurity] = useState(true);
   const [busy, setBusy] = useState(false);
+  // Synchronous latch: two taps in one frame both saw busy === false and ran
+  // verifyMpinRemote twice (each one spends an MPIN attempt).
+  const inFlight = useRef(false);
 
   useEffect(() => { deviceSecurityAvailable().then(setHasDeviceSecurity).catch(() => setHasDeviceSecurity(false)); }, []);
 
@@ -51,9 +54,10 @@ export default function OnboardSuccess() {
   // exists until verifyMpinRemote below has returned a JWT — so the import entry
   // point cannot be a shortcut that skips this, it has to be a destination for it.
   const finish = async (next?: string) => {
-    if (busy) return;
+    if (inFlight.current) return;
     const { userId, mpin } = onboarding.get();
     if (!userId || !mpin) { Alert.alert('Session expired', 'Please sign in again.'); resetTo('/onboard'); return; }
+    inFlight.current = true;
     setBusy(true);
     try {
       await verifyMpinRemote(userId, mpin);              // logs in → JWT stored
@@ -80,6 +84,7 @@ export default function OnboardSuccess() {
       // survive into the app (lib/authNav.ts).
       resetTo(next ?? '/(tabs)/chats');
     } catch (e: any) {
+      inFlight.current = false;
       setBusy(false);
       // A WAY OUT (2026-09-17). Back is swallowed and the gesture is disabled on
       // this screen, so a failing verify left the only affordance being the
@@ -110,7 +115,8 @@ export default function OnboardSuccess() {
     <View style={s.screen}>
       <AuthSky />
       <Stack.Screen options={{ headerShown: false, gestureEnabled: false }} />
-      <View style={s.body}>
+      {/* Scrolls rather than clips when large text pushes the button down. */}
+      <ScrollView contentContainerStyle={s.body}>
         <BrandMark size={72} markOnly />
         <Text style={s.title} accessibilityRole="header">Account secured</Text>
         <Text style={s.sub}>Your profile is encrypted and your MPIN is set.</Text>
@@ -163,7 +169,7 @@ export default function OnboardSuccess() {
         >
           <Text style={s.secondaryTxt}>Import an existing conversation</Text>
         </TouchableOpacity>
-      </View>
+      </ScrollView>
     </View>
   );
 }
@@ -174,7 +180,8 @@ const makeStyles = (AUTH: AuthPalette) => StyleSheet.create({
   // the container already adds HEADER_TOP and 52 + 88 left 140dp blank above
   // the title on the Honor. 64 keeps the roomier hero spacing this screen
   // wants without paying for the status bar twice (2026-09-17).
-  body: { flex: 1, paddingHorizontal: 24, paddingTop: 64, alignItems: 'center' },
+  // flexGrow (a scroll container) keeps the CTA's marginTop 'auto' at the bottom.
+  body: { flexGrow: 1, paddingHorizontal: 24, paddingTop: 64, alignItems: 'center' },
   title: { color: AUTH.text, fontSize: 26, fontWeight: '900', marginTop: 8 },
   sub: { color: AUTH.dim, fontSize: 14, marginTop: 8, textAlign: 'center', lineHeight: 20 },
 

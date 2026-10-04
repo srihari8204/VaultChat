@@ -137,7 +137,7 @@ export default function EmailVerify() {
 
       <KeyboardSafe keyboardOnly>
       <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
-        <Text style={s.title}>Enter the 6-digit code</Text>
+        <Text style={s.title} accessibilityRole="header">Enter the 6-digit code</Text>
         <Text style={s.sub}>Sent by SMS to{'\n'}<Text style={s.phone}>{mask(phone)}</Text></Text>
 
         {/* Right under the number it corrects, which is where a wrong number is

@@ -8,7 +8,7 @@ import * as Location from "expo-location";
 import * as Notifications from "expo-notifications";
 import { Pedometer } from "expo-sensors";
 import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AppState, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { canUseFullScreenIntent, openFullScreenIntentSettings } from "../lib/CallService";
 import { permissionDenied } from "../lib/permissionDenied";
@@ -23,34 +23,42 @@ import { tint } from "../lib/tintColor";
 // The legacy signup chain this screen was also part of is deleted, so the
 // step dots, "Step 7 of 8", the auto-advance and "Skip" are gone with it.
 type Grant = { granted: boolean; canAskAgain?: boolean };
-const PERMS: { key: string; icon: string; label: string; sub: string; request: () => Promise<Grant> }[] = [
+// `get` reads the current grant without prompting; `request` asks.
+const PERMS: { key: string; icon: string; label: string; sub: string; get: () => Promise<Grant>; request: () => Promise<Grant> }[] = [
   {key:"camera",   icon:"📷",label:"Camera",       sub:"Face scan and photo sharing",
+    get: () => Camera.getCameraPermissionsAsync(),
     request: () => Camera.requestCameraPermissionsAsync()},
   {key:"mic",      icon:"🎙️",label:"Microphone",   sub:"Voice and video calls",
+    get: () => Camera.getMicrophonePermissionsAsync(),
     request: () => Camera.requestMicrophonePermissionsAsync()},
   {key:"contacts", icon:"👥",label:"Contacts",     sub:"Find friends on crazzychat",
+    get: () => Platform.OS === 'web' ? Promise.resolve({ granted: true }) : Contacts.getPermissionsAsync(),
     request: () => Platform.OS === 'web' ? Promise.resolve({ granted: true }) : Contacts.requestPermissionsAsync()},
   {key:"location", icon:"📍",label:"Location",     sub:"Secure location sharing",
+    get: () => Location.getForegroundPermissionsAsync(),
     request: () => Location.requestForegroundPermissionsAsync()},
   // Background location MUST follow a granted foreground grant — both
   // platforms reject the always-on prompt otherwise. Family Space only keeps
   // sharing while the app is closed if this one lands. Never asked as part of
   // "Grant missing": it is the most sensitive grant here, so only its own row.
   {key:"background",icon:"🛰️",label:"Background Access",sub:"Keep Family Space sharing when the app is closed",
+    get: () => Location.getBackgroundPermissionsAsync(),
     request: async () => {
       const fg = await Location.requestForegroundPermissionsAsync();
       return fg.granted ? Location.requestBackgroundPermissionsAsync() : fg;
     }},
   // Motion is an iOS-only prompt; Android resolves granted with no dialog.
   {key:"motion",   icon:"🏃",label:"Motion & Fitness",sub:"Detect driving so location updates adapt",
+    get: () => Pedometer.getPermissionsAsync(),
     request: () => Pedometer.requestPermissionsAsync()},
   {key:"notifs",   icon:"🔔",label:"Notifications",sub:"New messages and calls",
+    get: () => Notifications.getPermissionsAsync(),
     request: () => Notifications.requestPermissionsAsync()},
 ];
 
 export default function PermissionsScreen() {
-  const { colors: c, scheme } = useTheme();
-  const S = useMemo(() => makeStyles(c, scheme === "light"), [c, scheme]);
+  const { colors: c } = useTheme();
+  const S = useMemo(() => makeStyles(c), [c]);
   // Settings opens this with ?from=settings, and Done goes back there. Opened
   // any other way (a deep link), Done lands on Settings — the page this one
   // belongs to — rather than popping into whatever happened to be underneath.
@@ -67,24 +75,23 @@ export default function PermissionsScreen() {
   // don't work". canUseFullScreenIntent resolves true where the concept does
   // not exist (iOS, Android 13 and below), so the row simply never appears.
   const [fsiOk,setFsiOk] = useState(true);
+  // The OS answers can land after the user has left: no state writes then.
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
 
   // READ WHAT IS ALREADY GRANTED, with getters that prompt nobody, so a user
   // who granted everything earlier does not see seven empty circles.
+  // Each getter on its own: one that throws leaves only ITS row as it was
+  // (unknown reads as not granted), instead of blanking every row after it.
   const readGranted = async () => {
     const r: Record<string, boolean> = {};
-    try {
-      r.camera   = (await Camera.getCameraPermissionsAsync()).granted;
-      r.mic      = (await Camera.getMicrophonePermissionsAsync()).granted;
-      r.contacts = Platform.OS === 'web' ? true : (await Contacts.getPermissionsAsync()).granted;
-      r.location = (await Location.getForegroundPermissionsAsync()).granted;
-      try { r.background = (await Location.getBackgroundPermissionsAsync()).granted; } catch { r.background = false; }
-      try { r.motion = (await Pedometer.getPermissionsAsync()).granted; } catch { r.motion = false; }
-      r.notifs   = (await Notifications.getPermissionsAsync()).granted;
-    } catch { /* a getter that fails leaves its row unknown, which reads as not granted */ }
-    setGranted((prev) => ({ ...prev, ...r }));
+    await Promise.all(PERMS.map(async (p) => {
+      try { r[p.key] = (await p.get()).granted; } catch { /* unknown: keep this row as it was */ }
+    }));
+    if (alive.current) setGranted((prev) => ({ ...prev, ...r }));
   };
 
-  const checkFsi = () => { canUseFullScreenIntent().then(setFsiOk).catch(()=>{}); };
+  const checkFsi = () => { canUseFullScreenIntent().then((ok) => { if (alive.current) setFsiOk(ok); }).catch(()=>{}); };
 
   // Re-check when the user comes back: the grant happens in Settings, in
   // another app, so nothing here would otherwise learn that it succeeded and
@@ -100,7 +107,7 @@ export default function PermissionsScreen() {
   const ask = async (p: typeof PERMS[number], explainDenial: boolean): Promise<boolean> => {
     let res: Grant = { granted: false };
     try { res = await p.request(); } catch { /* treated as a refusal */ }
-    setGranted((prev) => ({ ...prev, [p.key]: res.granted }));
+    if (alive.current) setGranted((prev) => ({ ...prev, [p.key]: res.granted }));
     // The OS will not prompt again: the app's Settings page is the only route.
     if (!res.granted && explainDenial && res.canAskAgain === false) {
       permissionDenied(`${p.label} is off`, `crazzychat uses it for: ${p.sub.toLowerCase()}.`, false);
@@ -111,7 +118,7 @@ export default function PermissionsScreen() {
   const requestOne = async (p: typeof PERMS[number]) => {
     if (busy) return;
     setBusy(p.key);
-    try { await ask(p, true); } finally { setBusy(null); }
+    try { await ask(p, true); } finally { if (alive.current) setBusy(null); }
   };
 
   // Everything still missing except background location (its own row only).
@@ -123,9 +130,10 @@ export default function PermissionsScreen() {
         if (p.key === 'background' || granted[p.key]) continue;
         await ask(p, false);
       }
-      setFsiOk(await canUseFullScreenIntent().catch(() => true));
+      const fsi = await canUseFullScreenIntent().catch(() => true);
+      if (alive.current) setFsiOk(fsi);
       await readGranted();
-    } finally { setBusy(null); }
+    } finally { if (alive.current) setBusy(null); }
   };
 
   const missing = PERMS.some(p => p.key !== 'background' && !granted[p.key]);
@@ -217,7 +225,7 @@ export default function PermissionsScreen() {
   );
 }
 
-const makeStyles = (c: Palette, light: boolean) => StyleSheet.create({
+const makeStyles = (c: Palette) => StyleSheet.create({
   // SCROLLVIEW, NOT A FIXED View (2026-09-17). Seven permission rows plus the
   // amber full-screen-intent card plus two buttons overflow a short screen, and
   // at OS font scale 1.5 the primary button and the exit clipped off the bottom
@@ -239,15 +247,14 @@ const makeStyles = (c: Palette, light: boolean) => StyleSheet.create({
   statusOk: { borderColor:c.success,backgroundColor:tint(c.success,0.1) },
   // Amber, not the blue of the primary button: this row is the one thing on the
   // screen that still needs the user, so it has to read as outstanding rather
-  // than as another item in the list above. The palette has no warning role,
-  // so the amber stays fixed (darkened on light for contrast).
+  // than as another item in the list above. The palette's warning role is the
+  // amber in dark and a darker amber on light, both AA on these surfaces.
   fsi:      { flexDirection:"row",alignItems:"center",gap:12,padding:12,borderRadius:12,marginBottom:12,
-              backgroundColor:"rgba(245,158,11,0.12)",borderWidth:1,borderColor:"rgba(245,158,11,0.45)" },
-  fsiGo:    { color:light ? "#925B00" : "#F59E0B",fontWeight:"800",fontSize:13 },
+              backgroundColor:tint(c.warning,0.12),borderWidth:1,borderColor:tint(c.warning,0.45) },
+  fsiGo:    { color:c.warning,fontWeight:"800",fontSize:13 },
   btn:      { backgroundColor:c.primary,borderRadius:14,paddingVertical:16,alignItems:"center",marginBottom:12 },
   btnOff:   { opacity:0.5 },
-  // White on the primary fill in both themes (the button ground is always the accent).
-  btnTxt:   { color:"#fff",fontSize:16,fontWeight:"800" },
+  btnTxt:   { color:c.onPrimary,fontSize:16,fontWeight:"800" },
   skip:     { padding:10,alignItems:"center",minHeight:44,justifyContent:"center" },
   skipTxt:  { color:c.textDim,fontSize:13 },
 });

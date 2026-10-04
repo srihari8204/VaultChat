@@ -19,7 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import { Stack, useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
@@ -60,6 +60,9 @@ export default function OnboardProfile() {
   // 4 buttons when a photo exists — over Android's 3-button ceiling.
   const [sheet, setSheet] = useState<{ title: string; message?: string; actions: SheetAction[] } | null>(null);
   const [photoErr, setPhotoErr] = useState<string | null>(null);
+  // The picker can resolve after the user has gone back: no state writes then.
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
 
   const pickFrom = async (source: 'camera' | 'gallery') => {
     try {
@@ -71,12 +74,12 @@ export default function OnboardProfile() {
       const res = await fn({ allowsEditing: true, aspect: [1, 1], quality: 0.85 });   // square crop
       if (res.canceled || !res.assets?.[0]) return;
       const uri = res.assets[0].uri;
-      setPic(uri);
       onboarding.set({ profilePicLocalUri: uri });
+      if (alive.current) setPic(uri);
     } catch {
       // No camera, a picker crash, an OEM that refuses the intent: the photo
       // is optional, so say so and let sign-up continue.
-      setPhotoErr(`Couldn't open the ${source === 'camera' ? 'camera' : 'gallery'}. You can add a photo later.`);
+      if (alive.current) setPhotoErr(`Couldn't open the ${source === 'camera' ? 'camera' : 'gallery'}. You can add a photo later.`);
     }
   };
   const choosePhoto = () => setSheet({
@@ -93,6 +96,10 @@ export default function OnboardProfile() {
   // is worse than none — it looks like a way back in until the day it is needed.
   const emailOk = !email.trim() || EMAIL_RE.test(email.trim());
   const valid = firstName.trim().length > 0 && ageOk && emailOk;
+  // Email and age already say what is wrong next to their fields; a missing
+  // required field has nothing to point at, so name it by the button.
+  const missing = [!firstName.trim() && 'your first name', !dob && 'your date of birth'].filter(Boolean);
+  const missingWhy = missing.length ? `Add ${missing.join(' and ')} to continue.` : null;
 
   const next = () => {
     if (!valid || !dob) return;
@@ -220,6 +227,7 @@ export default function OnboardProfile() {
             disabled={!valid}
             accessibilityRole="button"
             accessibilityLabel="Next, security questions"
+            accessibilityHint={missingWhy ?? undefined}
             accessibilityState={{ disabled: !valid }}
             style={({ pressed }) => [s.ctaWrap, !valid && s.ctaOff, pressed && valid && s.ctaDown]}
           >
@@ -232,6 +240,7 @@ export default function OnboardProfile() {
               <Text style={s.ctaTxt}>Next</Text>
             </LinearGradient>
           </Pressable>
+          {!!missingWhy && <Text style={s.why}>{missingWhy}</Text>}
         </ScrollView>
       </KeyboardSafe>
 
@@ -282,6 +291,7 @@ const makeStyles = (AUTH: AuthPalette) => StyleSheet.create({
   rowTwo: { flexDirection: 'row', gap: 12 },
   counter: { color: AUTH.faint, fontSize: 11, alignSelf: 'flex-end', marginTop: 4 },
   warn: { color: AUTH.danger, fontSize: 12, marginTop: 6 },
+  why: { color: AUTH.dim, fontSize: 12, textAlign: 'center', marginTop: 10 },
 
   ctaWrap: { marginTop: 24, borderRadius: 16, overflow: 'hidden' },
   // 2026-09-18: minHeight, not height — same clip as `input` above already

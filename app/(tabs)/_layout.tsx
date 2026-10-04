@@ -80,7 +80,7 @@ function TabIcon({ tab, label, focused, styles, unread = 0 }: {
         <TabGlyph name={tab} size={25 * metrics.controlScale} color={color} active={focused} />
         {badge && (
           <View style={styles.badge}>
-            <AppText variant="tiny" color="#fff" style={styles.badgeTxt} numberOfLines={1} maxFontSizeMultiplier={1.1}>{unread > 99 ? '99+' : unread}</AppText>
+            <AppText variant="tiny" color={c.onDanger} style={styles.badgeTxt} numberOfLines={1} maxFontSizeMultiplier={1.1}>{unread > 99 ? '99+' : unread}</AppText>
           </View>
         )}
       </Animated.View>
