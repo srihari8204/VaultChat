@@ -1,52 +1,61 @@
 # VaultChat — Fix Status and Updated Ratings
 
-_Updated 2026-10-04 · branch `ccr-9258b8b7-m4748a` · baseline `18eb6d2` (the rating in `2026-10-04_screen_ratings.md`) · round 3 from `b8c8bd2` to `a72296b`_
+_Updated 2026-10-04 · branch `ccr-9258b8b7-m4748a` · baseline `18eb6d2` (the rating in `2026-10-04_screen_ratings.md`) · round 3 from `b8c8bd2` to `a72296b` · rounds 4–6 from `43c2d19` to `166d207`_
 
 This file tracks what the remediation plan (`2026-10-04_screen_remediation_plan.md`) has fixed and the updated rating of every screen.
 
-**Status of all fixes below:** written and committed, with typecheck, lint and tests passing. Nothing has been deployed or tried on a phone yet. The backend changes from round 3 are written and tested against a scratch database only; they are **not deployed** (§4). Items marked 📱 need a device check before they count as verified.
+**Status of all fixes below:** written and committed, with typecheck, lint and tests passing. Nothing has been deployed or tried on a phone yet. The backend changes from rounds 3–5 are written and tested against a scratch database only; they are **not deployed** (§4). Items marked 📱 need a device check before they count as verified.
 
 ## 1. Summary
 
-| | Before (baseline) | After round 2 | Now (round 3) |
-|---|---|---|---|
-| Screens rated | 193 | 174 remain (19 mock/legacy/unwired routes deleted) | 174 remain; all 174 re-rated in round 3 |
-| Mean score, all 193 screens | 6.0 | — | — |
-| Mean score, the 174 that remain | 6.2 | 7.1 | **7.8** (7.83) |
-| Screens improved / unchanged / worse, against the baseline | — | 132 / 42 / 0 | **173 / 1 / 0** (the one unchanged screen is `app/onboard.tsx`, 7.5) |
-| Screens at 8 or above | 7 | 28 | **98** |
-| Screens below 5 | 32 | 2 (the `group-chat` and `creator-channels` redirect shims) | **0** |
-| Highest score | 8 | 8 | 10 (`creator-channels`, rated as a redirect; `group-chat` redirect 9.5). Highest real screen: 8.5, 22 screens |
-| `tsc --noEmit` | 0 errors | 0 errors | 0 errors |
-| `expo lint` | 0 errors, 267 warnings | 0 errors, 158 warnings | 0 errors, 55 warnings |
-| `npm test` | 351/355 | 386/390 | 413/417 |
-| `openspec validate --all --strict` | 48/50 | 49/51 | 49/51 (the same two changes fail, for having no deltas) |
+| | Before (baseline) | After round 2 | Round 3 | Round 4 | Round 5 (Now) |
+|---|---|---|---|---|---|
+| Screens rated | 193 | 174 remain (19 mock/legacy/unwired routes deleted) | all 174 re-rated | all 174 re-rated | all 174 re-rated |
+| Mean score, all 193 screens | 6.0 | — | — | — | — |
+| Mean score, the 174 that remain | 6.2 | 7.1 | 7.8 (7.83) | 8.2 (8.15) | **8.4** (8.38) |
+| Improved / unchanged / worse, against the baseline | — | 132 / 42 / 0 | 173 / 1 / 0 | 174 / 0 / 0 | **174 / 0 / 0** |
+| Improved / unchanged / worse, against round 3 | — | — | — | 110 / 64 / 0 | **150 / 24 / 0** |
+| Screens at 8 or above | 7 | 28 | 98 | 152 | **169** |
+| Screens at 9 or above | 0 | 0 | 2 (the two redirect shims) | 5 | **12** |
+| Screens below 5 | 32 | 2 (the `group-chat` and `creator-channels` redirect shims) | 0 | 0 | **0** |
+| Highest real screen (the two redirect shims not counted) | 8 | 8 | 8.5 (22 screens) | 9 (3 screens) | **9 (10 screens)** |
+| Redirect shims (`creator-channels`, `group-chat`) | 3.5, 4 | 4.5, 4 | 10, 9.5 | 10, 10 | 10, 10 |
+| `tsc --noEmit` | 0 errors | 0 errors | 0 errors | 0 errors | 0 errors |
+| `expo lint` | 0 errors, 267 warnings | 0 errors, 158 warnings | 0 errors, 55 warnings | 0 errors, 26 warnings | 0 errors, 27 warnings |
+| `npm test` | 351/355 | 386/390 | 413/417 | 441/445 | 471/475 |
+| `openspec validate --all --strict` | 48/50 | 49/51 | 49/51 | 49/51 | 49/51 |
+| uiDebtRatchet: touchables with no role / hex colour literals (`.tsx` under `app/` and `components/`) | — | — | 45 / 955 when added; 37 / 954 at the end of round 3 | 5 / 306 | 5 / 281 |
 
-The four `npm test` failures are the same in every column. All four are environmental: `lib/call/minimize`, `lib/layoutMetrics` and `services/securityEmulatorFlag` need the generated `android/` folder, and `utils/moneySeam` needs Node 24.
+**Where the check rows come from.** The Round 4 column was run on a clean export of `4910069` (the code the round-4 re-raters scored), and the Now column on `HEAD` (`166d207`, after round 6). On `2a05e46`, the code the round-5 re-raters scored, the same checks gave: `tsc` 0 errors, lint 0 errors / 30 warnings, `npm test` 460/464, openspec 49/51. The ratchet totals are the sums of `lib/uiDebtRatchet.baseline.json` at `b31ab90` (when it was added), `4910069`, `2a05e46` and `HEAD`; at `HEAD` the selftest also reports "no file got worse (5 unroled touchables, 281 hex literals remain)". The 5 unroled touchables are in `components/WritingAssistant.tsx` (3), `components/ChainLinkIcon.tsx` (1) and `app/videocall.tsx` (1).
 
-Against the previous score, round 3 raised 159 screens, left 15 the same and lowered none. Score spread now: 13 screens at 7, 63 at 7.5, 74 at 8, 22 at 8.5, and the two redirect shims at 9.5 and 10.
+The four `npm test` failures are the same in every column. All four are environmental: `lib/call/minimize`, `lib/layoutMetrics` and `services/securityEmulatorFlag` need the generated `android/` folder, and `utils/moneySeam` needs Node 24. The two openspec failures are also the same in every column: `fix-presence-publish-stall` and `responsive-breadth-and-toolchain` have no deltas.
 
-**How the new ratings were produced.** Reviewers who had not written any of the fixes re-scored screens with the original six-dimension rubric. They checked each fixer's claims against the code and reported regressions. Three re-rating rounds ran:
+Against round 4, round 5 raised 77 screens, left 97 the same and lowered none. Score spread now: 5 screens at 7.5, 49 at 8, 108 at 8.5, 10 at 9, and the two redirect shims at 10. The five screens still below 8 are `app/interest-calculator.tsx`, `app/space-devices.tsx`, `app/space-run-driver.tsx`, `app/videocall.tsx` and `app/voicecall.tsx` (7.5 each). The ten at 9 are the Alerts, Calls and Mini tabs, `contact-info`, `verify-contact`, `chat`, `family-alerts`, `finance/_layout`, `last-seen-privacy` and `settings`.
+
+**How the new ratings were produced.** Reviewers who had not written any of the fixes re-scored screens with the original six-dimension rubric. They checked each fixer's claims against the code and reported regressions. Five re-rating rounds ran:
 - **Round 1:** 147 screens, after the first fix round.
 - **Round 2:** 36 screens, after a second round that fixed the regressions round 1 found.
-- **Round 3:** all 174 remaining screens, in 13 batches (A, B, C1, C2, D, E+K, F, G1, G2, H, I1, I2, J), after a third fix round that worked through every screen's "Still needed for 10/10" list. The batches reviewed `HEAD` at `c28d1b2` or `5d7c50b`.
+- **Round 3:** all 174 remaining screens, in 13 batches (A, B, C1, C2, D, E+K, F, G1, G2, H, I1, I2, J), after a third fix round that worked through every screen's "Still needed for 10/10" list. The batches reviewed `c28d1b2` or `5d7c50b`.
+- **Round 4:** all 174 screens, same 13 batches, reviewing `43c2d19` → `4910069`. The user had asked to "fix the remaining open issues too and known gaps"; the fourth fix round worked through §3, §4 and §6 of the round-3 report and every round-3 "Still needed" list.
+- **Round 5:** all 174 screens, same 13 batches, reviewing `4910069` → `2a05e46`, after a fifth fix round on what the round-4 re-raters found.
 
-**Fixed after re-rating, not re-scored.** The round-3 re-raters found regressions and gaps (§3). Eight later commits fixed some of them: `5d7c50b`, `21ec13e`, `7c2bd24`, `9a3460e`, `815c7a5`, `298f739`, `d7f4e51` and `a72296b`. No reviewer has scored those changes, so the affected screens keep their round-3 score and are marked "fixed after re-rating" in §7. Their scores were not raised.
+A sixth fix round then worked on what the round-5 re-raters found. It has **not been re-scored**.
 
-Every score cites `path:line`; the evidence is in the appendices (Appendix C for round 3).
+**Fixed after re-rating, not re-scored.** Eight commits landed after the code the round-5 re-raters scored (`2a05e46`): `bf68b93` (finance reminders and a screen-reader delete) and the seven round-6 commits `076e098`, `f077a96`, `45cf418`, `91f5fb8`, `bd3b9a5`, `9124152` and `166d207`. They change 125 screen files (`git diff --stat 2a05e46 HEAD`), plus the screen-owned component folders of 8 more screens (`communities`, `family`, `family-member`, `file-viewer`, `finance/ledger/new`, `finance/ledger/edit`, `games`, `import-chats`). Small changes to shared components (the `ErrorBoundary` ground colour and an `onBlur` prop on the finance `Field`) are not counted. No reviewer has scored those changes, so these 133 screens keep their round-5 score and are marked "fixed after re-rating" in §7. Their scores were not raised. The commits that were "fixed after re-rating" in the round-3 report all landed before `43c2d19`, so the round-4 re-raters scored them.
 
-**Why no real screen reaches 10** (only a redirect shim does). Scores stop below 10 for these reasons:
-- Some fixes still need a device check.
-- Some fixes depend on backend changes that are written but not deployed, or not written yet (§4).
-- Several large files are still unsplit, for example `app/_layout.tsx`, `app/live-view.tsx`, `app/file-viewer.tsx`, `app/family.tsx`, `app/encrypted-notes.tsx`, `components/chat/MessageBubble.tsx` and the Rummy board.
-- Route casts (`as any`) remain where `typedRoutes` needs generated types this checkout lacks.
-- The palette has no on-primary, on-danger or warning token, so some fixed colours stay as named constants.
+Every score cites `path:line`; the evidence is in the appendices (Appendix E for round 5, Appendix D for round 4).
 
-Each screen's remaining "Still needed for 10/10" list is in Appendix C.
+**Why no real screen reaches 10** (only the redirect shims do). Scores stop below 10 for these reasons:
+- Many fixes still need a device check (📱), especially screen-reader behaviour, pickers inside modals and background behaviour.
+- Many fixes depend on backend changes that are written but not deployed (§4), or on things outside this repo (games server, App Store listing, signing values).
+- Several product decisions are open (§5). The largest is the dark-mode ink on solid primary and danger fills, which affects every solid button.
+- A few large files remain: `app/chat.tsx` (2,576 lines; its socket effect is pinned in place by four selftests), `app/family-map.tsx` (1,065) and `components/games/Rummy.tsx` (988). The ~300-line boot effect in `app/_layout.tsx` is pinned there by selftests too.
+
+Each screen's remaining "Still needed for 10/10" list is in Appendix E.
 
 ## 2. What was fixed
 
-Fixes were written by 9 parallel packages in round 1, an integration pass, 5 packages in round 2, and 16 packages plus integration and follow-up commits in round 3.
+Fixes were written by 9 parallel packages in round 1, an integration pass, 5 packages in round 2, and 16 packages plus integration and follow-up commits in round 3. Round 4 had 19 packages in 20 commits (`0dcfb48` … `4910069`), round 5 had 14 packages in 15 commits (`5492453` … `2a05e46`) plus one coordinator commit (`bf68b93`), and round 6 had 7 packages in 7 commits (`076e098` … `166d207`). `git log --oneline 43c2d19..HEAD` lists all 43.
 
 ### Rounds 1 and 2
 
@@ -86,7 +95,69 @@ Every package worked through its screens' latest "Still needed for 10/10" list a
 | **Backend** (Z-BE, `3353236`) | Written in `vaultchat-backend-go`, **not deployed**: the server checks the MPIN on account delete; the Shop Book reject note (migration 140) and Request Pro (migration 141); the admin returns `shopId` filter; guardians for the run's driver; a shift read; in-place stop updates; and a join preview. Tested against a scratch PostgreSQL 16 database. |
 | **Cross-cutting** | New `lib/uiDebtRatchet` selftest (`b31ab90`): per file under `app/` and `components/`, the count of touchables without a role and of hex colour literals may only go down. It now reports 37 and 954. |
 
-The per-item logs, with evidence for each claim, were kept in the working session (`fixes/P1–P9, H, R1–R5` for rounds 1–2; `fixes/ZA–ZK, ZBE, ZC1b, ZR, ZS` for round 3). The re-ratings in the appendices verify those claims against the code.
+### Round 4
+
+Every package worked through §3, §4 and §6 of the round-3 report and each screen's round-3 "Still needed for 10/10" list, and repeated the per-file sweep (roles and labels, theme tokens, errors instead of empty states, confirmations). The round-4 re-raters checked these claims against the code (Appendix D). Package logs: `fixes/R4*.md`.
+
+| Area | Main fixes (round 4) |
+|---|---|
+| **Foundation** (R4F0, `0dcfb48`) | The palette gains `onPrimary`, `onDanger` and `warning` (and, in the handoffs, `caution` and `scrim`). A shared, app-themed `useDatePicker` lives in `components/ui`; the finance picker is now a skin of it. Note: the R4F0 log describes a dark "night ink" for `onPrimary`/`onDanger`, but the values that shipped are white in both themes (round-4 re-raters, A and E+K). That is an open decision (§5). |
+| **Launch, auth & lock** (R4A, `a83fac8`) | `app/_layout.tsx` is split from 1,132 to 755 lines into `components/root/`, with all 9 `as any` removed. Index has an in-flight guard and a delayed spinner. App lock in PIN mode offers the MPIN when the PIN is forgotten. A skipped restore after a failed lookup is offered again. Delete account maps errors by code (the phone-side MPIN pre-check stays). Blocked gets "Check again" and hides raw threat details. Permissions reads each grant separately. UpdateGate is translated and has an iOS store fallback; TermsGate stops waking while signed out. |
+| **Sign-in** (R4HO, `4910069`, with R4BE C15) | OTP first for every number: `app/onboard.tsx` sends the code before any lookup, and `app/email-verify.tsx` is renamed `app/phone-verify.tsx`. The phone ticket is carried into MPIN verify and recovery, and re-checks send the Bearer token. It works against today's server; the server enforcement is written and off (§4). Every sign-in now costs an SMS (§5). |
+| **Tabs, contacts & links** (R4B, `cab83f5`) | Chats split to 824 lines with a memoised `ChatListRow`; the status composers moved out. A failed sign-out restores push and the socket. Search highlights the query that produced the hits. Verify contact can compare by QR. Invite links hide expired links; join waits up to 4 s for the preview and does not offer a retry on 410. 18 of 19 `as any` in Chats are gone. Contact info opens a file directly (R4HO). |
+| **Chat** (R4C1, `e729721`) | The bubble is one element with a role and named actions (quote, play, open file, poll, link, view-once, and VaultBeam via R4HO). The lock error is a live region. Leave, hide and clear in an embedded pane no longer replace the split view. The composer has a label and a silent-send action. GIF and Forward go through the outbox (typed `enqueueMessage`). `MessageBubble` is split with 0 lint warnings. The sound picker's current mark and Message Info read times are wired to the new endpoints with fallbacks. The forward picker has search. |
+| **Chat tools & backup** (R4C2, `5060ac0`) | Encrypted backup can change its password or switch to a key while on, and a failed upload no longer deletes the secret. Protected bookmark snapshots are purged. Reminders no longer carry message text in the route. Chat export is chunked and cancellable. Broadcast leave, admin delete and `channelId` filtering are wired with fallbacks. Hidden chats handle the server's 423, blur in the app switcher and keep the PIN pad above the keyboard. Import chats is split. |
+| **Groups & communities** (R4D, `0dfaeb5`) | Group calendar draws its iOS picker inline, lets admins edit when the server sends `updatedBy`, and keeps its decrypt cache apart from messages (R4HO). Group admin saves the latest choice and confirms Reject. Invites show one approval queue (C8), join reads the structured 409 codes (C7), and communities gain edit, delete, leave and attach (C9), each saying "Not available yet" on today's server. Seven screens got a real not-found state for a missing id. Create group works with nobody picked. |
+| **Calls & live** (R4E, `78b5a4e`) | A 409 ring now reads "ended" and a 429 "rate limited" instead of "Calling X". Incoming-call decline has a bounded wait. Group call awaits "Lower hand"; its hex literals went to tokens. Network test uses the app's own speed endpoints when deployed (C14), falling back to Cloudflare, and no longer overwrites history after a failed read. `app/live-view.tsx` is split from 2,107 to 808 lines, with tile labels, a non-drag picture-in-picture control and an honest poll close. |
+| **Media & files** (R4F, `8fd07ef`) | File viewer split from 1,583 to 758 lines, with a zoomable image and PDF zoom, and PDFs on iOS. Image editor exports at full resolution (📱) and keeps strokes in place on rotate and crop. File preview tokenises per row. Video player resumes after load. Archive viewer caps entries by actual size. Camera and Doc Scanner delete scan pages from the cache. Story viewer honours Reduce Motion. |
+| **Family Circle** (R4G1, `3ab709d`) | `app/family.tsx` split from 2,441 to 796 lines; nested row buttons became row actions. Family map split to 1,075 lines with the dead `memberRoutes` path removed. Meet Here origins and `/nav/trace` positions are rounded (about 11 m) and disclosed. Family setup copy follows the space type. A "then" turn chip was added (R4HO). |
+| **Location & safety** (R4G2, `cae7f8b`) | Location disables Send after a GPS failure. Navigate labels its input, reports an out-of-range link and stops repeating distance and ETA. Location Lock surfaces a refused kill-safe grant. Lock alert ink passes AA on red and Reduce Motion is known before the first frame. Lock history labels are complete. SOS uses shared "reached" wording and shows `contactsReached` when the server sends it (C13). |
+| **Spaces** (R4H, `2798bee`) | Device rename opens inside the detail modal (iOS). Runs load with their riders in one call when the server supports it (C11); a failed run read no longer reads as "nobody on this bus". Attendance labels are reachable, check-in has its own title, leave approval is outlined (contrast), overview links by permission, runs-admin is split, visitors show busy states and clear a copied code, and plain members can read the shift (C12). |
+| **Finance** (R4I1, `94f22db`) | The calculator compounds at the chosen period (it always compounded yearly). Reminders are anchored and no longer drift. The calendar opens the reminder and shows recurring series. Ledger new and edit share one form; the detail screen has undo and interest to date. Search matches "+91" numbers. Chitti detail is split. The full-backup KDF runs off the UI thread (R4HO). |
+| **Shop Book & admin** (R4I2 `d53e5cc`, R4ADM `9cb0650`) | Shop Book: one shared load hook replaces about 19 copies, notifications open their order, the inbox opens over the app so carts survive, documents open in-app, coupons are re-checked, and Request Pro says "not available yet" on today's server. Admin: an entitlement form replaces a chain of `prompt()`s, Pro requests, the returns filter and reject notes are shown, index and shopbook gain a light theme, and live regions are quieter. `admin/adminPages.selftest.ts` pins the CSP hashes and bans inline handlers. |
+| **Settings, privacy & vault** (R4J, `6842f7a`) | The privacy dashboard's screenshot fact comes from the actual `setSecure` result. The vault has no fixed-salt fallback for new files and streams new files (v3). Encrypted notes is split, re-locks only in the background, accepts 4–8 digit PINs and has an iOS reminder picker. Settings shows failed reads. Status privacy sends one request per change. |
+| **Utilities & comfort** (R4K, `5920892`) | Fixed white and amber constants moved to the new tokens; Back has a fallback on every screen. Ringtone saves are serialised. Offline mode recounts after the flush. Eye Check no longer stacks a second Vision Comfort, and is split. The dashboard score counts only the four settings checks. |
+| **Games** (R4GM, `bc89d00`) | A screen-reader pass on Chess, Ludo, Rummy and Tic-Tac-Toe: board positions spoken, card moves without dragging, results announced. Rummy is split from 3,173 to 987 lines; Chess and Ludo are split. Quick match is reachable on iOS. Ludo's join times out. |
+| **Backend** (R4BE `730e5b9`, `433030b`; R4HO) | Written, **not deployed**: contracts C1–C19 (§4), migrations 142–144, Caddy anti-framing headers for the legal pages, self-hosted admin fonts, and the deploy and well-known templates. Tested against a scratch PostgreSQL 16 database. |
+| **Cross-cutting** (R4HO, `4910069`) | Privacy and gallery setters store first and reject on failure. FLAG_SECURE from calls and live is reported to the screen guard. The ratchet baseline went from 37 / 954 to 5 / 306. |
+
+### Round 5
+
+Every package fixed what the round-4 re-raters found (§3), then the remaining "Still needed" items. The round-5 re-raters checked these claims against the code (Appendix E). Package logs: `fixes/R5*.md`.
+
+| Area | Main fixes (round 5) |
+|---|---|
+| **Launch & auth** (R5A, `02cfb3c`) | "Check again" on the blocked screen goes to the gate's target instead of the splash. A conflict on phone verify clears the spent code. `otp_required` is handled on sign-up, MPIN entry and recovery. Double-tap latches; theme comments corrected. |
+| **Privacy in tabs** (R5B, `2e6ec69`) | View-once and Invisible Ink text are kept out of global search and the Chats preview (including your own messages). Locked chats are left out of search and previews, and contact info opened from the avatar popup no longer shows a locked chat's media. "Verified" is bound to the safety number and clears when it changes. Small badges sit on `accentDeep` (6.33:1). |
+| **Chat** (R5C1, `5492453`) | The read tick is distinct again (`#7CFFB2`, 5.07:1 on the fill). Forwards say they are queued, and a server rejection is reported in the source chat. No `as any` left in the chat files. |
+| **Chat tools & backup** (R5C2, `bbae587`) | A failed key read pauses backups instead of uploading a server-readable copy. The secret and its header are one record. Switching is serialised with the scheduled backup. Key ids let an older copy ask for its own key. Restore no longer falls back silently to older copies. Chat export decrypts in chunks. App-lock-chats and import-chats are split. |
+| **Groups** (R5D, `3ee46c7`) | The four round-4 regressions are fixed. Group info is split. Lists are virtualised. Insights shows a partial read honestly. Notes and tasks publish ops instead of replaying the list. An abandoned "Create & add people" no longer leaves an empty group silently. |
+| **Calls, live, comfort & games** (R5E, `952cffc`) | Quiet storage scan, cleared offline retry baseline, unmount guard on the group-call sheet, live errors classified by status, notification Switch saves serialised, dashboard E2EE row explained, games invite and voice sheets brought up to standard. |
+| **Media** (R5F, `186b911`) | Doc Scanner's list is changed by read-modify-write and has no 20-entry cap, so a failed read or a 21st scan can no longer drop scan keys. View-once photos, decrypted thumbnails and PDF page renders stay out of the disk cache. iOS PDF loads with encoded paths. Reader says honestly when a row is not stored locally. File preview checks the size before downloading. |
+| **Family** (R5G1, `80eb646`) | Reopening the same place resets abandoned edits. The hub says "by road". Item API errors surface. The presence fold keeps reference distances. The member route request is rounded. Family member is split. |
+| **Location & safety** (R5G2, `300183d`) | AI Guardian colours pass AA in light theme and iOS hears the scan result. ETA is labelled. Lock history shows its refresh banner only on Retry. Test-alarm and vibration failures surface. The SOS result and live-share start and end are announced; the copy says live share ends when you leave the screen. |
+| **Spaces** (R5H, `67cee05`) | Date pickers inside modals render inline on iOS. Check-in links and titles agree. Polling skips runs that are not on the road. Stop rows show the day. Stale-data notes on every screen. Check-out asks first. Attendance days are DST-safe. Run driver is split. |
+| **Finance** (R5I1, `bbc81de`) | Ledgers state and let you choose the compounding frequency, and the calculator says how ledgers compound. Reminders alert on the picked day; 29 Feb and day-31 cases are warned. Done reminders stay in calendar history. Ledger validation is inline. EMI shows the full schedule. |
+| **Shop Book & admin** (R5I2 `4d310fb`; `db1d68b`) | Bill edits queued during a save are sent. Dark badge contrast fixed. Orders and products are split. `order_status` alerts are routed by a `side` tag (server tag in `db1d68b`, not deployed). Admin: Confirm cannot be double-clicked through, no `prompt()` is left, focus is kept after a save, storage access is guarded, `index.html` pins its stylesheet, and SSE stops on 401. |
+| **Vault & settings** (R5J, `0f92eb9`) | Archived vault keys can be recovered ("Try an old PIN"). No new key is minted silently when the keystore loses the old one. Unlisted files are found again. New seals are bound to their file id (v4). Partial files are swept. Adds have progress and cancel. iOS container moves are handled. Settings is split to 529 lines. VaultCheck stops when you leave. |
+| **Handoffs** (R5HO, `2a05e46`) | Picker `minimumDate`; restore-backup explains an E2EE backup; launch strings translated; `viewerPrefs` rejects failed writes. Backend, **not deployed**: visitor-pass revoke and `GET /stories/audience?base=1`. |
+
+### Round 6 — not re-scored
+
+These commits came after the round-5 re-rating. No reviewer has checked them; the logs (`fixes/R6*.md`) are the only evidence so far.
+
+| Area | Main fixes (round 6) |
+|---|---|
+| **Finance** (coordinator, `bf68b93`) | One-off and snoozed reminders now schedule: the date trigger carries its type, which expo-notifications requires (they never alerted before, and the screen blamed permissions). The screen-reader Delete on a saved calculation asks first. |
+| **Vault** (R6J, `076e098`) | A PIN change re-wraps the vault key all-or-nothing, and commits only after the PIN is saved. A damaged archive index no longer blocks "Try an old PIN", New key or a PIN change. The old-PIN attempt limit survives a re-lock. On iOS the vault folder is excluded from device backups. The PIN gate moved out of `app/vault.tsx`. The notes draft sweep no longer deletes attachments after a transient key-read failure. |
+| **Doc Scanner & media** (R6F, `f077a96`) | The scan key is never replaced silently while a sealed list exists; a lost key shows Retry or Reset. All list changes go through one queue. The migration checks the encrypted copy before deleting the plaintext. The image editor no longer treats a near-uniform photo as a blank capture. Smaller fixes in video player, camera, file preview, file viewer and shelf. |
+| **Privacy across chats** (R6B `45cf418`, R6HO `166d207`) | Hidden (PIN-gated) chats are out of global search, Bookshelf, the new-chat offline list and the Chats cold paint. Locked rows show no tick or "typing…". Contact info loads nothing from a locked chat. Bookmarks, scheduled messages, reminders and Bookshelf mask hidden and locked chats, failing closed. Custom bubble colours get their own ink; the dark default time text goes from 3.90:1 to 5.02:1. One shared `userErrorText` replaces 16 copies of `errText`. |
+| **Backup** (R6C2, `91f5fb8`) | A new phone can no longer overwrite the only online backup: scheduled backups wait until the restore offer is answered. Restores hold the backup lock, and restoring an E2EE backup turns E2EE back on. The lock has timeouts. An open hidden chat survives short trips away (60 s grace). PBKDF2 runs async. A crash mid-export no longer leaves plaintext behind (swept on screen open, and at app start via R6HO). `app/message-reminder.tsx` is split (R6HO). |
+| **Launch, groups & spaces** (R6ADH, `bd3b9a5`) | The launch gate is decided per mount, so a remount cannot route by the previous decision. Groups: one announcement on join, a media cache instead of a 200-message read per visit, a probing indicator in communities, no doubled labels, member emails out of the plain cache. Spaces: riders of scheduled runs refresh, iOS announcements are throttled, viewers no longer see a role error, and visitor passes can be cancelled (with an honest fallback until the revoke route is deployed). |
+| **Family, safety, calls, finance, Shop Book & admin** (R6GEI, `9124152`) | Saved family places are never overwritten after a failed read (data loss). Many targets raised to 44 dp in lock history, SOS, location and navigation. The games voice button's name matches its text. Finance: a snoozed day is no longer labelled "no phone alert", scheduling failures are not blamed on permission, older recurring triggers are rebuilt, and every interest figure states its frequency. Shop Book: returns no longer hide behind an inbox order, Back warns about unsent quantities. Admin: login errors are announced, a 401 signs out, `logs.html` and `shopbook.html` pin their stylesheets. |
+| **Handoffs** (R6HO, `166d207`) | Call swatch tokens, a shared `FALLBACK_GROUND`, the startup export sweep, and the chat-list selftest now allows persistent socket listeners. Ratchet: 281 hex literals. |
+
+The per-item logs, with evidence for each claim, were kept in the working session (`fixes/P1–P9, H, R1–R5` for rounds 1–2; `fixes/ZA–ZK, ZBE, ZC1b, ZR, ZS` for round 3; `fixes/R4*`, `R5*` and `R6*` for rounds 4–6). The re-ratings in the appendices verify the claims of rounds 1–5 against the code.
 
 ## 3. Regressions found and fixed
 
@@ -107,9 +178,9 @@ The independent re-raters found problems that the fixes had introduced or left b
 - **Communities:** a client-only "owner" rule contradicted the server.
 - **Media viewer:** the login token could be sent to any host named in a link.
 
-### Round 3 — fixed after re-rating (not re-scored)
+### Round 3 — found by the round-3 re-raters, fixed before round 4
 
-The round-3 re-raters reported these regressions, plus older problems they found for the first time. Each was fixed in a later commit; no reviewer has re-scored the fix.
+The round-3 re-raters reported these regressions, plus older problems they found for the first time. Each was fixed in a later commit before `43c2d19`, so the round-4 re-raters scored the fixes (Appendix D).
 
 | Found by | Problem | Fixed in |
 |---|---|---|
@@ -129,283 +200,350 @@ The round-3 re-raters reported these regressions, plus older problems they found
 | I2 | Khata "Share bill/receipt" was unreachable by screen readers inside the grouped row. | `d7f4e51`: offered as an accessibility action on the row (📱). |
 | J | VaultCheck's timeout claimed the analysis stopped, and its elapsed counter spoke every second. The vault-features lock picker and the vault export sheet wrapped their options in the backdrop. A stale filevault comment. | `298f739`. |
 
-### Round 3 — reported and still open
+### Round 3 — reported and still open at the time
 
-- **Root** (`app/_layout.tsx`): one new `as any` (9 in the file). Trivial.
-- **Profile:** sign-out tears down push and the socket before `logoutUser()` succeeds. Minor.
-- **Search:** the snippet is highlighted against the live query, not the query that produced the hits. Cosmetic.
-- **GatePicker:** `makeS(c)` takes the palette but never reads it. Minor.
-- **Group calendar:** the iOS picker is a modal inside the composer modal (📱). The shared `components/finance/useDatePicker` draws its iOS sheet with the finance palette on group and space screens (also H).
-- **Space devices:** the new rename modal is a sibling of an open full-screen modal and may not present on iOS (📱).
-- **Video call:** `lib/call/callControls.selftest.ts` still asserts "Beauty is gone", while the button exists as "Tint" (see §5).
-- **File preview:** the whole file (up to 2 MB) is tokenised up front instead of per row.
-- **Media viewer:** the Z-F log overstated the hex cleanup (15 literals remain, not 5). Not a code regression.
-- **FamilyMap:** the `memberRoutes` path is now dead code. Family setup's "Family Circle" copy reads oddly for users from other space types.
-- **AI Guardian:** its `ponytail:` comment says `STATUS_META` is not exported; it is, so the hard-coded severity colours can go.
-- **Privacy dashboard:** the screenshot-blocking fact is still a platform guess in Android release builds (`lib/screenGuard.ts:132` returns `native || Platform.OS === 'android'`).
-- **Calls:** a 409 "call ended" invite still reads "Calling X" (`ringCallGroup` in `lib/callSession.ts` returns null on that 409, so the socket fallback reports the target count).
-- **Chat:** the bubble is one accessible element with no role, so its nested controls may be unreachable on iOS (📱). The lock error has no live region, "Back to chats" and Leave group replace or strand an embedded pane, and the composer input has no label.
+The round-3 report listed 14 open items (root `as any`, profile sign-out order, search snippet, GatePicker palette, group-calendar and space-device modals, the Tint selftest, file-preview tokenising, media-viewer hex, FamilyMap dead code, AI Guardian colours, the privacy-dashboard screenshot fact, the 409 "call ended" invite, and the chat bubble's accessibility). Round 4 fixed all but two (R4A, R4B, R4C1, R4D, R4E, R4F, R4G1, R4G2, R4H, R4J; checked in Appendix D). Still open: the Tint selftest (§5), and the privacy dashboard still reports the last applied FLAG_SECURE rather than reading it from the window (needs a native method).
+
+### Round 4 — found by the round-4 re-raters, fixed in round 5
+
+These were reported in Appendix D: regressions introduced by round 4, plus older problems found for the first time. The round-5 re-raters confirmed each fix (Appendix E).
+
+| Found by | Problem | Fixed in |
+|---|---|---|
+| A | **Medium.** A clean "Check again" on the blocked screen could leave the user on the splash spinner with no way out (after a locked or signed-out launch). | `02cfb3c` (R5A): it routes to the gate's own target. |
+| A | After a "conflict" answer, phone verify kept the spent code and a live Resend on screen. The theme comments said dark `onPrimary`/`onDanger` were night ink; they are white. | `02cfb3c`. |
+| B | **Privacy (older than round 4).** Global search and the Chats preview showed view-once and Invisible Ink text and messages from locked chats. Verify contact kept "Verified" after the security code changed. | `2e6ec69` (R5B). The fixer also found that contact info, opened from the avatar popup, showed a locked chat's media; fixed in the same commit. |
+| C1 | Read and delivered ticks looked the same on your own bubble. A Composer comment was wrong. A forward rejected by the server failed silently in the source chat. | `5492453` (R5C1). |
+| C2 | After "Make a new key", an older backup copy was fed the new key and failed with an opaque error. "Nothing was changed" could be false when the store and the re-upload both failed. On web, text export shared only its title. Stale scrim comments. | `bbae587` (R5C2): key ids, honest copy, full-text fallback. |
+| D | Group-info thumbnails went stale with 9+ local items; group admin dropped a second tap while saving; link requests would be listed twice once C8 is deployed; community actions were visible but could only fail. | `3ee46c7` (R5D). |
+| E+K | Storage manager's live region spoke every 400 ms; offline mode's retry line stuck to an old retry; group call set state after unmount; incoming call's comment named the wrong server file. | `952cffc` (R5E). |
+| F | **Privacy.** View-once photos could be written to expo-image's disk cache. Story viewer stalled 12 s on a story with no attachment id; video resume could be missed; iOS could refuse a PDF with an encoded path; the image-editor export fallback had gaps. **Data loss (older):** a failed Doc Scanner read followed by a new scan dropped every older scan's key. Two backdrops wrapped their sheets. | `186b911` (R5F). Reader: the screen now says honestly when a server row is not stored locally, but cannot show its text (see §5). |
+| G1 | Reopening the same family place showed abandoned edits, and Save wrote them. (Older) the hub said "Straight-line" over road distances. | `80eb646` (R5G1). |
+| G2 | iOS did not hear the AI Guardian result, and its "Low risk" colour was about 1.6:1 in light theme; the ETA was a bare time; lock history flashed an error-styled banner on every filter; trusted contacts lost its bottom padding; two stale doc comments. | `300183d` (R5G2). |
+| H | Space date pickers opened a second Modal from inside a Modal on iOS; check-in links and titles disagreed; polling re-read every run against today's server; stop rows hid the day. | `67cee05` (R5H). |
+| I1 | **Calculator and ledgers disagreed on compound interest** (₹26,824.18 vs ₹24,000 on the same terms). Recurring reminders that start in the past alerted on the wrong day. A stale KDF comment. | `bbc81de` (R5I1): ledgers state and choose their frequency; the different defaults remain an open choice (§5). |
+| I2 | A packed quantity blurred during another save was never sent. The admin entitlement Confirm could be double-clicked through. The dark Shop Book badge was 1.94:1. | `4d310fb` (R5I2). |
+| J | **Medium.** After the vault's "New key", the archived key could not be read back, although the copy said it was kept. The notes iOS reminder sheet was a Modal inside a Modal. VaultBeam's in-memory apply waited on the write. A stale comment. | `0f92eb9` (R5J). |
+
+Still open from round 4: the Tint selftest (§5), and on iOS the finance forms' picker sheet uses the app button and the interest sheet the app theme (visual only, 📱).
+
+### Round 5 — found by the round-5 re-raters, fixed after re-rating (not re-scored)
+
+These were reported in Appendix E. Each was fixed in a later commit; no reviewer has re-scored the fix.
+
+| Found by | Problem | Fixed in |
+|---|---|---|
+| A | After a remount in the same JS process, the launch screen could route by the previous launch decision (📱; worst case a stuck veil, not a bypass). | `bd3b9a5` (R6ADH): the gate is decided per mount. |
+| B | **Privacy (older than round 5).** Hidden (PIN-gated) chats were still searched, and their hits opened without the PIN. Locked rows still showed the tick and "typing…". | `45cf418` (R6B), extended to bookmarks, scheduled, reminders and Bookshelf in `166d207`. |
+| C2 | **Data loss (older than round 5).** Skipping the restore offer on a new phone let the scheduled backup overwrite the only server copy within seconds. Restoring an E2EE backup left the phone in account mode, so the next backup was server-readable. Restores ran outside the backup lock. | `91f5fb8` (R6C2). |
+| C2 | The backup lock was held across network calls with no time limit; the key screen went blank while confirming; any trip to the background popped an open hidden chat (losing the draft); a stale comment. | `91f5fb8`. |
+| D | Double announcement on group join; group info read a 200-message page on every visit; community actions hidden with no indicator while probing; doubled labels in group admin; a stale comment. | `bd3b9a5` (R6ADH). |
+| E+K | The games voice button's accessible name did not match its visible text. | `9124152` (R6GEI). |
+| F | **Key loss.** The Doc Scanner minted a new key silently when the keystore returned nothing, orphaning every saved scan. Minor: the blank-capture check dropped near-uniform edits to screen resolution, Back during a save showed "PDF ready", a refusal pointed at a missing Retry, the video controls snapped back under a screen reader. | `f077a96` (R6F). |
+| G1 | **Data loss.** A failed read of saved family places was treated as an empty list, so the next add or edit overwrote them. Family add hid its empty state after a failed member check; a misplaced doc comment. | `9124152` (R6GEI). |
+| G2 | Two spinners during a lock-history Retry. | `9124152`. |
+| H | Riders of a scheduled run went stale between focuses; iOS could announce a rider window every minute; the role error was shown to viewers who cannot change roles. | `bd3b9a5`. |
+| I1 | **One-off and snoozed reminders never scheduled an alert** (older than round 5), and the screen blamed notification permission. The screen-reader Delete on a saved calculation skipped the confirmation. | `bf68b93` (coordinator). |
+| I1 | A snoozed day was labelled "(no phone alert this month)". | `9124152`. |
+| I2 | Returns hid behind an inbox-opened order; a queued quantity was lost on Back; the "Saving…" hint was Android-only; the admin login error was not announced and REST 401s did not sign out (all older than round 5). | `9124152`. |
+| J | **Medium (key loss).** A PIN change that failed partway left the vault key under the rejected PIN while the screen said nothing changed; a damaged archive index then blocked every recovery path. A comment about re-lock during a seal was false. The notes draft sweep made a transient failure permanent. | `076e098` (R6J). |
+
+### Still open
+
+- The Tint selftest (§5) and the decisions in §5.
+- Round 6's own partial items: the export sweep can remove a file from an export started in the first second after launch (it then fails, nothing leaks); bookmarks, scheduled and reminder rows read "🔒 Locked chat" on a fresh install until the chat list has cached (deliberate fail-closed); a picker left open longer than the 60 s grace still re-locks a hidden chat.
+- Restore-backup cannot say an online backup is E2EE before you tap Restore: the server's backup meta has no mode (§4).
+- Every remaining per-screen gap is listed under "Still needed for 10/10" in Appendix E. None of the round-6 changes has been reviewed yet.
 
 ## 4. Blocked — needs a backend or ops change (not deployable from here)
 
-**Written, waiting for deploy.** Deploys are file copies. In this order (from `fixes/ZBE.md`):
-1. Apply migrations `140_shopbook_reject_note.sql` and `141_shopbook_pro_request.sql` (`vaultchat-backend/migrations/`). The new Go code reads their columns, so deploying it first makes the order view and the admin subscriptions list fail.
-2. Copy the 9 modified Go files (`internal/redisx/redisx.go`, `internal/routes/{auth,user,shopbook,shopbook_admin2,shopbook_return,spaces_runs,spaces_ops,chats}.go`) and rebuild `go-api` (and `maps-api`, the same image).
-3. Then remove the `ponytail:` MPIN pre-check in `app/delete-account.tsx`, so a delete does not spend two attempts.
+**Written, waiting for deploy.** Deploys are file copies. Nothing below is on prod. Order (from `fixes/ZBE.md`, `fixes/R4BE.md` "To copy to prod", R4HO, R5HO and `admin/LOGS_DEPLOY.md`):
+1. Apply migrations `140_shopbook_reject_note.sql`, `141_shopbook_pro_request.sql`, `142_chat_receipt_log.sql`, `143_group_events_updated_by.sql` and `144_sos_contacts_reached.sql` (`vaultchat-backend/migrations/`, `node migrate.js up`), in order. The new Go code reads their columns: deployed first, it breaks the Shop Book order view and admin subscriptions (140/141), `/shopbook/my-shop` (141), group events, SOS send and history, and Message Info (142–144).
+2. Copy the changed Go files and rebuild `go-api` (and `maps-api`, the same image): `cmd/api/routes.go`, `internal/jobs/jobs.go`, `internal/redisx/redisx.go`, `internal/realtime/{handlers,ccwire,ccwire_app_events,ccwire_presence}.go`, and `internal/routes/{auth,auth_phone,channels,chats,chats_calendar,chats_helpers,chats_invitations,chats_membership,chats_receipts,communities,netspeed,shopbook,shopbook_admin2,shopbook_jobs,shopbook_return,spaces_ops,spaces_runs,stories,user}.go` (all under `vaultchat-backend-go/`). Leave `AUTH_REQUIRE_PHONE_TICKET` unset.
+3. Caddy: copy `caddy/Caddyfile` and reload (anti-framing headers on `/privacy`, `/terms`, `/delete-account`).
+4. Admin site (host nginx, not Caddy): the four headers, the five font files, `index.html`, `logs.html` and a reviewed `shopbook.html`, as in `admin/LOGS_DEPLOY.md`. The deployed `shopbook.html` may be newer than the repo's: back it up and diff first.
+5. After the deploy: remove the `ponytail:` MPIN pre-check in `app/delete-account.tsx`, so a delete does not spend two attempts. Once the OTP-first app is the minimum version, set `AUTH_REQUIRE_PHONE_TICKET=1` (§5). Once the well-known files are live, set `autoVerify: true` and the iOS associated domains in `app.json`.
 
-| Item | State |
+| Item | Contract (what the app does until it is deployed) |
 |---|---|
-| Delete account | Server MPIN check written (`user.go`). Until it is deployed, only the phone checks the MPIN. |
-| Shop Book "other" reject note | Server field written (migration 140). Until then the server ignores the note. |
-| Shop Book Request Pro | Endpoint written (migration 141). Until then the button reports "Could not send the request". `/shopbook/my-shop` does not yet return `proRequestedAt` or the entitled plan. |
-| Admin returns filter | `?shopId=` written. Until then the page shows its "not filtered" warning. |
-| Spaces "Call guardian", shift read, in-place stops | Written. Until then the app falls back: the honest guardian alert, the device copy of the shift, and re-mapping riders after a stop save. |
-| `/join` preview | Written. Until then the join screen shows its generic confirmation. |
-| Live broadcast reapers | In backend source (`golive_reaper.go`, `broadcast_reaper.go`); deployment not confirmed. live-view relies on them instead of ending on unmount. |
+| Round 3 items | Server MPIN check on account delete; Shop Book "other" reject note (140) and Request Pro (141); admin returns `?shopId=`; guardians for the run's driver, shift read, in-place stop updates; `/join` preview. The app falls back as before. |
+| C1 hidden chats | `POST /user/pin/verify` limited to 5 wrong tries per 15 min per user, 423 with `retryAfter`. Until then the client-side counter is the only limit. |
+| C2, C3 chat | `notifSound` on `GET /chats/{id}`; `GET /chats/{id}/messages/{msgId}/receipts` with per-member read and delivered times (migration 142). Until then: no current-sound mark, and Message Info has no times. |
+| C4–C6 broadcast | `channelId` on posts, admin post delete, leave. Until then: "isn't available yet". |
+| C7–C10 groups | Structured 409 `code`s; one approval queue read (`?include=link`); communities edit, delete, leave and attach; `updatedBy` on events (143). Until then: message matching, two lists, "Not available yet", author-only edits. |
+| C11, C12 spaces | Runs with riders and stops in one call; the shift readable by every member. Until then: one read per run, and the device copy of the shift. |
+| C13 SOS | `contactsReached` (144), counting push-provider acceptance, not on-screen display. Until then: "Sent to N". |
+| C14 network test | `/net/speed/down` and `/up`, rate-limited. Until then: Cloudflare, with the disclosure. |
+| C15 sign-in | OTP possession before MPIN and recovery, behind `AUTH_REQUIRE_PHONE_TICKET` (off). The app already sends the code first. |
+| C16 admin and links | Caddy headers, nginx snippet, self-hosted fonts, well-known templates, location-sealing design note. |
+| C17 channel rooms | Socket rooms need a subscription on both transports. Until then any socket can join any channel room. |
+| C18, C19 Shop Book | `entitledPlan` and `proRequestedAt` on `/shopbook/my-shop` (needs 141); `orderId` on return decisions. Until then: the plan comes from the report call, and return alerts open the list. |
+| Visitor-pass revoke (R5HO) | `DELETE /chats/{id}/visitor-passes/{passId}`; 409 once the pass is used. The app's Cancel pass says "not available yet" until then. |
+| `GET /stories/audience?base=1` (R5HO) | The pre-filter audience with names. Today's server ignores `base=1`. Status privacy is not wired to it yet. |
+| `order_status` side (`db1d68b`) | `side: customer \| owner` on completed and not-collected alerts. Until then those two fall back to the open side. |
+| Live broadcast reapers | In backend source (`golive_reaper.go`, `broadcast_reaper.go`); deployment not confirmed. |
 
-**Not written yet.**
+**Blocked outside this repo, or not written.**
 
 | Item | What is needed |
 |---|---|
-| Shared https links | Host `assetlinks.json` on `vaultchat.app`, then set `autoVerify: true`. iOS also needs Associated Domains (`apple-app-site-association`). |
-| Sign-in and MPIN recovery | A possession factor (OTP) before MPIN sign-in on a new device and before recovery answers; `/auth/lookup` should stop returning `userId` unauthenticated. |
-| Hidden chats | A per-user attempt limit on `POST /user/pin/verify`. |
-| Chat | `notifSound` on `GET /chats/:id` (to mark the current sound); per-member read/delivered times for Message Info. |
-| Broadcast channels | Leave, admin post delete, and `channelId` on `channel_post`. |
-| Groups | One approval queue for invite-link joins and invitations; structured 409 codes on membership requests; communities leave/edit/delete/attach; `updated_by` on group events. |
-| Spaces | Runs with riders in one call (removes the per-run reads in admin, ops map and transport); the shift readable by plain members. |
-| SOS | Count actual push deliveries if "alerted" should mean "reached". |
-| Network test | An app-owned speed endpoint instead of Cloudflare. |
-| Games | A draw-offer field in the chess protocol (the games server is not ours). |
-| Family location | A design for sealing the location-store upload, or an opt-out of server retention. |
-| Admin site | Copy `admin/shopbook.html` next to `index.html` (`admin/LOGS_DEPLOY.md`); `frame-ancestors` header and self-hosted fonts. |
+| Verified links | Host `assetlinks.json` and `apple-app-site-association` on `vaultchat.app`. Templates are in `deploy/well-known/`; the Play app-signing SHA-256 and the Apple Team ID are not in the repo, and `vaultchat.app` is not hosted by anything here. |
+| App Store URL | `expo.ios.appStoreUrl` in `app.json` needs the App Store listing (UpdateGate's iOS fallback). |
+| Games | A draw-offer state field in the chess snapshot. The games server is an external binary (`docs/GAMES_PROTOCOL.md`). |
+| Call protocol | An acknowledged decline: ccwire's relayed legacy events (`webrtc_end`) have no semantic acknowledgement (`internal/realtime/ccwire_app_events.go`). Needs a protocol extension on server and client. |
+| Backup mode | So Restore can say up front that a backup is E2EE: a `user_backups` mode column, the upload sending it, and the meta returning it in JSON and in the `ccwire.v1.BackupMeta` proto (protoc/buf are not installed here). |
+| Contact verification | Syncing the verified fingerprint across devices: a new column and a change to the negotiated `ContactVerifications` proto. |
+| Smaller backend items | Ops-only message audience for space detections; a token-bound `/invitations/preview`; a peer phone on chat summaries (phone search in New chat); a keyed contact lookup; Expo receipt polling (SOS "seen"); a native `isSecure` read; encrypted broadcast channels. |
+| Family location | No job deletes `space_locations`, so history is kept indefinitely (migration 103 promised a sweep). Options are in `docs/FAMILY_LOCATION_SEALING.md`; this needs a decision (§5). |
 
 ## 5. Decisions for you
 
-- **Legacy call code (~1,170 lines).** It never runs while `CALL_ENGINE_V2` is on. `constants/flags.ts` keeps it as the rollback until the hardware test pass in `CALLS_README.md` has been done, so it was not deleted.
-- **Video-call "Tint" (was "Beauty").** It is a local preview tint, now named honestly. `lib/call/callControls.selftest.ts` still claims the button is gone, as requested. Remove the button, or update the test to say it was renamed.
-- **Calendar reminders under the "hidden" notification preview.** They fire with generic text instead of being dropped. Hiding previews now rewrites booked titles at once; showing them again waits for the next sync.
-- **Sealed caches.** The ghost-mode list and the session IPs go only to the encrypted cache. While `VAULT_CACHE_ENCRYPTED` is off, those two screens have nothing to show offline. The new contact-match cache follows the same rule.
-- **Deleted screens that worked.** `voice-speed`, `voice-transcribe` and `slideshow` worked but had no entry point. They were deleted per the plan; restore them from git and wire them in if you want them.
-- **Two group-creation flows.** "New group" uses invites with consent. The Family-Space `group-create` flow is unchanged; both headers now document the split.
-- **Mini-app to-dos (`vc_miniapp_todos`).** They stay on the device and are not in the sign-out purge. They are sealed with the cache key that sign-out drops. Add the key to the purge if you want it removed.
-- **Family live map.** Connectors now show road distance and time from one coarse routing call, instead of drawing every member's road route by default. This overrides the earlier "always-on road routes" choice, for privacy. One member's route is still a tap away.
-- **Family invite codes.** Each shared code works once and expires after 24 h, so inviting three people means sharing three times.
-- **Doc Scanner and camera scan.** Two scan-to-PDF paths remain (the camera review sheet and Doc Scanner). Merge them, or keep both.
-- **Perf debug.** It is still reachable by long-press on the profile version line. It shows only the owner's device telemetry. Gate it behind a diagnostics flag if you prefer.
-- **Resume relock for Device-PIN users.** It now applies to everyone with a Device PIN, including users who set one only for the Vault, using the default 5-minute Auto Screen Lock.
+**New in rounds 4–6**
+- **Dark-mode ink on solid fills.** `onPrimary` and `onDanger` are white in both themes. In dark mode, white on primary `#1777FE` is 4.11:1 and on danger `#EF4444` is 3.76:1, below AA (4.5:1) for normal text. A near-black ink passes (the R4F0 contrast script gives 4.83:1 and 5.27:1 for `#010628`). This affects every solid button, badge and danger action in dark mode. The token values were left unchanged for your decision; some small badges were moved to the darker `accentDeep` (6.33:1) meanwhile.
+- **An SMS code on every sign-in.** The app now sends a one-time code before any MPIN sign-in or recovery, so each sign-in costs one SMS. This is needed before the server enforcement (`AUTH_REQUIRE_PHONE_TICKET=1`) can be turned on. Keep it, or limit it (for example to new devices).
+- **Live location share ends when you leave the screen.** The copy and announcements now say so. Keeping it running needs a background service.
+- **Road matching for family history.** Recent tracks are sent to `/nav/trace` automatically (rounded to about 11 m, and disclosed on screen). Keep it automatic, or make it opt-in (a switch, or a per-viewer setting).
+- **Finance compounding defaults.** The calculator defaults to compounding at the rate's period; a new compound ledger defaults to yearly. Both now say which they use, but the same terms with the defaults give different interest (₹26,824.18 vs ₹24,000 in the re-rater's example). Pick one default.
+- **Finance report period.** Whether a report's period means activity in the period or loans created in it. Today it is creation-based, and the empty state says so.
+- **One approval queue.** The server now merges invite-link requests into the pending list for reading. Moving link joins into invitations (one write path) changes the admission rule and strands older admin clients.
+- **Space duty state.** Where duty state is edited (space admin) is undecided.
+- **Group notes and tasks.** Any member may delete any note or task (with a confirm). Keep, or limit to the author and admins.
+- **`app/interest-calculator.tsx`.** It is kept for old links; delete it when they no longer matter.
+- **`app/i/[token].tsx`.** Retire the route, or add something that produces these links again.
+- **Chat multi-select and full-name @mentions.** Not built.
+- **VaultBeam auto-download.** It is off in this build (`VB_AUTODOWNLOAD = false`); the settings screen says so. Turn it on, or keep it off.
+- **Shop Book Pro support contact.** None exists in the product, so none is shown.
+- **Recovery answers.** Answers need only 2 characters, on the server and the phone. Raise both together, or rely on the OTP once enforced.
+- **Reader text for messages not stored locally.** Showing it needs an in-memory hand-off from the bubble; plaintext no longer travels in route params.
+- **Media at rest.** Imported chat media is unsealed, like received media. Sealing it is part of an app-wide decision.
+- **Family location retention.** No job deletes stored family positions; choose a retention sweep, a per-member opt-out or sealed uploads (`docs/FAMILY_LOCATION_SEALING.md`).
+
+**Still open from earlier rounds** (checked against the round 4–6 logs; none has been decided)
+- **Legacy call code (~1,170 lines).** It never runs while `CALL_ENGINE_V2` is on. `constants/flags.ts` keeps it as the rollback until the hardware test pass in `CALLS_README.md` has been done.
+- **Video-call "Tint" (was "Beauty").** A local preview tint, named honestly. `lib/call/callControls.selftest.ts` still claims the button is gone. Remove the button, or update the test.
+- **Calendar reminders under the "hidden" notification preview.** They fire with generic text instead of being dropped.
+- **Sealed caches.** The ghost-mode list, the session IPs and the contact-match cache go only to the encrypted cache, so they have nothing to show offline while `VAULT_CACHE_ENCRYPTED` is off.
+- **Deleted screens that worked.** `voice-speed`, `voice-transcribe` and `slideshow` had no entry point and were deleted; restore them from git if you want them.
+- **Two group-creation flows.** "New group" (invites with consent) and the Family-Space `group-create` flow.
+- **Mini-app to-dos (`vc_miniapp_todos`).** Not in the sign-out purge (sealed with the cache key that sign-out drops).
+- **Family live map.** Connectors show road distance and time from one coarse routing call, instead of every member's road route.
+- **Family invite codes.** Each code works once and expires after 24 h.
+- **Doc Scanner and camera scan.** Two scan-to-PDF paths remain. Merge them, or keep both.
+- **Perf debug.** Reachable by long-press on the profile version line; gate it behind a diagnostics flag if you prefer.
+- **Resume relock for Device-PIN users.** It applies to everyone with a Device PIN, using the default 5-minute Auto Screen Lock.
 - **Finance lock.** Finance has no lock of its own on top of the app lock, and its data is plain SQLite on the device.
+
+The Doc Scanner's 20-entry list cap, which the round-5 log flagged as a decision, is gone: the list has no cap (`lib/media/scanRecent.ts`), so it is no longer listed.
 
 ## 6. Still open (known, not done)
 
-- The open round-3 regressions in §3.
-- **Large files and casts:** `app/_layout.tsx` (9 `as any`), `app/live-view.tsx`, `app/file-viewer.tsx`, `app/family.tsx`, `app/encrypted-notes.tsx`, `app/import-chats.tsx`, `components/chat/MessageBubble.tsx` and the games boards are not split. Route casts remain where `typedRoutes` needs generated types.
-- **Palette tokens:** add `onPrimary`, `onDanger` and `warning`, so the named white and amber constants across chat, notifications, comfort, spaces and storage screens can move onto tokens.
-- **Accessibility:** the uiDebtRatchet holds the line, but 37 touchables still have no role and the Chess, Ludo and Rummy boards have had no full screen-reader pass.
-- **Chat:** GIF and Forward still post directly instead of through the outbox (`lib/messageQueue.ts` has no typed enqueue).
-- **Chat tools:** `useDatePicker` still lives in `components/finance`; protected bookmark snapshots are hidden but not purged (`lib/chatService` has no snapshot delete); backup-e2ee cannot change its password or switch to a key while on, because `enableE2EEBackup` still deletes the secret when an upload fails.
-- **Media:** image-editor output is cropped but still screen-resolution; story viewer does not respect Reduce Motion; PdfView has no zoom gesture.
-- Every remaining per-screen gap is listed under "Still needed for 10/10" in Appendix C.
+- The decisions in §5, the deploys in §4, and the items in §3 "Still open".
+- **Device checks (📱):** screen-reader behaviour (bubble actions, games boards, live regions on iOS), pickers inside modals on iOS, full-resolution image export, background behaviour (relock, hidden chats, live share), and visuals at large font sizes.
+- **Large files:** `app/chat.tsx` (2,576 lines; four selftests read the socket effect from it), `app/family-map.tsx` (1,065; the slot model reads about 20 pieces of screen state), `components/games/Rummy.tsx` (988), the boot effect in `app/_layout.tsx` (pinned by selftests), and `app/camera.tsx`, `app/video-player.tsx`, `app/story-viewer.tsx` and `app/image-editor.tsx` (no split requested).
+- **Security design:** the Doc Scanner key is bound to the device, not to the PIN (`lib/scanVault.ts` `ponytail:`).
+- **Performance:** group notes and tasks decrypt up to about 2,200 messages per visit (needs a server op index); Doc View renders wide sheets without virtualisation; the vault's JS cipher speed on large videos is unmeasured (📱).
+- **UI debt:** the ratchet still counts 5 touchables with no role and 281 hex literals; 31 `as any` remain in `app/` and `components/`, 23 of them in the three call screens.
+- Every remaining per-screen gap is listed under "Still needed for 10/10" in Appendix E.
 
 ## 7. Updated scorecard — all 193 screens
 
-**Before** is the baseline review. **Round 1** is the first re-rating. **Before round 3** is the score going into round 3 (round 2 where a screen was re-rated again, otherwise round 1, otherwise unchanged). **Round 3** is this round's independent score. **Now** is the latest score: round 3 for every remaining screen. **Δ** is Now − Before. "Fixed after re-rating" names the later commits that changed the screen; those changes are not reflected in the score.
+**Before** is the baseline review. **Round 3**, **Round 4** and **Round 5** are the independent re-ratings of those rounds; every remaining screen was re-rated in each. **Round 5 (Now)** is the latest score. **Δ** is Now − Before. "Fixed after re-rating" names the commits after `2a05e46` (the code the round-5 re-raters scored) that changed the screen file or its own component folder; those changes are not reflected in the score. The round 1 and round 2 scores are in Appendices A and B.
 
-| Area | Screen | Before | Round 1 | Before round 3 | Round 3 | Now | Δ | Status |
-|---|---|---|---|---|---|---|---|---|
-| Launch, auth & lock | `app/(tabs)/_layout.tsx` | 7.5 | 7.5 | 7.5 | 8 | **8** | +0.5 | re-rated |
-| Launch, auth & lock | `app/_layout.tsx` | 6.5 | 7 | 7 | 7.5 | **7.5** | +1 | re-rated |
-| Launch, auth & lock | `app/app-lock.tsx` | 6 | 7 | 7.5 | 7.5 | **7.5** | +1.5 | re-rated |
-| Launch, auth & lock | `app/backup-pin.tsx` | 4.5 | 7 | 7 | 8 | **8** | +3.5 | re-rated |
-| Launch, auth & lock | `app/biometric-setup.tsx` | 3.5 | — | — | — | **—** |  | deleted |
-| Launch, auth & lock | `app/blocked.tsx` | 6.5 | 7 | 7.5 | 8 | **8** | +1.5 | re-rated |
-| Launch, auth & lock | `app/delete-account.tsx` | 7.5 | 8 | 8 | 8 | **8** | +0.5 | re-rated; fixed after re-rating, not re-scored (`815c7a5`) |
-| Launch, auth & lock | `app/email-verify.tsx` | 7.5 | — | 7.5 | 8 | **8** | +0.5 | re-rated |
-| Launch, auth & lock | `app/index.tsx` | 7 | 7.5 | 7.5 | 8 | **8** | +1 | re-rated |
-| Launch, auth & lock | `app/lock.tsx` | 2.5 | — | — | — | **—** |  | deleted |
-| Launch, auth & lock | `app/mpin-entry.tsx` | 7.5 | 8 | 8 | 8 | **8** | +0.5 | re-rated |
-| Launch, auth & lock | `app/mpin-recover.tsx` | 7 | 7 | 7 | 7.5 | **7.5** | +0.5 | re-rated |
-| Launch, auth & lock | `app/onboard-mpin.tsx` | 8 | — | 8 | 8.5 | **8.5** | +0.5 | re-rated |
-| Launch, auth & lock | `app/onboard-profile.tsx` | 6.5 | — | 6.5 | 8 | **8** | +1.5 | re-rated |
-| Launch, auth & lock | `app/onboard-security.tsx` | 7.5 | — | 7.5 | 8 | **8** | +0.5 | re-rated |
-| Launch, auth & lock | `app/onboard-success.tsx` | 7.5 | — | 7.5 | 8 | **8** | +0.5 | re-rated |
-| Launch, auth & lock | `app/onboard.tsx` | 7.5 | — | 7.5 | 7.5 | **7.5** | 0 | re-rated |
-| Launch, auth & lock | `app/permissions.tsx` | 6.5 | 6.5 | 6.5 | 8 | **8** | +1.5 | re-rated |
-| Launch, auth & lock | `app/restore-backup.tsx` | 6.5 | 7 | 7 | 8 | **8** | +1.5 | re-rated |
-| Launch, auth & lock | `app/security-questions.tsx` | 3.5 | — | — | — | **—** |  | deleted |
-| Launch, auth & lock | `app/setup-complete.tsx` | 4.5 | — | — | — | **—** |  | deleted |
-| Tabs, contacts & links | `app/(tabs)/alerts.tsx` | 6.5 | 7.5 | 7.5 | 8.5 | **8.5** | +2 | re-rated |
-| Tabs, contacts & links | `app/(tabs)/calls.tsx` | 6.5 | 7.5 | 7.5 | 8.5 | **8.5** | +2 | re-rated |
-| Tabs, contacts & links | `app/(tabs)/chats.tsx` | 7 | 7.5 | 7.5 | 8 | **8** | +1 | re-rated |
-| Tabs, contacts & links | `app/(tabs)/mini.tsx` | 8 | — | 8 | 8.5 | **8.5** | +0.5 | re-rated |
-| Tabs, contacts & links | `app/(tabs)/profile.tsx` | 6.5 | 7 | 7 | 8 | **8** | +1.5 | re-rated |
-| Tabs, contacts & links | `app/(tabs)/status.tsx` | 6.5 | 6.5 | 6.5 | 8 | **8** | +1.5 | re-rated; fixed after re-rating, not re-scored (`5d7c50b`) |
-| Tabs, contacts & links | `app/add/[...segments].tsx` | 6.5 | 8 | 8 | 8.5 | **8.5** | +2 | re-rated |
-| Tabs, contacts & links | `app/contact-info.tsx` | 6.5 | 7 | 7 | 8 | **8** | +1.5 | re-rated |
-| Tabs, contacts & links | `app/contact.tsx` | 3 | — | — | — | **—** |  | deleted |
-| Tabs, contacts & links | `app/contacts.tsx` | 6.5 | 7 | 7 | 8 | **8** | +1.5 | re-rated |
-| Tabs, contacts & links | `app/i/[token].tsx` | 6 | 6.5 | 7 | 7.5 | **7.5** | +1.5 | re-rated |
-| Tabs, contacts & links | `app/invite-link.tsx` | 7 | 7.5 | 7.5 | 8 | **8** | +1 | re-rated |
-| Tabs, contacts & links | `app/join/[code].tsx` | 7 | 8 | 8 | 8.5 | **8.5** | +1.5 | re-rated |
-| Tabs, contacts & links | `app/msgrequests.tsx` | 4 | — | — | — | **—** |  | deleted |
-| Tabs, contacts & links | `app/new-chat.tsx` | 6.5 | 7.5 | 7.5 | 8 | **8** | +1.5 | re-rated |
-| Tabs, contacts & links | `app/qr-contact.tsx` | 6.5 | 7 | 7 | 8 | **8** | +1.5 | re-rated |
-| Tabs, contacts & links | `app/search.tsx` | 7.5 | 8 | 8 | 8.5 | **8.5** | +1 | re-rated |
-| Tabs, contacts & links | `app/sync-contact.tsx` | 5.5 | — | — | — | **—** |  | deleted |
-| Tabs, contacts & links | `app/verify-contact.tsx` | 7.5 | 8 | 8 | 8.5 | **8.5** | +1 | re-rated |
-| Chat conversation | `app/chat.tsx` | 6 | 7.5 | 7.5 | 8 | **8** | +2 | re-rated; fixed after re-rating, not re-scored (`7c2bd24`) |
-| Chat tools & backup | `app/app-lock-chats.tsx` | 3.5 | 7.5 | 7.5 | 8 | **8** | +4.5 | re-rated |
-| Chat tools & backup | `app/backup-e2ee.tsx` | 6 | 7.5 | 7.5 | 8 | **8** | +2 | re-rated; fixed after re-rating, not re-scored (`815c7a5`) |
-| Chat tools & backup | `app/bookmarks.tsx` | 5.5 | 7.5 | 7.5 | 8 | **8** | +2.5 | re-rated |
-| Chat tools & backup | `app/broadcast.tsx` | 5.5 | 7 | 7 | 7.5 | **7.5** | +2 | re-rated |
-| Chat tools & backup | `app/chat-backup.tsx` | 6 | 7 | 7 | 7.5 | **7.5** | +1.5 | re-rated |
-| Chat tools & backup | `app/chat-code.tsx` | 7 | 8 | 8 | 8 | **8** | +1 | re-rated |
-| Chat tools & backup | `app/chat-export.tsx` | 5.5 | 6 | 7 | 7.5 | **7.5** | +2 | re-rated |
-| Chat tools & backup | `app/chat-themes.tsx` | 6 | 7.5 | 7.5 | 8 | **8** | +2 | re-rated |
-| Chat tools & backup | `app/chat-wallpaper.tsx` | 5.5 | 7 | 7 | 7.5 | **7.5** | +2 | re-rated; fixed after re-rating, not re-scored (`815c7a5`) |
-| Chat tools & backup | `app/create-poll.tsx` | 7 | 8 | 8 | 8 | **8** | +1 | re-rated |
-| Chat tools & backup | `app/hidden-chats.tsx` | 5.5 | — | 5.5 | 7.5 | **7.5** | +2 | re-rated |
-| Chat tools & backup | `app/import-chats.tsx` | 6.5 | 7.5 | 7.5 | 7.5 | **7.5** | +1 | re-rated |
-| Chat tools & backup | `app/in-chat-search.tsx` | 7 | 8 | 8 | 8 | **8** | +1 | re-rated; fixed after re-rating, not re-scored (`815c7a5`) |
-| Chat tools & backup | `app/message-reminder.tsx` | 5.5 | 7 | 7.5 | 8 | **8** | +2.5 | re-rated; fixed after re-rating, not re-scored (`815c7a5`) |
-| Chat tools & backup | `app/receipt-control.tsx` | 6.5 | 7 | 7 | 7.5 | **7.5** | +1 | re-rated |
-| Chat tools & backup | `app/schedule-message.tsx` | 6.5 | 8 | 8 | 8 | **8** | +1.5 | re-rated |
-| Chat tools & backup | `app/scheduled.tsx` | 6 | 7 | 7 | 7.5 | **7.5** | +1.5 | re-rated; fixed after re-rating, not re-scored (`815c7a5`) |
-| Chat tools & backup | `app/stickers.tsx` | 4.5 | — | — | — | **—** |  | deleted |
-| Groups & communities | `app/communities.tsx` | 5.5 | 6.5 | 6.5 | 7 | **7** | +1.5 | re-rated |
-| Groups & communities | `app/create-group.tsx` | 6 | 7 | 7 | 8 | **8** | +2 | re-rated |
-| Groups & communities | `app/creator-channels.tsx` | 3.5 | 4.5 | 4.5 | 10 | **10** | +6.5 | re-rated |
-| Groups & communities | `app/group-admin.tsx` | 5.5 | 6 | 6 | 7.5 | **7.5** | +2 | re-rated |
-| Groups & communities | `app/group-calendar.tsx` | 6 | 7 | 7 | 8 | **8** | +2 | re-rated |
-| Groups & communities | `app/group-calls.tsx` | 5.5 | 7 | 7 | 8 | **8** | +2.5 | re-rated |
-| Groups & communities | `app/group-chat.tsx` | 4 | — | 4 | 9.5 | **9.5** | +5.5 | re-rated |
-| Groups & communities | `app/group-create.tsx` | 7 | — | 7 | 8 | **8** | +1 | re-rated |
-| Groups & communities | `app/group-info.tsx` | 6 | 7 | 7 | 7.5 | **7.5** | +1.5 | re-rated |
-| Groups & communities | `app/group-insights.tsx` | 6.5 | 6.5 | 6.5 | 7.5 | **7.5** | +1 | re-rated |
-| Groups & communities | `app/group-invitations.tsx` | 7 | — | 7 | 8 | **8** | +1 | re-rated |
-| Groups & communities | `app/group-invites.tsx` | 7 | 7 | 7 | 8 | **8** | +1 | re-rated |
-| Groups & communities | `app/group-join.tsx` | 7 | — | 7 | 8 | **8** | +1 | re-rated |
-| Groups & communities | `app/group-members.tsx` | 7 | 7.5 | 7.5 | 8 | **8** | +1 | re-rated |
-| Groups & communities | `app/group-notes.tsx` | 6 | 7 | 7 | 7.5 | **7.5** | +1.5 | re-rated |
-| Groups & communities | `app/group-privacy.tsx` | 6.5 | 7.5 | 7.5 | 8 | **8** | +1.5 | re-rated |
-| Groups & communities | `app/group-tasks.tsx` | 6.5 | 7.5 | 7.5 | 8 | **8** | +1.5 | re-rated |
-| Groups & communities | `app/group-trip.tsx` | 6.5 | 7.5 | 7.5 | 8 | **8** | +1.5 | re-rated |
-| Calls, live & voice | `app/call-recording.tsx` | 3.5 | — | — | — | **—** |  | deleted |
-| Calls, live & voice | `app/call-reliability.tsx` | 6.5 | — | 6.5 | 7.5 | **7.5** | +1 | re-rated; fixed after re-rating, not re-scored (`9a3460e`) |
-| Calls, live & voice | `app/group-call-active.tsx` | 6.5 | 7 | 7 | 7.5 | **7.5** | +1 | re-rated; fixed after re-rating, not re-scored (`9a3460e`) |
-| Calls, live & voice | `app/incoming-call.tsx` | 6.5 | 7.5 | 7.5 | 8 | **8** | +1.5 | re-rated |
-| Calls, live & voice | `app/live-view.tsx` | 6.5 | 6.5 | 7 | 7.5 | **7.5** | +1 | re-rated |
-| Calls, live & voice | `app/live.tsx` | 7 | — | 7 | 8 | **8** | +1 | re-rated |
-| Calls, live & voice | `app/live/join/[code].tsx` | 7 | — | 7 | 8 | **8** | +1 | re-rated; fixed after re-rating, not re-scored (`9a3460e`) |
-| Calls, live & voice | `app/network-test.tsx` | 5 | 7 | 7 | 7.5 | **7.5** | +2.5 | re-rated |
-| Calls, live & voice | `app/videocall.tsx` | 6.5 | 6.5 | 6.5 | 7 | **7** | +0.5 | re-rated; fixed after re-rating, not re-scored (`9a3460e`) |
-| Calls, live & voice | `app/voice-effects.tsx` | 4 | — | — | — | **—** |  | deleted |
-| Calls, live & voice | `app/voice-speed.tsx` | 4.5 | — | — | — | **—** |  | deleted |
-| Calls, live & voice | `app/voice-transcribe.tsx` | 6 | — | — | — | **—** |  | deleted |
-| Calls, live & voice | `app/voicecall.tsx` | 6.5 | 7 | 7 | 7.5 | **7.5** | +1 | re-rated; fixed after re-rating, not re-scored (`9a3460e`) |
-| Media & files | `app/archive-viewer.tsx` | 6.5 | 7.5 | 7.5 | 8 | **8** | +1.5 | re-rated |
-| Media & files | `app/camera.tsx` | 7.5 | 7.5 | 7.5 | 8 | **8** | +0.5 | re-rated |
-| Media & files | `app/docscanner.tsx` | 5.5 | 6 | 6 | 7 | **7** | +1.5 | re-rated; fixed after re-rating, not re-scored (`815c7a5`) |
-| Media & files | `app/file-preview.tsx` | 5 | 7 | 7.5 | 8 | **8** | +3 | re-rated |
-| Media & files | `app/file-viewer.tsx` | 6.5 | 6.5 | 6.5 | 7.5 | **7.5** | +1 | re-rated |
-| Media & files | `app/image-editor.tsx` | 4 | 5.5 | 5.5 | 7 | **7** | +3 | re-rated; fixed after re-rating, not re-scored (`815c7a5`) |
-| Media & files | `app/media-gallery.tsx` | 6 | 6 | 6 | 7.5 | **7.5** | +1.5 | re-rated |
-| Media & files | `app/media-viewer.tsx` | 4.5 | 6 | 6 | 7 | **7** | +2.5 | re-rated; fixed after re-rating, not re-scored (`815c7a5`) |
-| Media & files | `app/reader.tsx` | 7.5 | 8 | 8 | 8 | **8** | +0.5 | re-rated |
-| Media & files | `app/scanner.tsx` | 2 | — | — | — | **—** |  | deleted |
-| Media & files | `app/shelf.tsx` | 6.5 | 8 | 8 | 8 | **8** | +1.5 | re-rated |
-| Media & files | `app/slideshow.tsx` | 4.5 | — | — | — | **—** |  | deleted |
-| Media & files | `app/story-viewer.tsx` | 6.5 | 7.5 | 7.5 | 7.5 | **7.5** | +1 | re-rated; fixed after re-rating, not re-scored (`815c7a5`) |
-| Media & files | `app/video-player.tsx` | 3.5 | 5.5 | 5.5 | 7 | **7** | +3.5 | re-rated; fixed after re-rating, not re-scored (`815c7a5`) |
-| Media & files | `app/whiteboard.tsx` | 4.5 | 5.5 | 5.5 | 7.5 | **7.5** | +3 | re-rated |
-| Family Circle | `app/family-add.tsx` | 7 | 7.5 | 7.5 | 8 | **8** | +1 | re-rated |
-| Family Circle | `app/family-alerts.tsx` | 7.5 | 8 | 8 | 8.5 | **8.5** | +1 | re-rated |
-| Family Circle | `app/family-history.tsx` | 6 | 7.5 | 7.5 | 8 | **8** | +2 | re-rated |
-| Family Circle | `app/family-items.tsx` | 6 | 6.5 | 6.5 | 7.5 | **7.5** | +1.5 | re-rated |
-| Family Circle | `app/family-map.tsx` | 5.5 | 7 | 7 | 7.5 | **7.5** | +2 | re-rated |
-| Family Circle | `app/family-member.tsx` | 6.5 | 7 | 7 | 7.5 | **7.5** | +1 | re-rated |
-| Family Circle | `app/family-places.tsx` | 6.5 | 7.5 | 7.5 | 8 | **8** | +1.5 | re-rated |
-| Family Circle | `app/family-setup.tsx` | 6 | 7.5 | 8 | 8 | **8** | +2 | re-rated; fixed after re-rating, not re-scored (`21ec13e`) |
-| Family Circle | `app/family.tsx` | 6 | 7 | 7 | 7.5 | **7.5** | +1.5 | re-rated; fixed after re-rating, not re-scored (`21ec13e`) |
-| Location & safety | `app/aiguardian.tsx` | 7 | 7.5 | 7.5 | 8 | **8** | +1 | re-rated |
-| Location & safety | `app/current-location.tsx` | 4.5 | — | — | — | **—** |  | deleted |
-| Location & safety | `app/emergency-sos.tsx` | 4.5 | 6.5 | 7 | 7.5 | **7.5** | +3 | re-rated |
-| Location & safety | `app/location-lock.tsx` | 5.5 | 6.5 | 7 | 7.5 | **7.5** | +2 | re-rated; fixed after re-rating, not re-scored (`21ec13e`) |
-| Location & safety | `app/location-sharing.tsx` | 4.5 | — | — | — | **—** |  | deleted |
-| Location & safety | `app/location.tsx` | 6 | 6.5 | 6.5 | 7.5 | **7.5** | +1.5 | re-rated |
-| Location & safety | `app/lock-alert.tsx` | 6 | 6.5 | 7 | 7.5 | **7.5** | +1.5 | re-rated |
-| Location & safety | `app/lock-history.tsx` | 6 | 6.5 | 7 | 7.5 | **7.5** | +1.5 | re-rated |
-| Location & safety | `app/lock-settings.tsx` | 6 | 6.5 | 6.5 | 7.5 | **7.5** | +1.5 | re-rated |
-| Location & safety | `app/navigate.tsx` | 6 | 7 | 7 | 7.5 | **7.5** | +1.5 | re-rated |
-| Location & safety | `app/trusted-contacts.tsx` | 6 | 7 | 7 | 7.5 | **7.5** | +1.5 | re-rated |
-| Spaces | `app/space-admin.tsx` | 6 | 7 | 7 | 7.5 | **7.5** | +1.5 | re-rated |
-| Spaces | `app/space-attendance.tsx` | 5 | 5 | 5 | 7 | **7** | +2 | re-rated |
-| Spaces | `app/space-checkin.tsx` | 5.5 | 6.5 | 6.5 | 7.5 | **7.5** | +2 | re-rated |
-| Spaces | `app/space-devices.tsx` | 4.5 | 6 | 6.5 | 7 | **7** | +2.5 | re-rated |
-| Spaces | `app/space-incidents.tsx` | 5.5 | 7 | 7 | 7.5 | **7.5** | +2 | re-rated |
-| Spaces | `app/space-leave.tsx` | 6 | 6 | 6 | 7.5 | **7.5** | +1.5 | re-rated |
-| Spaces | `app/space-ops-map.tsx` | 5.5 | 6.5 | 6.5 | 7 | **7** | +1.5 | re-rated |
-| Spaces | `app/space-overview.tsx` | 6 | 6.5 | 6.5 | 7.5 | **7.5** | +1.5 | re-rated |
-| Spaces | `app/space-pending.tsx` | 5.5 | 7 | 7 | 7.5 | **7.5** | +2 | re-rated |
-| Spaces | `app/space-people.tsx` | 6 | 7 | 7 | 7.5 | **7.5** | +1.5 | re-rated |
-| Spaces | `app/space-roster.tsx` | 6 | 7 | 7 | 7.5 | **7.5** | +1.5 | re-rated |
-| Spaces | `app/space-run-driver.tsx` | 5 | 6.5 | 6.5 | 7 | **7** | +2 | re-rated |
-| Spaces | `app/space-run.tsx` | 6 | 6.5 | 6.5 | 7.5 | **7.5** | +1.5 | re-rated |
-| Spaces | `app/space-runs-admin.tsx` | 4.5 | 6.5 | 7 | 7 | **7** | +2.5 | re-rated; fixed after re-rating, not re-scored (`298f739`) |
-| Spaces | `app/space-tasks.tsx` | 6 | 7 | 7 | 7.5 | **7.5** | +1.5 | re-rated |
-| Spaces | `app/space-transport.tsx` | 6.5 | 6.5 | 6.5 | 7 | **7** | +0.5 | re-rated; fixed after re-rating, not re-scored (`298f739`) |
-| Spaces | `app/space-visitors.tsx` | 5.5 | 6.5 | 6.5 | 7.5 | **7.5** | +2 | re-rated |
-| Finance | `app/finance/_layout.tsx` | 8 | — | 8 | 8.5 | **8.5** | +0.5 | re-rated |
-| Finance | `app/finance/calendar.tsx` | 6.5 | 7 | 7 | 8 | **8** | +1.5 | re-rated |
-| Finance | `app/finance/chitti/[id].tsx` | 5 | 6 | 6 | 7.5 | **7.5** | +2.5 | re-rated; fixed after re-rating, not re-scored (`298f739`, `a72296b`) |
-| Finance | `app/finance/chitti/index.tsx` | 7 | 7 | 7 | 8 | **8** | +1 | re-rated; fixed after re-rating, not re-scored (`a72296b`) |
-| Finance | `app/finance/chitti/new.tsx` | 7 | 7 | 7 | 8 | **8** | +1 | re-rated |
-| Finance | `app/finance/customer.tsx` | 6 | 6.5 | 6.5 | 8 | **8** | +2 | re-rated |
-| Finance | `app/finance/emi.tsx` | 7.5 | 8 | 8 | 8 | **8** | +0.5 | re-rated |
-| Finance | `app/finance/index.tsx` | 6.5 | 7.5 | 7.5 | 8 | **8** | +1.5 | re-rated |
-| Finance | `app/finance/interest.tsx` | 7 | 7 | 7 | 7.5 | **7.5** | +0.5 | re-rated |
-| Finance | `app/finance/io.tsx` | 6.5 | 7.5 | 7.5 | 8 | **8** | +1.5 | re-rated |
-| Finance | `app/finance/ledger/[id].tsx` | 6.5 | 7 | 7 | 8 | **8** | +1.5 | re-rated; fixed after re-rating, not re-scored (`a72296b`) |
-| Finance | `app/finance/ledger/edit.tsx` | 6 | 7 | 7 | 7.5 | **7.5** | +1.5 | re-rated |
-| Finance | `app/finance/ledger/index.tsx` | 7 | 7 | 7 | 7.5 | **7.5** | +0.5 | re-rated; fixed after re-rating, not re-scored (`a72296b`) |
-| Finance | `app/finance/ledger/new.tsx` | 6.5 | 7 | 7 | 8 | **8** | +1.5 | re-rated |
-| Finance | `app/finance/ledger/update.tsx` | 6.5 | 7.5 | 7.5 | 8 | **8** | +1.5 | re-rated |
-| Finance | `app/finance/reminders.tsx` | 6 | 7 | 7 | 7.5 | **7.5** | +1.5 | re-rated; fixed after re-rating, not re-scored (`298f739`) |
-| Finance | `app/finance/reports.tsx` | 6 | 6.5 | 6.5 | 7.5 | **7.5** | +1.5 | re-rated |
-| Finance | `app/finance/saved.tsx` | 6.5 | 6.5 | 6.5 | 8 | **8** | +1.5 | re-rated |
-| Finance | `app/finance/search.tsx` | 6 | 6.5 | 6.5 | 8 | **8** | +2 | re-rated |
-| Finance | `app/interest-calculator.tsx` | 7 | — | 7 | 7.5 | **7.5** | +0.5 | re-rated |
-| Finance | `app/split.tsx` | 7 | — | 7 | 8 | **8** | +1 | re-rated |
-| Shop Book & admin | `admin/index.html` | 6.5 | 7 | 7 | 7.5 | **7.5** | +1 | re-rated |
-| Shop Book & admin | `admin/logs.html` | 6.5 | 7 | 7 | 8 | **8** | +1.5 | re-rated |
-| Shop Book & admin | `admin/shopbook.html` | 5.5 | 7 | 7 | 7.5 | **7.5** | +2 | re-rated |
-| Shop Book & admin | `app/shop-book.tsx` | 5.5 | 6.5 | 6.5 | 7.5 | **7.5** | +2 | re-rated; fixed after re-rating, not re-scored (`298f739`, `d7f4e51`) |
-| Settings, privacy & vault | `app/d2de-status.tsx` | 5 | 7 | 7 | 8 | **8** | +3 | re-rated |
-| Settings, privacy & vault | `app/encrypted-notes.tsx` | 5 | 6 | 6 | 7 | **7** | +2 | re-rated |
-| Settings, privacy & vault | `app/filevault.tsx` | 8 | — | 8 | 8.5 | **8.5** | +0.5 | re-rated; fixed after re-rating, not re-scored (`298f739`) |
-| Settings, privacy & vault | `app/ghost-mode.tsx` | 6 | 8 | 8 | 8.5 | **8.5** | +2.5 | re-rated |
-| Settings, privacy & vault | `app/last-seen-privacy.tsx` | 7 | 7.5 | 7.5 | 8.5 | **8.5** | +1.5 | re-rated |
-| Settings, privacy & vault | `app/login-history.tsx` | 7.5 | 8 | 8 | 8.5 | **8.5** | +1 | re-rated |
-| Settings, privacy & vault | `app/privacy-dashboard.tsx` | 4.5 | 8 | 8 | 8.5 | **8.5** | +4 | re-rated |
-| Settings, privacy & vault | `app/settings.tsx` | 6.5 | 8 | 8 | 8.5 | **8.5** | +2 | re-rated |
-| Settings, privacy & vault | `app/status-privacy.tsx` | 6.5 | 7 | 7.5 | 8.5 | **8.5** | +2 | re-rated |
-| Settings, privacy & vault | `app/vault-features.tsx` | 3.5 | 6 | 6 | 8 | **8** | +4.5 | re-rated; fixed after re-rating, not re-scored (`298f739`) |
-| Settings, privacy & vault | `app/vault.tsx` | 3.5 | 6 | 6.5 | 7.5 | **7.5** | +4 | re-rated; fixed after re-rating, not re-scored (`298f739`) |
-| Settings, privacy & vault | `app/vaultbeam-settings.tsx` | 5.5 | 6.5 | 6.5 | 7.5 | **7.5** | +2 | re-rated |
-| Settings, privacy & vault | `app/vaultcheck.tsx` | 7 | — | 7 | 8 | **8** | +1 | re-rated; fixed after re-rating, not re-scored (`298f739`) |
-| Settings, privacy & vault | `app/vaultdrop.tsx` | 2.5 | — | — | — | **—** |  | deleted |
-| Utilities & games | `app/cache-cleanup.tsx` | 7.5 | 8 | 8 | 8.5 | **8.5** | +1 | re-rated; fixed after re-rating, not re-scored (`9a3460e`) |
-| Utilities & games | `app/dashboard.tsx` | 6.5 | 7 | 7 | 7.5 | **7.5** | +1 | re-rated; fixed after re-rating, not re-scored (`9a3460e`) |
-| Utilities & games | `app/email-bridge.tsx` | 2.5 | — | — | — | **—** |  | deleted |
-| Utilities & games | `app/eye-check.tsx` | 8 | — | 8 | 8.5 | **8.5** | +0.5 | re-rated |
-| Utilities & games | `app/games.tsx` | 7.5 | 7.5 | 7.5 | 8 | **8** | +0.5 | re-rated |
-| Utilities & games | `app/meeting-scheduler.tsx` | 4 | — | — | — | **—** |  | deleted |
-| Utilities & games | `app/notification-sounds.tsx` | 6.5 | 7.5 | 7.5 | 8 | **8** | +1.5 | re-rated |
-| Utilities & games | `app/notifications.tsx` | 6 | 7 | 7 | 7.5 | **7.5** | +1.5 | re-rated |
-| Utilities & games | `app/offline-mode.tsx` | 3 | 8 | 8 | 8.5 | **8.5** | +5.5 | re-rated |
-| Utilities & games | `app/perf-debug.tsx` | 8 | — | 8 | 8.5 | **8.5** | +0.5 | re-rated |
-| Utilities & games | `app/storage-manager.tsx` | 6 | 7 | 7 | 8 | **8** | +2 | re-rated |
-| Utilities & games | `app/vision-comfort.tsx` | 8 | — | 8 | 8.5 | **8.5** | +0.5 | re-rated |
+| Area | Screen | Before | Round 3 | Round 4 | Round 5 (Now) | Δ vs baseline | Status |
+|---|---|---|---|---|---|---|---|
+| Launch, auth & lock | `app/(tabs)/_layout.tsx` | 7.5 | 8 | 8 | **8** | +0.5 | re-rated |
+| Launch, auth & lock | `app/_layout.tsx` | 6.5 | 7.5 | 8 | **8** | +1.5 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`, `166d207`) |
+| Launch, auth & lock | `app/app-lock.tsx` | 6 | 7.5 | 8 | **8.5** | +2.5 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Launch, auth & lock | `app/backup-pin.tsx` | 4.5 | 8 | 8 | **8** | +3.5 | re-rated; fixed after re-rating, not re-scored (`076e098`) |
+| Launch, auth & lock | `app/biometric-setup.tsx` | 3.5 | — | — | **—** |  | deleted |
+| Launch, auth & lock | `app/blocked.tsx` | 6.5 | 8 | 8 | **8.5** | +2 | re-rated |
+| Launch, auth & lock | `app/delete-account.tsx` | 7.5 | 8 | 8.5 | **8.5** | +1 | re-rated |
+| Launch, auth & lock | `app/phone-verify.tsx` (was `app/email-verify.tsx`) | 7.5 | 8 | 8 | **8.5** | +1 | re-rated; renamed in round 4; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Launch, auth & lock | `app/index.tsx` | 7 | 8 | 8.5 | **8.5** | +1.5 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Launch, auth & lock | `app/lock.tsx` | 2.5 | — | — | **—** |  | deleted |
+| Launch, auth & lock | `app/mpin-entry.tsx` | 7.5 | 8 | 8 | **8.5** | +1 | re-rated |
+| Launch, auth & lock | `app/mpin-recover.tsx` | 7 | 7.5 | 8 | **8** | +1 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Launch, auth & lock | `app/onboard-mpin.tsx` | 8 | 8.5 | 8.5 | **8.5** | +0.5 | re-rated |
+| Launch, auth & lock | `app/onboard-profile.tsx` | 6.5 | 8 | 8 | **8** | +1.5 | re-rated |
+| Launch, auth & lock | `app/onboard-security.tsx` | 7.5 | 8 | 8 | **8** | +0.5 | re-rated |
+| Launch, auth & lock | `app/onboard-success.tsx` | 7.5 | 8 | 8.5 | **8.5** | +1 | re-rated |
+| Launch, auth & lock | `app/onboard.tsx` | 7.5 | 7.5 | 8 | **8** | +0.5 | re-rated |
+| Launch, auth & lock | `app/permissions.tsx` | 6.5 | 8 | 8 | **8.5** | +2 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Launch, auth & lock | `app/restore-backup.tsx` | 6.5 | 8 | 8 | **8.5** | +2 | re-rated; fixed after re-rating, not re-scored (`91f5fb8`) |
+| Launch, auth & lock | `app/security-questions.tsx` | 3.5 | — | — | **—** |  | deleted |
+| Launch, auth & lock | `app/setup-complete.tsx` | 4.5 | — | — | **—** |  | deleted |
+| Tabs, contacts & links | `app/(tabs)/alerts.tsx` | 6.5 | 8.5 | 9 | **9** | +2.5 | re-rated; fixed after re-rating, not re-scored (`45cf418`) |
+| Tabs, contacts & links | `app/(tabs)/calls.tsx` | 6.5 | 8.5 | 9 | **9** | +2.5 | re-rated; fixed after re-rating, not re-scored (`45cf418`) |
+| Tabs, contacts & links | `app/(tabs)/chats.tsx` | 7 | 8 | 8 | **8.5** | +1.5 | re-rated; fixed after re-rating, not re-scored (`45cf418`, `166d207`) |
+| Tabs, contacts & links | `app/(tabs)/mini.tsx` | 8 | 8.5 | 9 | **9** | +1 | re-rated; fixed after re-rating, not re-scored (`45cf418`) |
+| Tabs, contacts & links | `app/(tabs)/profile.tsx` | 6.5 | 8 | 8.5 | **8.5** | +2 | re-rated; fixed after re-rating, not re-scored (`45cf418`) |
+| Tabs, contacts & links | `app/(tabs)/status.tsx` | 6.5 | 8 | 8.5 | **8.5** | +2 | re-rated; fixed after re-rating, not re-scored (`45cf418`) |
+| Tabs, contacts & links | `app/add/[...segments].tsx` | 6.5 | 8.5 | 8.5 | **8.5** | +2 | re-rated; fixed after re-rating, not re-scored (`45cf418`) |
+| Tabs, contacts & links | `app/contact-info.tsx` | 6.5 | 8 | 8.5 | **9** | +2.5 | re-rated; fixed after re-rating, not re-scored (`45cf418`) |
+| Tabs, contacts & links | `app/contact.tsx` | 3 | — | — | **—** |  | deleted |
+| Tabs, contacts & links | `app/contacts.tsx` | 6.5 | 8 | 8.5 | **8.5** | +2 | re-rated; fixed after re-rating, not re-scored (`45cf418`) |
+| Tabs, contacts & links | `app/i/[token].tsx` | 6 | 7.5 | 7.5 | **8** | +2 | re-rated; fixed after re-rating, not re-scored (`45cf418`) |
+| Tabs, contacts & links | `app/invite-link.tsx` | 7 | 8 | 8.5 | **8.5** | +1.5 | re-rated; fixed after re-rating, not re-scored (`45cf418`) |
+| Tabs, contacts & links | `app/join/[code].tsx` | 7 | 8.5 | 8.5 | **8.5** | +1.5 | re-rated; fixed after re-rating, not re-scored (`45cf418`) |
+| Tabs, contacts & links | `app/msgrequests.tsx` | 4 | — | — | **—** |  | deleted |
+| Tabs, contacts & links | `app/new-chat.tsx` | 6.5 | 8 | 8.5 | **8.5** | +2 | re-rated; fixed after re-rating, not re-scored (`45cf418`) |
+| Tabs, contacts & links | `app/qr-contact.tsx` | 6.5 | 8 | 8 | **8.5** | +2 | re-rated; fixed after re-rating, not re-scored (`45cf418`) |
+| Tabs, contacts & links | `app/search.tsx` | 7.5 | 8.5 | 8.5 | **8.5** | +1 | re-rated; fixed after re-rating, not re-scored (`45cf418`) |
+| Tabs, contacts & links | `app/sync-contact.tsx` | 5.5 | — | — | **—** |  | deleted |
+| Tabs, contacts & links | `app/verify-contact.tsx` | 7.5 | 8.5 | 8.5 | **9** | +1.5 | re-rated; fixed after re-rating, not re-scored (`45cf418`) |
+| Chat conversation | `app/chat.tsx` | 6 | 8 | 8.5 | **9** | +3 | re-rated; fixed after re-rating, not re-scored (`45cf418`) |
+| Chat tools & backup | `app/app-lock-chats.tsx` | 3.5 | 8 | 8 | **8.5** | +5 | re-rated; fixed after re-rating, not re-scored (`91f5fb8`) |
+| Chat tools & backup | `app/backup-e2ee.tsx` | 6 | 8 | 8 | **8.5** | +2.5 | re-rated; fixed after re-rating, not re-scored (`91f5fb8`) |
+| Chat tools & backup | `app/bookmarks.tsx` | 5.5 | 8 | 8.5 | **8.5** | +3 | re-rated; fixed after re-rating, not re-scored (`166d207`) |
+| Chat tools & backup | `app/broadcast.tsx` | 5.5 | 7.5 | 8 | **8** | +2.5 | re-rated |
+| Chat tools & backup | `app/chat-backup.tsx` | 6 | 7.5 | 8 | **8** | +2 | re-rated; fixed after re-rating, not re-scored (`91f5fb8`) |
+| Chat tools & backup | `app/chat-code.tsx` | 7 | 8 | 8.5 | **8.5** | +1.5 | re-rated; fixed after re-rating, not re-scored (`91f5fb8`) |
+| Chat tools & backup | `app/chat-export.tsx` | 5.5 | 7.5 | 8 | **8.5** | +3 | re-rated; fixed after re-rating, not re-scored (`91f5fb8`) |
+| Chat tools & backup | `app/chat-themes.tsx` | 6 | 8 | 8.5 | **8.5** | +2.5 | re-rated; fixed after re-rating, not re-scored (`91f5fb8`, `166d207`) |
+| Chat tools & backup | `app/chat-wallpaper.tsx` | 5.5 | 7.5 | 8 | **8.5** | +3 | re-rated; fixed after re-rating, not re-scored (`91f5fb8`) |
+| Chat tools & backup | `app/create-poll.tsx` | 7 | 8 | 8.5 | **8.5** | +1.5 | re-rated |
+| Chat tools & backup | `app/hidden-chats.tsx` | 5.5 | 7.5 | 8 | **8** | +2.5 | re-rated; fixed after re-rating, not re-scored (`91f5fb8`) |
+| Chat tools & backup | `app/import-chats.tsx` | 6.5 | 7.5 | 8 | **8** | +1.5 | re-rated; fixed after re-rating, not re-scored (`91f5fb8`) |
+| Chat tools & backup | `app/in-chat-search.tsx` | 7 | 8 | 8.5 | **8.5** | +1.5 | re-rated; fixed after re-rating, not re-scored (`91f5fb8`) |
+| Chat tools & backup | `app/message-reminder.tsx` | 5.5 | 8 | 8.5 | **8.5** | +3 | re-rated; fixed after re-rating, not re-scored (`91f5fb8`, `166d207`) |
+| Chat tools & backup | `app/receipt-control.tsx` | 6.5 | 7.5 | 8 | **8** | +1.5 | re-rated; fixed after re-rating, not re-scored (`91f5fb8`) |
+| Chat tools & backup | `app/schedule-message.tsx` | 6.5 | 8 | 8.5 | **8.5** | +2 | re-rated |
+| Chat tools & backup | `app/scheduled.tsx` | 6 | 7.5 | 8 | **8.5** | +2.5 | re-rated; fixed after re-rating, not re-scored (`166d207`) |
+| Chat tools & backup | `app/stickers.tsx` | 4.5 | — | — | **—** |  | deleted |
+| Groups & communities | `app/communities.tsx` | 5.5 | 7 | 7.5 | **8** | +2.5 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Groups & communities | `app/create-group.tsx` | 6 | 8 | 8 | **8.5** | +2.5 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Groups & communities | `app/creator-channels.tsx` | 3.5 | 10 | 10 | **10** | +6.5 | redirect; re-rated |
+| Groups & communities | `app/group-admin.tsx` | 5.5 | 7.5 | 8 | **8.5** | +3 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Groups & communities | `app/group-calendar.tsx` | 6 | 8 | 8.5 | **8.5** | +2.5 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Groups & communities | `app/group-calls.tsx` | 5.5 | 8 | 8 | **8.5** | +3 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Groups & communities | `app/group-chat.tsx` | 4 | 9.5 | 10 | **10** | +6 | redirect; re-rated |
+| Groups & communities | `app/group-create.tsx` | 7 | 8 | 8.5 | **8.5** | +1.5 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Groups & communities | `app/group-info.tsx` | 6 | 7.5 | 8 | **8** | +2 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Groups & communities | `app/group-insights.tsx` | 6.5 | 7.5 | 8 | **8.5** | +2 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Groups & communities | `app/group-invitations.tsx` | 7 | 8 | 8.5 | **8.5** | +1.5 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Groups & communities | `app/group-invites.tsx` | 7 | 8 | 8.5 | **8.5** | +1.5 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Groups & communities | `app/group-join.tsx` | 7 | 8 | 8.5 | **8.5** | +1.5 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Groups & communities | `app/group-members.tsx` | 7 | 8 | 8 | **8.5** | +1.5 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Groups & communities | `app/group-notes.tsx` | 6 | 7.5 | 8 | **8** | +2 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Groups & communities | `app/group-privacy.tsx` | 6.5 | 8 | 8.5 | **8.5** | +2 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Groups & communities | `app/group-tasks.tsx` | 6.5 | 8 | 8 | **8.5** | +2 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Groups & communities | `app/group-trip.tsx` | 6.5 | 8 | 8 | **8.5** | +2 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Calls, live & voice | `app/call-recording.tsx` | 3.5 | — | — | **—** |  | deleted |
+| Calls, live & voice | `app/call-reliability.tsx` | 6.5 | 7.5 | 8 | **8** | +1.5 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Calls, live & voice | `app/group-call-active.tsx` | 6.5 | 7.5 | 7.5 | **8** | +1.5 | re-rated |
+| Calls, live & voice | `app/incoming-call.tsx` | 6.5 | 8 | 8 | **8** | +1.5 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Calls, live & voice | `app/live-view.tsx` | 6.5 | 7.5 | 8 | **8** | +1.5 | re-rated |
+| Calls, live & voice | `app/live.tsx` | 7 | 8 | 8.5 | **8.5** | +1.5 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Calls, live & voice | `app/live/join/[code].tsx` | 7 | 8 | 8.5 | **8.5** | +1.5 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Calls, live & voice | `app/network-test.tsx` | 5 | 7.5 | 8 | **8** | +3 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Calls, live & voice | `app/videocall.tsx` | 6.5 | 7 | 7.5 | **7.5** | +1 | re-rated; fixed after re-rating, not re-scored (`166d207`) |
+| Calls, live & voice | `app/voice-effects.tsx` | 4 | — | — | **—** |  | deleted |
+| Calls, live & voice | `app/voice-speed.tsx` | 4.5 | — | — | **—** |  | deleted |
+| Calls, live & voice | `app/voice-transcribe.tsx` | 6 | — | — | **—** |  | deleted |
+| Calls, live & voice | `app/voicecall.tsx` | 6.5 | 7.5 | 7.5 | **7.5** | +1 | re-rated |
+| Media & files | `app/archive-viewer.tsx` | 6.5 | 8 | 8.5 | **8.5** | +2 | re-rated |
+| Media & files | `app/camera.tsx` | 7.5 | 8 | 8 | **8.5** | +1 | re-rated; fixed after re-rating, not re-scored (`f077a96`) |
+| Media & files | `app/docscanner.tsx` | 5.5 | 7 | 7.5 | **8.5** | +3 | re-rated; fixed after re-rating, not re-scored (`f077a96`) |
+| Media & files | `app/file-preview.tsx` | 5 | 8 | 8 | **8.5** | +3.5 | re-rated; fixed after re-rating, not re-scored (`f077a96`) |
+| Media & files | `app/file-viewer.tsx` | 6.5 | 7.5 | 8 | **8.5** | +2 | re-rated; fixed after re-rating, not re-scored (`f077a96`) |
+| Media & files | `app/image-editor.tsx` | 4 | 7 | 7.5 | **8** | +4 | re-rated; fixed after re-rating, not re-scored (`f077a96`) |
+| Media & files | `app/media-gallery.tsx` | 6 | 7.5 | 8 | **8.5** | +2.5 | re-rated; fixed after re-rating, not re-scored (`f077a96`) |
+| Media & files | `app/media-viewer.tsx` | 4.5 | 7 | 8 | **8.5** | +4 | re-rated; fixed after re-rating, not re-scored (`f077a96`) |
+| Media & files | `app/reader.tsx` | 7.5 | 8 | 8.5 | **8.5** | +1 | re-rated; fixed after re-rating, not re-scored (`f077a96`) |
+| Media & files | `app/scanner.tsx` | 2 | — | — | **—** |  | deleted |
+| Media & files | `app/shelf.tsx` | 6.5 | 8 | 8.5 | **8.5** | +2 | re-rated; fixed after re-rating, not re-scored (`f077a96`, `166d207`) |
+| Media & files | `app/slideshow.tsx` | 4.5 | — | — | **—** |  | deleted |
+| Media & files | `app/story-viewer.tsx` | 6.5 | 7.5 | 8 | **8.5** | +2 | re-rated |
+| Media & files | `app/video-player.tsx` | 3.5 | 7 | 7.5 | **8** | +4.5 | re-rated; fixed after re-rating, not re-scored (`f077a96`) |
+| Media & files | `app/whiteboard.tsx` | 4.5 | 7.5 | 8 | **8** | +3.5 | re-rated |
+| Family Circle | `app/family-add.tsx` | 7 | 8 | 8.5 | **8.5** | +1.5 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Family Circle | `app/family-alerts.tsx` | 7.5 | 8.5 | 8.5 | **9** | +1.5 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Family Circle | `app/family-history.tsx` | 6 | 8 | 8 | **8.5** | +2.5 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Family Circle | `app/family-items.tsx` | 6 | 7.5 | 8 | **8.5** | +2.5 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Family Circle | `app/family-map.tsx` | 5.5 | 7.5 | 8 | **8** | +2.5 | re-rated |
+| Family Circle | `app/family-member.tsx` | 6.5 | 7.5 | 8 | **8.5** | +2 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Family Circle | `app/family-places.tsx` | 6.5 | 8 | 8.5 | **8.5** | +2 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Family Circle | `app/family-setup.tsx` | 6 | 8 | 8.5 | **8.5** | +2.5 | re-rated |
+| Family Circle | `app/family.tsx` | 6 | 7.5 | 8 | **8.5** | +2.5 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Location & safety | `app/aiguardian.tsx` | 7 | 8 | 8 | **8.5** | +1.5 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Location & safety | `app/current-location.tsx` | 4.5 | — | — | **—** |  | deleted |
+| Location & safety | `app/emergency-sos.tsx` | 4.5 | 7.5 | 8 | **8** | +3.5 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Location & safety | `app/location-lock.tsx` | 5.5 | 7.5 | 8 | **8** | +2.5 | re-rated; fixed after re-rating, not re-scored (`9124152`, `166d207`) |
+| Location & safety | `app/location-sharing.tsx` | 4.5 | — | — | **—** |  | deleted |
+| Location & safety | `app/location.tsx` | 6 | 7.5 | 8 | **8** | +2 | re-rated; fixed after re-rating, not re-scored (`9124152`, `166d207`) |
+| Location & safety | `app/lock-alert.tsx` | 6 | 7.5 | 8 | **8.5** | +2.5 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Location & safety | `app/lock-history.tsx` | 6 | 7.5 | 8 | **8** | +2 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Location & safety | `app/lock-settings.tsx` | 6 | 7.5 | 8 | **8.5** | +2.5 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Location & safety | `app/navigate.tsx` | 6 | 7.5 | 8 | **8.5** | +2.5 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Location & safety | `app/trusted-contacts.tsx` | 6 | 7.5 | 8 | **8.5** | +2.5 | re-rated; fixed after re-rating, not re-scored (`9124152`, `166d207`) |
+| Spaces | `app/space-admin.tsx` | 6 | 7.5 | 7.5 | **8** | +2 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Spaces | `app/space-attendance.tsx` | 5 | 7 | 7.5 | **8** | +3 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Spaces | `app/space-checkin.tsx` | 5.5 | 7.5 | 8 | **8** | +2.5 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Spaces | `app/space-devices.tsx` | 4.5 | 7 | 7.5 | **7.5** | +3 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Spaces | `app/space-incidents.tsx` | 5.5 | 7.5 | 8 | **8** | +2.5 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Spaces | `app/space-leave.tsx` | 6 | 7.5 | 7.5 | **8** | +2 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Spaces | `app/space-ops-map.tsx` | 5.5 | 7 | 7.5 | **8** | +2.5 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Spaces | `app/space-overview.tsx` | 6 | 7.5 | 7.5 | **8** | +2 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Spaces | `app/space-pending.tsx` | 5.5 | 7.5 | 8 | **8** | +2.5 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Spaces | `app/space-people.tsx` | 6 | 7.5 | 8 | **8** | +2 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Spaces | `app/space-roster.tsx` | 6 | 7.5 | 8 | **8** | +2 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Spaces | `app/space-run-driver.tsx` | 5 | 7 | 7 | **7.5** | +2.5 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Spaces | `app/space-run.tsx` | 6 | 7.5 | 7.5 | **8** | +2 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Spaces | `app/space-runs-admin.tsx` | 4.5 | 7 | 7.5 | **8** | +3.5 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Spaces | `app/space-tasks.tsx` | 6 | 7.5 | 7.5 | **8** | +2 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Spaces | `app/space-transport.tsx` | 6.5 | 7 | 7.5 | **8** | +1.5 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Spaces | `app/space-visitors.tsx` | 5.5 | 7.5 | 8 | **8** | +2.5 | re-rated; fixed after re-rating, not re-scored (`bd3b9a5`) |
+| Finance | `app/finance/_layout.tsx` | 8 | 8.5 | 8.5 | **9** | +1 | re-rated |
+| Finance | `app/finance/calendar.tsx` | 6.5 | 8 | 8.5 | **8.5** | +2 | re-rated |
+| Finance | `app/finance/chitti/[id].tsx` | 5 | 7.5 | 8 | **8.5** | +3.5 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Finance | `app/finance/chitti/index.tsx` | 7 | 8 | 8.5 | **8.5** | +1.5 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Finance | `app/finance/chitti/new.tsx` | 7 | 8 | 8 | **8.5** | +1.5 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Finance | `app/finance/customer.tsx` | 6 | 8 | 8.5 | **8.5** | +2.5 | re-rated |
+| Finance | `app/finance/emi.tsx` | 7.5 | 8 | 8.5 | **8.5** | +1 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Finance | `app/finance/index.tsx` | 6.5 | 8 | 8.5 | **8.5** | +2 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Finance | `app/finance/interest.tsx` | 7 | 7.5 | 8 | **8.5** | +1.5 | re-rated |
+| Finance | `app/finance/io.tsx` | 6.5 | 8 | 8.5 | **8.5** | +2 | re-rated |
+| Finance | `app/finance/ledger/[id].tsx` | 6.5 | 8 | 8 | **8.5** | +2 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Finance | `app/finance/ledger/edit.tsx` | 6 | 7.5 | 8 | **8.5** | +2.5 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Finance | `app/finance/ledger/index.tsx` | 7 | 7.5 | 8.5 | **8.5** | +1.5 | re-rated |
+| Finance | `app/finance/ledger/new.tsx` | 6.5 | 8 | 8 | **8.5** | +2 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Finance | `app/finance/ledger/update.tsx` | 6.5 | 8 | 8 | **8.5** | +2 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Finance | `app/finance/reminders.tsx` | 6 | 7.5 | 8 | **8** | +2 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Finance | `app/finance/reports.tsx` | 6 | 7.5 | 7.5 | **8** | +2 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Finance | `app/finance/saved.tsx` | 6.5 | 8 | 8 | **8** | +1.5 | re-rated; fixed after re-rating, not re-scored (`bf68b93`) |
+| Finance | `app/finance/search.tsx` | 6 | 8 | 8.5 | **8.5** | +2.5 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Finance | `app/interest-calculator.tsx` | 7 | 7.5 | 7.5 | **7.5** | +0.5 | re-rated |
+| Finance | `app/split.tsx` | 7 | 8 | 8 | **8.5** | +1.5 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Shop Book & admin | `admin/index.html` | 6.5 | 7.5 | 8 | **8.5** | +2 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Shop Book & admin | `admin/logs.html` | 6.5 | 8 | 8 | **8.5** | +2 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Shop Book & admin | `admin/shopbook.html` | 5.5 | 7.5 | 8 | **8.5** | +3 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Shop Book & admin | `app/shop-book.tsx` | 5.5 | 7.5 | 8 | **8.5** | +3 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Settings, privacy & vault | `app/d2de-status.tsx` | 5 | 8 | 8 | **8.5** | +3.5 | re-rated |
+| Settings, privacy & vault | `app/encrypted-notes.tsx` | 5 | 7 | 8 | **8.5** | +3.5 | re-rated; fixed after re-rating, not re-scored (`076e098`) |
+| Settings, privacy & vault | `app/filevault.tsx` | 8 | 8.5 | 8.5 | **8.5** | +0.5 | re-rated |
+| Settings, privacy & vault | `app/ghost-mode.tsx` | 6 | 8.5 | 8.5 | **8.5** | +2.5 | re-rated |
+| Settings, privacy & vault | `app/last-seen-privacy.tsx` | 7 | 8.5 | 8.5 | **9** | +2 | re-rated |
+| Settings, privacy & vault | `app/login-history.tsx` | 7.5 | 8.5 | 8.5 | **8.5** | +1 | re-rated |
+| Settings, privacy & vault | `app/privacy-dashboard.tsx` | 4.5 | 8.5 | 8.5 | **8.5** | +4 | re-rated |
+| Settings, privacy & vault | `app/settings.tsx` | 6.5 | 8.5 | 8.5 | **9** | +2.5 | re-rated; fixed after re-rating, not re-scored (`076e098`) |
+| Settings, privacy & vault | `app/status-privacy.tsx` | 6.5 | 8.5 | 8.5 | **8.5** | +2 | re-rated; fixed after re-rating, not re-scored (`076e098`) |
+| Settings, privacy & vault | `app/vault-features.tsx` | 3.5 | 8 | 8.5 | **8.5** | +5 | re-rated |
+| Settings, privacy & vault | `app/vault.tsx` | 3.5 | 7.5 | 8 | **8.5** | +5 | re-rated; fixed after re-rating, not re-scored (`076e098`) |
+| Settings, privacy & vault | `app/vaultbeam-settings.tsx` | 5.5 | 7.5 | 7.5 | **8** | +2.5 | re-rated |
+| Settings, privacy & vault | `app/vaultcheck.tsx` | 7 | 8 | 8.5 | **8.5** | +1.5 | re-rated |
+| Settings, privacy & vault | `app/vaultdrop.tsx` | 2.5 | — | — | **—** |  | deleted |
+| Utilities & games | `app/cache-cleanup.tsx` | 7.5 | 8.5 | 8.5 | **8.5** | +1 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Utilities & games | `app/dashboard.tsx` | 6.5 | 7.5 | 8 | **8.5** | +2 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Utilities & games | `app/email-bridge.tsx` | 2.5 | — | — | **—** |  | deleted |
+| Utilities & games | `app/eye-check.tsx` | 8 | 8.5 | 8.5 | **8.5** | +0.5 | re-rated |
+| Utilities & games | `app/games.tsx` | 7.5 | 8 | 8.5 | **8.5** | +1 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Utilities & games | `app/meeting-scheduler.tsx` | 4 | — | — | **—** |  | deleted |
+| Utilities & games | `app/notification-sounds.tsx` | 6.5 | 8 | 8.5 | **8.5** | +2 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Utilities & games | `app/notifications.tsx` | 6 | 7.5 | 8 | **8.5** | +2.5 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Utilities & games | `app/offline-mode.tsx` | 3 | 8.5 | 8.5 | **8.5** | +5.5 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Utilities & games | `app/perf-debug.tsx` | 8 | 8.5 | 8.5 | **8.5** | +0.5 | re-rated |
+| Utilities & games | `app/storage-manager.tsx` | 6 | 8 | 8 | **8** | +2 | re-rated; fixed after re-rating, not re-scored (`9124152`) |
+| Utilities & games | `app/vision-comfort.tsx` | 8 | 8.5 | 8.5 | **8.5** | +0.5 | re-rated |
 
 
 ## Appendix A — Round 1 re-rating (147 screens)
@@ -8935,3 +9073,8413 @@ This review is static and read-only. **Nothing here is deployed or device-verifi
   1. Reword the service labels as build intent (`services/d2deService.ts:54-58`).
   2. The path copy names the "End-to-End Encrypted" card, which is titled "Encrypted in Transit" when the flag is off (`app/contact-info.tsx:404`). Derive the copy from the same flag.
   3. Function stays capped. This is a static readout of compile-time flags (`:1-4`) and cannot check a live conversation.
+
+---
+
+## Appendix D — Round 4 re-rating (174 screens)
+
+The 13 round-4 batch reports, as the re-raters wrote them; only the heading levels are shifted. They score the code at `4910069` (reviewing `43c2d19` → `4910069`). The round-5 fixes for what they found are listed in §3.
+
+### A — Launch, auth & lock — round-4 re-rating
+
+This is an independent, static, read-only review of `43c2d19` → `HEAD` (`4910069`). It uses the same rubric (`RUBRIC.md`) and format (`RERATE.md`/`RERATE4.md`).
+
+**Baselines and open items.**
+- "Old" is the round-3 "→ new" score in `rerate3/A.md`.
+- The open items are that file's "Still needed for 10/10" lists, plus one §3 "fixed after re-rating" item: delete-account's restored MPIN pre-check (`815c7a5`).
+- `app/email-verify.tsx` was renamed to `app/phone-verify.tsx` and is rated in its place.
+
+**What I read.**
+- The full current files for the root, index, onboard, phone-verify, mpin-entry, mpin-recover, app-lock and permissions.
+- For every other screen, the full diff plus the surrounding code.
+- All six split modules in `components/root/`. I compared them line by line with the old `app/_layout.tsx` at `43c2d19`.
+- The changed helpers: `components/{UpdateGate,TermsGate,ResumeLock,CallBar}.tsx`, `components/ui/Sheet.tsx`, `components/auth/PhoneField.tsx`, `lib/{otpFirstRoute,onboarding,securityVerdict,pendingLink}.ts`, `constants/{theme,layoutMath}.ts` and `lib/i18n/index.ts`.
+- The server at `730e5b9^`, which is what is deployed today. I checked that the OTP-first client degrades gracefully against it:
+  - `send-otp-phone` does not refuse existing numbers (`auth_phone.go:226-253` at that commit).
+  - `httpx.Body` ignores unknown fields, so `phoneTicket` is harmless (`internal/httpx/httpx.go:91`).
+  - `/auth/mpin/verify` reads only `userId` and `mpin` (`auth.go:2001-2013` at that commit).
+
+**Fixer claims checked.** I checked R4A, R4HO and R4F0 against the code. All R4A items #1–#27 and R4HO A-H1…A-H7 and #37 are present as described, with one exception. R4F0 says dark `onPrimary`/`onDanger` are `#010628`. The committed values are `#FFFFFF` (`constants/theme.ts:228-229`), with a comment saying the dark ink is left as an open decision (`:224-227`). The `Palette` interface doc still says "dark uses the splash night ink" (`constants/theme.ts:80-83`).
+
+**Checks I ran myself.** Nothing was device-tested, and the backend round-4 changes are not deployed.
+- `npx tsc --noEmit -p .`: exit 0.
+- `npx eslint` on the 26 batch files and helpers: 0 errors and 1 warning. The warning is the existing gate-effect deps warning, now at `app/_layout.tsx:311`.
+- These `npx tsx` selftests exited 0: pendingLink, resumeLockPolicy, weakPin, onboardDate, orphanRoutes (51), a11yCoverage, themeCoverage (22/20), screenBackCoverage, startupColdPath, launchVeil, onboardNav, securityVerdict, termsNegotiation, termsPolicy, otpFirstRoute (new), uiDebtRatchet ("no file got worse"), call/duplicateCall, permissionDeadEnd, responsiveLayout (28), mediaToolsFixesZR, i18n, keyboardAvoidance, pinFormat and confirmIdentity.
+
+**Is the root split behaviour-identical? Yes, as far as static reading can show.**
+- The side effects inside the boot effect run in the same order:
+  1. the `call_incoming` listener;
+  2. `e2ee_rekey`;
+  3. the four boot imports;
+  4. `runAfterInteractions`;
+  5. the `getCurrentUserAsync` and `new_message` ingest;
+  6. the AppState intent consumer;
+  7. `notifee.onForegroundEvent`;
+  8. the launch-notification drain;
+  9. `attachTapHandler`.
+- The cleanups are the same set (`app/_layout.tsx:638-650`).
+- `routeToCall` and its dedupe stay in the root (`:483-516`).
+- The verdict guard and the two foreground hooks keep their effect positions (`:339`, `:653-654`).
+- The 68 route declarations keep their order. They are flattened with `Children.toArray` (`components/root/rootScreens.tsx:116`), right after the `INSET_SCREENS` map (`app/_layout.tsx:698-714`).
+- One small change: `selfIdRef` became a closure variable (`components/root/messageIngest.ts:33-36`). This is equivalent because the boot effect runs once per `router`.
+- `grep "as any"` finds 0 in `app/_layout.tsx` and `components/root/*`.
+
+**Rounding.** Each overall score is the mean of the six dimensions, rounded to the nearest 0.5. Ties round up, as in rounds 2–3. One screen sits exactly on a tie: onboard-success, at 8.25.
+
+| Screen | Old | New | Δ |
+|---|---|---|---|
+| `app/_layout.tsx` (root shell) | 7.5 | 8.0 | +0.5 |
+| `app/index.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/(tabs)/_layout.tsx` | 8.0 | 8.0 | 0 (mean 7.75 → 8.08) |
+| `app/onboard.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/phone-verify.tsx` (was `email-verify`) | 8.0 | 8.0 | 0 (mean 7.75 → 8.08) |
+| `app/onboard-profile.tsx` | 8.0 | 8.0 | 0 (mean 7.75 → 8.0) |
+| `app/onboard-security.tsx` | 8.0 | 8.0 | 0 (mean 8.0 → 8.08) |
+| `app/onboard-mpin.tsx` | 8.5 | 8.5 | 0 (file unchanged) |
+| `app/onboard-success.tsx` | 8.0 | 8.5 | +0.5 (tie) |
+| `app/mpin-entry.tsx` | 8.0 | 8.0 | 0 (file unchanged; Security +0.5 via lib) |
+| `app/mpin-recover.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/app-lock.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/restore-backup.tsx` | 8.0 | 8.0 | 0 (mean 8.0 → 8.17) |
+| `app/delete-account.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/blocked.tsx` | 8.0 | 8.0 | 0 (**new regression, see below**) |
+| `app/permissions.tsx` | 8.0 | 8.0 | 0 (mean 7.83 → 8.17) |
+| `app/backup-pin.tsx` | 8.0 | 8.0 | 0 (mean 7.83 → 8.0) |
+
+**Round-4 regressions in this batch:**
+1. **blocked — "Check again" can dead-end on the splash (medium).** This happens when the launch gate had sent the user to `/app-lock` or `/onboard` (an MFA or sealed user, or someone signed out):
+   - The verdict then *replaced* that lock route with `/blocked` (`app/_layout.tsx:402-403`), so `/blocked` is the only stack entry.
+   - A clean re-scan calls `clearRestrictVerdict(); leave()` (`app/blocked.tsx:167`).
+   - `leave()` cannot go back, so it does `router.replace('/')` (`:155-157`).
+   - `index` then awaits `launchAllowed`, which settled `false` for these launches, and returns without routing (`app/index.tsx:48`).
+   - The user is left on the logo with the "Opening crazzychat" spinner (`:118-120`). There is no retry, because `failed` is never set. They have to kill the app.
+   - Nothing is bypassed. The fix: on a clean re-scan, route the way the launch gate would (`/app-lock` or `/onboard`), or `resetTo` the gate's target, rather than `/`.
+2. **New tokens: the docs disagree with the values (low; no visual change).**
+   - The interface doc says dark `onPrimary`/`onDanger` are night ink (`constants/theme.ts:80-83`). The dark values are `#FFFFFF` (`:228-229`). R4F0 claims `#010628`.
+   - Screens that moved from `'#fff'` to the token look identical, which keeps the split behaviour-identical. But they still put 3.76:1 white on dark `#EF4444` (tabs badge `app/(tabs)/_layout.tsx:83`, delete CTA `app/delete-account.tsx:328`, blocked bar `app/blocked.tsx:362`). They also put 4.11:1 white on dark `#1777FE` (app-lock `:279`, restore `:266`, permissions `:256`).
+   - The `warning` token is a real improvement on the light theme for the permissions FSI row (`app/permissions.tsx:251-252`, `constants/theme.ts:274`).
+3. **phone-verify — after a "conflict" answer, the spent code stays on screen (low).** `go()` sets only the error (`app/phone-verify.tsx:90`). The card keeps the filled cells and a live "Resend code" (`:176-193`), and `stuck` is not set. That screen is new this round.
+
+**Product change to note (not a regression):**
+- Every sign-in by an existing user now sends an SMS first (`app/onboard.tsx:50-55`, `app/phone-verify.tsx:86-92`).
+- Against today's server the possession check is client-side only. `/auth/lookup` still returns `userId` to any direct caller until C15 is deployed and `AUTH_REQUIRE_PHONE_TICKET=1` is set (R4BE C15, `vaultchat-backend-go/internal/routes/auth.go:1981-2020`, not deployed).
+
+---
+
+#### `app/_layout.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8 · States 8.5 · UI 8 · A11y 7.5 · Security 8.5 · Code 6.5 (mean 7.83)
+- **Original items:**
+  1. ✅ **Split the call routing, notification ingest and boot work, and drop the 9 `as any`.**
+     - The file is now 755 lines.
+     - New modules: `components/root/callRouting.ts`, `launchIntents.ts`, `messageIngest.ts`, `useForegroundUpkeep.ts`, `useVerdictGuard.ts` and `rootScreens.tsx`.
+     - There are 0 `as any`: dynamic hrefs use `as Href` (`app/_layout.tsx:445`), and the call payloads are typed `AnsweredCall`/`IncomingCall` (`components/root/callRouting.ts:13-19`).
+     - Behaviour is identical (see above).
+  2. ❌ Resume ordering is 📱. `enter()` still does `back()` then `push` (`app/app-lock.tsx:49-57`).
+  3. ✅ **UpdateGate.**
+     - The title, body, button, no-store note, advise bar and dismiss now use `t()` and `useLang()` (`components/UpdateGate.tsx:50,90-120`).
+     - iOS opens `expoConfig.ios.appStoreUrl` when set (`:38-42`).
+     - ◐ The "Installed build … minimum …" line is still English (`:101-103`), and `app.json` has no `appStoreUrl`, which is an ops item.
+  4. ❌ `useGlobalSearchParams()` still re-renders the root only to compute `launchHref` (`app/_layout.tsx:243-245`). R4A P4 says this is pinned by `lib/pendingLink.selftest.ts`.
+  5. ✅ **TermsGate** no longer runs a timer while signed out.
+     - It waits (`components/TermsGate.tsx:76-77`) and re-asks when the route leaves the lock and auth routes (`:113-115`, `lib/pendingLink.ts:128`).
+     - A failed acceptance shows the catalog `terms.error`, not the raw message (`:124-129`).
+- **Regressions:** none from the split.
+- **Subscreens:**
+  - Launch veil — 8 → 8.
+  - ResumeLock — 8.5 → 8.5 (cast removed, `components/ResumeLock.tsx:63`).
+  - UpdateGate — 8 → 8.5.
+  - TermsGate — 8.5 → 9.
+  - ErrorBoundary — 8 → 8.
+  - UsageCounter — 8.5 → 8.5.
+  - CallBar — 7 → 7.5. It now uses `CALL.text` and has no casts (`components/CallBar.tsx:85,91,113,149`).
+- **Still needed for 10/10:**
+  1. The boot effect is still about 300 lines inline (`app/_layout.tsx:344-651`). The launch-gate effect still has the `launchHref` deps warning (`:311`).
+  2. Read `launchHref` from a ref instead of `useGlobalSearchParams()` (`:243-245`). The selftest that pins it must be updated first.
+  3. Localise the UpdateGate build line (`components/UpdateGate.tsx:101-103`). Set `expo.ios.appStoreUrl`, which is ops.
+  4. Verify on a device the resume ordering: back then push of a held tap (`app/app-lock.tsx:49-57`) 📱.
+
+#### `app/index.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 9 · UI 7.5 · A11y 8 · Security 8 · Code 9 (mean 8.33)
+- **Original items:**
+  1. ✅ `inFlight` ref, released only on a throw (`app/index.tsx:27-31,77`).
+  2. ✅ A spinner appears after 1.5 s, labelled "Opening crazzychat" (`:23-24,118-120`).
+  3. ❌ The held tap → replace → push sequence is still 📱 (`:69-72`).
+- **Regressions:** none in this file. It is, however, where the blocked "Check again" dead-end lands (`:48`; see blocked).
+- **Subscreens:** Fallback splash — 8 → 8.5.
+- **Still needed for 10/10:**
+  1. When `launchAllowed` is `false` but the screen is still mounted (now reachable from `/blocked`'s `leave()`), route to the gate's target instead of returning silently (`app/index.tsx:48`).
+  2. The retry and spinner strings are hard-coded English (`:119,126-128`). A style comment is misplaced: it describes `retryTxt` but sits on `wait` (`:141`).
+  3. Verify on a device 📱 (`:69-72`).
+
+#### `app/(tabs)/_layout.tsx` — **8.0 → 8.0** (mean 7.75 → 8.08)
+- **Scores now:** Function 8 · States 8 · UI 8.5 · A11y 8 · Security 8 (n/a) · Code 8
+- **Original items:**
+  1. ✅ The label cap is raised to the shared `TAB_LABEL_MAX_SCALE = 1.5`. It is used both by the bar-height math and by both labels (`constants/layoutMath.ts:19,26`, `app/(tabs)/_layout.tsx:44,87`). The responsiveLayout selftest pins it.
+  2. ✅ The gradient and shadow are now `APPS_DISC_GRADIENT` and `TAB_BAR_SHADOW` (`app/(tabs)/_layout.tsx:37,175`, `constants/theme.ts:124-130`).
+  3. ✅ The badge ink is `c.onDanger` (`:83`). It is white in both themes, so it looks the same as before.
+- **Regressions:** none.
+- **Subscreens:** Mini Apps center button — 7 → 7.5.
+- **Still needed for 10/10:**
+  1. The badge is white on dark `#EF4444` at 3.76:1 with 10 pt text (`:83`, `constants/theme.ts:229`). That needs the open dark-ink decision.
+  2. The labels are still capped at 1.5, while Android allows up to 2.0. Whether two lines fit at the top scale is 📱 (`:44,87`).
+  3. The disc glyph still uses a literal `#FFFFFF` (`:42`).
+
+#### `app/onboard.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8 · States 8 · UI 8 · A11y 8.5 · Security 6.5 · Code 8 (mean 7.83)
+- **Original items:**
+  1. ◐ **Possession factor.**
+     - The client is now OTP-first for every number: the code is sent before any lookup, and any old ticket is cleared (`app/onboard.tsx:50-55`).
+     - The ticket rides on MPIN verify and recovery (`lib/onboarding.ts:161-170,198-203,235-251`).
+     - The server enforcement is written but flag-gated and not deployed. Today `/auth/lookup` still answers anyone who calls it directly.
+  2. ✅ The country row's spoken label has no flag: `PhoneField` passes `accessibilityLabel` (`components/auth/PhoneField.tsx:107`), and `Sheet` applies it (`components/ui/Sheet.tsx:27,80`).
+- **Regressions:** none. Every sign-in now costs an SMS (product change).
+- **Subscreens:** Country picker — 8 → 8.5.
+- **Still needed for 10/10:**
+  1. Deploy C15 and set `AUTH_REQUIRE_PHONE_TICKET=1` (`vaultchat-backend-go/internal/routes/auth.go:2006-2020`). This is backend and ops work.
+  2. Drop the `as any` on a literal route (`app/onboard.tsx:55`).
+  3. Device pass of the new sign-in flow 📱.
+
+#### `app/phone-verify.tsx` (was `app/email-verify.tsx`) — **8.0 → 8.0** (mean 7.75 → 8.08)
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8.5 · Security 7.5 · Code 7.5
+- **Original items:**
+  1. ✅ **Renamed.** The references in `lib/pendingLink.ts:128`, `app/onboard.tsx:55` and the selftests are updated, and orphanRoutes and onboardNav pass.
+  2. ✅ The title has a header role (`app/phone-verify.tsx:164`).
+- **New this round:**
+  - The screen routes after the code via `afterOtp`/`afterLookup`, which are pure and tested (`lib/otpFirstRoute.ts:23-34`).
+  - Both exits replace the screen (`:88-89`).
+  - When the code was spent but the lookup failed, it shows "Try again", which repeats only the lookup (`:112-124,199-204`).
+- **Regressions:** after a `conflict`, the spent code and a live "Resend" stay on screen (`:90,176-193`). Low.
+- **Subscreens:** "Didn't get the code?" Sheet — 8 → 8.
+- **Still needed for 10/10:**
+  1. On `conflict`, clear the code and hide the card, or point to "Edit number" (`:90`).
+  2. Drop the three literal-route casts (`:88,89,144`).
+  3. Deploy C15 (see onboard). Verify SMS autofill single-submit on a device 📱.
+
+#### `app/onboard-profile.tsx` — **8.0 → 8.0** (mean 7.75 → 8.0)
+- **Scores now:** Function 8 · States 8.5 · UI 8 · A11y 8.5 · Security 7 · Code 8
+- **Original items:**
+  1. ✅ A missing first name or DOB is now explained by the button, both as visible text and as `accessibilityHint` (`app/onboard-profile.tsx:101-102,230,243`).
+  2. ✅ An `alive` ref guards `setPic` and `setPhotoErr` (`:64-65,78,82`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Photo source Sheet — 8.5 → 8.5.
+  - DOB picker — 8 → 8.
+- **Still needed for 10/10:**
+  1. Drop the literal-route cast (`:111`).
+  2. Photo-picker refusal paths on a device 📱 (`:66-83`).
+
+#### `app/onboard-security.tsx` — **8.0 → 8.0** (mean 8.0 → 8.08)
+- **Scores now:** Function 8 · States 8.5 · UI 8 · A11y 8.5 · Security 7 · Code 8.5
+- **Original items:**
+  1. ✅ "Choose and answer all 5 questions to continue (n of 5 done)." appears under Next and as its hint (`app/onboard-security.tsx:36-41,95,108`).
+- **Regressions:** none.
+- **Subscreens:** Question picker — 8 → 8.
+- **Still needed for 10/10:**
+  1. Answers need only 2 characters (`components/auth/SecurityQuestionRow.tsx:16`). That is a weak knowledge factor, and it is the whole recovery proof until C15 is deployed.
+  2. Drop the literal-route cast (`app/onboard-security.tsx:48`).
+
+#### `app/onboard-mpin.tsx` — **8.5 → 8.5** (file unchanged)
+- **Scores now:** Function 9 · States 8.5 · UI 8 · A11y 8 · Security 8.5 · Code 8 (mean 8.33)
+- **Original items:** ❌ TalkBack/VoiceOver typing into the hidden input is still 📱 (`components/auth/MpinInput.tsx:61-92`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Create step — 8.5 → 8.5.
+  - Confirm step — 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. Verify on a device 📱.
+  2. Drop the cast (`app/onboard-mpin.tsx:103`).
+
+#### `app/onboard-success.tsx` — **8.0 → 8.5** (mean 8.25, tie)
+- **Scores now:** Function 8 · States 9 · UI 8.5 · A11y 8 · Security 8 · Code 8
+- **Original items:**
+  1. ✅ A synchronous `inFlight` latch, released on failure (`app/onboard-success.tsx:30,57-60,87`).
+  2. ✅ The body is a `ScrollView` with `flexGrow: 1` (`:119,172,184`). How it looks at large font is 📱.
+- **Regressions:** none.
+- **Subscreens:** "Could not continue" Alert — 8 → 8.
+- **Still needed for 10/10:**
+  1. Check the large-font layout on a device 📱.
+  2. Once C15 is on, `verifyMpinRemote` needs the 15-minute phone ticket (`lib/onboarding.ts:198-203`). A sign-up that takes longer than that gets `otp_required` here with only the generic Alert path (`:87-110`). Map that code to "Verify your number again".
+
+#### `app/mpin-entry.tsx` — **8.0 → 8.0** (file unchanged)
+- **Scores now:** Function 9 · States 8.5 · UI 8 · A11y 8 · Security 6.5 · Code 9 (mean 8.17)
+- **Original items:**
+  1. ◐ **Possession factor.** The screen is now reached only after the OTP (`app/phone-verify.tsx:88`), and `verifyMpinRemote` sends the ticket (`lib/onboarding.ts:198-203`). Server enforcement is not deployed.
+- **Regressions:** none.
+- **Still needed for 10/10:**
+  1. Deploy C15 and set the flag.
+  2. Map 403 `otp_required` (an expired ticket) to a way back to `/onboard`. Today it falls into the generic `onboardingError` (`app/mpin-entry.tsx:53-57`).
+  3. The `submit` guard is `busy` state, not a ref (`:40`). Drop the cast (`:96`).
+
+#### `app/mpin-recover.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 9 · States 8.5 · UI 8 · A11y 8 · Security 7 · Code 8 (mean 8.08)
+- **Original items:**
+  1. ◐ **OTP before the answers.** The ticket now rides on both calls, in the `X-Phone-Ticket` header and the body, and a Bearer is sent from app-lock (`lib/onboarding.ts:235-251`). Enforcement is not deployed.
+  2. ✅ The mismatch copy names the step (`app/mpin-recover.tsx:92`).
+  3. ✅ A load failure now shows an inline "Try again" (`:57-70,126-142`) and has an `alive` guard (`:55-56`). "No questions" keeps its Alert, which is correct.
+- **Regressions:** none.
+- **Subscreens:**
+  - Answer phase — 8 → 8.
+  - New/confirm MPIN — 7.5 → 8.5 (header role `:196`).
+  - Load error (new) — 8.5.
+- **Still needed for 10/10:**
+  1. Deploy C15.
+  2. A reset failure is still an Alert (`:102`). `onConfirm` has no in-flight guard (`:91-93`).
+
+#### `app/app-lock.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 9 · States 8.5 · UI 7.5 · A11y 8.5 · Security 7.5 · Code 7.5 (mean 8.08)
+- **Original items:**
+  1. ✅ The title has a header role (`app/app-lock.tsx:181`). All seven links use `altHit` with `minHeight: 44` (`:216,220,230,234,247,251,255,282`).
+  2. ✅ In `pin` mode, the Forgotten PIN Alert names the MPIN option and offers "Use MPIN instead" before the destructive option (`:127-141`).
+  3. ✅ `submitSeal` and `submitMpin` check `alive` before every state write (`:109-119,162-171`).
+  4. ◐ Recovery from the lock is still knowledge plus a Bearer token. The OTP enforcement is not deployed (`:145-147`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Sealed PIN — 8 → 8.
+  - Device-PIN — 8 → 8.5.
+  - Biometric — 7.5 → 8.
+  - MPIN — 8.5 → 8.5.
+  - Forgotten PIN Alert — 7 → 8.
+- **Still needed for 10/10:**
+  1. The PIN field has a fixed `height: 56` at 24 pt (`:284`). It can clip at large font, so use `minHeight`.
+  2. "Sign in again" is duplicated in `forgotPin` and `signInAgain` (`:135-139` vs `:151-155`).
+  3. The unlock button is white on dark primary at 4.11:1, via the token (`:279`).
+  4. Resume ordering 📱 (`:49-57`). Deploy C15.
+
+#### `app/restore-backup.tsx` — **8.0 → 8.0** (mean 8.0 → 8.17)
+- **Scores now:** Function 9 · States 9 · UI 8 · A11y 8 · Security 7 · Code 8
+- **Original items:**
+  1. ✅ The prompt is marked seen only after a real answer (`app/restore-backup.tsx:82-89`).
+  2. ✅ An `alive` ref guards the lookup and the restore success and failure paths (`:64-65,72-74,98-114`).
+- **Regressions:** none.
+- **Subscreens:** "Chats restored" — 8 → 8.
+- **Still needed for 10/10:**
+  1. `run` guards on `busy` state (`:92`), so two taps in one frame can start two restores. Use a ref latch.
+  2. The failed-lookup copy says to restore later from Settings, but the offer now also comes back on the next launch (`:148`). Say so.
+
+#### `app/delete-account.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 9 · States 8.5 · UI 8 · A11y 8.5 · Security 8 · Code 8.5 (mean 8.42)
+- **Original items:**
+  1. ✅ (§3 `815c7a5`) The `verifyMpinRemote` pre-check runs before the delete, with a `ponytail:` comment naming its limit (`app/delete-account.tsx:112-126`). Its failure says "Your account was not deleted." The round-3 high regression is closed.
+  2. ✅ The mapping keys only on `e.body.error.code` (`:146-160`). The codes match the written server (`vaultchat-backend-go/internal/routes/user.go:1752,1757,1763`).
+- **Regressions:** none. The CTA token is visually the same as before (`:283,328`).
+- **Subscreens:** Final "Delete account?" Alert — 7 → 7.5.
+- **Still needed for 10/10:**
+  1. Deploy the server MPIN check, then drop the pre-check (`:112-126`), which spends a second attempt once the server checks too.
+  2. White on dark danger is 3.76:1 (`:328`), a token decision.
+
+#### `app/blocked.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8 · States 7.5 · UI 8 · A11y 8 · Security 9 · Code 7.5 (mean 8.0)
+- **Original items:**
+  1. ◐ **"Check again" for `restrict`.**
+     - It runs `runSecurityCheck`. A finding updates the list; a failure says so in a live region (`app/blocked.tsx:163-175,313-332`).
+     - A clean result releases only `restrict` (`lib/securityVerdict.ts:39-41`), then `leave()`.
+     - **But** see regression 1: after a locked or signed-out launch, that `leave()` dead-ends on the splash.
+  2. ✅ Raw detail is behind "Show/Hide technical details", with `expanded` state (`:253-269`).
+- **Regressions:** the "Check again" → `replace('/')` → index dead-end (`:155-157,167`, `app/index.tsx:48`). Medium.
+- **Subscreens:**
+  - Contact Support Alert — 7.5 → 7. Its copy still says "Clear the indicator below and reopen crazzychat" (`:181`).
+  - "Nothing is blocked" — 8.5 → 8.5.
+  - Check again (new) — 6.5.
+  - Technical details (new) — 8.5.
+- **Still needed for 10/10:**
+  1. On a clean re-scan, route to the launch gate's target (`/app-lock` or `/onboard`), not `/` (`:155-157,167`).
+  2. Update the Support copy to mention Check again (`:181`). Drop the cast (`:157`).
+
+#### `app/permissions.tsx` — **8.0 → 8.0** (mean 7.83 → 8.17)
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8 · Security 8 · Code 8
+- **Original items:**
+  1. ✅ Each row has its own `get`, and they are read in parallel, each in its own try (`app/permissions.tsx:27-57,86-92`). `alive` guards every async state write (`:79-80,91,94,110,121,134-136`).
+  2. ✅ The stale ALLOWED entry is removed. `screenBackCoverage` passes, and grep finds no `permissions` in it.
+  3. ✅ The FSI row uses `c.warning` and `tint(c.warning)` (`:247-252`). `btnTxt` uses `c.onPrimary` (`:256`).
+- **Regressions:** none.
+- **Subscreens:** Full-screen-intent row — 8 → 8.5.
+- **Still needed for 10/10:**
+  1. Drop the cast (`:66`).
+  2. Emoji glyphs serve as row icons (`:28-56`). They are hidden from screen readers, but they render differently on each platform (📱).
+  3. Grant flows on a device 📱.
+
+#### `app/backup-pin.tsx` — **8.0 → 8.0** (mean 7.83 → 8.0)
+- **Scores now:** Function 8.5 · States 8 · UI 7.5 · A11y 8.5 · Security 7.5 · Code 8
+- **Original items:**
+  1. ✅ The forgotten-PIN Alert has "Lock now" → `/app-lock?resume=1` (`app/backup-pin.tsx:80-86`), plus a hint (`:160`). App-lock's PIN mode offers both sign-in-again and MPIN, and the MPIN returns to this screen.
+  2. ❌ PinPad's app palette over AuthSky is still 📱 (`components/PinPad.tsx:33`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Current PIN — 8 → 8.5.
+  - Set PIN — 8 → 8.
+  - Confirm PIN — 8 → 8.
+- **Still needed for 10/10:**
+  1. Check on a device that the PinPad palette matches the screen 📱.
+  2. Drop the cast (`:55`).
+
+---
+
+### B — Main tabs, contacts & links — re-rating (round 4)
+
+Static, read-only review of `43c2d19` → HEAD (`4910069`), using the same rubric (`RUBRIC.md`) and format (`RERATE.md`).
+
+**Baselines**
+- "Old" is the round-3 "→ new" score in `rerate3/B.md`.
+- Open items are that file's "Still needed for 10/10" lists, plus the items in `2026-10-04_fix_status.md` §3 that touch this batch:
+  - the status lock answer reveal (`5d7c50b`);
+  - Profile sign-out order;
+  - the Search snippet query;
+  - GatePicker `makeS`.
+
+**What I read**
+- Every screen in full at HEAD, plus its `git diff 43c2d19 HEAD`.
+- Every file the splits now import:
+  - `components/chats/{ChatListRow.tsx, AvatarPopup.tsx, chatListStyles.ts}`
+  - `components/status/{TextStatusComposer.tsx, MediaStatusPreview.tsx}`
+  - the diffs of `GatePicker`, `GateChallenge` and `PuzzleBoard`
+- The old inline code at `43c2d19`, for a line-by-line behaviour comparison.
+- These helpers:
+  - `lib/safetyQr.ts`
+  - `lib/status/puzzleFrame.ts:76-96`
+  - `services/security/auditChain.ts:337-363`
+  - `app/media-gallery.tsx:134-342`
+  - `lib/localDb.ts:825-1010`
+  - `lib/chatLock.ts:60-100`
+  - `lib/verification.ts`
+  - `lib/keyChange.ts`
+  - `constants/theme.ts:60-95, 176-276`
+
+**Fix claims checked**
+- Checked against the code: all of `fixes/R4B.md` (51 fixed rows plus the partial, not-done and handoff tables), and the parts of `fixes/R4HO.md` (rows 8 and 9) and `fixes/R4F0.md` that touch this batch.
+- R4B's palette note is correct for the code as it stands: `onPrimary`/`onDanger` are `#FFFFFF` in both themes (`constants/theme.ts:228-229, 272-273`). R4F0 had proposed night ink for dark, but that was not kept.
+- Handoffs that landed:
+  - #1: `syncAuditChain` now returns a boolean (`services/security/auditChain.ts:338, 359, 362`), and alerts uses it.
+  - #2: `lib/chatCode.selftest.ts:31-32` now reads `ChatListRow.tsx`.
+  - #3: `media-gallery` reads `open` (`app/media-gallery.tsx:136, 334-342`).
+  - #4: a `caution` token (`constants/theme.ts:92, 232, 276`), used by alerts.
+- Backend changes (join preview) are written but **not deployed**. Only the graceful client behaviour counts.
+
+**Evidence I ran.** Outputs are in `rerate4/B_*.txt`. Nothing was device-tested or deployed.
+- `npx tsc --noEmit -p .` exited 0.
+- `npx eslint` on all 16 screens, `components/chats`, `components/status` and `lib/safetyQr*` exited 0, with no output.
+- These `npx tsx` selftests all exited 0:
+  - safetyQr ("all checks passed")
+  - a11yCoverage
+  - themeCoverage (22 passed, 20 exemptions)
+  - screenBackCoverage
+  - orphanRoutes (51)
+  - silentFailure
+  - temporaryChat
+  - chatListResync
+  - chatCode
+  - chatUnreadCursor
+  - callHistory
+  - searchSnippet
+  - vaultIdLink
+  - status/gateWiring
+  - uiDebtRatchet ("no file got worse; 5 unroled / 306 hex remain")
+  - permissionDeadEnd
+  - responsiveCoverage
+  - responsiveLayout
+  - keyboardAvoidance
+  - rowOverflow
+  - pendingLink
+  - onboardNav
+
+**Rounding.** Overall is the mean of the six dimensions, rounded to the nearest 0.5.
+
+| Screen | Old | New | Δ |
+|---|---|---|---|
+| `app/(tabs)/chats.tsx` | 8 | 8 | 0 |
+| `app/(tabs)/status.tsx` | 8 | 8.5 | +0.5 |
+| `app/(tabs)/calls.tsx` | 8.5 | 9 | +0.5 |
+| `app/(tabs)/mini.tsx` | 8.5 | 9 | +0.5 |
+| `app/(tabs)/profile.tsx` | 8 | 8.5 | +0.5 |
+| `app/(tabs)/alerts.tsx` | 8.5 | 9 | +0.5 |
+| `app/new-chat.tsx` | 8 | 8.5 | +0.5 |
+| `app/search.tsx` | 8.5 | 8.5 | 0 |
+| `app/contacts.tsx` | 8 | 8.5 | +0.5 |
+| `app/contact-info.tsx` | 8 | 8.5 | +0.5 |
+| `app/qr-contact.tsx` | 8 | 8 | 0 |
+| `app/verify-contact.tsx` | 8.5 | 8.5 | 0 |
+| `app/add/[...segments].tsx` | 8.5 | 8.5 | 0 |
+| `app/join/[code].tsx` | 8.5 | 8.5 | 0 |
+| `app/i/[token].tsx` | 7.5 | 7.5 | 0 |
+| `app/invite-link.tsx` | 8 | 8.5 | +0.5 |
+
+#### Round-4 regressions
+
+**Splits:** none found. I compared the moved code with `43c2d19`.
+- `ChatListRow` is the old `ChatRow` body. The changes:
+  - handlers take `(chat)` (`components/chats/ChatListRow.tsx:26, 90, 117, 132`);
+  - a plain `memo` instead of the comparator (`:33`);
+  - the new avatar busy state (`:134-146`);
+  - `onPrimary`/`onDanger` inks (`:95, 98, 110, 149`).
+  - Every other line is the same.
+- `AvatarPopup` and the temporary-chat sheet changed only from a parent-scrim to a sibling-scrim shape (`AvatarPopup.tsx:259-268`, `chats.tsx:790-792`). That shape was requested.
+- `TextStatusComposer` and `MediaStatusPreview` are the old Modal JSX. The changes:
+  - `#fff` became `AuroraDark.text` (rgba .96);
+  - a `radiogroup` wrapper (`TextStatusComposer.tsx:47`);
+  - video posters (`MediaStatusPreview.tsx:150-160`).
+- The handlers stay in the screen, so the discard confirms, gate validation and posting are unchanged (`status.tsx:249-373`).
+
+**New tokens:** no visual change today, because `onPrimary`/`onDanger` are white in both themes. Two cross-cutting notes, neither a regression of this batch:
+- The `Palette` doc comment still says "dark uses the splash night ink" (`constants/theme.ts:80-84`). The values are white (`:228-229`). The AuroraDark comment points to "a design decision left open in fix_status §5" (`:224-227`), but §5 does not list it.
+- White on dark `#1777FE` is 4.11:1 (the comment's own number). So the small on-primary text in this batch stays below AA for small text in dark, as before. Examples: the unread badge at 11 px (`chatListStyles.ts:110`), the swipe labels at 11 px (`:115`), and the Scan button at 13 px (`alerts.tsx:317`).
+
+**Found for the first time (older than round 4, not regressions):**
+1. **Global search and the chat-list preview ignore protected text and chat locks.**
+   - `searchAllMessages` selects no `meta` column and applies no `searchHidden` filter (`lib/localDb.ts:878-895, 914-925`). Only the in-chat search does (`:946-952, 983, 1010`).
+   - So app/search.tsx shows view-once and Invisible Ink text in the snippet and in the row label (`app/search.tsx:82, 179-190`).
+   - `getLastMessagePerChat` is unfiltered in the same way (`lib/localDb.ts:830-852`), and the Chats row prints it as the preview (`components/chats/ChatListRow.tsx:53-87`).
+   - Neither screen consults `isChatLocked` (`lib/chatLock.ts:81`). `app/scheduled.tsx:55`, `app/bookmarks.tsx:55` and `app/message-reminder.tsx:330` do.
+2. **verify-contact keeps "Verified" across a key change.**
+   - Verification is stored per contact id only (`lib/verification.ts:36-48`), and the screen sets it with `verifiedList.includes(peerId)` (`app/verify-contact.tsx:77`).
+   - `lib/keyChange.ts` detects key changes and links here (`components/chat/ChatBanners.tsx:70-76`), but never clears the flag.
+   - So a user who arrives from the "security code changed" banner sees "Verified — tap to clear" next to the new number (`verify-contact.tsx:224`).
+
+---
+
+#### `app/(tabs)/chats.tsx` — **8 → 8**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 9 · Security 7 · Code 7.5 (mean 8.08)
+- **Original items (rerate3):**
+  1. ◐ `as any`: 18 of 19 are gone (all route casts, `handle.cancel()` at 80). One stays at 232, pinned by `lib/chatUnreadCursor.selftest.ts:221` (comment 230-231). Other loose types remain:
+     - `catch (e: any)` (187, 373, 448, 454, 460, 472);
+     - `useRef<any>` (199);
+     - `Record<string, any>` (103);
+     - `Promise<any>` (503).
+  2. ✅ The memo now works:
+     - Stable `useCallback` handlers (441-494): `patch`, `doPin/Mute/Archive/Delete`, `enterSelect`, `toggleSelect`, and `onRowPress/Avatar/LongPress`.
+     - `fetchList` is stable (`loadList` has `[]` deps, 158-193).
+     - Plain `memo` (`ChatListRow.tsx:33`). The separator is hoisted (757, `ChatListRow.tsx:28-31`).
+  3. ✅ First avatar tap: `avatarLoadingId` (419, 426, 434, 747). The row shows a spinner, `busy` state and a disabled avatar (`ChatListRow.tsx:134-146`).
+  4. ✅ `#fff` inks are now on tokens: FAB (768), unread badge, empty CTA, initials and action labels (`chatListStyles.ts:36, 56, 110, 115`), Delete `onDanger` (`ChatListRow.tsx:110`), select tick (149).
+     - `#fff` stays only on the photo name bar, which is documented (`chatListStyles.ts:29-30, 38`).
+     - The scrims are still `rgba` (31, 37, 101), although a `scrim` token now exists (`constants/theme.ts:231, 275`).
+  5. ✅ The split leaves 824 lines (`ChatListRow` 231, `AvatarPopup` 73, styles 120). The temporary-chat sheet stays in the screen, pinned by the temporaryChat selftest.
+- **Regressions:** none.
+- **Found now (older):** the row preview prints the last message's plaintext with no view-once, Invisible Ink or chat-lock check (`ChatListRow.tsx:53-87`, from `lib/localDb.ts:830-852` via 164 and 216). For a locked chat, that puts its newest message on the list. Security 8 → 7.
+- **Subscreens:**
+  - Temporary-chat sheet — 8 → 8.5. The scrim is a sibling; the sheet is a `View` with `accessibilityViewIsModal` (790-792).
+  - Avatar photo popup — 8 → 8.5. Sibling scrim (`AvatarPopup.tsx:259-268`), plus the pending state on the row.
+  - Selection / bulk mode — 8.5 → 8.5.
+  - Folder chips — 8.5 → 8.5.
+  - Swipe actions — 8 → 8. On-fill contrast needs a device check (📱). The action buttons rely on their text children for a name (`ChatListRow.tsx:94-111`).
+- **Still needed for 10/10:**
+  1. Mask protected and locked previews:
+     - select `meta` in `getLastMessagePerChat` (`lib/localDb.ts:836-852`) and blank `searchHidden` rows to "🔒 Message";
+     - for chats where `isChatLocked`, show "Locked chat" instead of the text (`ChatListRow.tsx:53-87`).
+  2. Drop the last cast once `chatUnreadCursor.selftest.ts:221` accepts the uncast line (232). Type the remaining `catch (e: any)` and `useRef<any>` (103, 199, 503).
+  3. Use the `scrim` token for the sheet and popup scrims (`chatListStyles.ts:31, 101`). Scale the "Split / Pick 2" label (620, fixed `fontSize: 13`).
+  4. Settle the on-fill ink decision for dark: 11-px labels on `#1777FE` are 4.11:1 (`chatListStyles.ts:110, 115`).
+
+#### `app/(tabs)/status.tsx` — **8 → 8.5**
+- **Scores now:** Function 8 · States 9 · UI 8 · A11y 8.5 · Security 8.5 · Code 8 (mean 8.33)
+- **Original items (rerate3, plus §3):**
+  1. ✅ GatePicker reveal: there is a Show/Hide answer toggle (`GatePicker.tsx:80, 148, 158-160`). This was §3, `5d7c50b`.
+  2. ◐ Video preview: on pick, each video gets a still from `puzzleFrameUri` (236-244; `lib/status/puzzleFrame.ts:76-96`, which has a timeout and returns null on failure). The preview and filmstrip draw the still with a play badge, or a placeholder (`MediaStatusPreview.tsx:150-160, 188, 197`). Whether frames render is **not verifiable statically** (📱).
+  3. ✅ Unmount guard: an `alive` ref (133-134), checked in `load` (140, 144), `onRefresh` (166) and the poster callback (242). `onPostText`'s `finally { setPosting(false) }` is still unguarded (199). Trivial.
+  4. ✅ GatePicker now uses `AppText as Text` (`GatePicker.tsx:16-19`), so it follows the comfort scale.
+  5. ✅ `StatusRow` is a `memo` component (505-533). The composer and preview moved to `components/status/` (419-432). The screen is 569 lines.
+  6. ✅ (§3) `makeS(c)` is gone. Styles are static `StyleSheet`s in GatePicker and GateChallenge (diff; `GatePicker.tsx:183-185`).
+- **Regressions:** none. The split behaves the same; see the section at the top.
+- **Subscreens:**
+  - Text status composer — 8 → 8.5. The swatches now sit in a `radiogroup` (`TextStatusComposer.tsx:47-51`).
+  - Media preview + caption — 8 → 8.5. Poster frames need a device check (📱).
+  - GatePicker — 8 → 8.5. Reveal toggle, AppText, no dead palette subscription.
+  - Emoji panel — 8 → 8.
+  - StoryRing — 8 → 8.
+- **Still needed for 10/10:**
+  1. Confirm on a device that video stills render, and that the 1 s / 0 s extractor finishes on long clips (📱; `puzzleFrame.ts:94`).
+  2. `catch (e: any)` (143, 197, 353). Guard `setPosting(false)` after unmount (199, 363).
+  3. Fixed font sizes in `makeStyles` (551-568). AppText scales them, but the row and header sizes ignore `m.textScale`, unlike the composers. Move them onto the vision-comfort metrics for consistency.
+
+#### `app/(tabs)/calls.tsx` — **8.5 → 9**
+- **Scores now:** Function 9 · States 9.5 · UI 8.5 · A11y 9 · Security 8 · Code 9 (mean 8.83)
+- **Original items:**
+  1. ✅ A failed inner `getCallLog()` merge now sets `syncFailed`, which shows the existing tappable notice (132; notice 288-293).
+  2. ✅ Casts are removed (158, 164, 313). The FAB icon uses `onPrimary` (314).
+  3. ✅ The `eslint-disable` is gone. A retry hides the old notice while it runs, because `syncTry` is now read (99-100). eslint 0.
+- **Regressions:** none.
+- **Subscreens:**
+  - Call actions sheet — 8.5 → 8.5.
+  - Call info modal — 9 → 9.
+  - Remove/Clear confirmations — 9 → 9.
+- **Still needed for 10/10:**
+  1. The scrim is `rgba(0,0,0,0.5)` (397); the `scrim` token now exists. The separator is an inline component (309). The "RECENT" label has no header role (308).
+  2. Real call placement and ringing are **not verifiable statically** (📱).
+
+#### `app/(tabs)/mini.tsx` — **8.5 → 9**
+- **Scores now:** Function 9 · States 8.5 · UI 9 · A11y 9 · Security 8.5 · Code 9 (mean 8.83)
+- **Original items:**
+  1. ✅ Back falls back to chats when there is no history: `canGoBack() ? back() : replace('/(tabs)/chats')` (101). screenBackCoverage passes.
+  2. n/a The `vc_miniapp_todos` purge is now an open product decision (fix_status §5, "Mini-app to-dos"). The comment says so honestly (60-67). Not a deduction.
+  3. ✅ `makeStyles` reads `m`: back, tile and icon disc scale by `controlScale` (177-179, 214, 230-231).
+  4. ✅ The cast is removed (88). The comments now describe the 10-tile, 3/4/5-column grid (35-37, 113, 206).
+- **Regressions:** none.
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. White glyphs on light gradients are under 3:1, for example Notes `#F59E0B`→`#D97706` (52, 134). The glyph is decorative next to its label, but the contrast is still low. Use a dark glyph on the amber tiles, or darken those stops.
+  2. Resolve the to-do purge decision (§5) and act on it (60-67).
+
+#### `app/(tabs)/profile.tsx` — **8 → 8.5**
+- **Scores now:** Function 9 · States 8.5 · UI 8 · A11y 8.5 · Security 8.5 · Code 7.5 (mean 8.33)
+- **Original items:**
+  1. ✅ (§3) Sign-out: the push and socket teardown still run first, and the reason is documented (258-263). A failed `logoutUser()` re-registers push and the socket and says "You are still signed in" (267-271). Screens whose listeners were dropped re-attach only on their next mount (comment 262-263). For example, the Chats tab's realtime listeners sit on the old socket object (`chats.tsx:308-372`) and stay detached until the tab remounts. Best effort; 📱.
+  2. ✅ A load failure with no cache shows an inline card with Retry and a polite live region (73, 114, 345-355). Settings and Sign out stay reachable.
+  3. ✅ `startEdit` reverts the row being left (295-301, 416, 422, 428).
+  4. ✅ "Verify via SMS" is hidden while idle for the account's own number (304, 456). The ✓ uses the same test (437). A number is only ever saved through the OTP (comment 122-123, `onSave` 124-140), so this holds.
+  5. ✅ The VaultID card and version footer moved into `makeStyles` (638-645). `onPrimary` is used for the avatar letter, badge, spinner and buttons (365, 367, 475, 602, 635). Casts are removed.
+- **Regressions:** none.
+- **Subscreens:**
+  - Inline edit rows — 8.5 → 9.
+  - Phone OTP step — 8.5 → 9.
+  - Sign-out confirmation — 8 → 8.5.
+  - Load-error card — new, 8.5.
+- **Still needed for 10/10:**
+  1. After a failed sign-out, ask live screens to re-attach, or keep the socket object and only pause it, so that Chats keeps realtime without a remount (262-271; 📱).
+  2. `load()` has no unmount guard (83-118).
+  3. Seven `catch (e: any)` (112, 136, 180, 196, 229, 244, 268). Seven inline styles (318, 332, 391, 472, 508, 549, 558). The busy scrim is `rgba` (603).
+
+#### `app/(tabs)/alerts.tsx` — **8.5 → 9**
+- **Scores now:** Function 9 · States 9 · UI 9 · A11y 9 · Security 8.5 · Code 8.5 (mean 8.83)
+- **Original items:**
+  1. ✅ `SEV_INK` is gone. Every severity maps to a palette role (30-39): `danger`, `warning`, `caution` (new token, `constants/theme.ts:232, 276`), `success`, `accentOn`. The scan ink uses `onPrimary` (233-234, 317). R4B's partial #1 is now fully done through handoff #4.
+  2. ✅ A failed background backup shows a polite line: "Couldn't back up the log just now — it is safe on this device" (87, 112-114, 253-257). `syncAuditChain` returns `false` from its catch (`auditChain.ts:338, 359-362`).
+  3. ✅ `errText(e: unknown)` (41, 105, 153). The `/blocked` cast is removed (143).
+- **Regressions:** none.
+- **Subscreens:**
+  - Expanded event details — 8.5 → 9.
+  - Scan confirmation — 8 → 8.
+- **Still needed for 10/10:**
+  1. The failed-refresh banner has no `disabled` while refreshing (261-269). The severity text uses an inline `{ color }` (200).
+  2. Settle the on-fill ink in dark: the 13-px "Scan device" label is white on `#1777FE` at 4.11:1 (317).
+  3. The real device-scan result is **not verifiable statically** (📱).
+
+#### `app/new-chat.tsx` — **8 → 8.5**
+- **Scores now:** Function 8 · States 9 · UI 8.5 · A11y 8.5 · Security 8 · Code 8.5 (mean 8.42)
+- **Original items:**
+  1. ❌ Phone-number search is still open. It needs a peer phone on `ChatSummary` (a backend field and a product call; R4B not-done #6).
+  2. ✅ `setListError(offline)` now runs after the `isCancelled()` check (111-121).
+  3. ✅ Casts are removed (`'/chat' as const`, 79). `onPrimary` is used on the action discs and the CTA (35, 218, 279).
+- **Regressions:** none.
+- **Subscreens:** New contact by phone — 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. Phone-number search, once the summary carries a peer phone (needs the backend).
+  2. `catch (e: any)` (72, 155).
+
+#### `app/search.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8.5 · States 9 · UI 8.5 · A11y 8.5 · Security 7 · Code 9 (mean 8.42)
+- **Original items:**
+  1. ✅ (§3) The hits are stored with the query that produced them (44-45, 87-88), and the snippet uses `found.q` (179).
+  2. ✅ The failure notice is its own 44-dp button that bumps `retry`, which the debounced effect depends on (53, 139-145, 89, `notice` `minHeight: 44`).
+  3. ✅ The debounce is typed `ReturnType<typeof setTimeout>` (54). The cast is removed (110).
+- **Regressions:** none.
+- **Found now (older):** global message search lists view-once and Invisible Ink text, and messages from locked chats. See the top section: `lib/localDb.ts:878-925` has no `meta` and no `isChatLocked`; the screen renders `snip` and the full `h.content` in the label (179-190). This is the same leak C1/C2 closed for in-chat search. Security 9 → 7.
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. Apply `searchHidden` in `searchAllMessages`: select `meta` on both paths (`lib/localDb.ts:879, 915`). In the screen, drop or mask hits whose chat `isChatLocked` (82-88).
+  2. Back is a bare `router.back()` (117). Search is only ever pushed, so this is fine today; a fallback would match the tabs.
+
+#### `app/contacts.tsx` — **8 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8.5 · A11y 8.5 · Security 7.5 · Code 8.5 (mean 8.33)
+- **Original items:**
+  1. ❌ Keyed/OPRF lookup: the wire value is still the client hash (148). The pepper is server-side and **not verifiable statically**.
+  2. ✅ An `alive` ref (112-113) is checked after the prompt (121), the read (136), every contact's hashes (152, which also stops the loop) and every match chunk (182). The catch and finally are guarded (219-221).
+  3. ✅ The error bar is the retry: role, label, busy/disabled state, 44 dp, and the copy "Tap to scan again" (377-382).
+  4. ✅ Casts are removed (255-259). `onPrimary` is used on the initials and CTA (430, 440).
+- **Regressions:** none.
+- **Subscreens:**
+  - Scanning progress — 8 → 8.5. It now stops on leave.
+  - Permission-denied state — 8 → 8.
+  - Call-mode Voice/Video picker — 7 → 7. It is still an `Alert` (268-272).
+- **Still needed for 10/10:**
+  1. A keyed or OPRF contact lookup, and confirmation that the pepper is deployed (148; backend).
+  2. An in-screen Voice/Video chooser instead of the `Alert` (268-272).
+  3. `catch (e: any)` (178, 218, 260, 288).
+
+#### `app/contact-info.tsx` — **8 → 8.5**
+- **Scores now:** Function 9 · States 9 · UI 8.5 · A11y 8.5 · Security 8.5 · Code 8.5 (mean 8.67)
+- **Original items:**
+  1. ✅ A refresh that fails over a painted cache sets `staleShown`. A `getCommonGroups` failure sets `groupsFailed`, with an `active` guard and a refetch on `reloadKey`. One tappable notice covers both (116-130, 199-200, 330-336).
+  2. ✅ (R4HO handoff #3) File rows pass `open: String(f.id)` and are labelled "Open <name>" (365-366). The gallery opens that row once, after the list holds it (`app/media-gallery.tsx:334-342`). If the file is not in the gallery's list, the user lands on the Files tab, as before. 📱
+  3. ✅ The `Promise.all` is typed (158-162). The casts and `Promise<any>[]` are gone. Inline styles moved to `prefTitle`, `prefSub` and `ghostEmoji` (507-510).
+  4. ✅ The Switch thumb uses `onPrimary` (310).
+- **Regressions:** none.
+- **Subscreens:**
+  - Block / Unblock / Report dialogs — 8.5 → 8.5.
+  - Stale / groups notice — new, 8.5.
+- **Still needed for 10/10:**
+  1. When both the refresh and the groups fail, the notice names only the stale snapshot (334). Mention both.
+  2. `catch (e: any)` (220, 230, 239, 253, 261). A remaining inline row style (305-306).
+
+#### `app/qr-contact.tsx` — **8 → 8**
+- **Scores now:** Function 7.5 · States 8.5 · UI 8 · A11y 8.5 · Security 8 · Code 8.5 (mean 8.17)
+- **Original items:**
+  1. ❌ Verified App Links and iOS domains: hosting is not done (fix_status §4; R4HO blocked list).
+  2. ✅ `accessibilityRole="tablist"` (119).
+  3. ✅ Only a `404` reads "Not found". Anything else reads "Couldn't look up this code … Try scanning again" (97-100).
+  4. ✅ The active tab text uses `onPrimary` (209). The QR colours and camera hint stay fixed on purpose (149, 222).
+- **Regressions:** none.
+- **Subscreens:**
+  - My QR tab — 8 → 8.
+  - Scan tab — 7.5 → 8.
+  - "Contact found" confirmation — 7 → 7. It is still an `Alert` (81-95).
+- **Still needed for 10/10:**
+  1. Verified links plus iOS Associated Domains (`app.json`; needs hosted `assetlinks.json` and AASA).
+  2. Replace the "Contact found" `Alert` with the in-screen confirm that `/add` uses (81-95).
+  3. `catch (e: any)` (49, 89, 96).
+
+#### `app/verify-contact.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 9 · States 9 · UI 8.5 · A11y 8.5 · Security 8 · Code 9 (mean 8.67)
+- **Original items:**
+  1. ✅ QR comparison:
+     - Show/Hide QR (175-179, 185-189) and a Scan button with `permissionDenied` on refusal (114-122).
+     - One result per opening (54, 124-127).
+     - Match only *offers* "Mark as verified"; mismatch warns; any other QR is "Not a safety-number code" (128-138).
+     - The pure helper is `lib/safetyQr.ts:8-29`, and its selftest passes.
+     - The scanner is always dark (234-244). Camera behaviour is **not verifiable statically** (📱).
+  2. ✅ The copy now says "a different app or channel (not this chat …)" (197-203), and the header is updated (3-7).
+  3. ✅ An `alive` ref with a guarded `set()` (56-61, 72). The Verified ink and spinner use `onPrimary` (215-223).
+- **Regressions:** none.
+- **Found now (older):** "Verified" is stored per contact id, not per safety number (`lib/verification.ts:36-48`, read at 77). After a key change, which `lib/keyChange.ts` detects and the chat banner links here for (`ChatBanners.tsx:70-76`), this screen still shows "Verified — tap to clear" beside the new number (224). The screen's own copy says to re-verify (201-202). Security 8.
+- **Subscreens:** QR show/scan and the scanner modal — new, 8.5 (📱).
+- **Still needed for 10/10:**
+  1. Bind verification to the number. Store a hash of the verified safety number, and when it differs, show "Number changed since you verified" and treat the contact as unverified (77, 206-228). The server sync (`setContactVerified`) would need to carry it too, or the key-change acknowledgement could clear the flag.
+  2. Inline retry styles (162-163). `catch (e: any)` (79, 93).
+
+#### `app/add/[...segments].tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8 · States 9 · UI 8.5 · A11y 8.5 · Security 9 · Code 8.5 (mean 8.58)
+- **Original items:**
+  1. ❌ Verified App Links and iOS domains (hosting; §4).
+  2. ✅ An `alive` ref (42-43). `resolve` uses a guarded `set` (57-69), and `openChat` does not navigate or set state after unmount (85, 88).
+  3. ✅ The resolving label shows only `@vaultId` (133). The name segment and `safeDecode` are removed, with a comment explaining why (46-49).
+- **Regressions:** none.
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. Verified links plus iOS domains.
+  2. `catch (e: any)` (66, 87).
+
+#### `app/join/[code].tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8.5 · States 9 · UI 8.5 · A11y 8.5 · Security 8 · Code 9 (mean 8.58)
+- **Original items:**
+  1. ❌ The preview endpoint is written but not deployed (§4). Today the confirm stays generic.
+  2. ✅ `previewSettled`:
+     - It settles on any answer (`.finally`) or after 4 s (28, 46, 77-84).
+     - Until then there is a polite "Loading group details…" line, and Join is disabled with a busy state (110-115).
+     - Against today's server, the speed of the preview failure is **not verifiable statically**.
+  3. ✅ A `410` from POST `/chats/join` has no retry (68).
+  4. ❌ Verified links plus iOS domains.
+- **Regressions:** none.
+- **Subscreens:**
+  - Join confirmation — 8.5 → 8.5.
+  - Joining — 8 → 8.
+  - Pending-approval — 8 → 8.
+  - Error with retry — 8.5 → 9.
+- **Still needed for 10/10:**
+  1. Deploy `/chats/join/:code/preview`, then confirm on a device that the name shows.
+  2. Verified links plus iOS domains.
+  3. `catch (e: any)` (64, 78).
+
+#### `app/i/[token].tsx` — **7.5 → 7.5**
+- **Scores now:** Function 5 · States 8.5 · UI 8.5 · A11y 8 · Security 7.5 · Code 8.5 (mean 7.67)
+- **Original items:**
+  1. ❌ Retirement date or producer: still undecided (header 17-20). Nothing mints tokens. This is not in fix_status §5, so Function stays capped.
+  2. ✅ `retry` is false for a missing token and for `410`/`400` (36-38, 53, 68, 74). Only "Go to chats" is offered then (130-134).
+  3. ❌ The confirm shows no group name; a token-bound preview endpoint is needed (R4HO "Blocked", B-6).
+  4. ✅ `AuroraBackground` over a transparent wrap (81, 143). `onPrimary` is used (123, 150), and the casts are removed (60, 77).
+- **Regressions:** none.
+- **Subscreens:** Error state — 7 → 8.5.
+- **Still needed for 10/10:**
+  1. Decide to retire the route, or re-add a producer (header 3-7, 17-20).
+  2. A token-bound preview, so the confirm can name the group (89-92; backend).
+  3. "Joining…" is not a live region (103). `catch (e: any)` (61).
+
+#### `app/invite-link.tsx` — **8 → 8.5**
+- **Scores now:** Function 8 · States 9 · UI 8.5 · A11y 9 · Security 8 · Code 8 (mean 8.42)
+- **Original items:**
+  1. ❌ Verified links for `JOIN_BASE` (hosting; §4).
+  2. ✅ `dead = revoked || isExpired` hides all row actions and dims the row (185-187). The title reads "LINKS · n ACTIVE" (176).
+  3. ✅ `Share.share` is try/caught (88-94). A failed revoke restores only that row (109-116).
+  4. ✅ Row labels name the code, for example "Copy link CODE" and "Revoke link CODE" (197-212). The QR Close text uses `onPrimary` (271).
+- **Regressions:** none.
+- **Subscreens:**
+  - Invite QR modal — 8.5 → 8.5.
+  - Revoke confirmation — 8 → 8.5.
+  - Permanent-link confirmation — 8 → 8.
+- **Still needed for 10/10:**
+  1. Verified links plus iOS domains.
+  2. `renderItem` is an inline closure rebuilt on every render (184-219). Back is a bare `router.back()` (140). `catch (e: any)` (50, 81, 111).
+  3. Revoke has no in-flight guard, so a second tap on another row while the first request is pending is allowed (105-119). Minor.
+
+---
+
+### C1 — Chat conversation screen (round 4) — re-rating
+
+Base 43c2d19 → HEAD 4910069. Round 4 touched the chat in three commits:
+- e729721: bubble a11y actions, GIF/forward via the outbox, the MessageBubble split.
+- 0dcfb48: the onPrimary/onDanger/warning tokens.
+- 4910069: cross-package handoffs. VaultBeam actions on the bubble, the reader gets only {chatId,id}, Remind drops its `preview` param, `forwardMessage` delegates to `forwardPayload`, split.tsx passes `onClosePane`.
+
+The old score of 8 is the round-3 result in `rerate3/C1.md`. Open items are that file's "Still needed" list plus `7c2bd24` (fix_status §3, line 118: ink leaks, full veil, sibling backdrops). I checked the fix claims in `fixes/R4C1.md`.
+
+**What I read:**
+- In full: the round-4 diff of `app/chat.tsx` and the current `MessageBubble.tsx` (801 lines). From `BubbleParts.tsx`: `ReaderAffordance`, `LocationBubble`, `TextBody` and `BubbleMetaLine`. Also `bubbleA11yActions.ts`, `chatFormat.ts:120-157`, `lib/forwardPayload.ts` and `lib/chatReceipts.ts`.
+- The diffs of `ChatModals`, `ChatBanners`, `ChatLockGate`, `Composer`, `InChatSearchBar`, `useChatMenu`, `chatStyles`, `ViewerStack`, `GifPicker`, `SharedMediaThumb`, `MessageRow`, `useMessageActions` and `lib/messageQueue.ts`.
+- `messageQueue.ts:150-330` and `480-760` (enqueue, `postOnce`, `flush`).
+- `chatService.ts` `sendMessage` (1485-1554) and old/new `forwardMessage`.
+- `msgEnvelope.ts` `META_PUBLIC_KEYS`, `constants/theme.ts` palettes.
+
+**Checks I ran (read-only):**
+- `npx tsc --noEmit -p .`: 0 errors.
+- `npx eslint app/chat.tsx components/chat/ components/{GifPicker,MessageActionSheet,VaultBeamBubble}.tsx lib/{messageQueue,forwardPayload,chatReceipts}.ts`: 0 errors and 2 warnings, both older ones in `lib/messageQueue.ts:524,538` (`perf.*`). `components/chat/*` went from 7 warnings to 0.
+- `npx tsx` selftests, all exit 0:
+  - New: bubbleA11yActions, forwardPayload, chatReceipts, and messageQueue section 5 (it asserts the server sees only `{gifUrl}` and that `localUri` is refused).
+  - Existing: bubbleA11yLabel, protectedText, messageQueue.flush, forwardPolicy, klipyAttribution, groupRefRouting, chatTimeline, outboxRecovery, receiptEvents, msgEnvelope, a11yCoverage, themeCoverage (22/20), uiDebtRatchet (5 / 306), chatLockReceipts, chatLockFactors, inChatSearchCount, editWindow, chatCode, silentFailure, keyboardInset, orphanRoutes (51), screenBackCoverage.
+
+Nothing here is deployed or device-verified. The backend parts (`notifSound` on GET /chats/:id, and `/receipts`) count only for how gracefully the client behaves against today's server.
+
+#### Did the MessageBubble split preserve behaviour?
+I extracted `43c2d19:components/chat/MessageBubble.tsx` (1,819 lines) and ran `diff -w` on every moved block against its new home. **I found no lost behaviour.**
+
+- **Pure moves.** Only the logged a11y and theme edits differ:
+  - `PollBubble`: old `259-377` against `BubbleParts.tsx:29-150`. Adds `voteRef`, `useMemo` on counts and mine, and radio/checkbox roles with checked/busy state.
+  - `FileBubble`, `AudioBubble`, `ImageAttachment` and `VideoBubble`: old `486-960` against `MediaBubbles.tsx:41-525`. Adds `actionRef`, roles and labels, `onPrimary`/`ON_MEDIA_SCRIM`, and the full deps.
+  - `ImageAttachment` now reads `onError` through a ref, so `download` stays stable. The load effect lists `download`, but `download`'s own deps are a subset of the effect's, so the effect runs exactly as before.
+  - `AudioBubble` drops its unused `authHeader` dependency.
+- **Thread decor and formatters.** `ThreadDecor.tsx` against old `1019-1103`, and `chatFormat.ts` against old `162-258` and `961-984`: identical.
+  - `EmojiPanel` was removed. It has no importer: grep finds nothing, and tsc is clean.
+  - The SwipeToReply glyph changed from `#9CA3AF` to `textDim`.
+- **Text rendering.** `bubbleText.tsx` against old `82-161`: the logic is identical. Link and mention styles now come from a `BubbleInk` argument instead of `HL.link`/`HL.mention`, and a link has `accessibilityRole="link"`.
+- **Group and game cards.** `GroupRefBubble` and `GameInviteBubble` (`MessageBubble.tsx:59-174`) are identical, with the navigation pulled into `openGroupRef` and `openGameInvite` and the `as any` dropped.
+- **Bubble body.** Old `1104-1819` against new `175-801`:
+  - The tick logic moved verbatim into `chatFormat.ts:130-157` (`tickStateOf`).
+  - The location IIFE became `LocationBubble` (`BubbleParts.tsx:199-236`), identical plus a role and label.
+  - The text, unable-to-decrypt and not-available branches became `TextBody` (`BubbleParts.tsx:238-312`), verbatim.
+  - The meta line became `BubbleMetaLine` (`:321-376`); see regression 1.
+- **Intended changes.**
+  - The Reader `cached` argument changed from `msg.id > 0 && !looksEncrypted(content)` to `msg.id > 0` (`MessageBubble.tsx:~466`). This is deliberate: `app/reader.tsx:57-66` now decrypts an envelope row itself through `e2eeGetCached`, so plaintext no longer travels in route params.
+  - The decrypt effect is now keyed on `msg.id` as well (`MessageBubble.tsx:225-236`). It only matters for a row that is still encrypted when its id changes, which is not an observable change.
+- **Memoisation.** `bubblePropsEqual` is unchanged (`MessageBubble.tsx:784-799`). The new `onReply` follows the same not-compared pattern as `onLongPress`/`onJumpTo`, and `MessageRow.tsx:71` builds it from `item`, which is compared.
+
+#### Did the GIF/forward outbox change regress behaviour or E2EE?
+I found no E2EE regression.
+
+- **Same encryption path.** `enqueueMessage` (`lib/messageQueue.ts:249-275`) feeds the same `postOnce` that text uses (`:488-...`). It does the same `splitMeta` → `wrapEnvelope` → `encryptForChat`, with the same "never ship the wrapper unencrypted" fallback (`:510-520`). That is byte-for-byte the logic of `sendMessage` (`chatService.ts:1504-1507`), which GIF and forward used before.
+  - A GIF sends `{gifUrl}` in the clear, because `gifUrl` is in `META_PUBLIC_KEYS` (`msgEnvelope.ts:67-79`), exactly as before. `preview` and `source` ride inside the ciphertext.
+  - `localUri` is refused (`:269-271`).
+- **Forward rules are identical.** `forwardPayload` (`lib/forwardPayload.ts:31-48`) matches the old `forwardMessage` rules line for line (`git show 43c2d19:lib/chatService.ts:2757-2781`). `forwardMessage` now delegates to it (`chatService.ts:2786-2795`), so there is one copy.
+- **The local record is better than before.** For a meta-only send, `postOnce` now commits the sender's row as `content: ''` plus the full meta (`messageQueue.ts:579-585`). Before, a GIF's own row kept the ack's ciphertext as its content.
+- **Restart restore keeps meta.** It now restores `q.meta` (`app/chat.tsx:745`), so pending text keeps its ink and mentions too.
+- **Event handling.** The `'sent'`/`'failed'` handlers are filtered by `chatId` (`app/chat.tsx:898-937`), so a forward queued into another chat never touches this list. The pending GIF bubble is swapped by `'sent'` like text, and Cancel/Retry already call both queues (`:1546-1585`).
+- **Behaviour change (logged, not a bug).** A forward that is offline or rejected now shows only in the target chat (`app/chat.tsx:1738-1755`), where it shows as a pending or red bubble. The source chat gives no confirmation and no failure alert, except when the outbox write fails.
+
+| Screen | Old | New | Δ |
+|---|---|---|---|
+| `app/chat.tsx` — Chat conversation (1:1, group, split pane), incl. `components/chat/*` | 8 | **8.5** | +0.5 |
+
+#### `app/chat.tsx` — **8 → 8.5**
+- **Scores now:** Function 9 · States 9 · UI 8 · A11y 9 · Security 9.5 · Code 7.5 (avg 8.67 → **8.5**)
+  - **Function (8.5 → 9):**
+    - GIF and Forward go through the outbox (`app/chat.tsx:1918`, `:1751`).
+    - Search has "Search all messages" (`InChatSearchBar.tsx:92-100`; `app/chat.tsx:2293`).
+    - The forward picker has search (`ChatModals.tsx:209-215`, `260-273`).
+    - The pane-ended notice has a real Close (`app/chat.tsx:2210-2228`; `app/split.tsx:139`, `169`).
+    - The sound mark and Message Info times are written with graceful fallbacks, but they stay unproven until the backend is deployed.
+    - Read and delivered are now hard to tell apart on your own bubbles (regression 1).
+    - Multi-select is a product decision.
+  - **States (9, unchanged):**
+    - Message Info has loading, fallback and error copy (`ChatModals.tsx:33-41`, `65`, `96`).
+    - GIFs survive offline.
+    - Forward outcomes appear only in the target chat.
+  - **UI (8, unchanged):**
+    - Gains: `WARN` became `c.warning` (`chatStyles.ts` screenshot/keyChange/vanish), `ViewerStack` uses `c.warning`, `HL.link`/`HL.mention` were replaced by per-bubble ink (`MessageBubble.tsx:274-281`), and `onPrimary` is used in the lock gate, badge, GIF picker and not-found screen.
+    - Offset by regression 1 (the read tick).
+    - Left: fixed `#fff` in `Composer.tsx:128`, `242`, `262-263` and `MediaCaptionPreview.tsx:65-163`.
+  - **A11y (8.5 → 9):**
+    - The bubble has a role and named actions (`MessageBubble.tsx:459-513`, `537`). VaultBeam controls are included (`:522`; `VaultBeamBubble.tsx:159-161`).
+    - The veil hides everything behind it, and so does the GIF overlay (`app/chat.tsx:2208`, `2262-2264`, `2336-2338`, `2406-2408`, `2421-2423`).
+    - Backdrops are siblings of their sheets (`ChatModals.tsx:103-104`, `124-125`, `171-172`, `225-226`; `ViewerStack.tsx:58-59`; `GifPicker.tsx:133-134`).
+    - The lock error is announced (`ChatLockGate.tsx:41-43`, `94`), the composer input has a label (`Composer.tsx:161`), and Send has a silent action (`:251-255`). Banner ✕ buttons are siblings (`ChatBanners.tsx:186-206`, `228-247`).
+    - Everything is 📱, not verified on a device.
+  - **Security (8.5 → 9.5):**
+    - Ink and view-once text no longer leaves the bubble: the reply bar, quote, Memory banner and search (`ComposerBars.tsx:161`, `MessageBubble.tsx:578`, `ChatBanners.tsx:137`, `InChatSearchBar.tsx:31`).
+    - The a11y actions never expose hidden ink, because the link and reader actions require `textShown` and `!inkHidden` (`MessageBubble.tsx:459-466`).
+    - Remind no longer puts plaintext in route params (`useMessageActions.ts:82-85`). The reader gets ids only (`BubbleParts.tsx:182-191`).
+    - E2EE is unchanged for GIF and forward (above).
+  - **Code (6.5 → 7.5):**
+    - `MessageBubble.tsx` went from 1,819 lines to 801, split into focused files, with 0 eslint warnings across `components/chat/*`.
+    - `as any` went from 46 to 22: chat.tsx 10, ChatHeader 4, MediaBubbles 2, useMessageActions 2, and 1 each in chatStyles, useMediaStaging, ChatBanners and MessageBubble.
+    - Left: `app/chat.tsx` is 2,549 lines, and the socket effect is still about 310 lines inline (`app/chat.tsx:979-1289`). It is blocked by selftests that read the source.
+- **Original items** (`rerate3/C1.md` "Still needed" 1-11):
+  1. ✅ The ink leaks are fixed (`7c2bd24`): `ComposerBars.tsx:161`, `MessageBubble.tsx:578`, `ChatBanners.tsx:137`, `InChatSearchBar.tsx:31`.
+  2. ✅ The veil hides the header, search, banners, FAB, list and composer (`app/chat.tsx:2262-2264`, `2336-2338`, `2406-2408`, `2421-2423`). Still 📱.
+  3. ✅ Modal nesting: backdrops are siblings (citations above). ✅ The bubble has a role and named actions for every nested control (`MessageBubble.tsx:472-513`; `bubbleA11yActions.ts:35-57`). Still 📱.
+  4. ✅ GIF and Forward go through the outbox (`app/chat.tsx:1909-1928`, `1738-1755`; `lib/messageQueue.ts:249-275`).
+  5. ◐ The sound mark reads `chat.notifSound` and updates locally after a successful save (`useChatMenu.ts:95-112`). Against today's server the field is absent, so no option is marked. Needs a backend deploy.
+  6. ◐ Hermes `\p{L}`/`u` (`app/chat.tsx:1435`, `1451`). ZC1b compiled the literals with the shipped hermesc (`fixes/ZC1b.md` #4), but nothing was run on a device. Low risk.
+  7. ✅ Theme: `WARN` and `#B45309` are now `c.warning`, `HL` link and mention are themed per bubble, and the read tick is tokenised. ◐ The read tick now introduces regression 1.
+  8. ✅ A11y nits: live region on the lock error (`ChatLockGate.tsx:94`), a label on the input (`Composer.tsx:161`), and "1 match" (`7c2bd24`).
+  9. ✅ Embedded mode: the veil shows a split-bar hint instead of replacing the screen (`ChatLockGate.tsx:101-110`). Leave, Hide and Clear show a pane notice with "Close this chat" (`useChatMenu.ts:249`, `311`, `340`; `app/chat.tsx:2210-2228`).
+  10. ◐ Code: MessageBubble is split, warnings are at 0, and `as any` went from 46 to 22. The socket effect is still inline (`app/chat.tsx:979-1289`).
+  11. ◐ Search all is ✅ (`InChatSearchBar.tsx:92-100`). Message Info per-member times are written with a fallback (`ChatModals.tsx:33-98`, `lib/chatReceipts.ts:31-43`) but depend on the backend. ❌ No multi-select (product decision).
+- **Regressions (round 4):**
+  1. **On your own text bubble, read and delivered now look the same.** Both use `checkmark-done`.
+     - On a filled bubble, read is `colors.tickRead` and delivered is `bubbleMetaOut` (`BubbleParts.tsx:327-329`, `368`).
+     - Light theme: `#FFFFFF` against `rgba(255,255,255,0.85)`. Dark theme: `#FFFFFF` against `rgba(255,255,255,0.70)` (`constants/theme.ts:211-212`, `259-260`).
+     - With Vision Comfort high contrast, `fillInk` is `bubbleOutText` `#FFFFFF`, so they are identical (`BubbleParts.tsx:329`).
+     - Before, read was a distinct blue `#4A9FFF`, though it had low contrast. Media and received bubbles are fine, because they use `accentOn` against the meta ink. The screen-reader label still differs (`:369`).
+  2. A minor inaccuracy in a comment, with no behaviour change: `Composer.tsx:124-126` says `onPrimary` is a dark "night ink" in the dark theme, but it is `#FFFFFF` in both palettes (`constants/theme.ts:228`, `272`).
+  3. A behaviour change (logged in R4C1 partial #7): a forward rejected by the server shows only as a red bubble in the target chat. The source chat no longer alerts (`app/chat.tsx:1751-1755`).
+  - No other regressions from the split or the new tokens. tsc is clean, eslint has 0 warnings in `components/chat`, and all the chat selftests pass.
+- **Subscreens:**
+  - Message thread (FlatList + MessageRow) — 8.5 → 9. Role, named actions and the quote ink fix. Read-tick regression.
+  - Header (`ChatHeader`) — 9 → 9.5. Hidden under the veil and the GIF overlay; 4 `as any` left.
+  - Overflow menu + Screenshot/Sound/Disappearing pickers — 8.5 → 9. Sound mark (graceful), pane notice, casts removed.
+  - In-chat search bar — 7.5 → 9. Protected rows are filtered, "1 match", "Search all messages".
+  - ConnectionBanner — 9 → 9.
+  - Error bar — 8.5 → 8.5.
+  - Security-code-change banner — 8.5 → 9 (`c.warning` tint).
+  - Inbound screenshot banner — 8.5 → 9 (`c.warning`).
+  - Memory Bubble — 7 → 8.5. Skips protected messages (`ChatBanners.tsx:137`).
+  - Live-location banner — 8 → 9. The ✕ is a sibling (`ChatBanners.tsx:186-206`), and it is hidden under the veil.
+  - Pinned-message bar — 8.5 → 9. Unpin is a sibling (`ChatBanners.tsx:228-247`).
+  - Scroll FAB + "Load newer" pill — 8.5 → 9. `onPrimary` badge, and hidden under the veil and GIF overlay.
+  - @mention picker — 7.5 → 8. hermesc-compiled; still first name only (product decision).
+  - Live viewers stack + "Viewing now" modal — 8 → 9. `c.warning` and a sibling backdrop (`ViewerStack.tsx:24`, `58-59`).
+  - Typing indicator — 8.5 → 8.5.
+  - Edit-mode bar — 8.5 → 8.5.
+  - Vanish Mode / Invisible Ink bars — 8 → 8.5 (`c.warning`).
+  - Composer link-preview card — 8.5 → 8.5.
+  - Reply bar — 8 → 9 (`previewText`, `ComposerBars.tsx:161`).
+  - Composer + camera tap/slide — 9 → 9.5. Input label, silent-send action, `onPrimary` hint. Fixed `#fff` on `sendFab` and mic.
+  - Voice recording mode — 8.5 → 8.5.
+  - Long-press MessageActionSheet — 9 → 9. Remind carries no preview.
+  - Message Info modal — 7.5 → 8.5. Times with fallback, loading and error states, headers and row labels. Times need the backend.
+  - Profile photo viewer — 8 → 8.5 (sibling backdrop).
+  - Attach menu — 7.5 → 8. Sibling backdrop; the 120 ms timeout is now a documented `ponytail:` (`ChatModals.tsx:181-185`).
+  - GifPicker overlay + preview — 8 → 9. Outbox, sibling backdrop, chat hidden behind it, `onPrimary`.
+  - Media caption preview — 8.5 → 8.5. Fixed `#fff` on the dark scrim.
+  - Forward picker — 7 → 8.5. Search, `KeyboardSafe`, outbox, sibling backdrop. Failures surface only in the target chat.
+  - Per-chat lock gate — 8.5 → 9. Full veil, live region plus iOS announce, embedded hint (📱).
+  - Pane-ended notice (new, Overlay, `app/chat.tsx:2210-2228`) — **9**. A header, the reason, and "Close this chat" through `onClosePane`.
+  - Not-found / loading — 9 → 9.5 (`onPrimary`, typed route).
+  - Failure / destructive Alerts — 8.5 → 8.5.
+  - Group-chat mode — 8 → 8.5. Leave and Clear in a pane end cleanly.
+  - Embedded split-pane mode — 8 → 9. The veil no longer replaces the split; Leave, Hide and Clear show the notice with Close.
+  - `components/chat/MessageBubble.tsx` (with `MediaBubbles`, `BubbleParts`, `bubbleText`, `ThreadDecor`, `chatFormat`) — 8 → 8.5. A faithful split with 0 warnings and named actions. Read-tick regression; 1 + 2 `as any`.
+  - `components/MessageActionSheet.tsx` — 8 → 8 (file unchanged).
+- **Still needed for 10/10:**
+  1. Make read visibly different from delivered on your own filled bubble: a distinct read colour with ≥3:1 against the bubble, or a different glyph. This must also hold under high contrast (`BubbleParts.tsx:327-329`, `368`; `constants/theme.ts:212`, `260`).
+  2. Give a forward visible feedback in the source chat: queued for <chat>, or a later failure (`app/chat.tsx:1738-1755`).
+  3. Deploy and confirm the backend contracts the client already handles: `notifSound` on GET /chats/:id (`useChatMenu.ts:95-112`), and `/messages/:id/receipts` (`lib/chatReceipts.ts:31-43`).
+  4. Move the socket effect out of `app/chat.tsx:979-1289`, updating `lib/receiptEvents.selftest.ts` and `lib/outboxRecovery.selftest.ts` to read the new file. Cut the remaining 10 `as any` in chat.tsx and 4 in `ChatHeader.tsx`.
+  5. Device-verify with VoiceOver and TalkBack:
+     - The bubble actions (`MessageBubble.tsx:472-537`).
+     - The veil and GIF hide wrappers (`app/chat.tsx:2208`).
+     - The sibling backdrops.
+     - The Send `activate`/`silent` actions (`Composer.tsx:251-255`).
+     - The Hermes `\p{L}` regexes (`app/chat.tsx:1435`, `1451`).
+  6. Tokenise or document the remaining fixed whites (`Composer.tsx:242`, `262-263`; `MediaCaptionPreview.tsx:65-163`), and correct the `Composer.tsx:124-126` comment.
+  7. The embedded lock veil could offer "Close this chat" through `onClosePane` instead of only the split-bar hint (`ChatLockGate.tsx:101-105`).
+  8. Product decisions: multi-select, and full-name @mentions (`app/chat.tsx:1435`).
+
+---
+
+### C2 — Chat tools, backup & import — round-4 re-rating
+
+This is a static, read-only review of `43c2d19` → `HEAD` (`4910069`); the working tree is clean. It uses the same rubric (`RUBRIC.md`) and format (`RERATE.md`, `RERATE4.md`). Each overall score is the mean of the six dimensions, rounded to the nearest 0.5, with ties rounded up (as in round 3).
+
+**Baselines.** "Old" is the round-3 score in `rerate3/C2.md`. Each screen's open items are that file's "Still needed for 10/10" list, plus the C2 items in `2026-10-04_fix_status.md` §3 that were fixed after re-rating in `815c7a5`:
+- Reminders: "Clear reminders".
+- In-chat search: protected text.
+- Scheduled: lock check on previews.
+- Wallpaper: the all-chats value.
+- `disableE2EEBackup`: rollback.
+
+**Fixer claims checked:** `fixes/R4C2.md`. I checked every claim against the code. I also checked the handoffs it lists; all are done at HEAD:
+- `app/chat.tsx:72-73` imports `lib/chatWallpaperStore` and `lib/chatBubbleTheme`, and the route re-exports are gone.
+- `components/chat/InChatSearchBar.tsx:92-100` has "Search all messages", wired at `app/chat.tsx:2293`.
+- `components/chat/useMessageActions.ts:82-85` no longer passes `preview`.
+- A `scrim` token exists (`constants/theme.ts:90`, `:231`, `:275`) and is used in chat-export (`:370`), `broadcastStyles` (`:55`), app-lock-chats and chat-backup (`:443`).
+- `lib/waImport.selftest.ts:306` scans `importChatsParts.tsx`.
+
+**Evidence I ran myself** at HEAD; all exit 0:
+- `npx tsc --noEmit -p .`
+- `npx eslint` on the 17 screens, `components/chattools/` and the 4 new libs: 0 errors, 0 warnings.
+- `npx tsx` selftests:
+  - Coverage and ratchets: a11yCoverage, themeCoverage (22/20), screenBackCoverage, orphanRoutes (51), uiDebtRatchet ("no file got worse"), keyboardAvoidance.
+  - Backup: backupSecretSwitch, backupCrypto, backupSecrets, backupScheduler, recoveryKeyCheck, mediaToolsFixesZR.
+  - Chat tools: chatExportFormat, bookmarkProtected, bookmarkBodies, chatCode, scopedChoice, wallpaperFile, waImport, missingRoute, messageReminderReset, silentFailure, chatTimeline.
+  - Chat lock: chatLockFactors, chatLockReceipts, chatLockPin.
+
+**Status.** Nothing here is deployed or device-verified. These are **not verifiable statically**:
+- the R4BE server contracts (423 on `/user/pin/verify`; channel leave, post delete and `channelId`);
+- the iOS `inactive` re-lock;
+- `beforeRemove` prompts;
+- chunked export writes;
+- the masked key field.
+
+**Split regression check:**
+- `importChatsParts.tsx` matches the old inline pieces (diffed against `43c2d19:app/import-chats.tsx:600-906`). The only changes are `stepLast` and `tint()`, plus `onPrimary` on the ack check.
+- `BroadcastChannelView` keeps the old detail view's back handler, realtime join, paging and composer.
+- `lib/chatBubbleTheme.getBubbleColors` is byte-identical in logic to the old route export.
+
+I found **no behaviour lost in the splits**.
+
+| Screen | Old | New | Δ |
+|---|---|---|---|
+| `app/in-chat-search.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/message-reminder.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/schedule-message.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/scheduled.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/create-poll.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/bookmarks.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/chat-code.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/chat-export.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/chat-themes.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/chat-wallpaper.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/receipt-control.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/broadcast.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/hidden-chats.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/app-lock-chats.tsx` | 8.0 | 8.0 | 0 |
+| `app/import-chats.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/chat-backup.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/backup-e2ee.tsx` | 8.0 | 8.0 | 0 |
+
+**Regressions introduced in round 4:**
+1. **backup-e2ee: "Make a new key" vs older key-mode copies.**
+   - Every key-mode header has `salt: ''` (`lib/backupCrypto.ts:131-133`), so `readSecret`'s salt check (`lib/cloudBackup.ts:233`) cannot tell an old key's blob from the current key's blob.
+   - After the new "MAKE A NEW KEY" (`app/backup-e2ee.tsx:344`, `:347`), restoring an older Google Drive or local copy on this device feeds it the new key and fails with an opaque decrypt error. That happens through Drive in `app/restore-backup.tsx:95` and the Drive/local fallback in `app/chat-backup.tsx:167-170`. The user is never asked for the old key.
+   - This contradicts the screen's own note, "still need your old key" (`app/backup-e2ee.tsx:97-99`).
+   - The path also existed via off→on, but round 4 made it a one-tap flow.
+2. **backup-e2ee: the failure copy can be untrue.**
+   - "Nothing was changed — still protected by your current …" (`app/backup-e2ee.tsx:89-94`) is false if the store step fails and the re-upload under the old secret also fails. `switchBackupSecret` swallows that second failure (`lib/backupSecretSwitch.ts:46`).
+   - The server copy is then encrypted under the new secret. In key mode that key is never shown, because the throw skips `:135`.
+3. **chat-export: the no-Sharing fallback (web) now shares only the title** `'crazzychat export'` (`app/chat-export.tsx:238-240`, `components/chattools/chatExportFile.ts:52`). Before round 4, the text export shared the full text (`43c2d19:app/chat-export.tsx:237`). It is documented in a `ponytail:` comment and affects web only.
+4. **Trivial: stale comments.** "No scrim token exists" remains next to code that now uses `c.scrim` (`app/chat-backup.tsx:442`, `components/chattools/broadcastStyles.ts:54`).
+
+I found no regression from the new tokens. `onPrimary` and `onDanger` are only used on `primary` and `danger` fills, and bubble text keeps `bubbleOutText`. One nit: hidden-chats now draws group-avatar initials in `onPrimary` on a `c.success` fill (`app/hidden-chats.tsx:396-398`); `onPrimary` is documented only against primary (`constants/theme.ts:272`).
+
+---
+
+#### `app/backup-e2ee.tsx` — **8.0 → 8.0** (data-loss review of the secret switch)
+- **Scores now:** Function 8.5 · States 8 · UI 8.5 · A11y 8 · Security 7.5 · Code 8 (mean 8.08)
+- **Original items:**
+  1. ✅ The `enableE2EEBackup` rollback is fixed. It now goes through the pure `switchBackupSecret` (`lib/cloudBackup.ts:168-180`, `lib/backupSecretSwitch.ts:35-49`):
+     - It reads the old pair, and a read failure throws before any change (`e2eeSlot.get`, `lib/cloudBackup.ts:132-138`).
+     - It uploads under the NEW pair through a one-write key override (`:252`, `:324-325`, `:430-433`). It stores the pair only after the upload succeeds.
+     - If storing fails, it restores the old pair or account mode and re-uploads under it.
+     - Scheduled backups keep the old secret until the store step (`writeSecret`, `:213-217`).
+     - The selftest covers 8 transitions (`lib/backupSecretSwitch.selftest.ts:33-88`) and passes.
+  2. ✅ The `disableE2EEBackup` rollback (fix_status §3, `815c7a5`): the old pair is restored on failure (`lib/cloudBackup.ts:189-205`). The screen re-reads the mode and reports what the device will actually do (`app/backup-e2ee.tsx:152-161`).
+  3. ✅ The "on" stage has CHANGE PASSWORD or MAKE A NEW KEY, plus "Switch to a password" or "Switch to a 64-character key" (`:342-355`):
+     - Cancel returns to "on" (`:316`).
+     - The copy is aware of the switch (`:88-99`, `:109-118`, `:127-128`, `:292`, `:314`).
+     - It warns that older device and Drive copies still need the old secret (`:97-99`).
+  4. ✅ The copy says "64-character" (`:254`, `:332`, `:376`, `:389`). `secondaryBtn` and `dangerBtn` have `minHeight: 48` (`:420`, `:422`). Fills use `onPrimary` (`:419`).
+- **Data-loss paths in the switch** (all need a failure on top of a failure, or a race; none is covered by the selftest):
+  - **(a) A non-atomic store write.**
+    - `put` writes the secret, then the header, as two items (`lib/cloudBackup.ts:139-142`). If the header write fails and restoring the old pair also fails (swallowed, `lib/backupSecretSwitch.ts:45`), the slot holds the NEW secret with the OLD header.
+    - `storedE2EE` returns that mixed pair (`lib/cloudBackup.ts:119-127`). Every later backup is stamped with the old salt but encrypted with the new secret, so neither password re-derives it on another device. The backups are silently unrecoverable off this phone.
+    - The selftest's `put` fails as a whole (`lib/backupSecretSwitch.selftest.ts:20`), so this case is untested.
+  - **(b) Store fails, then the re-upload fails.** The server copy is left under `next` (`lib/backupSecretSwitch.ts:46` swallows the error) while the device stays on `prev`.
+    - In key mode, the new key is never returned or shown, so nobody can open that server copy until the next successful scheduled backup overwrites it.
+    - The screen says "Nothing was changed" (`app/backup-e2ee.tsx:89-94`).
+  - **(c) No mutual exclusion with the scheduled backup.** `runScheduledBackupIfDue` runs 4 s after the Chats tab mounts (`app/(tabs)/chats.tsx:264-270`). It resolves its secret when it builds the blob (`lib/cloudBackup.ts:324`) and can finish its upload (`lib/backupScheduler.ts:142`) after the switch's upload.
+    - The server copy is then under the OLD secret while the device stores the new one.
+    - After "Make a new key", a user who discards the old key cannot restore it on a new phone until the next scheduled run. That may be a day, a week or a month later (`lib/backupScheduler.ts:116-117`).
+  - **(d) A crash in the window.** If the app dies between the upload (`lib/backupSecretSwitch.ts:41`) and the store (`:43`), the server copy is under a key that was never shown. This is the same class of risk as before round 4. It recovers on the next backup while the phone survives.
+- **New finding (existed before round 4, in the lib): a SecureStore read failure is treated as "account" mode.**
+  - `storedE2EE` swallows read failures and returns null (`lib/cloudBackup.ts:119-128`). So:
+    - `getBackupMode` never rejects (`:150-152`).
+    - The screen's error stage (`app/backup-e2ee.tsx:61-65`, `:193-205`) is unreachable, despite its own comment (`:59-60`).
+    - A failed read shows "Off".
+    - Worse, `writeSecret` then falls back to the account key (`lib/cloudBackup.ts:213-217`). A scheduled backup for an E2EE user silently uploads a server-readable blob over the encrypted one.
+  - Only `e2eeSlot.get` (`:130-138`) fails closed.
+- **Also (existed before round 4):**
+  - `enableE2EEBackup` derives the password key with the synchronous `backupSecret` (`lib/cloudBackup.ts:177`). The JS thread stalls under the spinner, although `backupSecretAsync` exists (`lib/backupCrypto.ts:124-128`).
+  - `fail` shows the raw `e.message`, such as "backup upload failed (500)" (`app/backup-e2ee.tsx:92-93`, `lib/cloudBackup.ts:446`).
+- **Regressions:** two, both listed above: (1) key-mode salt collision after "Make a new key" (`lib/backupCrypto.ts:132`, `lib/cloudBackup.ts:233`); (2) the "Nothing was changed" copy (`app/backup-e2ee.tsx:89-94`).
+- **Subscreens:**
+  - Loading — 7 → 7.
+  - Error — 8 → 7: it is unreachable because `getBackupMode` never rejects.
+  - Off — 8 → 8.
+  - Create/new password — 8 → 8.5.
+  - Key shown once — 8 → 8.
+  - Key check — 8 → 8.
+  - On — 7.5 → 8.
+- **Still needed for 10/10:**
+  1. Make `storedE2EE` fail closed:
+     - A read error must not mean "account" (`lib/cloudBackup.ts:119-128`).
+     - `writeSecret` and the scheduled backup should abort rather than downgrade to the account key (`:213-217`, `lib/backupScheduler.ts:142`).
+     - `getBackupMode` should reject, so the error stage works (`app/backup-e2ee.tsx:61-65`).
+  2. Store the secret and header as ONE SecureStore item, or write the header first and verify by reading back (`lib/cloudBackup.ts:139-142`). Add a partial-`put` case to `lib/backupSecretSwitch.selftest.ts:14-22`.
+  3. When the restore-and-re-upload fails (`lib/backupSecretSwitch.ts:45-46`), do not report "Nothing was changed" (`app/backup-e2ee.tsx:89-94`). In key mode, surface the new key instead of dropping it.
+  4. Serialise the switch against `runScheduledBackupIfDue` with a shared in-flight lock (`lib/backupScheduler.ts:111-146`, `lib/cloudBackup.ts:168-180`).
+  5. Give key-mode headers a key id or fingerprint, so `readSecret` asks for the old key instead of using the current one (`lib/backupCrypto.ts:132`, `lib/cloudBackup.ts:233`).
+  6. Use `backupSecretAsync` in `enableE2EEBackup` (`lib/cloudBackup.ts:177`). Map upload errors to user copy (`app/backup-e2ee.tsx:92-93`).
+
+#### `app/chat-backup.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8 · States 8 · UI 8 · A11y 8 · Security 8 · Code 8 (mean 8.0)
+- **Original items:**
+  1. ✅ The secret is masked by default (`secureTextEntry`) with a 44dp Show/Hide switch. It wraps only when shown. `importantForAutofill="no"` and `autoComplete="off"` are set (`app/chat-backup.tsx:370-394`, `:453`). Device behaviour is **not verifiable statically**.
+  2. ✅ `console.warn` and `(e as any)` are gone from `onBackUp` (`:121-126`). `loadBox` and `linkBtn` are in the sheet (`:226`, `:230`, `:454-455`).
+  3. ✅ Scrim token (`:443`). The comment above it, "no scrim token exists", is stale (`:442`).
+- **Regressions:** none, apart from the stale comment (`:442`).
+- **Subscreens:** Backup secret modal — 8 → 8.5. Restore confirm — 7.5 → 7.5.
+- **Still needed for 10/10:**
+  1. Restore falls back from the account copy to Drive, then to the local file, on any non-secret error (`:163-172`). "Restore complete" never says WHICH copy was applied, so an older Drive or local copy can be restored silently. With a wrong typed secret, the cloud decrypt error also falls through to the older copies. Name the source, and stop the fall-through when a `userSecret` was given.
+  2. A key-mode cached secret can open the wrong key's Drive or local copy and fail opaquely (see backup-e2ee regression 1) (`:182-194`).
+  3. Raw `e.message` in "Restore failed" and "Backup failed" (`:145`, `:194`). The E2EE mode row relies on `getBackupMode`, which reports "Off" on a SecureStore read failure (`:82`, `lib/cloudBackup.ts:119-128`).
+
+#### `app/in-chat-search.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8 · Security 8.5 · Code 8 (mean 8.25, tie rounded up)
+- **Original items:**
+  1. ✅ Protected messages (fix_status §3): `searchHidden(r.meta)` drops view-once and ink rows in both the FTS path and the fallback scan (`lib/localDb.ts:946-951`, `:983`, `:1010`). Unreadable meta counts as protected.
+  2. ✅ The error state uses user copy, has the alert role and a 44dp Try again, and re-runs through `retryKey` (`app/in-chat-search.tsx:47-48`, `:110-119`, `:293-301`).
+  3. ✅ Reachable from the chat's own search: "Search all messages" (`components/chat/InChatSearchBar.tsx:92-100`) → `app/chat.tsx:2293`.
+- **Regressions:** none.
+- **Subscreens:** Lock gate — 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. From contact-info, a tapped result calls `router.back()` (`:159-163`), which lands on contact-info, not the chat. Push or replace `/chat` when the previous screen is not the chat.
+  2. The "unreadable" lock gate has no Try again (`:203-204`). The comment "Debounced server search" is stale; the search is on-device (`:96`).
+  3. The 80-hit cap (`:108`) is silent. Say "showing the first 80".
+
+#### `app/message-reminder.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8.5 · Security 8.5 · Code 7.5 (mean 8.25, tie rounded up)
+- **Original items:**
+  1. ✅ Recovery for an unreadable list (fix_status §3): `clearReminders` cancels this screen's notifications by body and data, then removes the key (`app/message-reminder.tsx:117-141`). It is offered from the list (`:404-406`). The composer offers it too and reschedules afterwards (`:217-226`).
+  2. ✅ Open chat: a row tap calls `setPendingJump` and pushes `/chat` (`:349-352`, `:428`). There is a separate 44dp "Cancel reminder" button (`:447-454`, `:495`), and cancel is kept as an accessibility action (`:433-434`).
+  3. ✅ Pull-to-refresh on the list and on the empty state (`:343-345`, `:409-411`, `:423`).
+  4. ✅ The text comes from the sealed cache by id (`:168-175`). The caller no longer passes `preview` (`components/chat/useMessageActions.ts:82-85`).
+  - Also: a `busyRef` double-tap guard (`:166-167`, `:178`, `:185`, `:246`); back is 44dp (`:469`).
+- **Regressions:** none.
+- **Subscreens:** Composer — 8 → 8.5. Reminders list — 8 → 8.5.
+- **Still needed for 10/10:**
+  1. `load` sets state after unmount with no `alive` guard (`:315-335`). The `renderItem` is an inline closure (`:424-456`).
+  2. Raw `e.message` in "Could not schedule" and "Could not cancel" (`:244`, `:368`).
+  3. The composer shows "(no preview)" for both "not cached" and "protected" (`:264`). Say which.
+
+#### `app/schedule-message.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8.5 · A11y 8.5 · Security 8.5 · Code 8 (mean 8.42)
+- **Original items:**
+  1. ✅ It uses the shared, app-themed `components/ui/useDatePicker` (`app/schedule-message.tsx:22-23`, `components/ui/useDatePicker.tsx:1-30`). The iOS sheet is **not verifiable statically**.
+  2. ✅ A typed `beforeRemove` "Discard message?" guard. It is skipped after scheduling (`sent`) or for an unchanged prefill (`:68-84`, `:100`).
+  3. ✅ The header comment points at the Go sweep (`:8-9`).
+  4. ✅ "Scheduled messages" is a 44dp link-role button (`:211-214`, `:247`).
+- **Regressions:** none.
+- **Subscreens:** Custom date/time picker — 7.5 → 8.
+- **Still needed for 10/10:**
+  1. Raw `e.message` on failure (`:107`).
+  2. A past custom time is only rejected at Schedule time (`:93`, `:120-122`). Pass a minimum date to the picker.
+
+#### `app/scheduled.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8 · States 8.5 · UI 8 · A11y 8 · Security 8.5 · Code 8 (mean 8.17)
+- **Original items:**
+  1. ✅ Locked-chat previews (fix_status §3): `isChatLocked(...).catch(() => true)` → "🔒 Locked chat" (`app/scheduled.tsx:52-58`).
+  2. ✅ A refresh failure over rows shows "Couldn't refresh — showing the saved list…" (`:98-103`, `:198`).
+  3. ✅ `rowsRef` replaces the side effect inside the state updater (`:82-85`). `renderItem` is a `useCallback` (`:151-178`).
+- **Regressions:** none.
+- **Subscreens:** Cancel dialog — 7.5 → 7.5. It still shows raw `e.message` (`:144`).
+- **Still needed for 10/10:**
+  1. The cache paint and `load` have no unmount guard (`:87-118`).
+  2. Raw `e.message` on a cold load and on cancel (`:102`, `:144`).
+  3. Media rows show only a type label (`:60`), which is expected; the server's 7-day window is **not verifiable statically**.
+
+#### `app/create-poll.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8.5 · Security 8 · Code 8.5 (mean 8.33)
+- **Original items:**
+  1. ✅ `postingRef` synchronous guard (`app/create-poll.tsx:40-41`, `:90-91`, `:100`).
+  2. ✅ The `beforeRemove` listener is typed, with no cast (`:50-59`).
+  3. ◐ A UI privacy note exists (`:189-194`). It is slightly inaccurate: "the server sees only whether multiple answers are allowed", but `optionCount` is public meta too (`lib/msgEnvelope.ts:71`, `:112`).
+  - Also: remove-option is 44×44 (`:219`) and back is 44dp (`:205`).
+- **Regressions:** none.
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. Correct the note to mention the option count (`:191-194`).
+  2. Raw `e.message` on a send failure (`:98`).
+
+#### `app/bookmarks.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8 · Security 8.5 · Code 8 (mean 8.25, tie rounded up)
+- **Original items:**
+  1. ✅ Protected snapshots are purged: `dropBookmarkPlaintext` does a kv DELETE (`lib/chatService.ts:1785-1790`), called from `withBodies` (`app/bookmarks.tsx:63-66`) and from `removeBookmark` (`lib/chatService.ts:1777`). Whether the server returns `meta` is **not verifiable statically**.
+  2. ✅ An empty cache counts as a cold load (`hasCache = !!cached?.length`, `:93-94`, `:114-115`).
+  3. ✅ `renderItem` is a `useCallback` (`:162-193`).
+- **Regressions:** none.
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. A protected bookmark in a LOCKED chat is not purged until the chat is unlocked, because the lock branch returns first (`:60` before `:63`).
+  2. `load` has no unmount guard (`:88-117`). Raw `e.message` (`:115`, `:154`).
+
+#### `app/chat-code.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 9 · UI 8 · A11y 8.5 · Security 8 · Code 8 (mean 8.33)
+- **Original items:**
+  1. ✅ The share text uses the time left: `expiresIn(left)` (`app/chat-code.tsx:79-83`, `:273`).
+  2. ✅ `busyRef` and `joiningRef` guard mint, stop and join (`:148-151`, `:153-162`, `:173-182`, `:186-197`).
+  3. ✅ `codeError` shows server copy when there is an HTTP status, otherwise connection copy (`:85-90`). `api` sets `err.status` (`lib/api.ts:613`).
+- **Regressions:** none.
+- **Subscreens:** Share tab — 8.5 → 8.5. Enter tab — 8 → 8.5.
+- **Still needed for 10/10:**
+  1. The "Could not check for a live code" retry is an inline-styled ~36dp target (`:236`). Make it 44dp and move it into the sheet.
+  2. The share text says "crazzychat" (`:273`) while the app slug and scheme include "VaultChat" (`app.json:3-8`). Confirm the product name.
+
+#### `app/chat-export.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8 · States 8.5 · UI 8 · A11y 8 · Security 8 · Code 8 (mean 8.08)
+- **Original items:**
+  1. ✅ Cancel and unmount:
+     - `cancelRef` is checked between pages and between write chunks (`app/chat-export.tsx:95-101`, `:46-61`, `components/chattools/chatExportFile.ts:29-35`).
+     - `ExportCancelled` is silent (`app/chat-export.tsx:225`).
+     - A `mounted` guard covers the setters (`:101`, `:221-228`).
+     - The 44dp Cancel button (`:295-297`, `:364`) is **not verifiable statically** on a device.
+  2. ◐ Chunked write: lines are appended 500 at a time, and the file is removed on failure or cancel (`chatExportFile.ts:22-42`). The whole hydrated `Message[]` is still in memory (`app/chat-export.tsx:50-67`), and `hydrateMessages` (`:65`) is not cancellable.
+  3. ✅ Scrim token (`:370`). `fetchAll`, `fmtTime`, `bodyOf` and `fileName` are at module scope (`:46-73`).
+- **Regressions:** without `expo-sharing` (web), the text export now shares only the title `'crazzychat export'` (`:238-240`, `chatExportFile.ts:52`). Before, it shared the full text (`43c2d19:app/chat-export.tsx:237`). This is documented in a `ponytail:` comment.
+- **Subscreens:** Chat-lock PIN modal — 8 → 8. Inline styles remain (`:325-328`, `:337`).
+- **Still needed for 10/10:**
+  1. Stream pages through hydrate-and-write, so 100k messages are never held at once, and check `cancelled` around `hydrateMessages` (`:62-67`).
+  2. Restore a real web fallback, or hide the export on web (`:238-240`).
+  3. Move the PIN modal's inline styles into the sheet (`:325-337`). Map `e.message` (`:225`).
+
+#### `app/chat-themes.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8.5 · A11y 8.5 · Security 8 · Code 8.5 (mean 8.42)
+- **Original items:**
+  1. ✅ Logic is in `lib/chatBubbleTheme.ts` (`:8-55`). The chat imports it directly (`app/chat.tsx:73`), and the route has no export left (`app/chat-themes.tsx:21`).
+  2. ✅ A load failure shows an alert line, cleared on pick (`:39`, `:50`, `:58`, `:117-121`).
+  3. ✅ The meta colour is `tint(mineText, 0.6)` (`:78`). The ink hexes are named lib constants (`lib/chatBubbleTheme.ts:31-32`).
+- **Regressions:** none. The dimmed dark-ink meta alpha changed from 0.45 to 0.6; this is visual only.
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. `apply` has no in-flight guard. Two quick taps can roll back to a stale `prev` if the first write fails (`:56-69`).
+  2. On a load failure, the screen still offers Reset and radios against unknown stored state (`:117-121`). Disable saving until a retry succeeds, or add Retry.
+
+#### `app/chat-wallpaper.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8.5 · States 8 · UI 8 · A11y 8 · Security 8 · Code 8 (mean 8.08)
+- **Original items:**
+  1. ✅ All-chats inheritance (fix_status §3): a "Same as all chats · <name>" radio, and the preview shows the inherited wallpaper. Saving inherit removes the key, and Reset picks inherit on a per-chat screen (`app/chat-wallpaper.tsx:101-105`, `:114`, `:121-128`, `:170`, `:192`, `:231`, `:244-256`).
+  2. ✅ `getWallpaper` and the keys are in `lib/chatWallpaperStore.ts` (`:8-31`), imported by `app/chat.tsx:72`.
+  3. ✅ Set button: `minHeight: 50`, `setBtnOff`, `onPrimary` (`:333`, `:390-392`).
+- **Regressions:** none.
+- **Subscreens:** Colors — 8 → 8. Gradients — 8 → 8. My photo — 8 → 8.
+- **Still needed for 10/10:**
+  1. A failed load is silent, so Default is shown and saving overwrites the stored choice (`:129`). Say so, as chat-themes now does.
+  2. The save error is a generic "Failed to save wallpaper." (`:184`).
+
+#### `app/receipt-control.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8 · States 8.5 · UI 8 · A11y 8 · Security 7 · Code 8 (mean 7.92)
+- **Original items:**
+  1. ✅ `Toggle` takes `s` and `colors` props, so there is one StyleSheet per screen (`app/receipt-control.tsx:38-51`, `:215-217`).
+  2. ✅ `tint(c.danger, .12/.4)` (`:247`).
+  3. ✅ Pull-to-refresh reloads under the list through `reloadKey` and `pulling` (`:66-73`, `:77`, `:99-100`, `:207`). Whether the server honours the three flags is **not verifiable statically**, so Security stays 7.
+- **Regressions:** none.
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. A pull-to-refresh during an in-flight toggle replaces `rulesRef` (`:92`). A later rollback in the per-flag chain then applies to the reloaded rules. Skip the reload while `chains` has pending work.
+  2. Raw `e.message` (`:97`). `renderItem` is inline (`:208-221`).
+
+#### `app/broadcast.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8 · States 8.5 · UI 8 · A11y 8 · Security 7 · Code 8 (mean 7.92)
+- **Original items:**
+  1. ◐ Leave, admin delete and `channelId` filtering are wired:
+     - Leave (`components/chattools/BroadcastChannelView.tsx:155-171`, `:210-214`).
+     - Admin long-press and an accessibility "Delete post" action (`:138-153`, `:181-195`).
+     - `channel_post` is dropped when it names another channel, and `channel_post_deleted` is handled (`:91-100`).
+     - The calls are in `lib/chatService.ts:1437-1443`.
+     - Against today's server, `isMissingRoute` maps the plain 404/405 to "isn't available yet" (`lib/missingRoute.ts:9-12`; selftest passes). The server routes are written but **not deployed**.
+  2. ✅ A post-load failure shows an error with Try again, not "No posts yet" (`BroadcastChannelView.tsx:68-78`, `:225-232`).
+  3. ✅ Split: the screen is 233 lines plus the view and `broadcastStyles`. `busyRef` guards create and join (`app/broadcast.tsx:41-42`, `:81-106`) and `postingRef` guards posting (`BroadcastChannelView.tsx:56`, `:124-136`). There are no deps warnings.
+  4. ✅ Scrim token (`broadcastStyles.ts:55`). The comment above it is stale (`:54`).
+- **Regressions:** none. The split keeps the hardware-back close, realtime join and leave, paging and composer.
+- **Subscreens:** Channel list — 8 → 8. Channel detail — 7.5 → 8. Create modal — 7.5 → 8. Join modal — 7.5 → 8.
+- **Still needed for 10/10:**
+  1. Deploy R4BE C4–C6 and drop the fallback copy (`BroadcastChannelView.tsx:9-12`, `:148`, `:166`).
+  2. Posts are not end-to-end encrypted, which the screen states (`:222`).
+  3. The admin post card uses `accessibilityRole="text"` on a TouchableOpacity (`:188`). Raw `e.message` (`:75`, `:134`, `app/broadcast.tsx:63`, `:90`, `:104`).
+
+#### `app/hidden-chats.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8 · States 8.5 · UI 8 · A11y 8 · Security 7.5 · Code 8 (mean 8.0)
+- **Original items:**
+  1. ◐ The server attempt limit: `gateError` maps a 423 with `retryAfter` to a real wait (`app/hidden-chats.tsx:82-93`, `lib/onboarding.ts:111-114`). The server side is written, not deployed (`:44-46`), so the client counter is still the only live throttle.
+  2. ✅ It re-locks on iOS `inactive` as well as `background` (`:65-71`). Device behaviour is **not verifiable statically**.
+  3. ✅ The PIN gate is wrapped in `KeyboardSafe` (`:158-160`).
+  4. ✅ Guards and copy:
+     - An `alive` ref (`:214-215`, `:222`, `:228`).
+     - An in-flight Unhide set (`:216-217`, `:253-261`).
+     - Offline and generic copy instead of `e.message` (`:228`, `:259`).
+     - A memoised `renderItem` (`:269-306`) and a submit `busyRef` (`:104-106`).
+     - Gate buttons are 48dp (`:380`, `:382`).
+- **Regressions:** none. (Nit: group initials use `onPrimary` on a `c.success` fill, `:396-398`.)
+- **Subscreens:** PIN gate — 7.5 → 8. Hidden list — 8 → 8.
+- **Still needed for 10/10:**
+  1. Deploy the R4BE C1 limit (`:44-46`).
+  2. A chat opened from the list (`:242-244`) sits above the re-locked list. Backgrounding re-locks only this screen, so the hidden chat stays visible on return and in the app switcher.
+  3. The gate title has no header role (`:163`).
+
+#### `app/app-lock-chats.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8 · Security 8.5 · Code 7.5 (mean 8.17)
+- **Original items:**
+  1. ✅ The `onToggle` wrapper with `togglingRef` covers the whole removal, including the PIN prompt; `askUnlockPin` resolves on close. The Switch is disabled while a removal runs (`app/app-lock-chats.tsx:300-302`, `:348-357`, `:426-434`). chatLockFactors passes.
+  2. ✅ Inline styles are moved into the sheet (`loadErrTxt`, `chatsErrBtn`, `emptyTxt`, `:473-493`, `:708-712`). Scrim token (`:639`). Remove-lock text uses `onDanger` (`:548`, `:708`).
+  3. ◐ `renderChatItem` is a `useCallback` that reads `onToggle` through a ref (`:386-438`). The file is 713 lines, and `LockConfigModal` still takes 13 props (`:69-80`).
+- **Regressions:** none.
+- **Subscreens:** Lock config modal — 8 → 8. Remove-lock PIN prompt — 8 → 8.5.
+- **Still needed for 10/10:**
+  1. Pass the modal one state object instead of 13 props (`:69-80`), and split the 713-line file.
+  2. During one removal, every row's Switch is disabled (`:430`). That is acceptable, but give it a visible busy cue.
+
+#### `app/import-chats.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8 · Security 7 · Code 7.5 (mean 7.92)
+- **Original items:**
+  1. ❌ Imported media is still written unencrypted; this is documented in a `ponytail:` comment (`app/import-chats.tsx:293`). Chat-media sealing does not exist yet.
+  2. ✅ Split and deps:
+     - `PickChat`, `Preview`, `Done`, `Step`, `Row`, `PrivacyNote`, the styles and the types moved to `components/chattools/importChatsParts.tsx`; it is identical apart from tokens. The screen is 583 lines.
+     - `pickFile` now depends on `[runParse]`. The old `[chatId, peerName]` was a stale closure, so this is a correctness gain.
+     - `finishCancelled` is in `runImport`'s deps. eslint reports 0 warnings.
+  3. ✅ `tint()` for `matchOk`, `matchBad` and `failIcon`, and the `stepLast` style (`importChatsParts.tsx:298`, `:316-319`, `:341`).
+- **Regressions:** none.
+- **Subscreens:** Pick chat — 8 → 8. Pick source — 8 → 8. Pick file — 8 → 8. Reading/matching — 8 → 8. Preview — 8 → 8. Importing — 8 → 8. Done — 7.5 → 7.5. Failed — 8 → 8.
+- **Still needed for 10/10:**
+  1. Seal imported media at rest (`:293`).
+  2. The screen is still 583 lines. Move the parse and import flow into a hook.
+
+---
+
+### D — Groups & Communities — re-rating (round 4)
+
+Base `43c2d19` → `HEAD` (`4910069`). "Old" is the round-3 score in `rerate3/D.md`, and the open items are that file's "Still needed for 10/10" lists. `fix_status.md` §3 lists no batch-D item as "fixed after re-rating". Its only D entry, the nested iOS picker in group-calendar, is under "still open" and is handled below.
+
+**Fix logs checked:** `fixes/R4D.md`, plus the D items in `R4HO.md` (#19 calendar cache scope, #20 `updatedBy`) and `R4F0.md` (#2 `components/ui/useDatePicker`). Every claim was checked against `git diff 43c2d19 HEAD` and the current files, including the new imports:
+- `components/groups/{GroupNotFound, CommunityDetailView, CommunityNameModal, CommunityAttachSheet, communityStyles}`
+- `lib/groups/serverContracts.ts`
+- the diffs of `lib/groups/{catalog, opThread, calendar}.ts`
+- `lib/chatService.ts` `decryptFromChat` (`:329-339`)
+
+**Checks run (read-only, at HEAD).** The logs are in `rerate4/D_*.txt`.
+- `npx tsc --noEmit -p .` exits 0.
+- `npx eslint` on the 18 screens, `components/groups` and `lib/groups` exits 0, with 0 warnings.
+- These selftests exit 0:
+  - `lib/groups/groupScreensRound4` (new) and `groupScreensRound3`
+  - `groupScreenFixes`
+  - the `catalog.ts` self-check, which asserts ≥4.5:1 ink on every type colour
+  - the `calendar.ts` self-check
+  - `uiDebtRatchet`: "no file got worse"; 5 unroled and 306 hex remain app-wide
+  - `a11yCoverage`, `themeCoverage` (22), `orphanRoutes` (51) and `screenBackCoverage`
+
+**Deployment status.** Nothing is deployed or device-verified. The C7–C10 contracts are written in `vaultchat-backend-go` only. Against today's server, the client code that needs them behaves as follows:
+- **C7, join refusals:** the prose fallback in `serverContracts.ts:27-31` keeps current behaviour.
+- **C8, one approval queue:** the extra `?include=link` param is ignored, so Waiting shows the same rows as before.
+- **C9, community management:** every action ends in "Not available yet … Nothing was changed" (`app/communities.tsx:29-35`).
+- **C10, event writer:** `updatedBy` is absent, so edit stays author-only.
+Items marked 📱 need a device check.
+
+**Token check (onPrimary, onDanger, warning).**
+- `onPrimary` is `#FFFFFF` in both schemes (`constants/theme.ts:228`, `:272`). Every `#fff`→`onPrimary` swap in this batch therefore has the same pixels.
+- Every `btnTxt`/`pillTxt` style that lost its colour gets an explicit colour at every use. Checked by grep: `group-calendar:324,467`; `group-invitations:172,183,190,219`; `group-join:144,176,184`; `group-invites:312,362`; `group-notes`, `group-trip`, `group-create`.
+- The intended visual changes come from `inkOn`: a dark check on light swatches (`group-create:167`), and a dark label on light server/param accents (`group-invitations:124`, `group-join:51`).
+- No token regressions.
+
+**Split check (communities).** The detail view, name modal and styles were compared line by line with `git show 43c2d19:app/communities.tsx`:
+- Same rows, labels, navigation, Back/`openSeq` invalidation and modal fields.
+- The additions are the stale banner, management rows, the scrim and `onPrimary`.
+- The old modal backdrop colour moved to an absolutely-filled scrim (`communityStyles.ts:40-41`), so the visual result is the same.
+- No behaviour was lost.
+
+**Rounding:** an exact .25 or .75 mean rounds up, as in round 3 (e.g. group-trip 7.75 → 8.0).
+
+| Screen | Old | New | Δ |
+|---|---|---|---|
+| `app/group-admin.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/group-calendar.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/group-chat.tsx` (redirect) | 9.5 | 10 | +0.5 |
+| `app/group-create.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/group-info.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/group-insights.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/group-invitations.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/group-invites.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/group-join.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/group-members.tsx` | 8.0 | 8.0 | 0 |
+| `app/group-notes.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/group-privacy.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/group-tasks.tsx` | 8.0 | 8.0 | 0 |
+| `app/group-trip.tsx` | 8.0 | 8.0 | 0 |
+| `app/group-calls.tsx` | 8.0 | 8.0 | 0 |
+| `app/create-group.tsx` | 8.0 | 8.0 | 0 |
+| `app/communities.tsx` | 7.0 | 7.5 | +0.5 |
+| `app/creator-channels.tsx` (redirect) | 10 | 10 | 0 |
+
+#### Cross-screen items
+- **`GroupNotFound` (new, `components/groups/GroupNotFound.tsx:14-36`).**
+  - It shows a header "Group not found", the detail text, and a Go back that falls back to `/(tabs)/chats` on a cold start (`:16`).
+  - It is used by admin, calendar, info, insights, invites, members, notes, privacy, tasks, trip and calls.
+  - group-join still has its own not-found view, and that view has no button (`app/group-join.tsx:97-106`).
+  - Nit: `'/(tabs)/chats' as any` (`:16`).
+- **Approval queues.** ◐ group-invites now reads one queue (`approvalQueue`, `serverContracts.ts:118-121`) and acts on link rows by user id (`app/group-invites.tsx:155-183`). group-admin keeps its own "Link join requests" list (`app/group-admin.tsx:393-412`). Once C8 is deployed, a link request will therefore show in both places. Folding the write path together is a §5 or backend decision.
+- **Per-focus decrypt cost (notes/tasks).** ❌ Unchanged. The `ponytail:` note at `lib/groups/opThread.ts:24` still applies. `pageBack` (`:59-82`) is a pure refactor of the old loop, with the same `complete` semantics, and is reused by insights.
+- **Two creation UIs.** This is an open product decision (fix_status §5). Both headers are honest about it, so it is not deducted.
+
+---
+
+#### `app/group-admin.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8 · States 8.5 · UI 8 · A11y 8 · Security 8 · Code 7.5 (mean 8.0)
+- **Previous items:**
+  1. ◐ **Approval-queue merge.** The read side is merged in group-invites, but this screen keeps the link list (`:393-412`). It needs the backend and a §5 decision.
+  2. ✅ **Back has a role** (`:277`).
+  3. ✅ **In-flight guard.** One `applySetting` with a per-key in-flight set; repeating the current value does nothing (`:178-188`). All six settings go through it (`:190-203`).
+  4. ✅ **Missing `chatId`** shows `GroupNotFound` (`:257`).
+  5. ✅ **Reject confirms** with a destructive Alert, then shows a result banner (`:211-221`, `:408`).
+  6. ✅ **One FlatList.** Settings are the header, there is one row per member, and the hint is the footer (`:290-497`). The Members box is split into head, body and foot styles (`:520-526`). 📱 visual.
+  7. ✅ **`onPrimary`** (`:321`, `:539`, `:562`, `:568`).
+- **Regressions:** none functional. Two nits:
+  - A tap on a *different* option while the same setting is saving is dropped silently, with no feedback (`:182`).
+  - `extraData` is a fresh array every render (`:293`), so it does nothing; this is harmless.
+- **Subscreens:**
+  - Role menu: 7.5 → 7.5
+  - Remove confirm: 7.5 → 7.5
+  - Link join requests: 7.5 → 8 (Reject confirm)
+- **Still needed for 10/10:**
+  1. Merge the two approval queues once C8 is deployed and the §5 decision is made. Until then, avoid listing link requests in both places (`:393-412` vs `app/group-invites.tsx:341-372`).
+  2. "Group Info" and "Group Controls" titles, and the control labels, are not headers (`:302`, `:331`, `:333`, `:351`, `:354`).
+  3. Give feedback (or queue) when a different option is tapped while a save is in flight (`:182`).
+  4. `as any` on the members link (`:370`). The approve pill is about 30 dp plus a 6 dp `hitSlop` (`:406`, `:561`).
+
+#### `app/group-calendar.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8 · Security 8.5 · Code 8 (mean 8.25)
+- **Previous items:**
+  1. ✅ **Cache-id collision.** Rows decrypt with cache scope `'cal'` (`:95`). The scope is wired through `decryptFromChat(..., cacheScope)` (`lib/chatService.ts:329-339`), from R4HO #19, and the `ponytail:` is gone.
+  2. ✅ **Nested iOS picker.** iOS draws `DateTimePicker display="inline"` inside the sheet (`:404-413`), toggled by Change/Done with `expanded` state (`:394-403`). Android uses the native dialogs (`:282-285`). `{picker.element}` now sits outside the composer Modal. The sheet scrolls (`:377-378`, `:486-487`). The picker moved to `components/ui/useDatePicker` (`:37`), so the finance palette is gone. 📱
+  3. ◐ **Admin edits others' events.** The client is wired: `eventWriter` decrypts (`:95`), `writerKnown` is passed to `eventActions` (`:210`; `lib/groups/calendar.ts:279-286`), and the hint changes (`:362`). Today `updatedBy` is absent, so editing stays author-only. That is graceful.
+  4. ✅ **Missing `groupId`** shows `GroupNotFound` (`:292`).
+  5. ✅ **Second decrypt.** A per-visit memo is keyed on id plus ciphertext, and only successes are stored (`:71-73`, `:79-104`). It is shared with `syncReminders` (`:112-116`).
+- **Regressions:** none.
+- **Subscreens:** Event sheet (new and edit): 8 → 8.5.
+- **Still needed for 10/10:**
+  1. 📱 Device-check the inline iOS `datetime` picker in the sheet, and Android's two-step native dialogs.
+  2. The day, hour and repeat chips are radios with no `radiogroup` wrapper (`:415`, `:428`, `:444`).
+  3. Admin edit goes live only with the C10 deploy. The R4D rollout note says to ship this client first.
+  4. Moving months swaps the list for a full-screen spinner (`:287-290`, `:316-317`).
+  5. At 561 lines, the composer (`:367-470`) could be its own component.
+
+#### `app/group-chat.tsx` — **9.5 → 10** (rated as a redirect)
+- **Scores now:** Function 10 · States 10 · UI 10 · A11y 10 · Security 10 · Code 10
+- **Previous items:**
+  1. ✅ **Only `id` is forwarded** (`:19-21`), so the name no longer rides in route history.
+  2. ✅ **No casts.** The typed hrefs compile (tsc exit 0).
+- **Regressions:** none.
+- **Subscreens:** none.
+- **Still needed for 10/10:** nothing meaningful.
+
+#### `app/group-create.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8 · States 8.5 · UI 8.5 · A11y 8.5 · Security 8 · Code 8 (mean 8.25)
+- **Previous items:**
+  1. ✅ **Radiogroups and headers.** Type, Colour, Icon and Who-can-join each have a radiogroup, and every section label is a header (`:122-123`, `:142`, `:161-162`, `:172-173`, `:183-184`).
+  2. ✅ **Server create vs local save.** These are separate try blocks (`:67-87` and `:92-96`). A local failure still opens Add people and says the group exists (`:98-102`), so a retry cannot duplicate the group.
+  3. n/a **Two creation UIs.** This is a §5 product decision, documented (`:12-14`).
+- **Additional:** ✅ `inkOn(c.hex)` for the swatch check (`:167`). The button uses `onPrimary`.
+- **Regressions:** none. Nit: `setBusy(false)` runs before `router.replace` (`:97-99`), which leaves a theoretical one-frame re-enable.
+- **Subscreens:** Type, colour, icon and privacy pickers: 8 → 8.5.
+- **Still needed for 10/10:**
+  1. Product decision on the two creation flows (§5).
+  2. The 8 `PALETTE` hex literals are group-identity data (`:35-39`). Moving them into `lib/groups/catalog.ts` would let the catalog self-check cover them.
+  3. `'/group-invites' as any` (`:99`).
+
+#### `app/group-info.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8 · Security 7.5 · Code 7 (mean 7.92)
+- **Previous items:**
+  1. ✅ **Refresh failure over the cache.** A `stale` banner with Retry (`:80`, `:136`, `:391-397`).
+  2. ✅ **Remove `hitSlop={10}`** (`:677`).
+  3. ✅ **`ROLE_LABELS`** (`:671`).
+  4. ✅ **Media strip.** Local history is read first, and the server only when this phone has fewer than 9 items (`:149-160`).
+  5. ❌ **Split the file.** It is now 743 lines and was not attempted (R4D partial #4).
+- **Additional:** ✅ The shared `GroupNotFound` (`:294`) and `onPrimary`.
+- **Regressions:** one minor behaviour change. With 9 or more local media, newer server-only media are no longer considered, so a phone that has not synced recently shows older thumbnails (`:155-158`).
+- **Subscreens:**
+  - Rename: 7.5 → 7.5
+  - Description: 7.5 → 7.5
+  - Leave confirm: 7 → 7
+  - Remove confirm: 7.5 → 7.5
+- **Still needed for 10/10:**
+  1. Split the 743-line file; the header element alone spans about `:341-591`.
+  2. The Live Chat Viewers toggle swallows save errors and keeps the optimistic state (`:91-94`).
+  3. Eight `as any` route casts (`:265`, `:284`, `:448`, `:465`, `:483`, `:508`, `:546`, `:559`).
+  4. The stale Retry has no busy state (`:391-397`).
+
+#### `app/group-insights.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8 · States 8 · UI 7.5 · A11y 8 · Security 8.5 · Code 7.5 (mean 7.92)
+- **Previous items:**
+  1. ✅ **Paged read** at `OP_PAGE`. It stops at the first page older than the range (`:127-135`, using `lib/groups/opThread.ts:59-82`).
+  2. ✅ **`GroupNotFound`** (`:181`).
+  3. ✅ **One element per row.** Each stat (`:175`), member row (`:283-290`) and trip row (`:324-329`) is one element with a full label. "By member" and "Trips" are headers (`:273`, `:311`).
+- **Regressions:** none.
+- **Subscreens:** Week/Month tabs: 7.5 → 7.5.
+- **Still needed for 10/10:**
+  1. A trip-fold failure is swallowed (`:150`) and then reads "No group trips this {span}" (`:313-315`), a false empty. `pageBack`'s `complete:false` is also ignored (`:130`).
+  2. A `circleMembers` failure silently names everyone "Member" (`:105`, `:163`).
+  3. Hex-suffix concatenation `colors.primary + '22'` (`:209`, `:330`). Use the shared `tint()`.
+
+#### `app/group-invitations.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8.5 · A11y 8.5 · Security 8.5 · Code 8 (mean 8.42)
+- **Previous items:**
+  1. ✅ **`inkOn(accent)`** for the Accept/Join label and icon (`:124`, `:171-172`).
+  2. ✅ **Typed groups** open `/family` and the privacy sheet. Plain groups open `/chat` (`:80-86`). `groupType` was already in the server payload before round 4 (`chats_invitations.go:493` at `43c2d19`). 📱
+  3. ✅ **Card facts** are one accessible element, with the buttons as siblings (`:141-161`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Decline/withdraw confirm: 7.5 → 7.5
+  - Waiting alert: 7 → 7.5
+- **Still needed for 10/10:**
+  1. The "Waiting" chip draws the server accent as text and border on the glass card (`:181-183`). Contrast is not checked for light accents.
+  2. `as any` on `/family` and `/group-privacy` (`:81-82`).
+  3. 📱 Verify the stacked push `/family` → `/group-privacy` (`:81-82`).
+
+#### `app/group-invites.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8.5 · A11y 8 · Security 8 · Code 8 (mean 8.25)
+- **Previous items:**
+  1. ✅ **Turn-down guard** (`:173`). Withdraw/revoke has a `withdrawing` state with a spinner and disabled/busy state, and the label says Withdraw or Revoke (`:95`, `:206-213`, `:406-411`).
+  2. ✅ **`GroupNotFound`** before render (`:240`). Search cannot run without typing, so `inviteCandidates('')` can no longer fire.
+  3. ✅ **"Waiting" and "Sent" are headers** (`:333`, `:377`).
+- **Additional:**
+  - ◐ The C8 queue is read through `approvalQueue` (`:103`). Rows are keyed `link:`/`inv:` and approved or rejected through the right route (`:155-183`, `:343-372`). Today it returns the same rows `pendingMembers` did; the type and path are identical (`lib/chatService.ts:2372-2385`, `:2477-2479`).
+  - `onPrimary` and `inkOn(colors.success)` (`:311-312`, `:362`).
+- **Regressions:** none today. After the C8 deploy, link requests also stay in group-admin (see cross-screen).
+- **Subscreens:**
+  - Turn-down confirm: 7 → 7.5
+  - Withdraw/revoke confirm: 7 → 7.5
+- **Still needed for 10/10:**
+  1. The `if (acting) return` inside the Alert callback reads the `acting` value captured when the Alert opened (`:173`). A ref would make the guard exact.
+  2. Device- and deploy-verify C8 link rows (approval by user id through `/join-requests`).
+  3. The waiting and sent lists are `.map` in a ScrollView (`:343`, `:386`). This is fine for small groups.
+
+#### `app/group-join.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8.5 · A11y 8 · Security 8.5 · Code 8.5 (mean 8.42)
+- **Previous items:**
+  1. ✅ **`joinRefusal(e)`** checks the server's code first, then today's prose (`:90-91`; `serverContracts.ts:21-33`). Other codes show the server's message. It is covered by the R4 selftest, and the prose fallback keeps today's behaviour.
+  2. ✅ **`accepted` state.** "An admin still has to approve you" (`:33-34`, `:68`, `:147-154`). Stranded `canAccept` rows still go to invitations.
+  3. ✅ **`inkOn(accent)`** (`:51`, `:143-144`, `:174-176`).
+- **Regressions:** none.
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. Its own not-found view has no Go back (`:97-106`). Use `GroupNotFound`.
+  2. "Done" calls `router.back()`, which goes nowhere on a cold-start deep link (`:181-185`).
+  3. State changes such as "asked" are not announced; there is no live region on the notes (`:147-162`).
+
+#### `app/group-members.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8 · States 8.5 · UI 8 · A11y 8.5 · Security 8 · Code 8 (mean 8.17)
+- **Previous items:**
+  1. ◐ **Approval merge.** As group-admin: backend plus §5.
+  2. ✅ **`GroupNotFound`** (`:260`).
+  3. ✅ **Share picker** is a FlatList, with loading, failed and empty states as `ListEmptyComponent` (`:379-404`).
+  4. ✅ **`shareBusy`** guard, and the Share button is disabled/busy (`:85`, `:176-190`, `:349-350`).
+- **Additional:** ✅ "How people join" and "Change role" are radiogroups (`:320`, `:464`), and the count and section titles are headers.
+- **Regressions:** none. The Alert-callback guard reads a captured `shareBusy` (`:183`). The real guard is the disabled Share button.
+- **Subscreens:**
+  - Member actions sheet: 8.5 → 8.5
+  - Share picker: 7.5 → 8
+  - Join-mode list: 7.5 → 8
+- **Still needed for 10/10:**
+  1. Merge the approval queues (backend, §5).
+  2. Banner Retry swaps the list for a full-screen spinner (`:277`), the same issue fixed in notes. Retry in place.
+  3. Members are `.map` in a ScrollView (`:303`).
+  4. Non-actionable member rows have no role (`:233`).
+
+#### `app/group-notes.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8 · States 8.5 · UI 8 · A11y 8 · Security 7.5 · Code 7.5 (mean 7.92)
+- **Previous items:**
+  1. ✅ **Pin un-nested.** The card is a View with sibling Edit and Pin touchables, and Pin is absolutely positioned top-right (`:202-223`, `:279-281`). 📱 VoiceOver.
+  2. ✅ **`retryInPlace`** shows the banner spinner while the list stays (`:148-152`, `:190-197`).
+  3. ❌ **Per-focus decrypt cost.** Not started (`opThread.ts:24`).
+  4. ✅ **`GroupNotFound`** (`:154`). There is also `onPrimary` and a sheet header.
+- **Regressions:** none.
+- **Subscreens:** Note editor: 8 → 8.
+- **Still needed for 10/10:**
+  1. Replace the per-focus re-decrypt of up to about 2,200 messages with a server op index or a local fold snapshot (`opThread.ts:24-31`).
+  2. Any member may delete any note. This is a recorded decision with a confirm (`:136-143`), and still the main security gap.
+  3. `publish` rebuilds a replay log from folded state on every op (`:85-97`). It works, but it is fragile.
+  4. Notes are `.map` in a ScrollView (`:200`).
+
+#### `app/group-privacy.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 9 · UI 8 · A11y 8.5 · Security 8.5 · Code 8.5 (mean 8.5)
+- **Previous items:**
+  1. ✅ **Saves are queued** on a promise chain, so none are dropped and none race (`:97-101`).
+  2. ✅ **Details, Invisible and Share for a while are headers** (`:209`, `:235`, `:249`). The Location and timer chips are radiogroups (`:188`, `:250`).
+  3. ✅ **First-load failure** shows "Couldn't read your settings" with Retry, never defaults (`:59-60`, `:80-90`, `:129-147`).
+  4. ✅ **Interval stops itself** after expiry, and none starts for a time already past (`:64-75`).
+- **Regressions:** none.
+- **Subscreens:** Stop-timer confirm: 7.5 → 7.5.
+- **Still needed for 10/10:**
+  1. 📱 The live publisher picking up `reloadPrivacy` (`:115-120`) needs a device.
+  2. Queued taps give no pending feedback until each save lands; the UI updates only from `saved` (`:113`).
+  3. `.catch(() => {})` on the queue (`:99`) relies on `applyPatch` alerting internally. That is fine, but undocumented.
+
+#### `app/group-tasks.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8 · States 8.5 · UI 8 · A11y 8.5 · Security 7.5 · Code 8 (mean 8.08)
+- **Previous items:**
+  1. ❌ **Per-focus decrypt cost.** The same as notes.
+  2. ✅ **`GroupNotFound`** (`:159`).
+  3. ✅ **Heading is a header** (`:220`). The due and assignee chips are radiogroups (`:185`, `:197`).
+- **Regressions:** none.
+- **Subscreens:** Due-date and assignee chips: 8 → 8.5.
+- **Still needed for 10/10:**
+  1. Per-focus decrypt cost (`opThread.ts:24`).
+  2. Delete is shared-edit by decision (`:143-150`).
+  3. The checkbox label omits the assignee and due date, which are separate text (`:251`, `:268-272`).
+  4. Tasks are `.map` in a ScrollView (`:246`).
+
+#### `app/group-trip.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8 · States 8.5 · UI 8 · A11y 8.5 · Security 8 · Code 7.5 (mean 8.08)
+- **Previous items:**
+  1. ✅ **`acting` guard** on Navigate, Leave and End, with a spinner and disabled/busy state (`:64`, `:153-196`, `:273-296`).
+  2. ✅ **Participant rows** are one element: name, status and ETA in minutes (`:311-314`).
+  3. ✅ **Initial trip filtered by `groupId`** (`:55-58`).
+  4. ✅ **`onPrimary`** and `GroupNotFound` (`:206`, `:241-242`).
+- **Regressions:** none.
+- **Subscreens:** Leave/End confirms: 8 → 8.
+- **Still needed for 10/10:**
+  1. A `circleMembers` failure is swallowed (`:76`), and participants then show without names.
+  2. Hex-suffix concatenation (`colors.danger + '12'`, `tone(...) + '22'`, at `:284`, `:292`, `:315`).
+  3. 📱 Geocode, permission and navigation hand-off on a device.
+
+#### `app/group-calls.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8 · Security 7.5 · Code 7.5 (mean 8.0)
+- **Previous items:**
+  1. ✅ **`GroupNotFound`** (`:140`).
+  2. ✅ **`starting` also clears 3 s after the push** (`:133`).
+  3. ✅ **`onPrimary`** (`:158`, `:173`, `:232`, `:235`). 📱 calls.
+- **Regressions:** none.
+- **Subscreens:** Voice/Video toggle: 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. 📱 Device-verify group and 1:1 calls, and the legacy ring path (`:109-117`).
+  2. The dead branch `Promise.resolve(null as any)` (`:65`) can go, now that `!chatId` returns early. There are `as any` casts on the call routes (`:86-89`, `:120-128`).
+  3. The Start button has no busy state while `starting` is set (`:165-171`).
+
+#### `app/create-group.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8.5 · States 8 · UI 8.5 · A11y 8 · Security 8 · Code 7.5 (mean 8.08)
+- **Previous items:**
+  1. ◐ **Find people outside your chats.** There is no in-screen search. Picking nobody now leads to "Create & add people": it creates the group, opens the chat, then opens Add people with phone and email search (`:103-106`, `:116-121`, `:242-243`). A hint explains this (`:199`). This is honest, but the path is two steps.
+  2. ✅ **Creating with nobody picked** is allowed (`:103-106`).
+  3. n/a **Two creation UIs** (§5).
+- **Additional:** ✅ `onPrimary` (`:147`, `:241`, `:287`).
+- **Regressions:** none.
+- **Subscreens:** Selected-member chips: 8 → 8.
+- **Still needed for 10/10:**
+  1. An abandoned "Create & add people" leaves an empty group. Say so, or offer to delete it, if the user backs out of Add people (`:116-120`).
+  2. The "N SELECTED" line is marked a header, but it is a status (`:198`). A live count would serve better.
+  3. `as any` route casts (`:118-119`, `:126`). `errorBar` uses `c.danger + '1F'` concatenation (`:262`).
+
+#### `app/communities.tsx` — **7.0 → 7.5**
+- **Scores now:** Function 7 · States 8.5 · UI 8 · A11y 8 · Security 6.5 · Code 8 (mean 7.67)
+- **Previous items:**
+  1. ◐ **Management (C9).**
+     - Owner: Edit in the header and Delete (with a confirm that groups are kept).
+     - Member: Leave (with a confirm).
+     - Everyone: "Add a group you manage" (`:147-176`, `:178-204`; `components/groups/CommunityDetailView.tsx:58-63`, `:113-116`).
+     - Against today's server every action ends in "Not available yet … Nothing was changed" (`:29-35`; `serverContracts.ts:43-47`, `:59-67`). This is honest, but the controls do not work until the deploy, so Function counts it only partly.
+  2. ✅ **Stale detail.** `detailStale` shows a banner with Retry and a spinner (`:45`, `:105-108`, `:119-123`; `CommunityDetailView.tsx:66-73`).
+  3. ✅ **Extracted.** `CommunityDetailView`, `CommunityNameModal`, `CommunityAttachSheet` and `communityStyles`; the screen is 284 lines. The behaviour was compared with `43c2d19` and is identical.
+  4. ✅ **CTA labelled** (`:262`). The modal scrim is a labelled Pressable that closes it (`CommunityNameModal.tsx:156`; `communityStyles.ts:41`).
+- **Regressions:** none from the split or the tokens. One nit: the attach flow opens and loads your groups, then fails with "Not available yet" only after a pick (`:135-145`, `:151`).
+- **Subscreens:**
+  - Community detail: 7 → 8
+  - Name modal (new, group and edit): 7.5 → 8
+  - Attach sheet (new): **7** (good loading, failed and empty states, at `CommunityAttachSheet.tsx:210-231`, but it cannot succeed until C9 is deployed)
+- **Still needed for 10/10:**
+  1. Deploy C9. Until then, consider hiding or pre-flagging the four actions rather than letting them fail after confirmation or picking (`:151-176`).
+  2. Delete and leave do not clear the `community:<id>` cache (`:155-157`).
+  3. The `as any` on `/chat` (`:218`).
+
+#### `app/creator-channels.tsx` — **10 → 10** (rated as a redirect)
+- **Scores now:** Function 10 · States 10 · UI 10 · A11y 10 · Security 10 · Code 10
+- **Previous items:** ✅ The `as any` nit is gone: `<Redirect href="/broadcast" />` (`:39`).
+- **Regressions:** none.
+- **Subscreens:** none.
+- **Still needed for 10/10:** nothing.
+
+---
+
+#### Regressions introduced in round 4 (all minor; none from splits or tokens)
+1. **group-info media strip.** With 9 or more local media, newer server-only media are no longer fetched, so the strip can show older thumbnails on a phone that has not synced (`app/group-info.tsx:155-158`).
+2. **group-admin `applySetting`.** A tap on a *different* option while that setting is saving is dropped with no feedback (`app/group-admin.tsx:182`).
+3. **Deploy-time duplication (latent).** After C8, invite-link requests will be listed in both group-invites Waiting (`app/group-invites.tsx:341-372`) and group-admin "Link join requests" (`app/group-admin.tsx:393-412`).
+4. **Communities C9 actions.** They are visible today and fail only after confirmation or picking, with an honest "Not available yet" (`app/communities.tsx:29-35`, `:135-176`). This is not broken, but it is four controls that cannot succeed on the current server.
+
+---
+
+### E+K — Calls, Live, Network + Utilities, Comfort, Games — round-4 re-rating
+
+| Screen | Old | New | Δ |
+|---|---|---|---|
+| `app/voicecall.tsx` | 7.5 | 7.5 | 0 |
+| `app/videocall.tsx` | 7.0 | 7.5 | +0.5 |
+| `app/incoming-call.tsx` | 8.0 | 8.0 | 0 |
+| `app/group-call-active.tsx` | 7.5 | 7.5 | 0 |
+| `app/call-reliability.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/network-test.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/live.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/live-view.tsx` (+ `components/live/*`) | 7.5 | 8.0 | +0.5 |
+| `app/live/join/[code].tsx` | 8.0 | 8.5 | +0.5 |
+| `app/notifications.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/notification-sounds.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/storage-manager.tsx` | 8.0 | 8.0 | 0 |
+| `app/cache-cleanup.tsx` | 8.5 | 8.5 | 0 |
+| `app/offline-mode.tsx` | 8.5 | 8.5 | 0 |
+| `app/vision-comfort.tsx` | 8.5 | 8.5 | 0 |
+| `app/eye-check.tsx` (+ `components/comfort/*`) | 8.5 | 8.5 | 0 |
+| `app/perf-debug.tsx` | 8.5 | 8.5 | 0 |
+| `app/dashboard.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/games.tsx` (+ boards/sheets, `components/games/{chess,ludo,rummy}/*`) | 8.0 | 8.5 | +0.5 |
+
+**Method and evidence**
+- This is an independent, read-only review. For each screen I read `git diff 43c2d19 HEAD -- <file>` and the files it now imports. That covers all of `components/live/*`, `components/comfort/*`, the touched parts of `components/games/{chess,ludo,rummy}/*`, `components/games/{ui,feedback}.tsx`, `lib/{callSession,speedTarget,sosReachCopy,privacyPrefs,broadcast,batteryOptimization,gamesSocket}.ts`, `lib/call/engine.ts`, `lib/golive/stageLayout.ts`, `constants/{theme,callTheme}.ts` and `services/cache/cacheManager.ts`.
+- I checked every claim in R4E, R4K, R4GM and R4F0, plus the R4HO items that touch this batch (E-2 callTheme, K privacyPrefs, K emergency-sos wording).
+- "Old" is the round-3 score from `rerate3/EK.md`. Open items come from that file's lists, plus the fix_status §3 E+K row (`9a3460e`, which is an ancestor of `43c2d19`; I re-verified it).
+- Rounding is the same as round 3: the mean of the six dimensions, to the nearest 0.5, ties rounded up.
+- Checks I ran:
+  - `npx tsc --noEmit -p .` exited 0.
+  - These selftests all exited 0:
+    - Calls and live: `components/call/inviteResult` (11), `lib/call/{addPerson,callControls}`, `lib/golive/{immersiveStage,pipCorner (7),hostPasscodeMemo (6)}`.
+    - Network: `lib/speedTarget` (14), `lib/speedTest` (5).
+    - Notifications, storage and comfort: `lib/sosReachCopy` (6), `lib/comfortStorageFixes` (11), `lib/privacyPrefs`, `lib/outboxSummary` (9), `lib/eyeCheckModel`, `lib/settingReadBack` (10).
+    - Games: `lib/games/{boardLabels (41),chessView (25),ludoBoard (27),gamesNative,rummyTable,ludoGlass,fairness,boardFit}`, `lib/gamesBackCoverage` (17).
+    - Coverage and ratchets: `lib/a11yCoverage`, `lib/themeCoverage` (22), `lib/screenBackCoverage`, `lib/orphanRoutes` (51), `lib/uiDebtRatchet` ("no file got worse", 5 unroled / 306 hex remain), `lib/silentFailure`, `lib/responsiveLayout` (28).
+  - Logs are `SP/ek4_tsc.txt` and `SP/ek4_st_*.txt`.
+- **Split checks (behaviour must be identical).**
+  - **live-view.** I substituted the `LIVE` palette values back into `components/live/liveStyles.ts`. Its `StyleSheet` then matches the pre-split one exactly (0 differing lines after removing comments).
+  - **live-view hooks.** Effect bodies and dependency lists match the original. Three things differ:
+    - `useLiveFeed`'s heartbeat effect now also lists `setB`, `setEnded` and `releaseOwnedMedia`. All three are stable (state setters and `useCallback([])`), so the effect still does not re-run.
+    - The invite auto-open effect is now registered after the SFU join effect instead of before it. The two are independent, and the invite effect is gated on `!waiting`, so this has no observable effect.
+    - There are no other order changes.
+  - **Chess, Ludo and Rummy.** A line-multiset diff of each pre-split board against its new file, its folder and the lib modules it moved code into shows only these changes: export or signature lines, hex → named palette, the logged label and live-region changes, and `G?.wildRank` / `!!G` passed into `useHand` (`components/games/Rummy.tsx:412`).
+  - **eye-check.** Every user-visible string and accessibility literal from the old file is present in the new files, and the `ringSize < 190` branch is kept (`components/comfort/EyeCheckPhases.tsx:217`).
+- **New tokens.** HEAD's dark `onPrimary` and `onDanger` are `#FFFFFF` (`constants/theme.ts:224-229`). The R4F0 log's `#010628` is not what shipped. So every `'#FFFFFF'` → `colors.onPrimary` / `onDanger` move in this batch renders the same as before, and the Switch thumbs that became `colors.onPrimary` stay white in both themes (the stated rule). This causes no visual regression. The token's own comment still records white-on-dark-primary at 4.11:1. That is an open design decision, not new debt. `colors.warning` (dark `#F59E0B`, light `#93370D`) replaces the amber `TAB_ICON_INK.calls` in storage-manager and perf-debug.
+- **Not verifiable statically and not deployed:**
+  - Calls: decline timing, ringing.
+  - Live: PiP actions and stage-layer activation under VoiceOver/TalkBack, chat follow-at-bottom.
+  - Comfort: `dismissTo` param delivery and `beforeRemove`.
+  - Storage: walk speed.
+  - Games: every games screen-reader change, including actions on a `GestureDetector` child.
+  - Backend items written but not deployed: R4BE C13 `contactsReached`, C14 `/net/speed/*`, and the golive reapers. The client code that relies on them is credited only for how it behaves against today's server: it falls back to "Sent to N" and to Cloudflare.
+
+**Regressions introduced in round 4 (this batch)**
+1. **storage-manager: the live region chatters.**
+   - The loading view is a `polite` live region (`app/storage-manager.tsx:314`), and its text now changes every 400 ms ("Measuring storage… N items checked", `:157`, `:317`).
+   - TalkBack re-announces a live region on every content change, so a long walk becomes a continuous stream of announcements.
+   - This is the same class of problem R4GM fixed on the Rummy status pill.
+2. **offline-mode: the retry line stays tied to old retries (nit).**
+   - `retryBase` is set after a retry and never cleared (`app/offline-mode.tsx:93`, `:138`).
+   - Every later queue event re-describes the outbox against that old snapshot. For example, a message queued afterwards shows up in the old retry's "still waiting" line.
+3. **group-call-active: no unmount guard on the invite sheet (inconsistency).**
+   - voice and video gained a mounted guard on the add-sheet result (`app/voicecall.tsx:260-262`, `app/videocall.tsx:385-387`).
+   - group-call's `reportInvite` / `invite` still call `setSheet` after awaits with no guard (`app/group-call-active.tsx:214-216`, `:221-228`).
+4. **incoming-call: stale `ponytail:` comment (minor).** The comment says the server's `relay` in `internal/realtime/handlers.go` lacks an ack (`app/incoming-call.tsx:293-296`). Per R4HO, the transport is ccwire, and its dispatch documents that "legacy events have no semantic acknowledgement" (`internal/realtime/ccwire_app_events.go:192`). The limitation is real, but the comment points to the wrong place.
+5. **Carried over, still open:** `lib/call/callControls.selftest.ts:101` still asserts "Beauty is gone", while `app/videocall.tsx:554` renders "Tint". This is a product decision (§5), but the test still encodes a false statement.
+- Not a regression, but a deliberate behaviour change to note: the startup ring (`lib/call/engine.ts:817`) no longer falls back to the socket loop on a 409. It now returns `'ended'` (`lib/callSession.ts:140-142`). That is correct for an ended call.
+
+---
+
+#### `app/voicecall.tsx` — **7.5 → 7.5**
+- **Scores now:** Function 8.5 · States 8 · UI 7.5 · A11y 8 · Security 7.5 · Code 5.5 (mean 7.5)
+- **Open items from round 3:**
+  - ❌ `VoiceCallLegacy` is still present (`:369` onward). This is the product decision in §5, and the rollback flag still holds it.
+  - ✅ Invites report a 409 honestly. `inviteToCall` returns `RingOutcome` (`lib/call/engine.ts:938-951`) and no longer infers a rate limit from 0. `ringCallGroup` maps 429 → `'rate_limited'` and 409 → `'ended'` without falling back (`lib/callSession.ts:125-143`). The sentence for `'ended'` is at `components/call/inviteResult.ts:21`.
+  - ✅ There is an unmount guard on the add sheet (`:258-262`, dependencies at `:309`).
+- **Regressions:** none. The V2 whites now use `CALL.text`.
+- **Subscreens:**
+  - Add-to-call sheet: 8 → 8.5.
+  - In-call chat: 8.
+  - Reaction picker: 8.
+- **Still needed for 10/10:**
+  1. Delete `VoiceCallLegacy` (`:369`–`:748`) once `CALL_ENGINE_V2` is no longer the rollback. This is §5 and needs the device pass in CALLS_README.
+  2. Ringing and invite delivery on real devices are not verifiable statically.
+
+#### `app/videocall.tsx` — **7.0 → 7.5**
+- **Scores now:** Function 8 · States 8 · UI 7.5 · A11y 7.5 · Security 7.5 · Code 5 (mean 7.25)
+- **Open items from round 3:**
+  - ❌ `VideoCallLegacy` is still present (`:580` onward; §5).
+  - ❌ Tint: the decision in §5 is untouched. `lib/call/callControls.selftest.ts:101` is still false.
+  - ✅ The `inviteToCall` outcome fix is shared with voicecall, and the unmount guard is in (`:383-387`).
+  - n/a: the `shareBanner` style. R4E's "not reproduced" holds: the legacy body still uses it (`:1033` area).
+- **Regressions:** none. The route casts are gone (`:312`, `:343`), and the V2 whites use `CALL.text` (`:464`, `:484`, `:1119`).
+- **Subscreens:**
+  - Add-to-call sheet: 8 → 8.5.
+  - Tint strip: 7.
+  - In-call chat / reactions: 8.
+- **Still needed for 10/10:**
+  1. Remove the legacy body after the rollback gate.
+  2. Resolve Tint: remove it, or rewrite selftest #4 to say "renamed to Tint" (`lib/call/callControls.selftest.ts:98-101`).
+  3. The V2 Tint chip still has `'#FFFFFF'` (`:512`). Use `CALL.text`.
+
+#### `app/incoming-call.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8 · Security 7 · Code 8 (mean 8.0)
+- **Open items from round 3:**
+  - ❌ Acknowledged emit: blocked. ccwire has no semantic ack (R4HO "Blocked" E-1). The `ponytail:` note remains (`:293`), but it names the wrong server file (see Regressions #4).
+  - ✅ The `'/' as any` cast and the accept-path casts are removed (`:143`, `:181`, `:184`, `:203`).
+  - ✅ A hung connect no longer holds the ring screen. The first send races `DECLINE_WAIT_MS` = 2.5 s (`:231-232`, `:291`), the screen then leaves, and an in-flight first send still counts (`:235`). Device timing is not verifiable statically.
+- **Regressions:** the stale ponytail reference (#4). The race timer is never cleared, which is harmless.
+- **Subscreens:** Call-waiting mode: 8.
+- **Still needed for 10/10:**
+  1. A ccwire ack extension on server and client, so that "told" means received (`:293-308`).
+  2. Point the ponytail at `ccwire_app_events.go` instead of `handlers.go relay`.
+
+#### `app/group-call-active.tsx` — **7.5 → 7.5**
+- **Scores now:** Function 8.5 · States 8 · UI 8 · A11y 7.5 · Security 8 · Code 6 (mean 7.67)
+- **Open items from round 3:**
+  - ❌ `GroupCallLegacy` is still present (`:539` onward; §5).
+  - ✅ "Lower hand" now awaits and reports failure (`:176-180`). `engine.lowerPeerHand` restores the hand on failure (`lib/call/engine.ts:1005-1013`).
+  - ✅ The 22 hex literals are now `CALL.*` tokens (`constants/callTheme.ts:21-25`; `makeStyles` `:845-875`). The tile `width as any` is replaced by the typed `` `${number}%` `` (`:76`, `:390`).
+- **Regressions:** no unmount guard on the invite result (#3).
+- **Subscreens:**
+  - Moderation sheet: 8 → 8.5.
+  - Add people sheet: 8.
+  - Pager: 8.
+  - In-call chat / reactions: 8.
+- **Still needed for 10/10:**
+  1. Remove the legacy body after the rollback gate (its RTCPeerConnection `as any` casts at `:600-705` go with it).
+  2. Guard `reportInvite` and `invite` against unmount, as voice and video do (`:214-228`).
+  3. Some `rgba(...)` chrome literals remain (`sub`, `tileName`, `handBadge`, `addPeoplePill`, `CtrlBtn`'s inline style `:836`). Move them into `CALL` for consistency.
+
+#### `app/call-reliability.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8 · States 8 · UI 8 · A11y 8 · Security 7.5 · Code 8 (mean 7.92)
+- **Open items from round 3:**
+  - ✅ The battery state is tri-state. `readBatteryExemption` returns true / false / null (`lib/batteryOptimization.ts:67-76`), and the card shows "Couldn't check…" for null (`:124-128`).
+  - ✅ A failed settings open is reported, and so is a failed "I've done this" write:
+    - The openers resolve booleans (`lib/batteryOptimization.ts:96-108`, `:149`; `lib/CallService.ts:241-243`).
+    - Each card shows an inline polite error (`:109`, `:137`, `:161`).
+    - The `DONE_KEY` write reverts and says so (`:44-49`, `:169`).
+  - ✅ The cast is removed (`:82`). `btnTxt` uses `c.onPrimary` (`:226`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Full-screen intent card: 7.5 → 8.
+  - Battery card: 6.5 → 8.
+  - OEM auto-start: 7.5 → 8.
+  - Low-data card: 8.
+- **Still needed for 10/10:**
+  1. Whether `VaultPower` is in the build decides whether the battery card ever says "Done". That is not verifiable statically (no implementation in the repo).
+  2. `refresh()` sets state after async reads with no mount guard (`:69-72`).
+  3. The low-data Switch has no in-flight guard against rapid toggles (`:187-193`).
+
+#### `app/network-test.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8 · States 8.5 · UI 7.5 · A11y 8 · Security 7.5 · Code 7.5 (mean 7.83)
+- **Open items from round 3:**
+  - ◐ App-owned endpoint: the client is written.
+    - A HEAD probe picks ours on 2xx and Cloudflare otherwise. A 429 stops the test with "Try again in N min" and does not fall back (`:117-152`; `lib/speedTarget.ts:48-56`; selftest 14).
+    - The bearer token is only on the app target (`lib/speedTarget.ts:27-44`).
+    - The disclosure names the server actually used (`:424-428`).
+    - C14 is not deployed, so today's builds still measure against Cloudflare, with the disclosure. That is credited as graceful behaviour.
+  - ✅ Back has hitSlop and a fallback, and the title has the header role (`:399-406`).
+  - ✅ The write happens outside the updater (`historyRef`). An unreadable history is never overwritten (`:183`), and a failed write is shown (`:189-192`, `:496`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Results grid: 8.
+  - History list: 8 → 8.5.
+  - Failed panel: 7.5 → 8 (429 copy).
+- **Still needed for 10/10:**
+  1. Deploy R4BE C14 (ops).
+  2. History rows do not record which server measured them, so Cloudflare and app results mix in one list (`TestResult` `:33-41`). Add `server`.
+  3. The chosen `target` keeps the token it was built with for the screen's lifetime (`:268`). An expired token gives 401s that read as "No request reached …". Re-probe on a 401.
+
+#### `app/live.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8.5 · Security 8 · Code 8 (mean 8.25)
+- **Open items from round 3:**
+  - ✅ A failed refresh over a shown list now shows a "Couldn't refresh … Try again" row (44 pt, labelled; `:389-399`).
+  - ✅ The LIVE label uses `colors.danger` at 12 pt (`:432`, style `:485`). The real contrast is not verifiable statically.
+  - ✅ The route and icon casts are gone (`:79`, `:110`, `:277`, `:424`). Continue uses `colors.onPrimary` (`:367`). "LIVE NOW" has the header role (`:385`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Go-live composer: 8.
+  - Join card: 8 → 8.5.
+  - Live-now list: 8 → 8.5.
+- **Still needed for 10/10:**
+  1. `goLive` classifies errors by matching the message string ("409", "503") (`:126-135`). Use the error's status.
+  2. `load` has no mount guard (`:82-86`).
+
+#### `app/live-view.tsx` (+ `components/live/*`) — **7.5 → 8.0**
+- **Scores now:** Function 8.5 · States 8.5 · UI 7.5 · A11y 8.5 · Security 8 · Code 7.5 (mean 8.08)
+- **Open items from round 3:**
+  - ✅ The split is done. The screen is 808 lines, with `useLiveStage`, `useLiveFeed`, `useLiveInvite`, `useStageGestures` and `useStageOrientation` as hooks, and the panels and styles as components (`:45-56`). Behaviour is unchanged (see Method).
+  - ✅ Stage tiles are labelled "<room name>, on stage" (`components/live/LiveStageStrip.tsx:31-36`; name from `remoteParticipants`, `:747`).
+  - ✅ PiP can be moved without dragging: there is a "Move the camera corner" button (`components/live/LiveTopRow.tsx:104-116`) and move/hide screen-reader actions on the PiP (`:675-683`). `nextPipCorner` cycles clockwise (`lib/golive/stageLayout.ts:224-246`; selftest 7; I traced the cycle by hand).
+  - ✅ `closePoll` returns a boolean (`lib/broadcast.ts:282-288`). `endPoll` reopens the poll and alerts on failure (`components/live/useLiveFeed.ts:178-183`).
+  - ✅ Chat follows only when the reader is at the bottom (24 dp slack; `components/live/LiveChatPanel.tsx:31-35`, `:79`). Needs a device check.
+  - ❌ The reapers are not deployed, and end-on-unmount was not added (ZE D3).
+- **Regressions:** none. Effect order is unchanged apart from the harmless invite-effect position, and the styles are identical.
+- **Subscreens:**
+  - Waiting / Failed / Ended: 8.
+  - Top chrome: 8.5.
+  - Live chat: 8 → 8.5.
+  - Poll card: 8 → 8.5.
+  - Poll composer: 8.
+  - Invite panel: 8.
+  - Host media: 8.
+  - Camera PiP: 6.5 → 8.
+  - Stage strip: 6 → 8.
+- **Still needed for 10/10:**
+  1. Deploy and confirm the golive reapers, or end the broadcast on unmount (fix_status §4).
+  2. `LiveInvitePanel` Copy awaits `Clipboard.setStringAsync` without a catch (`components/live/LiveInvitePanel.tsx:57`, `:70`). Its comment "Shown from the route param" is stale, since the passcode now comes from memory (`:43`; pre-existing).
+  3. `useLiveStage.ts` is still 411 lines of one effect. A device pass on the screen-reader actions and the follow-at-bottom behaviour is still needed.
+
+#### `app/live/join/[code].tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8 · Security 8.5 · Code 8 (mean 8.25)
+- **Open items from round 3:**
+  - ✅ The network reason is honest. `redeemInviteLink` returns `'network'` for no status, 5xx, 408 and 429 (`lib/broadcast.ts:372-379`). The screen has no NetInfo heuristic (`:112`).
+  - ✅ The casts are removed (`:82`, `:108`). The CTA text and spinner use `colors.onPrimary` (`:189`, `:302`, `:333`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Name: 8.
+  - Joining: 8.
+  - Passcode: 8.5.
+  - Error: 7.5 → 8.5.
+- **Still needed for 10/10:**
+  1. The Name and Passcode titles have no header role. Only Error has one (`:222`).
+  2. `attempt` sets `busy` in `finally` after a `router.replace` has unmounted the screen (`:101-116`). This is harmless but unguarded.
+
+#### `app/notifications.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8.5 · Security 8 · Code 7.5 (mean 8.17)
+- **Open items from round 3:**
+  - ✅ A failed save reverts and alerts (`:190-201`). The revert is now reachable, because both setters store first and reject on failure (`lib/privacyPrefs.ts:87-91`, `:108-111`; selftest).
+  - ✅ One Switch-thumb rule: `colors.onPrimary`, which is white in both themes at HEAD (`:329`).
+  - ✅ Static styles are moved into `makeStyles` (`:386-433`).
+  - ✅ Back has a `canGoBack` fallback (`:203`, `:212`).
+- **Also fixed:**
+  - The armed panic glyph was danger-on-danger and invisible. It now uses `onDanger` (`:344-346`).
+  - SOS copy says "Sent to N" until C13 lands (`lib/sosReachCopy.ts:18-29`; `:148-149`, `:247-256`).
+  - Trusted-contact rows are one labelled stop (`:358`).
+- **Regressions:** none.
+- **Subscreens:**
+  - SOS history: 8 → 8.5.
+  - Privacy: 8 → 8.5.
+  - Panic: 8 → 8.5.
+- **Still needed for 10/10:**
+  1. The `Promise.all([getNotifPreview(), getRemoteLinkPreviews()])` load has no catch (`:85`).
+  2. `loadSos` and `refreshSos` set state with no mount guard (`:70-79`).
+  3. Deploy R4BE C13, so the history can say "Reached X of N".
+
+#### `app/notification-sounds.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8.5 · Security 8 · Code 8.5 (mean 8.33)
+- **Open items from round 3:**
+  - ✅ Rapid ringtone taps can no longer race. A `savingTone` guard is in place, and rows are `disabled` with a disabled state (`:24-25`, `:42-48`, `:114-117`).
+  - ✅ The `THUMB` literal is replaced by `colors.onPrimary` (`:26-28`). It is white in both themes, so it looks the same.
+- **Regressions:** none.
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. The two Switches have no in-flight guard (`:80`, `:96`).
+  2. The loading state is a bare spinner with no header or Back (`:50`).
+
+#### `app/storage-manager.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 7.5 · Security 8 · Code 7.5 (mean 8.0)
+- **Open items from round 3:**
+  - ◐ Each directory's entries are now stat'ed 16 at a time (`:69`, `:86-93`), and the loading view counts progress. The speed-up is not verifiable statically, and Delete-old's walk is still sequential per directory.
+  - ✅ Back has a fallback (`:299`).
+  - ✅ The Files colour is `colors.warning` (`:150`).
+- **Regressions:** the chatty live region (#1, `:157`, `:314-318`).
+- **Subscreens:**
+  - Loading: 8 → 7.5 (progress is useful but chatty for screen readers).
+  - Destructive confirmations: 8.5.
+  - Load-failed: 8.
+- **Still needed for 10/10:**
+  1. Take the counter out of the live region. Keep the live region on a static "Measuring storage…" and give the count as a non-live label, or announce it only every N seconds.
+  2. Measure the walk on a large media folder on a device.
+
+#### `app/cache-cleanup.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 9 · States 8.5 · UI 8.5 · A11y 8.5 · Security 9 · Code 8 (mean 8.58)
+- **Open items from round 3:**
+  - ✅ The setters reject (`services/cache/cacheManager.ts:136-147`; `9a3460e`), so the screen's revert and alert are now reachable (`:107-118`).
+  - ✅ `ON_PRIMARY` is replaced by `colors.onPrimary` (`:141`, `:191`, `:232`). Back has a fallback to `/storage-manager` (`:124`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Clear confirmation: 8.5.
+  - Load-failed: 8.5.
+- **Still needed for 10/10:**
+  1. `load()` (focus-driven) and the cleanup's `finally { setBusy(false); load(); }` have no mount guard (`:51-66`, `:97`).
+
+#### `app/offline-mode.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8.5 · A11y 8.5 · Security 8 · Code 8 (mean 8.33)
+- **Open items from round 3:**
+  - ✅ Queue events now re-describe the retry, so in-flight sends catch up (`:73`, `:93`, `:138`). Live-region timing needs a device check.
+  - ✅ `ON_PRIMARY` is replaced by `colors.onPrimary` (`:236`, `:308`). Back has a fallback (`:152`).
+- **Regressions:** `retryBase` is never cleared (#2).
+- **Subscreens:** Outbox card: 8.5.
+- **Still needed for 10/10:**
+  1. Clear `retryBase` once the retried rows have settled (unsent reaches 0 or stops changing), or on the next manual action.
+
+#### `app/vision-comfort.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 9 · States 8.5 · UI 8.5 · A11y 9 · Security 8.5 · Code 8 (mean 8.58)
+- **Open items from round 3:**
+  - ✅ Back has a fallback (`:152`).
+  - ✅ No more stacked second instance. eye-check uses `router.dismissTo` with an `eyeCheckAt` stamp (`app/eye-check.tsx:126-129`), and Vision Comfort re-applies a fresh result after it has initialised (`:66-78`). Device delivery of the params is not verifiable statically.
+- **Also done:** profile chips are a radiogroup with radio buttons, sections have headers (`:162-170`), and `onPrimary` is used everywhere, including `previewColors.onPrimary` (`:187`).
+- **Regressions:** none. A returning suggestion replaces an unsaved draft without asking. This is a logged decision (R4K "Decisions"), and leaving afterwards is still guarded.
+- **Subscreens:**
+  - Sight step: 8.5.
+  - Discard dialog: 9.
+  - Eye Check suggestion: 8 → 8.5.
+  - Preview and slider: 9.
+- **Still needed for 10/10:**
+  1. A device check of `dismissTo` params plus `beforeRemove`.
+  2. Many per-render inline colour styles remain in JSX (for example `:160`, `:184`). Move them into a themed `makeStyles`.
+
+#### `app/eye-check.tsx` (+ `components/comfort/*`) — **8.5 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8.5 · A11y 9 · Security 9 · Code 8.5 (mean 8.67)
+- **Open items from round 3:**
+  - ✅ The phases are split. The screen is 187 lines, with the state and logic only. The phases are in `components/comfort/EyeCheckPhases.tsx`, the charts in `EyeCheckCharts.tsx`, and the fixed test-field palette in `eyeCheckField.ts`. Copy and logic are unchanged (literal comparison in Method).
+- **Also done:** the glasses choice is a radiogroup with radio buttons (`EyeCheckPhases.tsx:130-141`), Back falls back to `/vision-comfort` (`:130`), and the WHO link has a hint.
+- **Regressions:** none.
+- **Subscreens:**
+  - Acuity: 8.5.
+  - Colour plates: 8.5.
+  - Others: 8–8.5.
+- **Still needed for 10/10:**
+  1. A stale comment: `components/comfort/eyeCheckField.ts:8` points at `app/eye-check.tsx ON_WHITE_FIELD`, which now lives at `EyeCheckPhases.tsx:26`.
+  2. A device check that the summary's `dismissTo` is not blocked by `beforeRemove`. Summary is not in `MID_TEST` (`:24`), so it should not be.
+
+#### `app/perf-debug.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 9 · States 8.5 · UI 9 · A11y 8.5 · Security 7.5 · Code 8.5 (mean 8.5)
+- **Open items from round 3:**
+  - ◐ Gating stays a product decision (§5 "Perf debug"). The screen is honest about what it shows.
+  - ✅ The warning colour is now `c.warning` (`:183-184`). Back falls back to `/(tabs)/profile` (`:58`).
+- **Regressions:** none.
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. Gate the long-press behind `__DEV__` or a diagnostics flag if the owner decides to (`app/(tabs)/profile.tsx`; §5).
+
+#### `app/dashboard.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8.5 · States 8.5 · UI 7.5 · A11y 8.5 · Security 8 · Code 8 (mean 8.17)
+- **Open items from round 3:**
+  - ✅ It refreshes on focus (`:100-101`; `9a3460e`).
+  - ✅ A failed refresh over cached data shows an alert-role "Couldn't refresh…" row (`:92-95`, `:176-181`).
+  - ✅ Blocked Contacts and Active Sessions are `ok: null`, labelled INFO / "not scored", and left out of the score (`:38-43`, `:116-117`, `:192-202`).
+  - ✅ There is a mount guard (`:65-67`, `:80-95`).
+- **Regressions:** none.
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. With `E2EE_ENABLED` off, the E2EE row is always "REVIEW", has no link, and still counts against the score (`:25-27`). Either mark it unscored or explain why.
+  2. Most of the layout is inline style objects (for example `:155-170`, `:207-215`).
+
+#### `app/games.tsx` + boards/sheets — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8.5 · Security 8.5 · Code 8.5 (mean 8.42)
+- **Open items from round 3:**
+  - ◐ Screen-reader pass of the boards: written and statically checked; 📱 still needed.
+    - Shared pieces: `useAnnounce` (`components/games/ui.tsx:648-664`), `Btn selected`, `PlayerRow accessible`, Banner announce, `SettingRow` as a switch with its checked state (`feedback.tsx:248-264`).
+    - Chess: square labels from `lib/games/boardLabels.ts` (selftest 41).
+    - Rummy: the hand card is `accessible` with activate/discard actions (`components/games/rummy/Cards.tsx:386-395`).
+    - Ludo: token position labels.
+    - Tic-Tac-Toe: whose mark is in each cell.
+    - Hub: Quick match is an action on the card (`app/games.tsx:509-517`).
+    - Unroled touchables in the games files are now 0 (ratchet).
+  - ❌ The draw offer still comes from a toast regex (`components/games/Chess.tsx:215`). This needs a field from the external games server. The banner is now announced and its buttons are labelled.
+  - ✅ The Rummy split is done (988 lines plus `components/games/rummy/*`; line-multiset check in Method). Chess is 648 lines and Ludo 728.
+  - ✅ The Ludo settings sheet has a Sound switch, "How to play" and "Invite a friend" (`components/games/Ludo.tsx:703-722`). "Joining the table…" now times out to Try again (`:66`, `:120-126`, `:231`).
+  - ✅ `GAMES_HTTP` has one source (`lib/gamesSocket.ts:32-34`), and `lib/games/origin.ts` is deleted.
+- **Regressions:** none found. The splits keep behaviour apart from the logged label and contrast changes.
+- **Subscreens:**
+  - ModeSheet: 8.
+  - Searching: 8 → 8.5 (iOS announce, header).
+  - BotOffer: 8.
+  - LeaderboardSheet: 8.5.
+  - HistorySheet: 8.
+  - InviteSheet: 7.
+  - RulesSheet: 8.
+  - VoiceSheet: 7.5.
+  - "Which game" code sheet: 8.
+  - Chess: 8 → 8.5. Its draw-offer banner goes 6 → 6.5.
+  - Ludo: 7.5 → 8.5. Ludo settings go 6 → 8.
+  - Rummy: 8 → 8.5. The leave confirmation stays at 8, and table info / score stays at 7.5.
+  - Tic-Tac-Toe: 7.5 → 8.5.
+- **Still needed for 10/10:**
+  1. A VoiceOver and TalkBack device pass of every board, especially Rummy's `accessibilityActions` on a `GestureDetector` child and the GameCard `quickMatch` action.
+  2. A protocol field for draw offers (`Chess.tsx:215`), which needs the games server.
+  3. InviteSheet (7) and VoiceSheet (7.5) were not part of this round. Bring them up to the sheet standard: a header and labelled, stateful controls.
+
+---
+
+### F — Media, Files & Documents — round-4 re-rating
+
+- **Old scores.** "Old" is each screen's round-3 score ("→ new" in `rerate3/F.md`). The open items are that file's "Still needed for 10/10" list, plus the F row of fix_status §3 ("fixed after re-rating", `815c7a5`) and the §3 open items for file-preview and media-viewer.
+- **What changed.** I read `git diff 43c2d19 HEAD` for all 13 screens. I read every screen in full in its current form, together with the parts it imports:
+  - `components/fileviewer/{Panes.tsx,styles.ts,fileTypes.ts}`
+  - `components/media/ZoomableImage.tsx`
+  - `components/PdfView.tsx`
+  - `components/ProtectedMediaView.tsx` (diff)
+  - `lib/media/{pdfZoom,editExport,videoResumeKey}.ts`
+  - `lib/useReducedMotion.ts`
+  - `lib/scanVault.ts`
+  - the reader entry in `components/chat/BubbleParts.tsx:155-190` and `components/chat/MessageBubble.tsx:468-471`
+- **Fixer claims.** The claims in `fixes/R4F.md`, `R4HO.md` (F-1…F-3) and `R4F0.md` (tokens) were each checked against the code. Most hold. Two inaccuracies:
+  - The R4F0 token table says dark `onPrimary` is `#010628`. The code says `#FFFFFF` (`constants/theme.ts:224-228`).
+  - The theme comment points to a fix_status §5 decision about it, but §5 does not contain one.
+- **What I ran.** Everything was read-only. Logs are in `SP/rerate4/F_*.txt`.
+  - `npx tsc --noEmit -p .`: exit 0.
+  - `npx eslint` on the 13 screens and their new parts: 0 errors and 1 warning. The warning predates this round: `lib/media/compressMedia.ts:32` uses `require`. The 4 story-viewer `exhaustive-deps` warnings are gone.
+  - Selftests: all exited 0. That covers a11yCoverage, themeCoverage (22/20), screenBackCoverage, orphanRoutes (51), uiDebtRatchet ("no file got worse", 306 hex remain), responsiveLayout (28), keyboardAvoidance, silentFailure, permissionDeadEnd and rowOverflow. It also covers these new ones: pdfZoom, editExport, fflateBound, videoResumeKey, fileTypes. And these existing ones: zoomPan (9), imageEditMath (31), videoSeek (11), storyDuration (7), strokePath (5), archive, shelfOpen (13), shelf, reader, docOpen, whiteboardStroke (3), cameraMode.
+- **Not verified on a device.** Nothing here was checked on a device, so none of these counts beyond what the code shows. Each is **not verifiable statically**:
+  - image-editor: the offscreen full-resolution capture.
+  - PdfView: pinch zoom, and the iOS WKWebView path.
+  - story-viewer: Reduce Motion.
+  - camera: back and abandoned recordings.
+  - shelf and docscanner: the row a11y actions.
+  - expo-image caching.
+- **Rounding.** Mean of the six dimensions, rounded to the nearest 0.5, ties rounded up (the same convention as rounds 2 and 3).
+
+| Screen | Old | New | Δ |
+|---|---|---|---|
+| app/camera.tsx | 8 | 8 | 0 |
+| app/media-viewer.tsx | 7 | 8 | +1 |
+| app/media-gallery.tsx | 7.5 | 8 | +0.5 |
+| app/image-editor.tsx | 7 | 7.5 | +0.5 |
+| app/file-preview.tsx | 8 | 8 | 0 |
+| app/file-viewer.tsx | 7.5 | 8 | +0.5 |
+| app/video-player.tsx | 7 | 7.5 | +0.5 |
+| app/reader.tsx | 8 | 8.5 | +0.5 |
+| app/shelf.tsx | 8 | 8.5 | +0.5 |
+| app/archive-viewer.tsx | 8 | 8.5 | +0.5 |
+| app/docscanner.tsx | 7 | 7.5 | +0.5 |
+| app/story-viewer.tsx | 7.5 | 8 | +0.5 |
+| app/whiteboard.tsx | 7.5 | 8 | +0.5 |
+
+**Regressions and new risks from round 4.** None of these breaks a screen outright.
+
+1. **media-viewer: view-once photos may be disk-cached.** This is a privacy risk. The shared `ZoomableImage` swapped RN `Animated.Image` for expo-image with the default `cachePolicy` (`components/media/ZoomableImage.tsx:79-80`). That default is `'disk'`. expo-image only turns Glide's disk cache off for `'none'` or `'memory'` (`node_modules/expo-image/android/.../ExpoImageViewWrapper.kt:430-435`). The view-once photo is the ephemeral `vo_<id>.jpg` file (`app/media-viewer.tsx:460-467`), which is deleted on unmount (`:371-375`). A decoded or transformed copy may now outlive it in Glide's cache. Whether Glide writes one for a local file is **not verifiable statically**. The chat bubble already uses `cachePolicy="memory"` for comparable thumbnails (`components/chat/MediaBubbles.tsx:403-423`).
+2. **reader: depends on local SQLite for encrypted rows.** The F-1 handoff landed. Server rows now pass `{chatId,id}` only (`components/chat/MessageBubble.tsx:468-471`, `components/chat/BubbleParts.tsx:182-190`), and an envelope row is read from the E2EE cache (`app/reader.tsx:57-67`). Before, encrypted rows passed `text`. A server row that is missing from local SQLite (`lib/localDb.ts:1122-1132`) now shows "Nothing to read" where it used to show the text. This is low risk and **not verifiable statically**.
+3. **story-viewer: 12 s stall on a media story with no attachment id.** The deps rewrite returns early when there is no `curAttachmentId` (`app/story-viewer.tsx:205`). Before, the fetch failed and `setLoaded(true)` ran at once. Now such a story waits for the 12 s safety timer (`:324-328`). Behaviour is otherwise identical. The effects re-run on the same primitives.
+4. **video-player: resume can be missed.** The resume is applied in `onLoad`, or right away if `durationRef > 0` (`app/video-player.tsx:96-113`). If AsyncStorage answers after `onLoad` but before the first status update sets `durationRef` (`:241`), the saved position is never applied. This is a narrow race.
+5. **PdfView on iOS: the PDF itself may be blocked.** `onShouldStartLoadWithRequest={r => r.url === fileUrl}` (`components/PdfView.tsx:144`) compares the raw path. If WKWebView reports a percent-encoded URL (a space or non-ASCII character in the path), the PDF's own load is refused, and `onError` may not fire. That would leave a blank view instead of the text-reader fallback. Not verifiable statically (📱).
+6. **image-editor: export fallback has gaps.** If the offscreen image never reports `onLoad`, Done spins for 10 s before it falls back (`app/image-editor.tsx:387-390`). If `captureRef` returns a blank bitmap instead of throwing, there is no fallback at all (`:395`). Not verifiable statically (📱).
+7. **Splits: no behavioural regression found.**
+   - The file-viewer split keeps every hint, label and handler of the old renderers, checked against `43c2d19:app/file-viewer.tsx:960-1308`. The intended changes are the PDF hint and the image's single-tap zoom.
+   - media-viewer's ImageViewer move keeps the same gesture code.
+8. **New tokens: no regression in this batch.**
+   - `onPrimary` (dark `#FFFFFF`) replaced literal whites with the same value. White on dark `primary`/`accent` is 4.11:1, below AA for small text, for example the media-gallery active tab, 12 px (`app/media-gallery.tsx:558-560`). This is unchanged from before.
+   - `warning` is used only by file-viewer's error icon (`components/fileviewer/styles.ts:19`, `Panes.tsx:344`).
+
+**Pre-existing problems found this round (not regressions).**
+- **docscanner: a failed read can lead to data loss.** A failed list read followed by a new scan overwrites the sealed list, and every older scan's key goes with it. `recentError==='read'` leaves `recentDocs=[]` (`app/docscanner.tsx:136-166`). `processToPdf` then saves `[doc, ...recentDocs]` (`:304`, `:131-134`) over `RECENT_KEY`. This was already true at `43c2d19` (`persistRecent([doc, ...recentDocs])`, line 259 there).
+- **Backdrops wrap their sheets.** The docscanner chat picker (`:639-640`) and the story-viewer viewers sheet (`app/story-viewer.tsx:651-652`) put the sheet inside an accessible `Pressable` backdrop. fix_status §3 records this as an iOS VoiceOver bug elsewhere (C1, J).
+
+---
+
+#### `app/camera.tsx` — **8 → 8**
+- **Scores now:** Function 8.5 · States 9 · UI 8 · A11y 8 · Security 8 · Code 7.5 (mean 8.17)
+- **Round-3 items:**
+  - ✅ 1 Hardware back closes the review sheet first (`app/camera.tsx:345-349`).
+  - ✅ 2 Leaving while recording stops the recording and marks it abandoned (`:158-164`, `:178`, `:185`). The late file is deleted instead of delivered (`:269-270`). Device behaviour is 📱.
+  - ✅ 3 Scan pages are deleted at every exit:
+    - on remove (`:333-341`)
+    - on Discard (`:186`)
+    - after the PDF is built (`:325`)
+    - when a photo or video capture leaves with pages unsent (`:212-215`)
+  - ✅ 4 The floor timer is cleared when the camera reports ready (`:203-206`). `beforeRemove` is typed without `any` (`:174-176`). The local Reduce Motion copy is replaced by `lib/useReducedMotion` (`:105`).
+- **Regressions:** none found.
+- **Subscreens:** Permission gate 8 → 8 · Mode tabs 8.5 → 8.5 · Scan review sheet 8.5 → 9
+- **Still needed for 10/10:**
+  1. The review sheet is an in-tree overlay with no `accessibilityViewIsModal`, so screen readers can still reach the shutter rail behind it (`:596-603`).
+  2. Taking a photo or video while scanned pages exist discards those pages silently (`:212-215`). Only ✕, back and swipe ask (`:174-190`).
+  3. Remove the 2 `as any` (`:221`, `:638`) and type the `catch (e: any)` (`:297`, `:327`).
+
+#### `app/media-viewer.tsx` — **7 → 8**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8 · Security 7.5 · Code 7.5 (mean 8.0)
+- **Round-3 items:**
+  - ✅ 1 The video tap wrapper is `accessible={false}`, so the play button and seek track are reachable (`app/media-viewer.tsx:128-131`).
+  - ✅ 2 A failed or empty `getAccessToken` sets `authFailed`, which shows an error (`:403-405`, `:436-440`).
+  - ✅ 3 Hex reduced to 2 deliberate values (`:41-54`; ratchet 2). `CODE` is built from AuroraDark (`:285-288`). CodeViewer's styles are in the sheet (`:737-747`). This also closes the fix_status §3 "overstated hex" note.
+  - ✅ 4 The controls are padded with the safe-area inset (`:98`, `:138`). The stale `Dimensions` comment is gone.
+  - ✅ 5 Audio skips a fixed ±10 s, and the waveform is `adjustable` (`:199-205`, `:212-215`, `:220-224`).
+- **Regressions:** view-once photos now go through expo-image's default disk cache (`components/media/ZoomableImage.tsx:79-80`; summary item 1). The comment at `:386-387` still says Fresco.
+- **Subscreens:** ImageViewer 7 → 7.5 · VideoPlayer 7 → 8 · AudioPlayer 6.5 → 8 · CodeViewer 7 → 7.5 · ArchiveCard 7.5 → 8 · GenericViewer 7.5 → 8 · "Nothing to show" 7.5 → 8 · ProtectedMediaView 7.5 → 8 (foreground re-reads `getState()`; icons on tokens) · Error+Retry 8 → 8.5
+- **Still needed for 10/10:**
+  1. Pass `cachePolicy="none"` (or `'memory'`) to `ZoomableImage` for view-once and decrypted local sources (`components/media/ZoomableImage.tsx:79`; `app/media-viewer.tsx:667`). Fix the Fresco comment (`:386-387`).
+  2. CodeViewer mounts up to 500 rows in a `ScrollView` map (`:331`). Use a FlatList, as file-preview does.
+  3. The HEAD size probe has no cancel guard and sends no auth (`:503-505`). Type `(u: any)` (`:351`). Remove the dead `fullImg` style (`:699`).
+
+#### `app/media-gallery.tsx` — **7.5 → 8**
+- **Scores now:** Function 8.5 · States 8 · UI 8 · A11y 8 · Security 7.5 · Code 7.5 (mean 7.92)
+- **Round-3 items:**
+  - ✅ 1 One `unlockKey` helper (`app/media-gallery.tsx:255-259`), used at `:271`, `:296` and `:355`.
+  - ✅ 2 Safe-area insets replace `HEADER_TOP` (`:126-127`, `:553`).
+  - ✅ 3 `StyleProp<ImageStyle>` (`:78`). Both route casts are gone (`:315-318`, `:360-367`). The play badge uses AuroraDark ink on a scrim (`:388`), and on-fill text uses `c.onPrimary` (`:560`, `:581`).
+  - ✅ 4 A decrypt failure and a navigation failure have separate copy (`:357`, `:370`).
+- **New (R4HO B-3):** the `open` param auto-opens one file once the Files list holds it (`:136`, `:335-342`). contact-info passes it (`app/contact-info.tsx:365`).
+- **Regressions:** none found.
+- **Subscreens:** Tabs 8.5 → 8.5 · Album grouping 8 → 8 · Error/stale states 8 → 8 · Auto-open file (new) — 7.5
+- **Still needed for 10/10:**
+  1. An `open` id that is not in the walked history (the cap is `:536`) does nothing, silently (`:338-339`). Say so.
+  2. Auto-open can run before `meId` resolves (`:245-248`, `:336-342`), so a sender's own file is downloaded back (`:301`). Wait for `meId`.
+  3. Type `(u: any)` and `catch (e: any)` (`:246`, `:319`, `:368`). Move the inline styles into the sheet (`:397`, `:410`, `:473-474`, `:492`, `:511`, `:542-548`). The play-badge scrim is still an rgba literal (`:569`).
+
+#### `app/image-editor.tsx` — **7 → 7.5**
+- **Scores now:** Function 8.5 · States 8 · UI 7.5 · A11y 7.5 · Security 7.5 · Code 7 (mean 7.67)
+- **Round-3 items:**
+  - ✅ 1 (code), 📱 (device) Full-resolution export.
+    - Done renders the edit offscreen at the photo's pixel size, up to 4096 px (`app/image-editor.tsx:371-403`, `:560-581`; `lib/media/editExport.ts`).
+    - The 4096 px cap has a documented `ponytail:` comment (`:377-379`).
+    - It falls back to a screen capture cropped to `frame`, so letterbox bands are gone (`:405-421`, `:433-441`).
+  - ✅ 2 `beforeRemove` guard, from `815c7a5` (`:356-369`).
+  - ✅ 3 The bottom chrome is padded with the inset (`:584`, `:860`).
+  - ✅ 4 Strokes and text are remapped on crop and rotate (`:187-196`, `:265-267`, `:292`). The editExport selftest passes.
+  - ✅ 5 Temp files are tracked and deleted (`:114-126`, `:198-204`). `releaseCapture` is called (`:418`). A `getSize` failure is surfaced (`:159`, `:279-281`, `:632-636`).
+  - ✅ 6 The crop box is `adjustable`, scaling in 15 % steps with a value (`:534-543`). Refs and styles are typed (`:60`, `:104`).
+- **Regressions:** none to existing behaviour. New-code risks: the 10 s wait and the blank-capture case (summary item 6).
+- **Subscreens:** Crop 7.5 → 8.5 · Draw 7.5 → 8 · Text 7 → 7.5 · Filter 7.5 → 8 · Adjust 7 → 7.5 · Processing overlay 7.5 → 8 (`accessibilityViewIsModal`, `:791`) · Discard confirm 7.5 → 8.5
+- **Still needed for 10/10:**
+  1. Verify the offscreen capture on a device. Fall back sooner than 10 s (`:389`), and detect a blank capture (`:395`).
+  2. The live stroke copies its whole point array on every move (`:215-218`). Use whiteboard's ref + rAF pattern.
+  3. Text overlays can only be moved by drag, with no screen-reader alternative (`:506-517`). Remove the `as any` route cast (`:451`). The undo button's rgba is not a token (`:833`). Move inline styles into the sheet (`:509`, `:625`, `:662`, `:710`, `:716-720`).
+
+#### `app/file-preview.tsx` — **8 → 8**
+- **Scores now:** Function 8.5 · States 8.5 · UI 7.5 · A11y 8 · Security 8.5 · Code 8 (mean 8.17)
+- **Round-3 items:**
+  - ✅ 1 Lazy tokenising, per row, with a per-file and per-language cache (`app/file-preview.tsx:241-252`, `:268`). This also closes the fix_status §3 regression.
+  - ✅ 2 Copy and Share expose their disabled state, and Share its busy state (`:290-298`). The header styles are in the sheet (`:367-370`).
+  - ✅ 3 The file itself is shared through expo-sharing: as-is when local, or as a `vt_share_` copy (`:211-239`). `getInfoAsync` is typed (`:182-183`).
+- **Regressions:** none found.
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. A remote file is downloaded in full before the 2 MB check (`:171-183`). Check `content-length` first, or cap the download.
+  2. The line-number gutter is a fixed 9 px per digit (`:253`, `:266`), so it clips at large font scales.
+  3. The 17 hex values on the code canvas are deliberate (`:27-40`, `:358-361`; ratchet 17). Type `catch (e: any)` (`:189`).
+
+#### `app/file-viewer.tsx` — **7.5 → 8**
+- **Scores now:** Function 9 · States 8.5 · UI 7.5 · A11y 7.5 · Security 8.5 · Code 7.5 (mean 8.08)
+- **Round-3 items:**
+  - ✅ 1 Split. The screen is down to 758 lines (`app/file-viewer.tsx:1-10`), and the panes are in their own modules:
+    - `components/fileviewer/Panes.tsx` (355 lines)
+    - `styles.ts` (191 lines)
+    - `fileTypes.ts` (126 lines, with selftest)
+
+    The behaviour is unchanged against the old renderers, as noted in the summary.
+  - ✅ 2 The image uses the shared ZoomableImage: pinch 1–5×, clamped pan, an a11y zoom action, and new error copy (`components/fileviewer/Panes.tsx:54-70`).
+  - ✅ 3 `C` and `paperColors` are built from AuroraDark and AuroraLight, with one hex left: the photo stage (`components/fileviewer/styles.ts:13-27`, `:46-53`). The header height is measured (`app/file-viewer.tsx:119`, `:697`, `:724`).
+  - ✅ 4 (📱) PdfView has pinch zoom committed on release, double-tap 2×, and an adjustable zoom pill (`components/PdfView.tsx:167-207`, `:334-349`; `lib/media/pdfZoom.ts`). iOS uses WKWebView with JS off (`:130-152`, `:265`).
+  - ✅ (found) The audio awaits are caught (`app/file-viewer.tsx:516-524`).
+- **Regressions:** none to existing behaviour. New risk: the iOS URL equality check (summary item 5).
+- **Subscreens:** Image 6 → 8 · PDF/PdfView 7.5 → 8.5 (📱) · Office/DocView 8.5 → 8.5 · Text reader 8.5 → 8.5 · Audio 7.5 → 7.5 · Hand-off card 7.5 → 7.5 · Unknown type 6.5 → 7 · Error+Retry 8 → 8 · Loading 7 → 7 · Bottom bar 7.5 → 8
+- **Still needed for 10/10:**
+  1. `ImagePane` sends no token for an own-server http image (`components/fileviewer/Panes.tsx:59`). Every other loader uses `downloadAuthed` (`app/file-viewer.tsx:145-158`).
+  2. File-type icons are emoji (`components/fileviewer/fileTypes.ts:107-122`; shown at `app/file-viewer.tsx:709` and `Panes.tsx:106`, `:159`). Use Ionicons, as docscanner now does. The loading shimmer loops regardless of Reduce Motion (`Panes.tsx:25-29`).
+  3. Match the iOS PDF URL by decoded path (`components/PdfView.tsx:144`). Type the 7 `catch (e: any)` and the `(FileSystem as any)` (`PdfView.tsx:229`).
+  4. DocView still mounts wide sheets un-virtualised. This is deferred in R4F as a redesign.
+
+#### `app/video-player.tsx` — **7 → 7.5**
+- **Scores now:** Function 8 · States 8 · UI 7.5 · A11y 7.5 · Security 8 · Code 7 (mean 7.67)
+- **Round-3 items:**
+  - ✅ 1 The four awaits are caught, and Mute, speed and fullscreen update their UI only on success (`app/video-player.tsx:261-301`, from `815c7a5`).
+  - ✅ 2 The resume position is read on mount and applied in `onLoad` (`:92-115`, `:456`). There is a small race (summary item 4).
+  - ✅ 3 The dead `setStatus` is removed.
+  - ✅ 4 `FG_DIM` on the black stage, and the fill is `ACCENT` at 25 % (`:30-37`, `:416-418`, `:732`). The state views' styles are in the sheet (`:848-856`), and the error is a live region (`:469`).
+  - ✅ 5 The resume key is a SHA-256 hash (`lib/media/videoResumeKey.ts:13-15`). The legacy key is removed on open (`:106`).
+- **Regressions:** the resume race (summary item 4).
+- **Subscreens:** Controls overlay 8 → 8 · "Nothing to play" 7 → 8 · Load-error overlay 7.5 → 8
+- **Still needed for 10/10:**
+  1. Controls auto-hide after 3 s even with a screen reader on (`:204-213`). Keep them shown when `isScreenReaderEnabled`.
+  2. Apply the saved resume position from the first status update as well as from `onLoad` (`:107-113`, `:241`).
+  3. The file is 857 lines with `(e: any)` touch handlers (`:174`, `:183`). Pinch is raw touch maths (`:173-201`); `lib/zoomPan` exists.
+
+#### `app/reader.tsx` — **8 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8.5 · Security 9 · Code 8 (mean 8.42)
+- **Round-3 items:**
+  - ✅ 1 No plaintext in route params for server rows (`components/chat/MessageBubble.tsx:468-471`, `components/chat/BubbleParts.tsx:182-190`). Envelope rows are read from the E2EE cache, checked against their ciphertext (`app/reader.tsx:57-67`). Only unsent rows still pass `text`, as documented (`:7-11`).
+  - ✅ 2 The entry chip has a role and label (`components/chat/BubbleParts.tsx:160-165`).
+  - ✅ 3 The state styles are in the sheet (`app/reader.tsx:151-167`, `:306-311`). The error is a live region, and "Nothing to read" has a header role.
+- **Regressions:** the dependence on local SQLite (summary item 2, low risk).
+- **Subscreens:** Reader settings sheet 8.5 → 8.5 · Pages layout 8 → 8 · Read-error state 8 → 8.5
+- **Still needed for 10/10:**
+  1. When an encrypted server row is not in local SQLite or the E2EE cache, "Nothing to read" claims the message is gone (`:160-167`). Distinguish "not on this device".
+  2. Inline styles remain in `renderBlock`, `Seg`, `Stepper` and the page header (`:105-124`, `:171-191`, `:251-286`). `theme.dim + '22'` is hex-alpha string concatenation (`:136`, `:182`).
+
+#### `app/shelf.tsx` — **8 → 8.5**
+- **Scores now:** Function 8 · States 9 · UI 8 · A11y 9 · Security 8 · Code 8.5 (mean 8.42)
+- **Round-3 items:**
+  - ✅ 1 The row exposes a Pin/Unpin action, and its label says "pinned" (`app/shelf.tsx:242-246`). Whether a screen reader exposes it is 📱.
+  - ✅ 2 The live pin set is kept in a ref. Writes are chained, and a failure reverts only its own row (`:99-125`).
+  - ✅ 3 The route cast is removed (`:134`).
+- **Regressions:** none found.
+- **Subscreens:** Kind chips + sort 8.5 → 8.5 · Stale bar 8 → 8
+- **Still needed for 10/10:**
+  1. Accent text uses `c.primary` (`:296`, `:312`), where siblings use `c.accentOn` for accent-coloured text (`:315`).
+  2. Type `KIND_ICON` as an Ionicons glyph (`:33`). Two inline styles remain (`:210`, `:250`).
+
+#### `app/archive-viewer.tsx` — **8 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8.5 · Security 9 · Code 8 (mean 8.42)
+- **Round-3 items:**
+  - ✅ 1 fflate's bound on the inflated size is pinned by `lib/media/fflateBound.selftest.ts` (exit 0). There is also a check on the actual output length (`app/archive-viewer.tsx:183-191`).
+  - ✅ 2 A size refusal offers "Open in another app" with a busy state, not Retry (`:55-56`, `:286-298`).
+  - ✅ 3 Each extraction gets its own numbered folder, so same-named entries no longer overwrite each other (`:156-159`, `:194-196`). The info is typed, and the route cast is removed (`:98-99`, `:202`).
+- **Regressions:** none found.
+- **Subscreens:** Directory browser 8.5 → 8.5 · Error state 7.5 → 8.5 · Unsupported-format state 8.5 → 8.5
+- **Still needed for 10/10:**
+  1. A remote archive that is too big has already been downloaded into `workDir` (`:88-94`), and the hand-off downloads it again (`:227-235`). Reuse the first copy.
+  2. Accent text uses `c.primary` (`:377`). Type the 3 `catch (e: any)` (`:133`, `:203`, `:237`). ZIP only (`:262-279`), which the screen documents.
+
+#### `app/docscanner.tsx` — **7 → 7.5**
+- **Scores now:** Function 8 · States 7.5 · UI 8 · A11y 7.5 · Security 7.5 · Code 7.5 (mean 7.67)
+- **Round-3 items:**
+  - ✅ 1 The sealed list is saved before plaintext is deleted, and a failed save rolls back the `.vcs` copies (`app/docscanner.tsx:149-162`). `persistRecent` throws, and a failed save fails the scan (`:129-134`, `:301-317`). This came from `815c7a5`.
+  - ✅ 2 `recentError` distinguishes `'read'` from `'locked'`. A locked list gets "Reset list", behind a destructive confirm (`:101-104`, `:142`, `:169-189`, `:473-491`).
+  - ✅ 3 Type icons, tips and the filename use Ionicons (`:40-47`, `:463-470`, `:650`). Fills use `BRAND_GRADIENT_CTA` or `accentDeep` with `onPrimary` (`:448-458`, `:560-563`, `:614-616`). Inline styles are in the sheet (`:696-772`, 0 hex). Insets are used (`:684`, `:698`). The type grid is a radiogroup (`:542`).
+  - ✅ 4 A `sharing` guard, with busy state on both Share buttons (`:320-336`, `:523-524`, `:605-606`). No `as any` remains.
+  - ✅ 5 Scanner and picker page copies are deleted on reset and unmount (`:120-127`, `:210-211`, `:231-234`, `:414`). The preview still shows page 1 until then (`:597-601`), which it needs.
+  - n/a 6 The merge with camera SCAN is a product decision (fix_status §5), and the screen is honest about it.
+- **Regressions:** none from round 4. Two pre-existing problems were found (item 1 below, and the backdrop in item 2).
+- **Subscreens:** Step pick 7.5 → 8 · Step type 7 → 8 · Step processing 8 → 8 · Step preview 7.5 → 8 · Chat picker Modal 8 → 7.5 (backdrop wraps the sheet) · Delete confirm 7 → 7.5 · Recent-list error card 7.5 → 8.5
+- **Still needed for 10/10:**
+  1. **Do not save over a list that failed to load.** While `recentError` is set, a new scan overwrites `RECENT_KEY` with `[doc]` (`:136-166`, `:304`, `:131-134`). That permanently drops every older scan's key after a transient read failure, and hides a half-migrated legacy list. Refuse the save, or re-read and merge first.
+  2. Make the picker backdrop a sibling of the sheet (`:639-640`), the C1/J fix pattern. Use the `c.scrim` token (`:755`).
+  3. The scan key is device-bound, not PIN-bound (`lib/scanVault.ts:13-16`, `ponytail:`). Type the 3 `catch (e: any)` (`:215`, `:308`, `:388`).
+
+#### `app/story-viewer.tsx` — **7.5 → 8**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8 · Security 8 · Code 7.5 (mean 8.08)
+- **Round-3 items:**
+  - ✅ 1 A Pause button (`userPaused`) that a hold or sheet release does not override (`app/story-viewer.tsx:85-90`, `:621-624`). Reduce Motion is respected (📱):
+    - the active segment is drawn full instead of sweeping (`:609`);
+    - the clock still advances and still pauses (`:354-365`).
+  - ✅ 2 The bar continues from `progressFrac` on resume (`:94-103`, `:366-372`).
+  - ✅ 3 The effects depend on primitives, with 0 eslint warnings (`:164-173`, `:248`, `:271`, `:313`, `:328`). The `mediaSrc` cast is removed (`:509`). The STAGE set is built from AuroraDark (2 hex) (`:61-73`).
+- **Regressions:** the 12 s stall for a media story with no attachment id (summary item 3, minor).
+- **Subscreens:** GateChallenge 8 → 8 · Viewers sheet 8 → 7.5 (backdrop wraps the sheet, `:651-652`) · Error/loading 8.5 → 8.5 · Delete confirm 8.5 → 8.5 · Reduce Motion (new) — 8 (📱)
+- **Still needed for 10/10:**
+  1. Make the viewers backdrop a sibling of the sheet (`:651-652`).
+  2. Set `loaded` at once for a media story with no attachment id (`:205`).
+  3. Type `locked: any` and the `catch (e: any)` (`:551`, `:152`, `:446`). The file is 762 lines, and the GateChallenge `onAnswer` closure (`:549-560`) could move out.
+
+#### `app/whiteboard.tsx` — **7.5 → 8**
+- **Scores now:** Function 8 · States 8.5 · UI 7.5 · A11y 7.5 · Security 7.5 · Code 8 (mean 7.83)
+- **Round-3 items:**
+  - ✅ 1 The leave guard compares a version counter that is bumped on stroke, undo, redo and clear (`app/whiteboard.tsx:106-110`, `:99`, `:116`, `:122`, `:128`, `:140`, `:158`, `:179`).
+  - ✅ 2 The live stroke is kept in a ref, with at most one render per frame (`:58-67`, `:84-103`).
+  - ✅ 3 The header styles are in the sheet, with a busy state (`:200-215`, `:287-291`). The redundant AuroraBackground is removed (`:286`).
+  - ◐ The capture temp is kept after Share. This is deliberate and documented (`:175-177`); view-shot sweeps it at the next start.
+- **Regressions:** none found.
+- **Subscreens:** Toolbar 8.5 → 8.5 · Clear confirm 8 → 8 · Leave guard 7.5 → 8.5
+- **Still needed for 10/10:**
+  1. Remove the `as any` route cast (`:160`). The 14 ink hex values are image content (`:22-27`; ratchet 14).
+  2. The canvas has no non-gesture alternative for screen-reader users (`:221-222`). This is inherent; it could at least announce stroke count changes.
+
+---
+
+### G1 — Family Circle — re-rating (round 4)
+
+| Screen | Old | New | Δ |
+|---|---|---|---|
+| `app/family.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/family-map.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/family-add.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/family-alerts.tsx` | 8.5 | 8.5 | 0 |
+| `app/family-history.tsx` | 8.0 | 8.0 | 0 |
+| `app/family-items.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/family-member.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/family-places.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/family-setup.tsx` | 8.0 | 8.5 | +0.5 |
+
+**Method.** This is a static, read-only review of `git diff 43c2d19 HEAD` (HEAD `4910069`). Overall = mean of the six dimensions, rounded to 0.5 as `Math.round(2x)/2`.
+- **Baselines.** The "Old" scores and open items come from `rerate3/G1.md`. The two G1 items in fix_status §3 ("fixed after re-rating", `21ec13e`) are already in the base and still hold:
+  - Hub matrix rounding: now `coarse()`, at `components/family/useHubDistances.ts:17` and `:125-127`.
+  - The family-setup pending-join exit: `app/family-setup.tsx:59`.
+- **Files read in full.**
+  - All nine screens.
+  - Every file the hub now imports from the split: `components/family/{HubTop, HubMemberRow, HubManageSheet, HubQuickActions, HubSpaceCards, HubDistancePanel, HubControls}.tsx`, `hubStyles.ts`, `useHub{Presence,Distances,Feeds,Safety,Sharing}.ts`, `lib/family/{hubGroups, keepAlive}.ts`.
+  - The map's parts: `MapBars.tsx`, `MapRosterSheet.tsx`.
+  - Safe Zones: `PlaceEditSheet.tsx`, `lib/family/placeOptions.ts`.
+  - The changed helpers: `lib/family/{traceShape, historyGate, memberFormat}.ts`.
+  - The diffs of `FamilyMap`, `MeetHereSheet`, `SelectedMemberSheet`, `NavigationLayer`, `CheckinSheet`, `AnnouncementSheet` and `CrashCountdown`, plus `lib/nav/{navigationService, navPresentation}.ts`.
+  - The new theme tokens (`constants/theme.ts:228-230`, `:272-274`).
+- **Split equivalence (hub).**
+  - **Copy.** I extracted every string literal and JSX text from the base `app/family.tsx` (2441 lines) and searched for each one in the new hub plus its parts. Every literal is present, except entity-encoding differences (`&amp;` → `&`, `’` → `’`) and the `#fff`/`#070A18` literals that moved to tokens or `AVATAR_INK`.
+  - **Code paths compared side by side with the base.** All of these are behaviour-identical: the member row, manage sheet, distance chips, toggleShare/keep-alive, the presence/refresh effects, watch alerts, crash countdown, the roster and focus effects (same deps: `[router, active?.id]` ≡ `[router, activeId, refreshMembers]`), and the zero-space redirect.
+  - **Changes from the base.** These are additive a11y and tokens, not behaviour: row actions, radio roles, header role on the sheet title, Save busy state, unread badge `onDanger`.
+- **Split equivalence (map).** `MapBars`/`MapRosterSheet` are pure moves. These are the only differences:
+  - A roster row with no fix now has role `text` and no `onPress`. The old `onPress` was a no-op in that case.
+  - `LeaveBar` tolerates a null `arriveBy` (`MapBars.tsx:96`).
+  - The turn bar is now one labelled element (`:139-140`).
+  - The roster load state is a polite live region with a labelled spinner (`MapRosterSheet.tsx:68`, `:74`).
+- **Split equivalence (Safe Zones).** There is one behaviour regression (see family-places).
+- **New tokens.**
+  - `onPrimary`/`onDanger` are `#FFFFFF` in both themes, so every swap from `'#fff'` is visually identical.
+  - The places that changed look on purpose are improvements: disabled "Post"/CTA labels now use `textDim` instead of white on `border` (`AnnouncementSheet.tsx:53-54`, `family-add.tsx:289`), and the arrival "Done" is outlined instead of white on `#22C55E`.
+  - No G1 screen uses `warning` except `family-items.tsx:61`'s `c.warning ?? c.primary`, which now resolves to the token.
+
+**Checks run (read-only):**
+- `npx tsc --noEmit -p .` exits 0 (`rerate4/G1_tsc.txt`).
+- `npx eslint app/family*.tsx components/family lib/family lib/items lib/nav/navigationService.ts lib/nav/navPresentation.ts` gives **0 errors, 0 warnings** (`rerate4/G1_eslint.txt`; round 3 had 9 warnings).
+- Selftests, all exit 0 (`rerate4/G1_st_*.txt`): uiDebtRatchet, a11yCoverage, themeCoverage, locationEgress, responsiveLayout, pendingLink, screenBackCoverage, orphanRoutes, family/{traceShape, placeOptions, memberFormat, historyOwners}, items/crowd. The `lib/nav/navPresentation.ts` self-check is OK (it now includes `showThenManeuver`).
+- The ratchet counter over `app/family*` and `components/family/*.tsx` (`rerate4/G1_counts.txt`) finds:
+  - unroled 0 everywhere;
+  - hex 0 in every screen and every new part;
+  - hex remaining only in CheckinSheet 4, CrashCountdown 3 and FamilyMap 14, all matching the lowered baseline.
+- Zero `as any` in the batch, and `grep memberRoutes` finds nothing.
+
+**Fixer claims (`fixes/R4G1.md`).** All 32 "Fixed" rows hold in the code, with one inaccuracy.
+- Row 28 says PlaceEditSheet "resets during render when a different place opens, so no stale frame". That is true for a *different* place, but it does not reset when the *same* place reopens (regression below).
+- The `thenEvent` handoff landed: `lib/nav/navigationService.ts:202-208` and `:272`, and `app/family-map.tsx:801-802`.
+
+**Not verified:** nothing is deployed or device-verified. These all need a device: the row accessibility actions in VoiceOver/TalkBack, the 40% roster height, the THEN chip, the outlined Done button, the share sheet, background alert taps, and the slot model.
+
+---
+
+#### `app/family.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8.5 · States 8.5 · UI 7.5 · A11y 8.5 · Security 8.5 · Code 7.5 (mean 8.17)
+- **Original items:**
+  1. ✅ **Split the hub.**
+     - `app/family.tsx` is 796 lines and holds state and actions. Rendering lives in `Hub*.tsx`, effects in `useHub*.ts`, and the pure parts in `lib/family/hubGroups.ts` and `keepAlive.ts`.
+     - The four exhaustive-deps warnings, the `require()` and the unused disable are gone: `refreshMembers`/`afterCircleGone` are `useCallback`s (`:191-227`), and the crash countdown calls through `sosRef` (`useHubSafety.ts:70-71`).
+     - eslint gives 0 warnings. Three justified disables remain (`:258`, `:290`, `:367`).
+  2. ✅ **Matrix rounding** (already from `21ec13e`). `fetchMatrix` receives `coarse()` positions (`useHubDistances.ts:125-127`).
+  3. ✅ **Nested row buttons are reachable.** The row carries the `showOnMap`, `navigate` and `manage` accessibility actions, routed in `onAccessibilityAction` (`HubMemberRow.tsx:95-114`).
+  4. ✅ **The expanded roster grows.** It uses `maxHeight: Math.round(winH * 0.4)` (`:678`) and shows `RosterLoadState` (loading, or failed + labelled Retry, polite) while not loaded (`:679`; `HubTop.tsx:63-82`).
+  5. ✅ **Setup copy per space type.** The manage row passes `groupType` (`HubManageSheet.tsx:113-114`), and family-setup names that type (see below).
+  6. ❌ **Seal the location-store upload.** This is a backend design (fix_status §4). It is disclosed honestly in the header (`:7-10`).
+- **Regressions:** none in behaviour (see Method). Hex 7 → 0.
+- **Subscreens:**
+  - Expanded map + roster: 7.5 → 8.
+  - Sections grid (`HubQuickActions`): 8 → 8.
+  - Check-in sheet: 8.5 → 8.5.
+  - Announcement sheet: 9 → 9.
+  - Manage sheet (`HubManageSheet`): 8.5 → 8.5. It gains a header role and the Save busy state (`:85`, `:97`).
+  - Crash countdown: 8.5 → 9. "Send SOS now" now has a label and hint (`CrashCountdown.tsx:55-56`).
+  - Member actions: 8 → 8.5.
+  - SOS outcome dialog: 8 → 8.
+  - Roster error state: 8 → 8.5.
+  - Distance panel (`HubDistancePanel`, newly separate): 8. It has radio groups (`:107`, `:121`), but its origin line is mislabelled (item 1 below).
+- **Still needed for 10/10:**
+  1. **Fix the distance summary label.** It reads "Straight-line from {origin}" (`HubDistancePanel.tsx:96`), but the summary is computed from `mergeRoadDistances` rows (`useHubDistances.ts:143-146`), which carry ROAD metres once the matrix answers (`lib/family/distance.ts:383-385`). Say "by road" when `byRoad`, or drop "Straight-line". This predates round 4; not a regression.
+  2. **Drop a roster that answers for a space you have left.** `refreshMembers` sets `members` from whichever request resolves last (`:206`). A slow response for the previous space can overwrite the new space's roster after a quick switch. Ignore results whose `id !== activeId`.
+  3. **Move the alpha concatenations onto tokens.** They remain at `HubQuickActions.tsx:31`, `HubSpaceCards.tsx:135` and `:225`, `HubTop.tsx:150` and `:187`, and `HubControls.tsx:93`.
+  4. **Seal the location-store upload**, or offer an opt-out of server retention (backend; `lib/family/presence.ts:426-434`).
+  5. **Device-verify:**
+     - the row accessibility actions
+     - the 40% roster
+     - the one-dialog SOS flow
+
+#### `app/family-map.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8.5 · States 8 · UI 7.5 · A11y 8.5 · Security 8 · Code 7 (mean 7.92)
+- **Original items:**
+  1. ✅ **Dead `memberRoutes` path removed.** The type, the prop, the memo, the inject effect and both WebView functions are gone, and a repo grep finds no reference.
+  2. ✅ **THEN chip.**
+     - `NavBanner.thenEvent`/`thenRoadName` (`lib/nav/navigationService.ts:47-49`, `:202-208`, `:272`) are gated by `showThenManeuver` (≤300 m, self-checked in `navPresentation.ts:175-178`).
+     - They are passed in at `:801-802` and drawn as a labelled chip (`NavigationLayer.tsx:169-181`).
+  3. ◐ **Split.** The screen is 1309 → 1076 lines. `MapBars.tsx` and `MapRosterSheet.tsx` are pure moves. The slot model and nav wiring stay in the screen.
+  4. ✅ **Light basemap recorded** as an in-place `theme-exempt` (`FamilyMap.tsx:697`), and themeCoverage passes.
+  5. ✅ **Meet Here origins rounded** to 0.001° (`MeetHereSheet.tsx:99-100`).
+  6. ❌ **Device verification** of the slots, follow bar, matrix labels and THEN chip is still pending.
+- **Regressions:** none. The arrival "Done" changed look (outlined, `G.goodText`; `NavigationLayer.tsx:114-120`). That is a contrast fix, not a behaviour change.
+- **Subscreens:**
+  - `FamilyMap` WebView: 7.5 → 8. Dead code is gone and the exemption is recorded; `originWhitelist={['*']}` remains (`:730`).
+  - `MeetHereSheet`: 8.5 → 9.
+  - `SelectedMemberSheet`: 8 → 8.
+  - `NavigationLayer`: 7.5 → 8.5. THEN chip, AA Done, Reroute `onPrimary`.
+  - Trip and Leave-now bars: 7.5 → 8.
+  - Route, turn and follow bars: 8 → 8.5. The turn bar is one labelled element (`MapBars.tsx:139-140`).
+  - Saved-place chips: 8 → 8.
+  - Roster sheet: 7.5 → 8. Live region and labelled spinner; still fixed height.
+  - Connector labels: 8 → 8.
+- **Still needed for 10/10:**
+  1. **Let the roster sheet grow.** It is pinned at `maxHeight: 148` (`MapRosterSheet.tsx:76`). Size it to the window, as the hub now does (`app/family.tsx:678`).
+  2. **Fold the presence events through one helper.** The mergePresence/markSharingOff fold is written out three times (`:162-167`, `:175-180`, `:621-628`). The hub has a single `foldPoint` (`useHubPresence.ts:20-25`); reuse it.
+  3. **Keep splitting.** The screen is still 1076 lines with 8 `eslint-disable` comments, and the slot model and navigation wiring are still inline.
+  4. **Round or disclose the member Route request.** `fetchRoute(from, to)` sends full-precision positions (`:285`). It is user-initiated, but it is the one routing call here that is neither rounded nor stated in the header (`:12-15`).
+  5. **Device-verify** the THEN chip, the slots and the outlined Done.
+
+#### `app/family-add.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8.5 · A11y 8.5 · Security 8 · Code 8 (mean 8.33)
+- **Original items:**
+  1. n/a **Several invites.** One use per code is an open product decision (fix_status §5 "Family invite codes"). The screen is honest about it: the confirm and the shared text both state "one use, 24 h" (`:154-171`). Function is no longer deducted for it.
+  2. ✅ **Space tokens.**
+     - The check uses `onPrimary` (`:199`).
+     - The CTA uses `onPrimary`, or `textDim` when nothing is selected (`:288-289`).
+     - The error bar is a bordered `glassSoft` pane, `G.paneStrong`/`G.dangerText` on a space (`:239-246`, `:329`).
+     - Hex 0.
+  3. ❌ **Device-verify** the share sheet and the `SpaceGround` seam.
+- **Regressions:** none.
+- **Subscreens:** share-code confirm: 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. **Say when the member list did not load.** A failed `circleMembers` is swallowed to `[]` (`:74`), so existing members look selectable and their invites fail one by one.
+  2. **Device-verify** the share sheet and the header seam.
+
+#### `app/family-alerts.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 9 · States 9 · UI 8 · A11y 8.5 · Security 8 · Code 9 (mean 8.58)
+- **Original items:**
+  1. ✅ **Tabs.** The filters are a `tablist` with `tab` + selected (`:124`, `:129`).
+  2. ✅ **Trash only with something to clear.** It renders only when `useFamilyAlerts(circleId,'all')` is non-empty (`:72`, `:116-120`), which matches Clear's whole-history scope.
+  3. ❌ **Device-verify** background taps.
+- **Regressions:** none.
+- **Subscreens:**
+  - Filter tabs: 8 → 9.
+  - Clear-history confirm: 9 → 9.
+- **Still needed for 10/10:**
+  1. **Give an empty filter its own copy.** An empty Important/System filter shows "No alerts yet … land here" (`:147-150`) even when the All tab has rows.
+  2. **Give section headers ("Today", "Yesterday") a header role** (`:155`).
+  3. **Put the critical icon wash on a token.** It is still `colors.danger + '22'` (`:173`).
+  4. **Device-verify** background family-alert taps, locked and unlocked.
+
+#### `app/family-history.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8.5 · States 8 · UI 8 · A11y 8 · Security 8 · Code 8.5 (mean 8.17)
+- **Original items:**
+  1. ◐ **`/nav/trace`.**
+     - `traceShape` rounds to 4 dp (~11 m), drops consecutive duplicates and drops non-finite points (`lib/family/traceShape.ts:19-31`; selftest OK). It is used at `:170`.
+     - The caption now says "rounded to about 10 m" (`:312`).
+     - It is still automatic, not opt-in. A `ponytail:` note (`traceShape.ts:11-13`) records the gap and names opt-in as the product choice that would close it.
+  2. ✅ **Typed and static.** It uses a static `fetchTraceDistance` import (`:30`), and the `(p: any)` mapper is gone.
+  3. ✅ **System events circle-wide** are listed next to the picked member's (`:192-193`); the per-member view is unchanged.
+- **Regressions:** none.
+- **Subscreens:**
+  - Range tabs: 8 → 8.
+  - Locked view: 8.
+  - Trips list: 8.
+  - Member picker: 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. **Make road matching opt-in, or a per-viewer switch** (`:166-176`). Today the shown track always reaches the routing server, though rounded and disclosed.
+  2. **Use the right roles.**
+     - Range tabs: `tab` in a `tablist` like family-alerts, not `button` + selected (`:221`).
+     - Member picker: wrap it in a `radiogroup` and use `checked` (`:259`).
+     - "Trips"/"Timeline" headings: give them a header role (`:322`, `:357`).
+  3. **Label the Retry button** (`:233-240`). It has a role but only its text as a label, and no busy state while reloading.
+
+#### `app/family-items.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 7.5 · States 8 · UI 7.5 · A11y 8 · Security 8 · Code 8 (mean 7.83)
+- **Original items:**
+  1. ✅ **Place name disclosed.** The footer says everyone sees that you heard a tag and the saved place you were in (`:451-458`).
+  2. ✅ **"By you" only after success.** `reportSighting` is awaited, and a failure returns before `setShared` (`:207-214`). The once-a-minute stamp makes the retry happen on the next due minute (`:224-233`).
+  3. ❌ **Background left-behind scan.** Not wired. It needs native background BLE plus geofence exits. The in-screen comment says why (`:445-449`).
+  4. ✅ **Shared `ago`.** It comes from `memberFormat`, via `seenAgo` (`:281`).
+  5. ✅ **Tokens.**
+     - The backdrop is the shared `sheetSt.modalWrap` (`:464`).
+     - The scanning button uses `G.paneStrong` (`:295`).
+     - The device icon uses `brandAlpha(0.1)` (`:427`).
+     - The icon picker is a `radiogroup` of `radio`s (`:478-483`).
+- **Regressions:** none. The "ago" wording changes from "5 min ago" to "5m ago", which is the intended unification.
+- **Subscreens:**
+  - Nearby list: 8 → 8.
+  - Pairing sheet: 8 → 8.5.
+  - Remove confirm: 8 → 8.
+  - Family's things: 7.5 → 8.5.
+- **Still needed for 10/10:**
+  1. **Wire the background left-behind scan**, or keep it out of the spec (`:445-449`).
+  2. **Say when the item list did not load.** `listItems()` failures are swallowed (`:90`), so a read error looks like "no items yet" (`:378-383`).
+  3. **Offer Settings after a permanent "Nearby devices" refusal** (`:143-145`). Use `permissionDenied`, as family-places does.
+  4. **A11y details.**
+     - "MY THINGS", "FAMILY'S THINGS" and "NEARBY DEVICES" need a header role (`:304`, `:387`, `:413`).
+     - The scan button needs a busy/selected state (`:292-295`).
+
+#### `app/family-member.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8 · States 8.5 · UI 7 · A11y 8 · Security 8 · Code 7.5 (mean 7.83)
+- **Original items:**
+  1. ✅ **Map-matching disclosed** under Today, shown only when there is a track (`:548-556`). It is rounded via `traceShape` (`:248`), and the place matrix is rounded to 0.001° (`:283-285`).
+  2. ✅ **Relationship radio group** (`:490`, `:498-499`, with `checked`/`disabled`).
+  3. ✅ **`require()`s and the pull `eslint-disable` are gone.**
+     - There is a namespace import (`:40-42`; locationEgress passes).
+     - `pull` reads `pullOnceRef` (`:135`, `:138`, `:183`).
+  4. ✅ **Registry-missing circle is asked about.** `historyGate.ts:22-25` asks the server, and only registered groups are cached (`:37-39`).
+  - ✅ **Avatar ink** uses `AVATAR_INK[scheme]` (`:405`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Withheld state: 8.
+  - Load-failed notice: 8.5.
+  - Relationship chips: 8 → 9.
+  - Route-to-stale confirm: 8.
+  - Map-matching caption (new): 8.5.
+- **Still needed for 10/10:**
+  1. **Make road matching opt-in.** Today's track still goes to `/nav/trace`, rounded, up to once a minute while the screen is open (`:240-255`).
+  2. **Move the tint concatenations onto tokens.** They remain at `QUALITY_COLOR[...] + '22'` (`:590`), `(...success|textFaint) + '22'` (`:619`) and `zc + '22'` (`:641`).
+  3. **Give the section headings a header role:** "Relationship", "Today", "Today's Activity" and "Safe Zones" (`:489`, `:529`, `:559`, `:601`).
+  4. **Split the 675-line screen**, for example the identity card and the activity timeline.
+
+#### `app/family-places.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 9 · Security 8 · Code 8 (mean 8.33)
+- **Original items:**
+  1. ✅ **Edit Save busy guard.**
+     - `saving` state in the screen (`:57`), with a re-entry check (`:222`).
+     - Save is disabled with a spinner and busy state (`PlaceEditSheet.tsx:82-83`, `:237-242`).
+  2. ✅ **Split.**
+     - The edit sheet moved to `components/family/PlaceEditSheet.tsx`.
+     - Choices and labels moved to `lib/family/placeOptions.ts` (with a selftest).
+     - The screen is 649 → 388 lines, and the misindented chips are gone.
+  3. ✅ **Radio roles.** `ZoneChoice` is `radio` + checked (`PlaceEditSheet.tsx:31-44`), inside labelled `radiogroup`s for radius, measure-from, window and lifetime (`:275`, `:315`; `PlaceEditSheet.tsx:128`, `:136`, `:181`). Day chips stay checkboxes.
+- **Regressions:**
+  - **Discarded edits come back.** The form resets only when `place !== formFor` (`PlaceEditSheet.tsx:72-80`), and `formFor` is never cleared on close.
+    - Steps: open a place, change its name, radius or schedule, then close with "Close without saving" (`:102-103`). Reopen the SAME place, which is the same object while the list is unchanged.
+    - Result: the sheet shows the abandoned values, and Save writes them.
+    - The base reset all fields on every open (`43c2d19:app/family-places.tsx:241-248`).
+    - Fix: clear `formFor` when `place` becomes null, or key the sheet per open.
+- **Subscreens:**
+  - Edit-place sheet: 8.5 → 8.5. Radios and the Save guard are gained, offset by the stale-form regression.
+  - Lock/unlock confirms: 8.5.
+  - Delete confirm: 8.5.
+- **Still needed for 10/10:**
+  1. **Reset the edit form on every open** (regression above, `PlaceEditSheet.tsx:72-80`).
+  2. **Put the lock chip's tint on a token.** It is still `zoneColor(...) + '22'` (`:346`).
+  3. **Give the section labels a header role:** "Add a safe zone" and "Places (n)" (`:255`, `:291`).
+
+#### `app/family-setup.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 8 · UI 8 · A11y 9 · Security 7.5 · Code 8.5 (mean 8.33)
+- **Original items:**
+  1. ❌ **Location-store upload** is still plaintext (backend, fix_status §4). It stays disclosed in both copy variants (`:86`).
+  2. ✅ **Copy per space type.**
+     - Opened with a non-family `groupType`, the screen uses that type's name and icon: the title (`:72`), hero and sub-copy (`:79-86`), "Create family circle" (`:90`, `:97-98`), "Create a {type} or other space" (`:109`), and "Join space" (`:121-122`).
+     - The family case is unchanged.
+     - `router.back()` is guarded with a `/(tabs)/chats` fallback, and its `as any` is gone (`:59`).
+     - The section labels and hero title are headers (`:79`, `:90`, `:114`).
+  3. ❌ **Device-verify** create → hub and the `dismissTo` return (`:38`).
+- **Regressions:** none. Zero-space users with no type still get the family copy, which is a decision recorded in R4G1.
+- **Subscreens:** none (Alerts only).
+- **Still needed for 10/10:**
+  1. **Seal the location-store upload**, or offer an opt-out of server retention (`lib/family/presence.ts:426-434`).
+  2. **Fix the disabled Create/Join labels.** They are white (`onPrimary`) on `colors.border` (`:97-98`, `:121-122`), which is near-invisible on the light theme's translucent border. Use `textDim` when disabled, as family-add and AnnouncementSheet now do.
+  3. **Device-verify** create → hub and the `dismissTo` return.
+
+---
+
+### G2 — Location, Navigation & Safety — re-rating (round 4)
+
+This is a static, read-only review from `43c2d19` to HEAD (`4910069`), using the same rubric (`RUBRIC.md`) and format (`RERATE.md`, `RERATE4.md`).
+
+- **Baselines.** "Old" is the round-3 score in `rerate3/G2.md`. The open items are that file's "Still needed for 10/10" lists, plus the two round-3 regressions:
+  - The location-lock mode-save copy, which fix_status §3 marks as fixed in `21ec13e`.
+  - The AI Guardian `ponytail:` comment, which fix_status §3 lists as still open.
+- **What I read.** I read all 9 screens in full at HEAD, each with its `git diff 43c2d19 HEAD`. No G2 screen was split in round 4.
+  - Changed helpers, read in full or in their changed parts: `components/nav/NavBanner.tsx`, the `NavMap.tsx` diff, `lib/lock/alarmPalette.ts`, `lib/lock/lockService.ts:355-396`, `lib/useReducedMotion.ts`, `lib/sosReachCopy.ts` (new) with its selftest, `components/ui/KeyboardSafe.tsx`, `services/security/deviceSecurity/viewModel.ts:1-40`, `riskEngine.ts:138-143` and `constants/theme.ts:80-95, 195-276`.
+  - I also read the `lib/nav/navigationService.ts` and `navPresentation.ts` diffs. They add the family map's "Then" chip; NavBanner does not use them.
+- **Two commits touch this batch.**
+  - `cae7f8b` holds R4G2's work.
+  - `4910069` carries the cross-package handoffs. It moved the SOS reach logic into `lib/sosReachCopy.ts` (shared with `notifications.tsx`) and added `useReducedMotionSetting` to `lib/useReducedMotion.ts:26-38`.
+
+**Fix claims (`fixes/R4G2.md`).** All 38 "Fixed" rows match the code, with the notes below. I checked the "Not reproduced" row too: the mode-save copy now reads "The new mode applies now but will not survive an app restart" (`location-lock.tsx:195`).
+- **#38 (SOS reach).** The log says that without `contactsReached`, today's "Alerting N" stays unchanged. After `4910069`, the Sent face says "Sent to N trusted contacts." instead (`lib/sosReachCopy.ts:21`, used at `emergency-sos.tsx:292, 352`). The new wording is still honest, so this is not a defect.
+- **#19 (reduced motion).** The log says lock-alert reads the setting "itself". It now uses the shared `useReducedMotionSetting` (`lib/useReducedMotion.ts:26`). This is the R4G2 handoff, and it landed.
+
+**Evidence I ran.** Nothing was device-tested. The backend `contactsReached` (R4BE C13) is written but not deployed.
+- `npx tsc --noEmit -p .` exited 0 with no output (`rerate4/G2_tsc.txt`).
+- `npx eslint` on the 9 screens plus NavMap, NavBanner, lockService, alarmPalette, sosReachCopy and useReducedMotion gave **0 errors and 0 warnings**. The two round-3 NavMap dependency warnings are gone.
+- These `npx tsx` selftests all exited 0, with logs in `rerate4/G2_st_*.txt`:
+  - a11yCoverage
+  - themeCoverage (22 passed, 20 exemptions)
+  - screenBackCoverage
+  - responsiveCoverage
+  - keyboardAvoidance (4)
+  - silentFailure
+  - permissionDeadEnd (5)
+  - uiDebtRatchet ("no file got worse", 5 unroled, 306 hex)
+  - locationEgress
+  - rowOverflow (6)
+  - orphanRoutes (51)
+  - nav/typedCoords
+  - lock/lockHistoryUnits
+  - sosReachCopy (6 groups)
+  - nav/navE2E (1540 assertions; it still prints the known esbuild "Unexpected typeof" line)
+  - deviceSecurity/viewModel
+  - the navPresentation self-check
+  - the urlCoords self-check
+- **Hex literals.** The 9 screens now hold one: the deliberate SOS gradient, `emergency-sos.tsx:389`. NavMap keeps 3 inside its map HTML. There is no `as any` in any G2 screen.
+
+**Entry points.** None were lost.
+- `/location`: `app/chat.tsx:1955`.
+- `/navigate`: `app/(tabs)/mini.tsx:43`, `lib/nav/openNavigation.ts:16,23`, `location-lock.tsx:271` and `lock-alert.tsx:82`.
+- `/location-lock`: `navigate.tsx:218`, `family-places.tsx:375` and `lockService.ts:477`.
+- `/lock-alert`: `lockService.ts:195,477`.
+- `/lock-settings` and `/lock-history`: `location-lock.tsx:408,412,572,595`.
+- `/emergency-sos`: `family.tsx:430` (after the family split, also `components/family/HubQuickActions.tsx:100` and `HubManageSheet.tsx:158`) and `lib/spaces/layout.ts:94`.
+- `/trusted-contacts`: `emergency-sos.tsx:218,426,454`, `notifications.tsx:173,354` and `lib/privacyChecklist.ts:56`.
+- `/aiguardian`: `mini.tsx:58`.
+
+**New tokens (`onPrimary`, `onDanger`, `warning`).** They changed no rendered colour in this batch, so there is no token regression.
+- `onPrimary` and `onDanger` are `#FFFFFF` in both schemes (`constants/theme.ts:228-229, 272-273`), the same white the literals were.
+- `warning` replaces SOS's private `amber()` helper. It is `#F59E0B` on dark (`:230`) and `#93370D` on light (`:274`), both annotated as AA on the normal surfaces.
+- In dark mode, white on `#1777FE` and on `#EF4444` stays below AA for small text (`theme.ts:219-223`). That was true before and is a design decision left open, so it is not scored here.
+- One doc inconsistency is outside this batch: the interface comment says dark mode uses "the splash night ink" (`theme.ts:81-83`), but the dark value is white (`:228`).
+
+**Rounding.** As in round 3, the overall score is the mean rounded to the nearest 0.5. An exact .25 or .75 rounds up; only emergency-sos (7.75) hit one.
+
+| Screen | Old | New | Δ |
+|---|---|---|---|
+| `app/location.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/navigate.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/location-lock.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/lock-alert.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/lock-history.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/lock-settings.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/emergency-sos.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/trusted-contacts.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/aiguardian.tsx` | 8.0 | 8.0 | 0 |
+
+**Regressions from round 4.** All are minor. None is functional or security-relevant, and none comes from a split.
+1. **`aiguardian.tsx:130-136`: iOS no longer hears the scan result.**
+   - The result moved from `Alert.alert` to an in-screen card announced only through `accessibilityLiveRegion`, which works on Android only.
+   - VoiceOver used to get the result through the Alert. It now gets no announcement when "Scanning device…" ends.
+   - The new title is also drawn in `vm.bandColor`. For "Low risk" that is `#34D399` (`riskEngine.ts:139`), which I computed at about 1.6:1 on the light theme's `glassSoft` card.
+2. **`components/nav/NavBanner.tsx:65`: the ETA is now a bare time.**
+   - The sheet's "· ETA hh:mm" was removed to stop duplication (`navigate.tsx:195-202`). The only ETA left is NavBanner's unlabelled time text, so a screen reader reads, for example, "3:45 PM" with no "ETA" context.
+3. **`lock-history.tsx:124` with `:250-253`: an error-styled banner on every filter change.**
+   - Every filter, range or "Show more" change now sets `load='loading'`. So the "Refreshing lock history…" banner, which has a `colors.danger` border and a polite live region, flashes and announces on each chip tap.
+   - The comment at `:248-249` ("only happens after Retry") is now false.
+4. **`trusted-contacts.tsx:123, 246`: the resting bottom padding is lost.**
+   - `KeyboardSafe` puts its computed `paddingBottom` last (`components/ui/KeyboardSafe.tsx:38-40`). It overrides the body's `padding: 16` at the bottom.
+   - At rest, the last card therefore sits only `insets.bottom` from the edge, which is 0 on a device without a gesture inset.
+5. **Cosmetic doc comments.**
+   - `lib/lock/lockService.ts:365`: `enableKillSafe`'s JSDoc is now orphaned above the new `KILL_SAFE_REFUSED` block (`:366-371`).
+   - `lock-settings.tsx:40-43`: two doc blocks are stacked on `save()`.
+
+---
+
+#### `app/location.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8 · States 9 · UI 8 · A11y 8.5 · Security 7.5 · Code 8 (mean 8.17)
+- **Original items (rerate3/G2.md):**
+  1. ✅ **Wrong copy after a GPS failure.**
+     - Send and Start are disabled and dimmed while `!loc`, with `accessibilityState.disabled` (`:332-333, 357-359`).
+     - "Try again" is the way forward (`:290-297`). The "Still getting your location" alerts (`:145, 182`) can no longer be reached from the UI.
+  2. ◐ **Live session.** It still ends when you leave the screen (`:173-174`). The copy stays honest (`:321, 365-370`).
+     - The fixer calls this a product decision. It is not listed in fix_status §5.
+  3. ✅ **Stop event sent when nothing is live.**
+     - `sessionRef` is set only after the start message is sent (`:202`), and `stopLive` emits only then (`:164-167`).
+     - Leaving while the start message is sending or the watcher is starting is handled (`:205, 232`).
+  4. ✅ **Side effect in a state updater.** The interval only decrements (`:240`), and an effect on `live && timeLeft === 0` ends the session (`:178`). New architecture plus React 19.1 (`app.json:10`, `package.json:145`) batches `setLive` and `setTimeLeft` after the await, so this effect cannot fire on a stale `0`.
+  5. ✅ **Missing radiogroup.** It is labelled "Share live for" (`:342`). The title and section header have the header role (`:271, 341`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Permission-denied state: 7.5 → 7.5 (unchanged; its title `:248` has no header role).
+  - GPS-failure state: 8 → 8.5.
+  - Live-sharing mode: 6.5 → 7. The stop is clean now, but the session still dies on leave and its end is not announced.
+  - LocationMap: 9 → 9 (unchanged).
+- **Still needed for 10/10:**
+  1. **Live session.** Move it into a service so it survives leaving the screen (`:173-174, 207-240`), or record keeping it as a §5 product decision.
+  2. **Nothing announces live state.** The live card has no live region, so neither the start nor the automatic end at 0 is announced (`:178, 315-325`). Add a polite region or an `announceForAccessibility` call on start and stop.
+  3. **Unguarded cache read.** `readCache(...).then(setLastFix)` on mount has no unmount guard and no `catch` (`:132`). Minor.
+
+#### `app/navigate.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8 · States 8.5 · UI 8 · A11y 8.5 · Security 7.5 · Code 7.5 (mean 8.0)
+- **Original items (rerate3/G2.md):**
+  1. ✅ **Unlabelled search input.** It now has `accessibilityLabel="Destination"` and a hint (`:249`). The section headers have the header role (`:244, 313, 319, 325, 329, 335`).
+  2. ✅ **Silent paths.**
+     - An out-of-range deep link alerts "Not a valid position" (`:105`).
+     - Zero routes sets "No route was found…" (`:86`), shown in the polite note (`:281-283`).
+  3. ✅ **Remaining distance shown twice.** NavBanner's sub-line is now only the road name (`NavBanner.tsx:57-59`). The distance stays in the sheet (`:197-199`). See regression 2 for the ETA.
+  4. ✅ **NavMap dependency warnings.** The effects are keyed on extracted primitives (`NavMap.tsx` lock `:338-350`, pin `:371-376`). eslint reports 0 warnings.
+  5. ✅ **Chip semantics.**
+     - `Chip` takes a `role` with `checked` state (`:361-366`).
+     - The routes, profile, guidance, timing, travel mode and Fastest/Shortest choices are radios in labelled radiogroups (`:294, 314, 320, 326, 330, 337`).
+     - Avoid tolls and Avoid highways are checkboxes (`:341-342`).
+  6. ❌ **`eslint-disable` for the route-options key.** It is kept, as deferred (`:97-100`). It works.
+- **Regressions:** the bare ETA in NavBanner (`NavBanner.tsx:65`; regression 2).
+- **Subscreens:**
+  - Setup mode: 7.5 → 8
+  - Active navigation: 7.5 → 8
+  - Route alternative chips: 7 → 7.5 (radios; not device-verified)
+  - NavBanner: 8 → 8 (de-duplicated; the ETA lacks context)
+  - NavMap: 7.5 → 8
+- **Still needed for 10/10:**
+  1. **Label the banner values.** Give the ETA a label (for example "ETA 3:45 PM"), and the maneuver distance too (`NavBanner.tsx:64-65`).
+  2. **Alpha suffixes instead of tokens.** Colours are still built as `colors.text + '99' / '66' / '77' / '88'` in inline styles (`:233, 239, 246, 250, 271, 351`). Use `textDim` and `textFaint`.
+  3. **Small chips.** They are about 36 dp tall: `paddingVertical: 8` plus a 13.5 sp label (`st.chip`, `:388`). Add `minHeight: 44` or `hitSlop`.
+  4. **Route-options key.** Replace the `eslint-disable` key with a memoised `routeOpts` key (`:97-100`).
+
+#### `app/location-lock.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8 · States 8.5 · UI 7.5 · A11y 8.5 · Security 7.5 · Code 7 (mean 7.83)
+- **Original items (rerate3/G2.md):**
+  1. ✅ **Mode-save copy** (round-3 regression, `21ec13e`). It now reads "The new mode applies now but will not survive an app restart" (`:193-197`).
+  2. ✅ **Refused kill-safe grant is silent.**
+     - `askKillSafe()` alerts with the shared `KILL_SAFE_REFUSED` and catches a throw (`:61-65`). Both the arm alert (`:233`) and the active-face banner (`:376`) use it.
+     - The same copy is used by `lock-settings.tsx:115`.
+  3. ✅ **No unmount guard in `firstFix`; hook-style name.** A `mounted` ref guards `firstFix` (`:128, 132`), the saved-places load (`:156-157`) and `pickCurrent`, which was renamed from `useCurrent` (`:169-191`).
+  4. ✅ **Stats read as fragments.** Each `Stat` is one accessible element, "Label: value" (`:603-612`). It says "GPS accuracy" and ", charging" in place of "±" and "⚡" (`:361, 365-366`).
+  5. ❌ **File size.** It is now 642 lines; the faces are not split. The fixer judged this optional.
+  - Extra: the Mode and Radius chips are radios in labelled radiogroups (`:522-526, 539-541`, `Chip` `:81-93`), and the white literals became `onPrimary` (`:591-592`).
+- **Regressions:** the orphaned `enableKillSafe` JSDoc (`lockService.ts:365`), cosmetic.
+- **Subscreens:**
+  - Active face: 8 → 8.5
+  - Setup face: 8 → 8
+  - Background-protection Alert: 7 → 8 (a refusal is now said)
+  - Battery Alert: 7 → 7
+  - Unlock confirm: 8.5 → 8.5
+  - NavMap: 7.5 → 8
+- **Still needed for 10/10:**
+  1. **File size.** Split the active and setup faces into components (642 lines).
+  2. **Refusal copy blames the permission.** `KILL_SAFE_REFUSED` always says it "needs location access set to Allow all the time". But `enableKillSafe` also returns false when the background service fails to start (`lockService.ts:373-378`). Tell the two apart, and fix the orphaned JSDoc (`:365`).
+  3. **Buttons below the tap floor.** `srcBtn` and `btn` use `minHeight: 40` (`:623, 640`), while the comment above claims they are "above the 44dp floor" (`:620-622`).
+  4. **Leftover selected-state controls.**
+     - The saved-place chips are still button plus `selected` (`:488`), and are matched by name only, so two places with the same name both light up (`:488-489`).
+     - The pin toggle uses `selected` instead of a switch or `checked` (`:453`).
+     - "SAVED PLACES" has no header role (`:483`).
+
+#### `app/lock-alert.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8 · States 8.5 · UI 8 · A11y 8.5 · Security 7.5 · Code 8.5 (mean 8.17)
+- **Original items (rerate3/G2.md):**
+  1. ✅ **Secondary-text contrast.**
+     - Every line on the alarm face uses `ALARM.ink` (white) (`:155, 188-193`). `inkSoft` and `inkMuted` are removed (`lib/lock/alarmPalette.ts:22-25`), and nothing else used them (grep).
+     - By my calculation, white is 4.8:1 on `#DC2626` and higher toward `#7F1D1D`.
+  2. ✅ **First-frame flash.** `useReducedMotionSetting()` returns `null` until the setting is read (`lib/useReducedMotion.ts:26-38`). The strobe runs only when it is known `false` (`:31, 51`). Not device-verified.
+  3. ✅ **Announce on mount.** A ref-guarded, one-shot `announceForAccessibility` runs when the alarm face first shows (`:63-70`). Not device-verified.
+- **Regressions:** none.
+- **Subscreens:**
+  - Alarm mode: 8 → 8.5
+  - Safe mode: 8 → 8
+- **Still needed for 10/10:**
+  1. **iOS hears only the first announcement.** Later phase changes (grace, alarming, silenced) are announced only by the Android-only assertive live region (`:129-137`). Announce each phase change on iOS too.
+  2. **Device checks.** Confirm on a device that the strobe stays off before the setting resolves, and that the announcement is spoken (📱).
+  3. **Unguarded listener.** The `reduceMotionChanged` listener is not guarded by `alive` (`lib/useReducedMotion.ts:35`). Trivial.
+
+#### `app/lock-history.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8 · States 8.5 · UI 7.5 · A11y 8.5 · Security 7 · Code 7.5 (mean 7.83)
+- **Original items (rerate3/G2.md):**
+  1. ✅ **Summary label drops details.** `sessionLabel()` speaks everything the summary shows: start, radius, duration or "active", exits and max, alarm, time outside, and note (`:71-84, 308`).
+  2. ✅ **Events race.** The `openRef` stale guard covers both the `getEvents` result and its failure (`:98-100, 127-139`). Delete clears it (`:168`).
+  3. ✅ **No progress on filter change or "Show more".**
+     - The effect sets `load='loading'` before every reload (`:124`).
+     - The footer shows a labelled spinner while loading (`:275-283`), and the header banner says "Refreshing…" (`:250-262`). See regression 3.
+  4. ✅ **Emoji in the note preview.** It is an Ionicons `document-text-outline` hidden from accessibility (`:328-333`).
+  - Extra: the filter and range chips are radios in labelled radiogroups (`:59-69, 190, 232`), and each `StatCell` is one element (`:398-404`).
+- **Regressions:** the danger-bordered "Refreshing…" banner on every filter tap, and the now-false comment (`:124, 248-253`; regression 3).
+- **Subscreens:**
+  - Export Alert: 7.5 → 7.5
+  - Delete-all confirm: 8.5 → 8.5
+  - Per-session delete: 8.5 → 8.5
+  - Timeline and note editor: 8 → 8.5
+  - "Show more" footer: 7 → 8
+- **Still needed for 10/10:**
+  1. **Banner styling.** Use a neutral border for the loading state of the banner (`:251`), and fix the comment (`:248-249`).
+  2. **Reload race.** `reload` has no stale guard, so an older `getSessions` for a previous filter, range or limit can land after a newer one (`:109-122`).
+  3. **No retry on a failed timeline.** It says "Close and reopen it to try again" with no Retry control (`:338-341`).
+  4. **Timeline rows read as fragments.** Each row's icon, label, distance and time are separate elements (`:346-353`). Make each row one accessible element.
+
+#### `app/lock-settings.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8 · States 8.5 · UI 7.5 · A11y 8.5 · Security 8 · Code 7.5 (mean 8.0)
+- **Original items (rerate3/G2.md):**
+  1. ✅ **Silent test failures.** `testFailed()` (`:56-58`) is called from the `catch` blocks and from `Speech.speak`'s `onError` (`:270-275`).
+  2. ✅ **Two alerts on a double failure.** `save()` awaits both steps and shows one of three messages (`:44-54`). It still applies after a failed write, exactly as before.
+  3. ✅ **Chip semantics.** Option chips are radios inside 10 labelled radiogroups (`:141, 147, 153, 158, 199, 217, 227, 233, 240, 259`). Action chips stay buttons (`:84-96`).
+  4. ✅ **Emoji in visible labels.** The labels are plain "Test voice" and "Test vibration" (`:270, 273`), and the Test Alarm colours use `onPrimary` (`:266-267`).
+- **Regressions:** the stacked doc comments on `save()` (`:40-43`), cosmetic.
+- **Subscreens:**
+  - Custom sensitivity panel: 7.5 → 8
+  - Repeat-interval chips: 7.5 → 8
+  - Battery-exemption row: 8 → 8
+  - Background-tracking switch: 8 → 8
+- **Still needed for 10/10:**
+  1. **Test Alarm has no failure feedback.** `testAlarm()` returns void and can fail silently (`:264`; `lockService.ts:390-396`). Have it report failure the way the voice test does.
+  2. **Vibration failure is undetectable.** `Vibration.vibrate` does not throw when vibration is off, so `testFailed('Vibration')` is effectively unreachable (`:274`). Either soften the copy or drop the false sense of detection.
+  3. **Small chips.** They are about 33 dp tall (`st.chip`, `:312`). Add `minHeight: 44` or `hitSlop`.
+  4. **Doc comments.** Merge the two blocks on `save()` (`:40-43`).
+
+#### `app/emergency-sos.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8 · States 8.5 · UI 7.5 · A11y 8 · Security 7.5 · Code 7 (mean 7.75, an exact tie rounded up)
+- **Original items (rerate3/G2.md):**
+  1. ◐ **Server-side delivery count.**
+     - The client reads `contactsReached` defensively through `sosReachedOf` (`lib/sosReachCopy.ts:10-13`). It shows "Reached N of M" plus a warning line when the server sends it (`:292, 346-358, 518-521`).
+     - Against today's server it says "Sent to N trusted contacts." (`sosReachCopy.ts:21`), which is honest.
+     - The backend is written but not deployed (fix_status §4).
+  2. ❌ **Device check** that `/emergency-sos` opens and that shake works. Not verifiable statically.
+  3. ✅ **No unmount guard in `triggerSOS`.** A `mounted` ref skips this screen's state after `sendSOS` (`:109-110, 263-264, 275`). The send itself is unaffected, and a failure still alerts (`:272-274`).
+  4. ✅ **Accessibility action name ignored.** It now branches on `activate` and `longpress` (`:384-387`).
+  5. ✅ **Shake gate written during render.** It is now written in a post-commit effect (`:278-281`).
+  6. ✅ **A11y gaps.**
+     - The title and "SOS Contacts" have the header role (`:304, 423`).
+     - The ✓ is hidden from accessibility (`:344`).
+     - The history Retry becomes a labelled spinner while loading (`:497-503`), and `loadHistory` is unmount-guarded (`:155-161`).
+  - Extra: `amber()` became `c.warning`, and the white literals became `onDanger`/`onPrimary` (`:547-549, 568-570, 597`). Only the deliberate SOS gradient hex remains (`:389`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Default / SOS button: 8 → 8.5
+  - Countdown: 8 → 8
+  - Sending: 6.5 → 6.5 (not announced)
+  - Sent: 7.5 → 8 (reach copy, ✓ hidden; not announced)
+  - Shake detection: 7 → 7.5 (📱)
+  - Contacts selector: 8.5 → 8.5
+  - History: 7.5 → 8
+- **Still needed for 10/10:**
+  1. **Deploy the reach count.** Deploy R4BE C13 and migration 144 so "reached" is shown (backend, not this file).
+  2. **Device-verify** the route, shake and Reduce Motion (📱).
+  3. **The result is never announced.** After the assertive countdown (`:316-320`), neither "Sending SOS…" (`:337-340`) nor "SOS Sent!" and its reach line (`:343-358`) has a live region or an announcement. On a safety screen, a screen-reader user is not told the result.
+  4. **No unmount guard on contacts.** `loadTrustedContacts` sets state after its await (`:134-151`).
+  5. **File size.** It is 607 lines with every face inline; split the SOS button and countdown faces, the contacts list and the history.
+
+#### `app/trusted-contacts.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8 · States 8.5 · UI 7.5 · A11y 8 · Security 8 · Code 8 (mean 8.0)
+- **Original items (rerate3/G2.md):**
+  1. ✅ **Keyboard may cover the form.** The body is `KeyboardSafe` (`:120-123, 236`), and the FlatList shrinks. Not device-verified. See the remaining item 1 for small screens.
+  2. ✅ **Stale cache not flagged.** A `stale` line says "may be out of date" in a polite region, with Retry and a spinner while retrying (`:43-44, 59, 63-64, 133-146`).
+  3. ✅ **Emoji read aloud.** The "What trusted contacts receive" rows use Ionicons hidden from accessibility (`:225-235`).
+  4. ✅ **No unmount guard.** The `mounted` ref guards `load`, the cache paint and `addByVaultId` (`:45-46, 52, 59-60, 69, 82, 88-90`). The cache is written before the guard, which is correct.
+  - Extra: the hex literals became `onPrimary` (`:214, 253, 266`).
+- **Regressions:** the lost resting bottom padding (`KeyboardSafe.tsx:38-40` versus `:246`; regression 4).
+- **Subscreens:**
+  - Add-by-VaultID form: 8 → 8 (📱 on small screens)
+  - Remove confirm: 8.5 → 8.5
+  - Stale-cache line: new, 8
+- **Still needed for 10/10:**
+  1. **The body does not scroll.** With the keyboard up on a small phone, the fixed info card (`:124-131`) and "What trusted contacts receive" card (`:225-235`) can push the form under the keyboard. Only the FlatList shrinks. Hide both cards while `adding`, or make the body scroll (📱).
+  2. **Resting bottom padding.** Restore it by adding 16 to KeyboardSafe's inset for this screen, or by wrapping the content (`:246`).
+  3. **Status read on its own.** The online dot is a separate element that reads "Online" or "Offline" without the contact's name (`:163-166`). Fold it into the row's label.
+  4. **Remove handler after leaving.** `removeTrusted`'s `onPress` sets state after its await without the `mounted` guard (`:97-103`). Minor.
+
+#### `app/aiguardian.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8.5 · States 8.5 · UI 7.5 · A11y 8 · Security 8 · Code 8.5 (mean 8.17)
+- **Original items (rerate3/G2.md and fix_status §3):**
+  1. ✅ **Use the exported colours.** `STATUS_META` is imported (`:25`), and the icon uses `STATUS_META[a.severity].color` (`:149`). The false `ponytail:` comment is gone, which closes the round-3 regression.
+  2. ✅ **Read failure after a scan.** A successful scan no longer reloads, and it clears `readFailed` (`:70-73`). A failure reloads (`:81-84`).
+  3. ✅ **Long alert body.**
+     - An in-screen result card shows the band and "N recommended actions listed below", or the clean-result caveat (`:74-80, 130-136`).
+     - The card is one accessible element in a polite region. An Alert is kept only for failure (`:83`). Its white literals became `onPrimary` (`:126, 223`).
+- **Why it does not rise despite the fixes:** a light-theme contrast problem the earlier rounds did not record.
+  - `vm.bandColor` and `STATUS_META` are fixed dark-tuned hexes (`riskEngine.ts:138-143`, `viewModel.ts:18-24`).
+  - They are used as *text* for the score number, the band label, the new result title and the status pills (`:111, 114, 133, 179`).
+  - For "Low risk" and "Clear" that is `#34D399`. By my calculation it is about 1.6:1 on the light `glassSoft` card, which fails even the 3:1 large-text threshold.
+- **Regressions:** the iOS announcement is lost, and the new result title adds another `bandColor` text (`:130-136`; regression 1).
+- **Subscreens:**
+  - Scan result: 7 → 8. It was an Alert and is now an in-screen card; the iOS announcement is missing.
+  - Checks list: 8.5 → 8.5
+- **Still needed for 10/10:**
+  1. **Theme-aware status colours.** Give the band and status colours a light-theme variant in the view model, or draw text in `colors.text` with a coloured icon or ring only (`:111, 114, 133, 179`; `riskEngine.ts:139-142`, `viewModel.ts:19-23`).
+  2. **Announce on iOS.** Add `AccessibilityInfo.announceForAccessibility(title + body)` when `scanResult` is set (`:75-80`).
+  3. **Stale result card.** The card stays up across later focus reloads, including one that then fails. It can sit next to "Couldn't read the last scan" (`:59, 117-121, 130`). Clear it when a reload fails, or mark its time.
+
+---
+
+### H — Spaces — round-4 re-rating
+
+Base `43c2d19` → HEAD (`4910069`). The round-4 Spaces work is `2798bee` (fix log `fixes/R4H.md`), plus `0dcfb48` (R4F0: `onPrimary`/`onDanger`/`warning` tokens and the app-theme `components/ui/useDatePicker.tsx`). The backend items R4BE C11 (`GET /runs?include=riders,stops`) and C12 (shift readable by every member) are written but **not deployed**. This is a static, read-only review. Nothing here is deployed or device-verified.
+
+**Scope.** "Old" is the round-3 score in `rerate3/H.md`. The open items are that file's "Still needed for 10/10" lists, plus the two H items that `2026-10-04_fix_status.md` §3 says were fixed after re-rating (`298f739`):
+- the runs-admin handover-code label;
+- the stale "not a map" comment in transport.
+
+I read every screen in full, together with the new split-out parts:
+- `components/spaces/DeviceDetailSheet.tsx`
+- `NewRunModal.tsx`
+- `StopFormModal.tsx`
+- `runsAdminStyles.ts`
+
+I also read the changed helpers:
+- `lib/spaces/api.ts` (`getRunsWithManifest`)
+- `lib/spaces/runPlan.ts` (`plannedPickStart`, `splitListedRun`)
+- `lib/spaces/theme.ts` (`onBrand`)
+- `lib/spaces/shift.ts`
+- `components/ui/useDatePicker.tsx`
+- `constants/theme.ts` (`onDanger`)
+
+**How today's server is handled.** I checked what each new client path does against the current, undeployed server:
+- **Runs with riders.** `getRunsWithManifest` sends `include=`. An older server ignores it, so `splitListedRun` returns null. The code then falls back to one `getRun` per run, and a run whose read fails is marked `failed` (`lib/spaces/api.ts:110-127`, `lib/spaces/runPlan.ts:94-100`). The N+1 reads remain until C11 ships, but the screens now say when a run's riders could not be read.
+- **Shift.** `loadShift` still falls back to the device copy on any refusal (`lib/spaces/shift.ts:4-9`).
+
+**Rounding:** overall = mean of the six scores, rounded to the nearest 0.5, with ties rounded up (the earlier rounds did the same).
+
+**Checks I ran (read-only). All exit 0:**
+- `npx tsc --noEmit -p .`: 0 errors (`rerate4/H_tsc.txt`).
+- `npx eslint app/space-*.tsx components/spaces/ lib/spaces/`: clean (`rerate4/H_eslint.txt`).
+- `npx tsx` selftests (outputs in `rerate4/H_st_*.txt`):
+  - `lib/spaces/runPlan.selftest.ts`, `shift.selftest.ts` and `leave.selftest.ts`
+  - `uiDebtRatchet`: "no file got worse (5 unroled touchables, 306 hex literals remain)"
+  - `themeCoverage` (22 assertions), `a11yCoverage`, `screenBackCoverage`, `orphanRoutes` (51), `keyboardAvoidance` (4) and `constants/spaceTheme.selftest.ts`
+- I did not run `npm test`.
+- Outside the `#0008` scrims, the only hex literal left in the Spaces files is `Donut`'s default `textColor` (`components/spaces/Donut.tsx:18`). The remaining `any` uses are almost all `catch (e: any)`.
+
+| Screen | Old | New | Δ |
+|---|---|---|---|
+| app/space-admin.tsx | 7.5 | 7.5 | 0 |
+| app/space-attendance.tsx | 7.0 | 7.5 | +0.5 |
+| app/space-checkin.tsx | 7.5 | 8.0 | +0.5 |
+| app/space-devices.tsx | 7.0 | 7.5 | +0.5 |
+| app/space-incidents.tsx | 7.5 | 8.0 | +0.5 |
+| app/space-leave.tsx | 7.5 | 7.5 | 0 |
+| app/space-ops-map.tsx | 7.0 | 7.5 | +0.5 |
+| app/space-overview.tsx | 7.5 | 7.5 | 0 |
+| app/space-pending.tsx | 7.5 | 8.0 | +0.5 |
+| app/space-people.tsx | 7.5 | 8.0 | +0.5 |
+| app/space-roster.tsx | 7.5 | 8.0 | +0.5 |
+| app/space-run-driver.tsx | 7.0 | 7.0 | 0 |
+| app/space-run.tsx | 7.5 | 7.5 | 0 |
+| app/space-runs-admin.tsx | 7.0 | 7.5 | +0.5 |
+| app/space-tasks.tsx | 7.5 | 7.5 | 0 |
+| app/space-transport.tsx | 7.0 | 7.5 | +0.5 |
+| app/space-visitors.tsx | 7.5 | 8.0 | +0.5 |
+
+**Shared verified changes:**
+- **On-danger ink.** `colors.onDanger` replaces `#fff` on every solid danger fill:
+  - admin `:196`, `:313`
+  - overview `:175`, `:523`
+  - ops-map `:319-321`
+  - checkin `:166`
+  - run-driver `:458`, `:644-645`
+- **`onBrand` token.** `SpacePalette.onBrand` is white in both schemes (`lib/spaces/theme.ts:29-36`, `:54`). It replaces the white ink on `brandOnLight` fills in all 17 screens and the sheets.
+- **Contrast.** In dark mode, `onDanger` on `#EF4444` is still about 3.76:1 (`constants/theme.ts:225-229`). That is the open palette decision in fix_status §5, not a deduction here.
+- **Date pickers.** All four Space date-picker callers now import the app-theme hook:
+  - `app/space-leave.tsx:42`
+  - `app/space-tasks.tsx:36`
+  - `components/spaces/NewRunModal.tsx:12`
+  - `components/spaces/StopFormModal.tsx:11`
+
+  This closes round-3 regression 3.
+- **Round-3 regressions 1 and 4** are confirmed fixed.
+  - The label now reads "Ask for a handover code at boarding and drop-off" (`components/spaces/NewRunModal.tsx:114`, `:117`).
+  - The transport comment now says "…and a map" (`app/space-transport.tsx:304-305`).
+- **Splits.** I diffed the split code against `43c2d19`. The behaviour is identical, apart from the intended fixes:
+  - The device detail, add, message and rename handlers match.
+  - The stop-form geocode, current-location and permission flow matches the old `submitStop`/`fillHere`.
+  - The create flow differs only where intended: a successful create followed by a failed open is now an inline error, not "Could not create".
+
+**Regressions and inconsistencies round 4 introduced:**
+1. **The date-picker comment contradicts its Space callers.** `components/ui/useDatePicker.tsx:63-65` (new in R4F0) says: "don't open it from inside another Modal … Screens with a modal composer draw DateTimePicker inline instead".
+   - All four Space callers render `picker.element` inside their Modal:
+     - `app/space-leave.tsx:433-434`
+     - `app/space-tasks.tsx:399-400`
+     - `components/spaces/NewRunModal.tsx:135-136`
+     - `components/spaces/StopFormModal.tsx:165-166`
+   - The StopFormModal picker is three Modals deep, because the form sits inside the run editor Modal (`app/space-runs-admin.tsx:544-548`).
+   - Either the comment or the callers is wrong. Whether the picker stacks on iOS is **not verifiable statically** (📱).
+2. **The check-in title no longer matches the links to it.** `space-checkin` is now titled "Check in" (`app/space-checkin.tsx:123`, `:136`), but overview still opens it as "Attendance" (`app/space-overview.tsx:56`) and "View Attendance" (`:282-283`). A different screen, `space-attendance`, is also titled "Attendance".
+3. **Polling repeats per-run reads against today's server.** Ops-map re-reads every 60 s (`app/space-ops-map.tsx:83-87`) and transport every 30 s while a run is out (`app/space-transport.tsx:170-174`). Until C11 ships, each re-read is one list call plus one `getRun` per run (`lib/spaces/api.ts:116-125`). Transport also re-fetches `circleMembers` on every tick (`:153-155`). This is a cost, not wrong behaviour.
+4. **The stop list hides the day.** A stop can now be planned on any day (`components/spaces/StopFormModal.tsx:125`, `:140-144`), but the runs-admin stop row shows only `clockOf` (HH:MM) (`app/space-runs-admin.tsx:467`). An off-day stop therefore looks like a same-day time outside the form. Minor.
+
+---
+
+#### `app/space-admin.tsx` — **7.5 → 7.5** (mean 7.67)
+- **Scores now:** Function 8 · States 8 · UI 7.5 · A11y 8 · Security 7 · Code 7.5
+- **Original items:**
+  - ◐ 1. The per-run `getRun` loop is replaced by `getRunsWithManifest(spaceId, { activeOnly: true })` (`app/space-admin.tsx:116-117`).
+    - A run whose riders could not be read is now said: "Could not load riders for N runs (the figures below may be low)" (`:122-124`).
+    - Against today's server, this is still one `getRun` per run (C11 is not deployed).
+  - ✅ 2. The SOS banner ink uses `colors.onDanger` (`:196`, `:313`).
+  - ✅ 3. Styles are memoised (`:159`). Tiles are each one accessible element with a label (`:214-217`). Duty-state editing is a product decision (R4H "Not done" #1).
+- **Regressions:** none.
+- **Subscreens:**
+  - Links sheet — 8 → 8.
+  - Shift sheet — 7.5 → 7.5. Plain members still get the device copy until C12 ships.
+  - Emergency banner — 7 → 7.5.
+  - Run tiles — 7 → 7.5. They are grouped, and an undercount is said.
+  - Chat door — 8 → 8.
+- **Still needed for 10/10:**
+  1. Deploy R4BE C11, so the tiles come from one call instead of one `getRun` per run (`lib/spaces/api.ts:116-125`).
+  2. Decide where duty state is edited (product decision; `app/space-people.tsx:238` only displays it).
+  3. Type the `catch (e: any)` at `:141`, and the `e.route as string` cast at `:252`. For example, make `route` and `sheet` a discriminated union in `Entry` (`:43-53`).
+
+#### `app/space-attendance.tsx` — **7.0 → 7.5** (mean 7.5)
+- **Scores now:** Function 7 · States 8 · UI 7.5 · A11y 7.5 · Security 7.5 · Code 7.5
+- **Original items:**
+  - ✅ 1. The week now renders outside the row touchable. The card is a View holding a 44pt header touchable (`app/space-attendance.tsx:238-265`, `rowHit` at `:352`) and the week cells. Each cell is its own accessible element, labelled "Mon: Late" (`:267-279`).
+  - ✅ 2. After a failed refresh, the stale note shows above the earlier rows: "The list below is from the last successful load and may be out of date." (`:178-180`).
+  - ✅ 3. `stateIcon` returns `keyof typeof Ionicons.glyphMap` (`:323`), and the styles are memoised (`:155`). The data is still device-local by design (`:4-14`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Per-member week disclosure — 6.5 → 7.5.
+  - Workplace zone picker — 7.5 → 7.5.
+- **Still needed for 10/10:**
+  1. Group each summary tile into one accessible element ("Present, 12"), as admin, ops-map and overview now do (`:230-235`).
+  2. Build the week and day labels from calendar days (`setDate(-d)`), not `Date.now() - d*24h` (`:121-123`, `:317-321`). On a daylight-saving change, a day near midnight lands in the wrong column.
+  3. For plain members, the shift comes from the device copy until C12 is deployed (`:88`; `lib/spaces/shift.ts:4-9`).
+  4. Type the `catch (e: any)` (`:128`).
+
+#### `app/space-checkin.tsx` — **7.5 → 8.0** (mean 7.75)
+- **Scores now:** Function 8 · States 8 · UI 8 · A11y 7.5 · Security 7 · Code 8
+- **Original items:**
+  - ✅ 1. Leave is read on its own: `getLeave(spaceId).catch(() => null)` (`app/space-checkin.tsx:64`). A failure shows only on the Leave row, as "Could not load your requests · open to try again" (`:180`, `:187`). The hero is no longer hidden.
+  - ✅ 2. A missing identity throws "Could not tell who is signed in", which shows a LoadError (`:66-69`, `:138-140`). The viewer's own requests can no longer be miscounted (`:110-111`).
+  - ✅ 3. The header is "Check in" (`:123`, `:136`). Both buttons have disabled and busy state (`:160`, `:165`).
+- **Regressions:** the rename left overview's "Attendance" links pointing here (summary item 2).
+- **Subscreens:**
+  - Leave door row — 7.5 → 8.
+- **Still needed for 10/10:**
+  1. "Check Out Now" is one tap and cannot be undone. The day is then closed (`:165-172`), with no confirmation. Add one, or allow an undo window.
+  2. After a failed refresh, the "Today" team list (`:200-218`) still shows the last rows under the error with no stale note. Add a note, or hide the list, as the hero is hidden.
+  3. Make each team row one accessible element ("Asha, in 09:02, out 17:40") (`:204-215`). The status dot is colour-only (`:205-207`).
+
+#### `app/space-devices.tsx` — **7.0 → 7.5** (mean 7.42)
+- **Scores now:** Function 7 · States 8 · UI 7.5 · A11y 7.5 · Security 7 · Code 7.5
+- **Original items:**
+  - ✅ 1. Dialog nesting. The detail view is now `components/spaces/DeviceDetailSheet.tsx`, and its one dialog Modal (message or rename) renders inside the detail `<Modal>` (`DeviceDetailSheet.tsx:111`, `:248-287`).
+    - The add Modal opens only from the header "+" on the list (`app/space-devices.tsx:234`, `:327`), which the full-screen detail Modal covers.
+    - Whether the nested dialog presents on iOS is **not verifiable statically** (📱). This closes the fix_status §3 item at the code level.
+  - ❌ 2. Ring and message still work only while the app is in the foreground. Lock, photo and wipe are shown disabled as "Needs device admin" (`DeviceDetailSheet.tsx:26-32`, `:165-185`). Device verification is 📱.
+  - ✅ 3. `archiveDevice` now separates the outcomes:
+    - An archive failure says "Could not remove" and stops (`app/space-devices.tsx:148-150`).
+    - A local unbind failure after a successful archive says "Removed … this phone could not clear its own saved link" (`:151-157`).
+  - ✅ 4. The screen went from 644 to 409 lines. The styles are memoised here (`:212`) and in the sheet (`DeviceDetailSheet.tsx:97`).
+- **Regressions:** none. The handlers match `43c2d19`: rename still closes on an unchanged label (`:166`), and the message dialog still stays open and keeps the text on failure (`DeviceDetailSheet.tsx:103-108`).
+- **Subscreens:**
+  - Device detail — 7.5 → 8.
+  - Add-device modal — 7.5 → 7.5.
+  - Show-a-message dialog — 7.5 → 8 (📱).
+  - Rename dialog — 7 → 7.5 (📱).
+- **Still needed for 10/10:**
+  1. Device-verify ring and message, and the nested dialog on iOS. Add background command collection (R4H "Not done" #2; `DeviceDetailSheet.tsx:159`).
+  2. Make each history row accessible with a label that includes the time (`DeviceDetailSheet.tsx:235-243` sets `accessible` with no label). The kind is colour-only (`:236`).
+  3. Type `getCachedUser().then((u: any)` (`app/space-devices.tsx:90`) and the `catch (e: any)` blocks.
+
+#### `app/space-incidents.tsx` — **7.5 → 8.0** (mean 7.75)
+- **Scores now:** Function 7.5 · States 8 · UI 8 · A11y 7.5 · Security 7.5 · Code 8
+- **Original items:**
+  - ❌ 1. The row still opens the space's gallery, not the specific photo (`app/space-incidents.tsx:194-205`). No client writes `mediaRef` yet (R4H "Not done" #3).
+  - ✅ 2. A `getRuns` failure sets `runsFailed` (`:64-70`):
+    - Rows say "vehicle unknown" (`:92-96`).
+    - A note reads "Vehicle names could not be loaded. Pull down to try again." (`:156-158`).
+  - ✅ 3. The list is a FlatList with header, footer and stable keys (`:136-245`). Resolve uses `onBrand` ink (`:231`, `:279`). Acknowledge and Resolve have state (`:216`, `:227`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Photo row — 6.5 → 6.5.
+- **Still needed for 10/10:**
+  1. Open the specific photo once a client writes `mediaRef` (`:194-205`).
+  2. After a failed refresh, earlier incidents stay under the LoadError with no stale note (`:143-145`), unlike pending and attendance.
+  3. Make each card one accessible element ("Breakdown, Bus 01, 5 min ago, acknowledged") (`:166-180`). Resolved cards are drawn at 0.6 opacity (`doneCard`, `:268`), so check their text contrast (📱 visual).
+
+#### `app/space-leave.tsx` — **7.5 → 7.5** (mean 7.67)
+- **Scores now:** Function 8 · States 7.5 · UI 8 · A11y 8 · Security 7 · Code 7.5
+- **Original items:**
+  - ✅ 1. A failed balance read gets its own card, with "Set allowance" for `edit_settings` (`app/space-leave.tsx:320-331`). The allowance sheet warns that the current values could not be read and that saving replaces them (`:447-452`).
+  - ✅ 2. It now uses `LoadError` (`:337-339`). The icon is typed (`:190-191`). The tab row has `accessibilityRole="tablist"` (`:273`). Cancel is labelled (`:417`, `:465`). Styles are memoised (`:186`).
+  - ✅ 3. The picker is the app-theme hook (`:42`, `:68`).
+  - Extra: Approve is outlined, with success ink on the ground (`:249-259`). This replaces white on the dark `#22C55E` fill.
+- **Regressions:** the picker sits inside the compose Modal, against the hook's new comment (summary item 1).
+- **Subscreens:**
+  - Tabs — 7.5 → 8.
+  - Request-leave sheet — 7.5 → 8 (📱 picker stacking).
+  - Allowance sheet — 7 → 7.5.
+- **Still needed for 10/10:**
+  1. A failed refresh empties the list: `setRows([])` in the catch (`:105-108`). The leave a person just saw disappears behind the error. Keep the last rows with a stale note, as transport now does.
+  2. If `getCurrentUserAsync` fails, `meId` stays null (`:89-91`). My Leave is then empty and Withdraw is hidden (`:193`, `:228`). An approver is also shown Approve and Decline on their own requests (`:238`), which the server refuses. Treat a missing identity as an error, as checkin now does.
+  3. A withdrawn (`cancelled`) request is drawn red with a close icon, like a rejection (`:188-191`). Give it a neutral tone. Decline has no `busy` state (`:245`).
+
+#### `app/space-ops-map.tsx` — **7.0 → 7.5** (mean 7.58)
+- **Scores now:** Function 8 · States 7.5 · UI 7.5 · A11y 8 · Security 7.5 · Code 7
+- **Original items:**
+  - ◐ 1. It uses `getRunsWithManifest` (`app/space-ops-map.tsx:66-69`). A run without riders shows "Riders could not be loaded" on its row (`:407`), and a note sits above the tiles (`:283-287`). It is still per run against today's server.
+  - ✅ 2. Pull-to-refresh (`:277`) and a 60 s re-read while focused (`:83-87`).
+    - Subscriptions key on the set of started runs (`startedKey`, `:101-104`, `:129`), so a re-read does not resubscribe.
+  - ✅ 3. The row is a View holding the row touchable and a separate 44pt chevron (`:390-429`). `me` is typed (`:110`). Tiles are grouped (`:291-294`). Send has state (`:350`).
+  - ◐ 4. The keyboard with the 46% map is unchanged and **not verifiable statically** (📱; `:258`, `:459`). On-danger ink is done (`:319-321`).
+- **Regressions:** the 60 s re-read repeats the per-run reads against today's server (summary item 3).
+- **Subscreens:**
+  - FamilyMap — 6 → 6 (📱).
+  - Emergency mode — 7.5 → 7.5.
+  - Instruction composer — 7.5 → 8.
+- **Still needed for 10/10:**
+  1. Deploy C11, so the minute re-read is one call (`lib/spaces/api.ts:116-125`).
+  2. Device-check the composer above the keyboard with the 46% map (`:459`).
+  3. When the focused run finishes or disappears after a re-read, clear `focus` (`:56`, `:223`). The composer otherwise keeps "Message this run" for a run that is gone (`:334`).
+  4. If a periodic re-read fails, the LoadError sits under the composer while the old rows stay, with no stale note (`:378-380`).
+
+#### `app/space-overview.tsx` — **7.5 → 7.5** (mean 7.58)
+- **Scores now:** Function 8 · States 7.5 · UI 7.5 · A11y 8 · Security 7.5 · Code 7
+- **Original items:**
+  - ✅ 1. "View All Employees" is gated on `view_space_ops` (`app/space-overview.tsx:262-268`), like the People action (`:427-429`). Whether a member without permissions gets `sum` is server-side and **not verifiable statically** (`:82-86`).
+  - ✅ 2. Metric, Legend and Chip are each one accessible element, with "—" read as "not known" (`:473-475`, `:486`, `:496`). School tiles are grouped too (`:187-190`).
+  - ✅ 3. `onDanger` is used (`:175`, `:523`).
+- **Regressions:** "Attendance" (`:56`) and "View Attendance" (`:282-283`) now open a screen titled "Check in" (summary item 2).
+- **Subscreens:**
+  - School tiles — 7 → 7.5.
+  - Business dashboard — 7.5 → 8.
+  - Donut — 7.5 → 7.5.
+- **Still needed for 10/10:**
+  1. Rename the shortcut and link to "Check in" (`:56`, `:283`), or point "View Attendance" at `/space-attendance` for ops.
+  2. After a failed refresh, the old `sum` stays under the "Not available" card with no stale note (`:163-167`).
+  3. Give the attendance bar an accessible value, for example a `progressbar` role with the percentage (`:274-281`). Today the 42, the "/ 50 checked in" and the "84%" are read as three fragments.
+
+#### `app/space-pending.tsx` — **7.5 → 8.0** (mean 7.83)
+- **Scores now:** Function 8 · States 8.5 · UI 7.5 · A11y 8 · Security 7 · Code 8
+- **Original items:**
+  - ✅ 1. Each rider row is one element, with the label "Asha, Green Lane, due 07:45, overdue[, run not started]" (`app/space-pending.tsx:129-136`).
+  - ✅ 2. Styles are memoised (`:71`). The last row of each section gets a bottom radius (`:130`, `rowLast` at `:190`). The visual result is **not verifiable statically**.
+- **Regressions:** none.
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. The data reloads only on focus or pull. The 30 s timer only re-renders "overdue" (`:36-41`). This is the screen open while a parent is on the phone, so re-read while focused, as transport now does.
+  2. Device-check the grouped sections' radius (📱).
+
+#### `app/space-people.tsx` — **7.5 → 8.0** (mean 7.75)
+- **Scores now:** Function 7.5 · States 8 · UI 7.5 · A11y 8 · Security 8 · Code 7.5
+- **Original items:**
+  - ✅ 1. `PermissionMatrix` renders below the radio, inside the option card, not inside the touchable (`app/space-people.tsx:299-341`).
+  - ✅ 2. Count takes the memoised styles and is one accessible element (`:392-398`). The chat detail is typed locally (`:92`). Search has `minHeight: 44` (`:423-426`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Role picker sheet — 8 → 8.
+  - PermissionMatrix — 7.5 → 8.
+- **Still needed for 10/10:**
+  1. A failed catalog read is never shown. `catalogErr` is rendered only inside the matrix (`:338`), but no row can open the picker without a catalog (`:211-212`). An admin just sees no role action. Say it, with a retry, in the list header (`:200-208`).
+  2. Each option's grants summary (`:320-330`) is inside the radio, whose `accessibilityLabel={o.label}` (`:304`) hides it. Add it to the label.
+  3. After a failed refresh, people stay under the LoadError with no stale note (`:202-204`).
+
+#### `app/space-roster.tsx` — **7.5 → 8.0** (mean 7.83)
+- **Scores now:** Function 8 · States 8 · UI 8 · A11y 7.5 · Security 7.5 · Code 8
+- **Original items:**
+  - ✅ 1. FlatList with header, footer and stable keys (`app/space-roster.tsx:180-259`).
+  - ✅ 2. Each row starts with Child or Adult, or the stored kind (`:43`, `:238`).
+- **Regressions:** none. The ScrollView→FlatList move keeps every header block and its conditions (diff against `43c2d19`).
+- **Subscreens:**
+  - Links sheet — 8 → 8.
+  - Add-to-roster modal — 7.5 → 8.
+- **Still needed for 10/10:**
+  1. Make each row one accessible element ("Asha, Child, no account, in your care") (`:224-243`). Today the name and the meta line are read separately.
+  2. After a failed refresh, the roster stays under the LoadError with no stale note (`:187-189`).
+  3. Archive has no in-flight guard (`:130-136`).
+
+#### `app/space-run-driver.tsx` — **7.0 → 7.0** (mean 7.17)
+- **Scores now:** Function 7 · States 7.5 · UI 7.5 · A11y 7.5 · Security 7 · Code 6.5
+- **Original items:**
+  - ❌ 1. Guardians: against today's server, a driver still gets the explanatory Alert (`app/space-run-driver.tsx:305-313`). Backend deploy plus 📱.
+  - ❌ 2. Incidents are still category only (`:369-377`; R4H says the note needs a sealing design). The SOS is still not queued durably; the `ponytail:` note is kept (`:353-361`).
+  - ❌ 3. Detection alerts still go to every member (`:186-188`). This needs the server-side ops audience in R4H's handoffs.
+  - ◐ 4. Done:
+    - Start/Finish and the action buttons have `minHeight: 44` (`:701`, `:722`).
+    - `INCIDENTS` and `settledIcon` are typed (`:56`, `:685`).
+    - Styles are memoised (`:414`).
+    - Board, absent and arrive have state (`:513`, `:558`, `:568`). The code dialog buttons are labelled (`:620`, `:627`).
+
+    Not done: the file is 764 lines and not split (R4H Partial #2).
+- **Regressions:** none.
+- **Subscreens:**
+  - Handover code — 7.5 → 8.
+  - Report-a-problem sheet — 6 → 6.
+  - Panic confirmation — 7 → 7.
+  - Guardian picker Sheet — 7 → 7.
+- **Still needed for 10/10:**
+  1. Deploy `riders[].guardians` and device-test the call path (📱).
+  2. Add an ops-only audience on the server, and use it for detection alerts (`:186-188`).
+  3. Add a sealed incident note or photo (`:369-377`), and a durable SOS queue (`:353-361`).
+  4. Split the location and detection effects out of the 764-line screen.
+
+#### `app/space-run.tsx` — **7.5 → 7.5** (mean 7.67)
+- **Scores now:** Function 7.5 · States 8 · UI 7.5 · A11y 7.5 · Security 8 · Code 7.5
+- **Original items:**
+  - ✅ 1. Each stop row is one element, labelled "Green Lane, arrived 07:41, planned 07:45" or "… not reached yet" (`app/space-run.tsx:330-334`).
+  - ◐ 2. The window has `accessibilityLiveRegion="polite"` (`:437-439`). That works on Android only; iOS ignores it (📱).
+  - ✅ 3. `RiderCard` and `Row` take the screen's memoised styles (`:205`, `:384-391`, `:462-470`). `Row`'s icon is typed and the row is grouped (`:463-466`).
+- **Regressions:** none.
+- **Subscreens:**
+  - RiderCard — 7 → 7.5.
+  - Timeline — 8 → 8.
+  - Live map — 7 → 7 (📱; FamilyMap still says "1 person" for a vehicle, `components/family/FamilyMap.tsx:805`).
+- **Still needed for 10/10:**
+  1. Announce window changes on iOS too. For example, call `AccessibilityInfo.announceForAccessibility` when the window text changes (`:437-439`).
+  2. Make RiderCard one element ("Asha, waiting, between 07:40 and 07:50 at Green Lane, 2 stops away") (`:430-458`).
+  3. Let FamilyMap's label name a vehicle (`components/family/FamilyMap.tsx:805`).
+
+#### `app/space-runs-admin.tsx` — **7.0 → 7.5** (mean 7.67)
+- **Scores now:** Function 8.5 · States 8 · UI 7.5 · A11y 8 · Security 7 · Code 7
+- **Original items:**
+  - ✅ 1. The handover label reads "at boarding and drop-off" (`components/spaces/NewRunModal.tsx:114`, `:117`). This was fixed in `298f739`.
+  - ✅ 2. The stop time is one picked instant in the app-theme date+time picker (`components/spaces/StopFormModal.tsx:122-139`).
+    - `plannedPickStart` sets where the picker starts (`app/space-runs-admin.tsx:213-216`; `lib/spaces/runPlan.ts:76-88`; selftest passes).
+    - A time on a day other than the run's scheduled day is warned (`StopFormModal.tsx:96-97`, `:140-144`).
+  - ✅ 3. The code is split into `NewRunModal.tsx`, `StopFormModal.tsx` and `runsAdminStyles.ts`. The screen went from 835 to 595 lines.
+  - Extra: create and open failures are now separate. After `createRun` succeeds, the dialog closes and a failed `openRun` shows the inline LoadError (`app/space-runs-admin.tsx:109-127`, `:362-367`).
+- **Regressions:** summary items 1 (picker three Modals deep, 📱) and 4 (the stop row hides the day).
+- **Subscreens:**
+  - New-run modal — 8 → 8.
+  - Edit-run modal — 7.5 → 8.
+  - Stop form — 7.5 → 8 (📱 picker stacking).
+  - Rider stop picker — 7.5 → 7.5.
+- **Still needed for 10/10:**
+  1. Show the day on a stop row when it differs from the run's scheduled day (`:467`).
+  2. Device-check the picker inside StopFormModal inside the editor Modal on iOS (`:544-548`).
+  3. Remove the `as Run` cast on the just-created run (`:125`). `openRun` needs only the id and labels, so take those.
+  4. The rider stop picker radios have no `radiogroup` container (`:551-576`).
+
+#### `app/space-tasks.tsx` — **7.5 → 7.5** (mean 7.67)
+- **Scores now:** Function 8 · States 7.5 · UI 8 · A11y 8 · Security 7 · Code 7.5
+- **Original items:**
+  - ✅ 1. The comment is corrected: "Kept on success (the next focus or pull re-reads the list)" (`app/space-tasks.tsx:138-139`).
+  - ✅ 2. Create has disabled and busy state (`:390`). A past custom day shows a warning with `accessibilityRole="alert"` (`:179`, `:352-356`). It is warned, not refused.
+  - ✅ 3. `LoadError` (`:261-263`), a FlatList (`:249-280`) and a tablist role (`:232`).
+- **Regressions:** the picker sits inside the compose Modal, against the hook's comment (summary item 1).
+- **Subscreens:**
+  - Tabs — 7.5 → 8.
+  - New-task sheet — 7.5 → 8.
+- **Still needed for 10/10:**
+  1. A failed refresh empties the list: `setTasks([])` in the catch (`:119-125`). Keep the last list with a stale note.
+  2. The due presets, "Another day…" and the assignee chips use `radio` with no `radiogroup` container (`:326-338`, `:340-351`, `:368-380`). The priority row has none either (`:313-325`).
+  3. Device-check the nested picker on iOS (`:399-400`).
+
+#### `app/space-transport.tsx` — **7.0 → 7.5** (mean 7.5)
+- **Scores now:** Function 7.5 · States 8 · UI 7.5 · A11y 7 · Security 8 · Code 7
+- **Original items:**
+  - ◐ 1. It uses `getRunsWithManifest(spaceId, { stops: true })` (`app/space-transport.tsx:151`). A failed manifest says "Could not load who is on this bus" instead of "Nobody … today" (`:283-292`). It is still per run against today's server.
+  - ✅ 2. It uses `LoadError` (`:202-204`). A failed refresh keeps the last list, with "may be out of date" (`:158-160`, `:205-207`). The comment is updated (`:304-305`).
+  - ✅ 3. It re-reads every 30 s while a run is started and the screen is focused (`:57-58`, `:169-174`).
+- **Regressions:** the 30 s re-read repeats the per-run reads and the `circleMembers` fetch against today's server (summary item 3).
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. Deploy C11. Fetch `circleMembers` once per focus, not on every timer tick (`:153-155`).
+  2. Make each rider row one accessible element ("Asha, picked up, on the bus, 07:42") (`:267-279`). Rider state relies on tone colour plus text, which is fine, but it is read as fragments.
+  3. The driver button reads only "Driver" when the name is unknown (`:329`). Its label is fine (`:322`), but the visible text is ambiguous.
+
+#### `app/space-visitors.tsx` — **7.5 → 8.0** (mean 7.92)
+- **Scores now:** Function 7.5 · States 8 · UI 8 · A11y 8 · Security 8 · Code 8
+- **Original items:**
+  - ✅ 1. Issue, Admit and Sign out have state (`app/space-visitors.tsx:338`, `:368`, `:378`). The row's Sign out has disabled and busy state with its own spinner (`:268-276`). The redeem dialog spins only the button that was pressed (`redeemExit`, `:60`, `:138`, `:370-380`).
+  - ✅ 2. "Copy code" uses `copyAndAutoClear`, which wipes the clipboard after 30 s if the value is unchanged (`lib/clipboardSafe.ts:46-62`). The app says so (`:116-122`).
+  - ✅ 3. FlatList (`:209-288`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Issue-pass modal — 7.5 → 8.
+  - Redeem modal — 7 → 7.5.
+  - Issue-result Alert — 7.5 → 8.
+- **Still needed for 10/10:**
+  1. There is no way to cancel an issued, unused pass. The client API has issue and redeem only (`lib/spaces/api.ts:205-214`). Whether the server has a revoke is **not verifiable statically**.
+  2. After a failed refresh, passes stay under the LoadError with no stale note (`:222-224`).
+  3. Make each pass card one accessible element, with the name and its state (`:239-256`).
+
+---
+
+### I1 — Finance — re-rating (round 4)
+
+Diff `43c2d19 → HEAD` (finance commit `94f22db`, plus `4910069` for the hand-offs and `0dcfb48` for the shared date picker). I read each screen together with the parts it now imports: `components/finance/{LedgerForm, ledgerFormRules, FinanceErrorBoundary}`, `components/finance/chitti/*`, `lib/finance/{compounding, reminderSchedule, searchQuery}`, `components/ui/{useDatePicker, Sheet}`, `constants/financeTheme` (`HERO_INK`), `db/{ledger, reminders, financeDb}` and `utils/financeBackupSeal`.
+
+This is a static review. Nothing here is device-verified. The following are **not verifiable statically**:
+- OS notification delivery and the day-31 / 29 February behaviour of OS triggers
+- the iOS date-picker sheet
+- an Alert raised 10 ms after a Sheet closes on iOS
+- share-sheet timing
+- whether quick-crypto or noble `pbkdf2Async` actually keeps the UI responsive
+- whether the error boundary recovers
+
+No backend code is involved in this batch.
+
+| Screen | Old | New | Δ |
+|---|---|---|---|
+| `app/finance/_layout.tsx` | 8.5 | 8.5 | 0 |
+| `app/finance/index.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/finance/calendar.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/finance/chitti/index.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/finance/chitti/new.tsx` | 8.0 | 8.0 | 0 |
+| `app/finance/chitti/[id].tsx` | 7.5 | 8.0 | +0.5 |
+| `app/finance/customer.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/finance/emi.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/finance/interest.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/finance/io.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/finance/ledger/index.tsx` | 7.5 | 8.5 | +1.0 |
+| `app/finance/ledger/new.tsx` | 8.0 | 8.0 | 0 |
+| `app/finance/ledger/[id].tsx` | 8.0 | 8.0 | 0 |
+| `app/finance/ledger/edit.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/finance/ledger/update.tsx` | 8.0 | 8.0 | 0 |
+| `app/finance/reminders.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/finance/reports.tsx` | 7.5 | 7.5 | 0 |
+| `app/finance/saved.tsx` | 8.0 | 8.0 | 0 |
+| `app/finance/search.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/interest-calculator.tsx` | 7.5 | 7.5 | 0 |
+| `app/split.tsx` | 8.0 | 8.0 | 0 |
+
+#### Independent maths verification (exact money)
+My script is `SP/rr4_i1_maths.ts`. It runs with `npx tsx` and exits 0. I ran it with TZ set to UTC, America/New_York and Asia/Kolkata, and all checks passed in each.
+
+**Compounding (`lib/finance/compounding.ts:41-47`)**
+
+I compared `calculateInterest` against an exact BigInt rational reference, P·((den+num)/den)^k rounded half-up to paise. The comparison goes through `utils/money.ts` `toPaise`/`fromPaise` (backend `ts` in Node). Every case matches to the paise, and P + interest reconciles to the total to the paise:
+
+| Case | Total (₹) |
+|---|---|
+| 2%/month, monthly, 1 year | 1,26,824.18 |
+| 2%/month, yearly, 1 year | 1,24,000.00 |
+| 10%/year, quarterly, 2 years | 1,21,840.29 |
+| ₹2 per ₹100 per month, monthly, 3 years on ₹50,000 | 1,01,994.37 |
+| 1%/week, weekly, 1 year on ₹10,000 | 16,776.89 |
+| 12%/year, monthly, 5 years on ₹2,50,000 | 4,54,174.17 |
+| 0.1%/day, daily, 1 year | 1,44,025.13 |
+
+Other points:
+- The formula itself is unchanged: `utils/interest.ts:19-23`, using the nominal rate divided by n.
+- The rate's period sets the default compounding: `compoundingFor` → `[365, 52, 12, 1]` (`:25-27`).
+
+**Reminder anchors (`lib/finance/reminderSchedule.ts:31-56`, over `utils/financeRules.ts:26-32` `addMonths` and `:150-187`)**
+
+All verified:
+- A monthly reminder anchored on 31 Jan falls on 28 Feb, 31 Mar, 30 Apr, 31 May, 30 Jun. The day is clamped each month and never carried forward.
+- A yearly reminder on 29 Feb 2028 falls on 28 Feb in 2029, 2030 and 2031, then 29 Feb 2032.
+- After a snooze, the series returns to the anchor's day and time: 5 Apr 09:00 after a 6 Mar 10:15 snooze. The snooze is left alone while it is still today.
+- An early snooze (11 Mar, ahead of a 20 Mar due date) shows both days in the calendar and then returns to the 20th.
+- A daily reminder is not moved later on its due day. The next day it moves to 09:00.
+- A weekly reminder keeps its weekday across a 2-year gap.
+- A legacy row with a null anchor counts from `next_at`, so drift that already happened is kept. This is as documented.
+
+The migration backfills `anchor_at = next_at` (`db/financeDb.ts:31-35`). `insertReminder` defaults the anchor to `next_at` (`db/reminders.ts:32`), and `snoozeReminder` moves only `next_at` (`:68-71`).
+
+#### Checks run (all exit 0)
+- `npx tsc --noEmit -p .` gives 0 errors.
+- `npx eslint` on app/finance, split, interest-calculator, components/finance, lib/finance, the db/ledger/reminders/financeDb files, financeTheme, ui/useDatePicker and financeBackupSeal gives 0 problems.
+- `npx tsx` passes for:
+  - lib/finance/: compounding 12, reminderSchedule 15, searchQuery 12, grid
+  - components/finance/: ledgerFormRules 11, notifyIds, ledgerCsv
+  - utils/: financeRules 54, financeGuards 45, financeBackupSeal 14
+  - lib/financeBtnLatch (the hand-off was applied, so the path failures the fixer reported are gone)
+  - db/: financeBackup, chitti
+  - constants/: financeTheme
+  - lib/: a11yCoverage, themeCoverage (22; `app/finance/` is no longer in `EXEMPT_PREFIX`, `lib/themeCoverage.selftest.ts:43`), uiDebtRatchet ("no file got worse"), keyboardAvoidance, orphanRoutes, screenBackCoverage, silentFailure, responsive
+- `grep` finds no hex or rgba literal anywhere under `app/finance/`, and no `as any` in the batch's files or the new chitti/LedgerForm parts.
+
+#### Round-3 shared regressions and hand-offs
+- ✅ **Yearly OS trigger.** It now uses `month: d.getMonth()` (`components/finance/notify.ts:34`; fixed in `298f739`).
+- ✅ **Duplicate `'status'` rows.** A row is added only when `r.changes > 0` (`db/ledger.ts:103`, `db/chitti.ts:89`).
+- ✅ **Stale auction-delete comment.** It now says the delete writes a timeline entry (`components/finance/chitti/AuctionsTab.tsx:122-124`).
+- ✅ **`app/finance/` theme exemption.** Removed. `HERO_INK` now sits next to `FIN_HERO` (`constants/financeTheme.ts:101-115`).
+
+#### Regressions and new findings
+1. **The calculator and the ledgers now disagree on compound interest. Round 4 introduced this.**
+   - `interest.tsx` compounds at the rate's period by default (`:34-35`, `lib/finance/compounding.ts:25-27`).
+   - `ledgerInterest` still compounds yearly (`utils/financeRules.ts:82-89`, `compoundInterest(..., 1)`). The ledger detail, dashboard, reports and customer screens all use it.
+   - Same terms, ₹1,00,000 at 2%/month compound for 1 year: the calculator shows ₹26,824.18 of interest and the ledger shows ₹24,000. I ran both functions to confirm.
+   - The ledger screens show only "Compound" with no frequency (`app/finance/ledger/[id].tsx:132`; PDF `:64`).
+2. **Pre-existing, newly found: OS alerts for recurring reminders that start in the past do not match the in-app series.**
+   - The screen anchors the series at the picked time (`app/finance/reminders.tsx:101`).
+   - `triggerFor` builds the OS trigger from `max(now + 1s, at)` (`components/finance/notify.ts:26-34`).
+   - Example: a monthly reminder picked for the 5th, created on the 4th, shows "5th 09:00" in the app but alerts on the 4th at the current time every month.
+   - Round 4 did not cause this. It does make the gap visible, because the app now keeps the anchor exactly.
+3. **Stale comment.** `app/finance/io.tsx:48-53` still says sealing "run[s] PBKDF2 synchronously … and hold[s] the JS thread". The seal and open are now async (`utils/financeBackupSeal.ts:22-29`, `:41-48`).
+4. **Visual change from the shared date picker (minor, 📱).** On iOS, finance forms now get the app `Button` instead of the finance `Btn` in the picker sheet (`components/ui/useDatePicker.tsx:85-86`). The interest-history Sheet is also styled in the app theme, not the finance palette (`components/ui/Sheet.tsx:40-41`, `:68`).
+5. **Split behaviour check: identical, as claimed.**
+   - `chitti/[id]`: MembersTab, DuesTab, AuctionsTab and HistoryTab hold the old logic and JSX line for line. Compare old `43c2d19:app/finance/chitti/[id].tsx:98-214,289-430` with `components/finance/chitti/*`.
+   - Tabs stay mounted behind `display:none` (`[id].tsx:163-174`, `chittiStyles.ts:33`). Typed form state therefore survives a tab switch, as the old parent-held state did. The cost is that all four tabs render on every reload.
+   - `LedgerForm` / `ledgerFormRules`: the checks and messages are verbatim from the old `new.tsx` and `edit.tsx` (`43c2d19:app/finance/ledger/edit.tsx:56-77`; `components/finance/ledgerFormRules.ts:17-38`).
+6. **New tokens.** No file in the batch uses `onPrimary`, `onDanger` or `warning` (grep), so those tokens cannot have caused a regression here.
+
+---
+
+#### `app/finance/_layout.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 9 · States 9 · UI 9 · A11y 8 · Security 8 · Code 9
+- **Original items:**
+  - ✅ The boundary has a way out. `FinanceErrorBoundary` adds a labelled "Leave Vault Finance" button that calls `router.replace('/(tabs)/mini')` (`components/finance/FinanceErrorBoundary.tsx:18-36`; the route exists, `app/(tabs)/mini.tsx`). It is wired in at `:33-55`. Recovery is not verifiable statically.
+  - ◐ The finance lock is an open product decision (fix_status §5). Nothing on the screen claims protection, so I score Security 8 and do not deduct further.
+- **Regressions:** none.
+- **Subscreens:** error fallback, 7 → 8.5.
+- **Still needed for 10/10:**
+  1. The Leave button is absolutely positioned at `bottom: 48` over a vertically centred fallback (`FinanceErrorBoundary.tsx:42-45`). At large font scales it can overlap the message or Try again (📱). Put it in the fallback's flow instead.
+  2. Resolve the finance-lock decision (`:18-57`).
+
+#### `app/finance/index.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8 · States 8 · UI 8 · A11y 9 · Security 8 · Code 9
+- **Original items:**
+  - ✅ The labels now say "full term": "Settled loans, full term" and "Open loans, full term", with full spoken labels (`:140-152`).
+  - ✅ The hero uses `HERO_INK` (`:214-222`).
+- **Regressions:** none on this screen. Regression 1 still applies to its sums: a compound loan is summed with yearly compounding (`:62`).
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. The visible hero text never says "interest". Only the spoken label does (`:146`, `:150`). A sighted user can read "Settled loans, full term ₹X" as principal.
+  2. Make ledger compounding consistent with the calculator, or state it (regression 1).
+
+#### `app/finance/calendar.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 9 · States 8 · UI 8 · A11y 9 · Security 8 · Code 8
+- **Original items:**
+  - ✅ A reminder event opens `/finance/reminders?focus=<id>` (`:84`). The reminders screen outlines that card and scrolls to it once (`reminders.tsx:48-54`, `:182-183`).
+  - ✅ The past is shown from the anchor (`:66`, `reminderOccurrences`). I verified this above.
+  - ✅ The month title has `accessibilityRole="header"` (`:124`).
+- **Regressions:** none.
+- **Subscreens:** selected-day events panel, 8 → 8.5.
+- **Still needed for 10/10:**
+  1. Done reminders vanish from past months entirely (`:64`, `status !== 'active'`), so history is lost once a reminder is completed.
+  2. A day-31 or 29-February series is drawn on the clamped day (30 Apr, 28 Feb), but the OS alert skips those months (copy in `reminders.tsx:88-91`). The calendar shows a due day that will not alert. Mark those days or say so.
+  3. Regression 2: for past-start reminders, the alert time and the calendar time differ.
+
+#### `app/finance/chitti/index.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8 · States 9 · UI 8 · A11y 8 · Security 8 · Code 9
+- **Original items:**
+  - ✅ It is a FlatList, with the loading, error and empty states in `ListEmptyComponent` (`:66-93`).
+- **Regressions:** none.
+- **Subscreens:** Active / Closed / Draft segment, 8 → 8.
+- **Still needed for 10/10:**
+  1. The header add button and the FAB do the same thing and have near-identical labels ("New lucky draw group" / "New Lucky Draw group", `:56`, `:95`). Keep one, or make them distinguishable.
+  2. The 90 dp footer (`:92`) does not include `insets.bottom`, but the FAB does (`:94`). On a phone with a home indicator, the FAB can cover the last card (📱).
+
+#### `app/finance/chitti/new.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 9 · States 8 · UI 8 · A11y 8 · Security 8 · Code 8
+- **Original items:**
+  - ✅ The status choice is Active / Draft only (`:31`, `:108`).
+  - ✅ There is a live, paise-exact inline mismatch line (`:35-39`, `:99`). Create still confirms (`:54-62`). I checked the paise arithmetic: `toPaise(inst) * mem` against `toPaise(cv)`.
+- **Regressions:** none.
+- **Subscreens:**
+  - Start-date picker: 8 → 8 (iOS 📱).
+  - Status segment: 8 → 8.5.
+- **Still needed for 10/10:**
+  1. The mismatch `Text` has `accessibilityLiveRegion="polite"` and is rebuilt on every keystroke (`:99`), so Android re-announces it while the user types. Announce once, on blur or on Create.
+  2. Status and other form choices use the shared `Segment`, which exposes `tablist`/`tab` (`components/finance/ui.tsx:189`, `:198`). These are form choices, so radiogroup/radio is the right role. This is shared with every finance form.
+
+#### `app/finance/chitti/[id].tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8 · States 9 · UI 8 · A11y 8 · Security 8 · Code 8
+- **Original items:**
+  - ✅ The screen is split. It is now 180 lines (`:1-180`), plus `components/finance/chitti/{MembersTab 117, DuesTab 66, AuctionsTab 133, HistoryTab 41, MonthChips 25, chittiStyles 76}`. Behaviour is identical (regression 5).
+  - ✅ The dues latch is held until the re-read lands. `reload` returns its promise (`:46-55`) and `DuesTab` awaits `onChanged()` inside the latch (`DuesTab.tsx:27-38`).
+  - ✅ The stale comment is fixed (`AuctionsTab.tsx:122-124`).
+  - ✅ Hero ink uses tokens (`chittiStyles.ts:27-31`).
+- **Regressions:** none behavioural. All four tabs now render on every reload (`:163-174`). With large groups, members are rendered three times.
+- **Subscreens:**
+  - Members tab: 8 → 8.
+  - Member form: 8 → 8.
+  - Dues tab: 7.5 → 8.5.
+  - Auctions tab: 8 → 8.
+  - History tab: 8 → 8.
+  - Delete-group, remove-member and delete-auction Alerts: 8 → 8.
+  - Group-status segment: 8 → 8.
+- **Still needed for 10/10:**
+  1. Render only the active tab and lift the two form states (`MembersTab.tsx:22-26`, `AuctionsTab.tsx:24-26`), or virtualise. Today every list renders while hidden.
+  2. `MembersTab` and `AuctionsTab` call `onChanged()` without awaiting it (`MembersTab.tsx:59`, `AuctionsTab.tsx:60`). The latched `Btn` is released before the reload lands. This is the same window the dues latch had.
+  3. The group-status `Segment` uses tab roles for a state choice (`:152-155`; `components/finance/ui.tsx:189`).
+
+#### `app/finance/customer.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 9 · States 8 · UI 8 · A11y 9 · Security 8 · Code 8
+- **Original items:**
+  - ✅ Aliases are shown: "Also recorded as …" (`:56-66`, `:94-96`).
+  - ✅ The net is said in words: THEY OWE YOU / YOU OWE THEM / SETTLED UP, with the absolute amount (`:67-69`, `:104-105`). How a negative figure renders is not verifiable statically.
+  - ✅ The name has `accessibilityRole="header"` (`:92`).
+- **Regressions:** none.
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. The ledger rows are an unvirtualised `rows.map` (`:130-…`). Use a FlatList, or cap the list.
+  2. Device-check the hero at large font scales (`:103-110`).
+
+#### `app/finance/emi.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8 · States 8 · UI 9 · A11y 9 · Security 9 · Code 8
+- **Original items:**
+  - ✅ Each schedule row is one spoken element, and the header row is hidden from assistive tech (`:133`, `:141-142`).
+  - ✅ The PDF heading uses `FIN_PRINT.brandDeep`, the same `#6D3FA8` (`:8`, `:71`; `constants/financeTheme.ts:30`). The hero uses `HERO_INK`.
+- **Regressions:** none.
+- **Subscreens:**
+  - Amortization schedule: 8 → 8.5.
+  - PDF share: 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. The spoken row label leaves out the EMI amount, which the PDF lists (`:142` vs `:72-73`).
+  2. On screen, the schedule shows the first 24 months only (`:139`, `:149`), and the full schedule exists only in the PDF. Offer an on-screen "show all".
+
+#### `app/finance/interest.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8 · States 8 · UI 8 · A11y 8 · Security 8 · Code 8
+- **Original items:**
+  - ✅ A "Compounded" segment defaults to the rate's period and can be overridden (`:32-35`, `:154-162`). It is shown in the result and the PDF (`:118`, `:200`). The real `frequency` is stored (`:95`). The maths is verified exact (above).
+  - ✅ The day-count convention is stated under the result and in the PDF (`:122`, `:204`, `:218-223`).
+  - ✅ The hero uses `HERO_INK` (`:233-235`).
+- **Regressions:** regression 1. With the defaults, this screen gives a different answer from a ledger with the same terms.
+- **Subscreens:**
+  - Dates / Duration: 8 → 8.
+  - Date picker: 8 → 8.
+  - Result and Share PDF: 8 → 8.5.
+- **Still needed for 10/10:**
+  1. Reconcile with `ledgerInterest`, which compounds yearly (`utils/financeRules.ts:82-89`). Either let ledgers store a compounding frequency, or say in the result that ledgers compound yearly.
+  2. The five-option "Compounded" segment uses tab roles (`:157-160`; `components/finance/ui.tsx:189`, `:198`).
+
+#### `app/finance/io.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8 · States 9 · UI 8 · A11y 8 · Security 9 · Code 8
+- **Original items:**
+  - ✅ There is a busy state. `withBusy` disables both buttons and shows `LoadingState` with a progressbar role (`:67-73`, `:270`, `:276`, `:279`; `components/finance/ui.tsx:484`). The hand-off made the KDF async (`utils/financeBackupSeal.ts:22-29`, `:41-48`; `lib/vaultCrypto.ts:52-62`). Whether this stays off the UI thread is 📱.
+  - ✅ The password is cleared after export and after restore (`:101`, `:195`).
+  - ✅ The size is checked before the file is read, via `getInfoAsync` (`:154-164`).
+  - ✅ The Lucky Draw export uses `Promise.all`, with group order kept (`:113-133`).
+- **Regressions:** the stale comment (regression 3).
+- **Subscreens:**
+  - Spreadsheet mode: 8 → 8.
+  - Full Backup mode: 8 → 8.5.
+  - CSV import: 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. Fix the comment at `:48-53`.
+  2. The busy `LoadingState` (`:279`) is not announced. Add a live region or `announceForAccessibility`.
+  3. The password stays on screen when a restore fails partway (`restoreBackup` throws before `:195`).
+
+#### `app/finance/ledger/index.tsx` — **7.5 → 8.5**
+- **Scores now:** Function 8 · States 9 · UI 8 · A11y 9 · Security 8 · Code 9
+- **Original items:**
+  - ✅ The pending row is filtered out on reload (`:35-36`, `:42-46`). Undo clears the ref before reloading (`:97-101`).
+  - ✅ The list is a FlatList, with the hint in the footer (`:121-175`).
+  - ✅ iOS hears the delete through `announceForAccessibility` (`:70`). Android keeps its live region (`:184`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Filter: 8 → 8.
+  - Undo snackbar: 8 → 8.5.
+- **Still needed for 10/10:**
+  1. Only one delete can be undone at a time. A second long-press commits the first silently (`:65`), and the snackbar never says so.
+  2. The UNDO control is a bare text button whose size comes from `hitSlop={12}` alone (`:186`). Give it a 44 dp box like the other finance controls.
+
+#### `app/finance/ledger/new.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8 · States 8 · UI 8 · A11y 8 · Security 8 · Code 9
+- **Original items:**
+  - ✅ It uses the shared `LedgerForm` (`:29`; `components/finance/LedgerForm.tsx:25-122`). The checks in `ledgerFormRules.ts:17-38` are verbatim, with selftest 11 passing.
+- **Regressions:** none. Lend/Borrow gained a radiogroup role (`LedgerForm.tsx:76`).
+- **Subscreens:** Start/End pickers, 8 → 8.
+- **Still needed for 10/10:**
+  1. Validation is reported only through Alerts (`LedgerForm.tsx:57`). Show it inline at the field.
+  2. The compounding frequency for a compound ledger is not offered or stated (`LedgerForm.tsx:92`; regression 1).
+
+#### `app/finance/ledger/[id].tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8 · States 8 · UI 9 · A11y 8 · Security 8 · Code 8
+- **Original items:**
+  - ✅ Delete can be undone. `snapshotLedger` captures the row, repayments and timeline, and `restoreLedgerSnapshot` restores them in one transaction (`:76-94`; `db/ledger.ts:147-174`).
+  - ◐ "Interest so far (to today)" was added (`:50-55`, `:136`, PDF `:68`). "Remaining" still excludes interest (`:137`).
+  - ✅ The hero uses `HERO_INK` (`:216-219`).
+- **Regressions:**
+  - "Interest so far" is shown whenever the end date is in the future, including on a **completed** ledger (`:54`). It keeps growing after the loan has been settled.
+  - Regression 1: "Compound" with no frequency (`:132`).
+- **Subscreens:**
+  - Delete confirmation + undo Alert: 8 → 8.5.
+  - PDF share: 8 → 8.
+  - Timeline: 8 → 8.
+- **Still needed for 10/10:**
+  1. Hide or freeze "Interest so far" when `status === 'completed'` (`:54`).
+  2. State the compounding frequency (`:132`, `:64`).
+  3. On Android, dismissing the undo Alert (tapping outside it or pressing back) runs `onDismiss → router.back()` (`:92`) and drops the snapshot with no second chance. The list screen offers a 30-second snackbar instead. Make the two consistent.
+
+#### `app/finance/ledger/edit.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8 · States 8 · UI 8 · A11y 8 · Security 8 · Code 9
+- **Original items:**
+  - ✅ It uses the shared `LedgerForm`, keyed by id and seeded from the stored row (`:50`). Direction is fixed (`:41`).
+- **Regressions:** none. The old message for an invalid stored mobile is kept verbatim (`ledgerFormRules.ts:33`).
+- **Subscreens:** pickers, 8 → 8.
+- **Still needed for 10/10:**
+  1. Inline validation (shared with new).
+  2. Editing terms changes the interest without showing a before/after (`:41-44`).
+
+#### `app/finance/ledger/update.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8 · States 9 · UI 8 · A11y 8 · Security 8 · Code 8
+- **Original items:**
+  - ✅ The name has `accessibilityRole="header"` (`:95`).
+  - ✅ There is a "Settle this ledger?" confirm when the new remaining is 0 (`:67`, `:75-82`).
+- **Regressions:** none.
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. When the amounts are "odd" and the new remaining is 0, only the odd-amount confirm shows, not the settle one (`:67`). Mention settling in that message.
+  2. The update form shows no interest figure (`:95-…`, principal/remaining only), while the detail screen now shows interest so far. Show it here too, so the amount received can be judged against it.
+
+#### `app/finance/reminders.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8 · States 9 · UI 8 · A11y 8 · Security 8 · Code 8
+- **Original items:**
+  - ✅ Yearly fires in the right month (`notify.ts:34`).
+  - ✅ `anchor_at` was added, the schema and migration are additive (`db/financeDb.ts:31-35`, `:152`), and a snooze moves only `next_at` (`db/reminders.ts:68-71`). The anchoring is verified exact (above).
+  - ✅ A per-reminder in-flight set guards Snooze, Done and Delete (`:56-63`, `:108-137`).
+- **Regressions:** none caused by round 4. Regression 2 (the OS trigger for past-start recurring reminders) is pre-existing and newly reported.
+- **Subscreens:**
+  - Add form: 8 → 8.
+  - Date+time picker: 7 → 7 (📱).
+  - Permission handling: 8 → 8.
+  - Calendar focus (new, `:47-54`): 7.5.
+- **Still needed for 10/10:**
+  1. Build the OS trigger from the anchor (`notify.ts:26`), not from `max(now, at)`, so that the alert day and time match `anchor_at` (`:101`).
+  2. The focused card is shown only by a border (`:182`, `:230`). Announce it, or move accessibility focus to it.
+  3. A day-31 or 29-February series: the app shows the clamped day, but the OS skips it (`:88-91`). Yearly 29 February gets no warning.
+
+#### `app/finance/reports.tsx` — **7.5 → 7.5**
+- **Scores now:** Function 7 · States 8 · UI 8 · A11y 7 · Security 8 · Code 8
+- **Original items:**
+  - ✅ The Excel copy is deleted after sharing (`:104-109`).
+  - ◐ Period means creation date (`:54`). This is an open decision, and the empty state says so (`:122-125`). Not a deduction.
+- **Regressions:** none caused by round 4. The dashboard was relabelled to "full term", but this screen still says "Interest earned" and "Interest pending" (`:86-87`, `:133-134`) for the same `ledgerInterest` figures (`:59`). The two screens now disagree in wording.
+- **Subscreens:**
+  - Segment: 7 → 7.
+  - PDF / Excel export: 7.5 → 8.5.
+- **Still needed for 10/10:**
+  1. Use the dashboard's "full term" wording (`:86-87`, `:133-134`).
+  2. `shareTextFile` returns the uri only after a successful share and never deletes in a `finally` (`utils/financeIO.ts:85-93`), unlike `sharePdf` (`:15-24`). A share that throws leaves the `.xls` in the cache, and this screen cannot delete it (`:105-108`).
+  3. Regression 1 (yearly compounding unstated).
+
+#### `app/finance/saved.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8 · States 8 · UI 8 · A11y 8 · Security 8 · Code 9
+- **Original items:**
+  - ✅ The list is a FlatList (`:108-141`).
+  - ✅ Details open in a `Sheet` with a Delete action, which confirms once (`:142-153`, `:52-59`). The Sheet includes "Compounded …" (`:147`).
+- **Regressions:** none behavioural. The Sheet is styled in the app theme inside finance (regression 4).
+- **Subscreens:**
+  - Segment: 7 → 7.
+  - Interest details Sheet: 7.5 → 8. Delete runs 10 ms after the Sheet starts closing (`components/ui/Sheet.tsx:56-61`). Whether an Alert presents on iOS during the modal's dismissal is 📱.
+- **Still needed for 10/10:**
+  1. Delete the calculation without the Alert-after-Modal hop, for example with a destructive confirm inside the Sheet (`:151`; `Sheet.tsx:58-60`).
+  2. The Segment has tab roles (shared).
+
+#### `app/finance/search.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 9 · States 8 · UI 8 · A11y 9 · Security 8 · Code 8
+- **Original items:**
+  - ✅ Phone-shaped queries are normalised with `mobileMatches` (`:62`, `:76`; `lib/finance/searchQuery.ts:10-32`, selftest 12).
+  - ✅ The cap is stated with the full count (`:129-130`, `:151-152`).
+  - ✅ The screen uses `KeyboardSafe` (`:120`), announces the count after a 700 ms pause (`:97-103`), and section titles are headers.
+- **Regressions:** none.
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. A short "+91…" query is cut down to very few digits ("+9198" becomes "98", `searchQuery.ts:15-19`) and matches most mobiles. Apply the 3-digit minimum after the country code is stripped.
+  2. Results render in a ScrollView (`:121`). Use a SectionList.
+
+#### `app/interest-calculator.tsx` — **7.5 → 7.5**
+- **Scores now:** Function 3 · States 8 · UI 8 · A11y 8 · Security 8 · Code 9
+- **Original items:**
+  - ❌ The route is still **UNWIRED**. The file is unchanged in round 4. A grep of app, lib, components, utils and constants finds only comments (`app/shop-book.tsx:4`, `components/finance/ui.tsx:63`). Deleting it is an open decision.
+- **Regressions:** none.
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. Delete it once old links no longer matter (`:10-12`).
+
+#### `app/split.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 9 · States 8 · UI 8 · A11y 9 · Security 7 · Code 8
+- **Original items:**
+  - ✅ The refusal title wraps, is centred and has the header role (`:183-184`, `:205`).
+  - ✅ The bar buttons have `minHeight: 44`, `BAR_H` is 44, and the pane maths uses `BAR_H` (`:33`, `:59`, `:200`). The hitSlop is horizontal only (`:125`, `:130`).
+  - ✅ The R4HO hand-off adds per-pane close (`:99-101`, `:139`, `:169`; `app/chat.tsx:166`, `:2218-2221`).
+- **Regressions:** none. `usableH` is 4 dp smaller (`:59`), which can tip `preferredAxis` at the threshold. That is intended.
+- **Subscreens:**
+  - Refusals: 8 → 8.5.
+  - Divider resize: 8 → 8.
+- **Still needed for 10/10:**
+  1. `usableH` subtracts `BAR_H` on both axes, although the comment says it "costs nothing side-by-side" (`:53-59`).
+  2. The pane-close notice in the embedded chat is the only per-pane close. The split bar has no "close left" or "close right" (`:120-135`).
+
+---
+
+#### Fix-log claims that are not quite right
+- R4I1 #14 says the tokens live in `components/finance/heroInk.ts`. That file was later deleted and `HERO_INK` moved to `constants/financeTheme.ts:101-115` (R4HO #36). Every importer was updated (tsc passes).
+- R4I1 #1 says the calculator "defaults to the rate's period". That is correct, but the log does not say that ledgers still compound yearly, which is regression 1.
+- R4I1 #20 says the KDF is "sync, frame yield". After the R4HO hand-off it is async, and `io.tsx:48-53` was not updated (regression 3).
+- R4I1 hand-off notes say "financeGuards / financeBtnLatch FAIL". Both now pass: 45 assertions and "all checks passed".
+- Everything else in the R4I1 "Fixed" table matched the code at the places cited above.
+
+---
+
+### I2 — re-rating (round 4: Shop Book and admin web pages)
+
+Base 43c2d19 → HEAD 4910069. Relevant commits:
+- d53e5cc: Shop Book, shared load hook, tappable notifications, carts survive a role switch.
+- 9cb0650: admin, entitlement form, light theme, quieter live regions.
+- 730e5b9 / 433030b: backend. Written and tested locally, **not deployed**.
+
+Fix logs: `fixes/R4I2.md`, `fixes/R4ADM.md`, `fixes/R4BE.md` (C16–C18), `fixes/R4HO.md` (#38). Old scores are the round-3 "→ new" values in `rerate3/I2.md`.
+
+This is a static, read-only review. Nothing here is device-, browser- or server-verified by me.
+
+| Screen | Old | New | Δ |
+|---|---|---|---|
+| app/shop-book.tsx (+ components/shopbook/*) | 7.5 | 8.0 | +0.5 |
+| admin/index.html | 7.5 | 8.0 | +0.5 |
+| admin/logs.html | 8.0 | 8.0 | 0 |
+| admin/shopbook.html | 7.5 | 8.0 | +0.5 |
+
+#### Checks I ran (all read-only)
+
+**Admin CSP hashes.** I extracted every real `<script>` element (HTML comments stripped) and hashed it with SHA-256/base64 (`SP/r4i2_hash.mjs`). I also ran the in-page Python recipe from each file's `:7` comment. Both methods agree, and each page has exactly one script whose hash equals its only pin:
+
+| Page | Pin (`:9`) | Script | Match |
+|---|---|---|---|
+| `admin/index.html` | `vtZ4NWLY…fJI=` | `:256` | ✅ |
+| `admin/logs.html` | `+40j6rh4…5EM=` | `:130` | ✅ |
+| `admin/shopbook.html` | `H3SOMKGG…Xsc=` | `:142` | ✅ |
+
+- The second `<script` grep hit on each page is the recipe text inside the `:7` comment, not a script.
+- No `on*=` attributes and no `javascript:` URLs on any page. `node --check` passes for all three extracted scripts.
+- The hashes match `fixes/R4ADM.md`.
+- `npx tsx admin/adminPages.selftest.ts`: exit 0. It now runs under `npm test`, because `admin` is in `SEARCH_DIRS` (`scripts/test-all.ts:43`).
+- The five font files that `admin/index.html:19-23` points at exist in `assets/fonts/`. They are deployed by `admin/LOGS_DEPLOY.md:89-96`.
+
+**Toolchain.**
+- `npx tsc --noEmit -p .`: exit 0.
+- `npx eslint app/shop-book.tsx components/shopbook/ services/shopBookService.ts utils/shopbook.ts utils/shopbook.selftest.ts admin/adminPages.selftest.ts`: exit 0.
+- Selftests, all exit 0: `utils/shopbook` (all checks passed), `utils/shopbookInvoice`, `lib/a11yCoverage`, `lib/themeCoverage` (22), `lib/uiDebtRatchet` ("no file got worse"), `lib/silentFailure`, `lib/screenBackCoverage`, `lib/orphanRoutes` (51), `lib/permissionDeadEnd`, `lib/keyboardAvoidance`, `lib/responsiveLayout`, `lib/rowOverflow`, `lib/socketioRemoval`.
+
+**Own a11y scan (shell plus all 13 split files).** With an arrow-aware regex: 0 `TouchableOpacity` without `accessibilityRole`, 0 `TextInput` without `accessibilityLabel`. 0 `as any`. The only hex literals left in the `.tsx` files are the QR quiet zone (`reports.tsx:38-39`).
+
+**`useShopLoad` refactor fidelity.**
+- I checked all 24 call sites. Every `fetch` is a module function or a `useCallback` with the right deps, so there is no reload loop. Examples: `catalog.tsx:44`, `orders.tsx:86`, `:469`, `:540`, `invoices.tsx:37`, `:257`, `ledger.tsx:19`, `:344`, `reports.tsx:280`, `customerViews.tsx:209`, `:722`, `products.tsx:20`, `app/shop-book.tsx:386`.
+- Every no-argument `SB.*` fetch was also called with no arguments before.
+- Deliberate behaviour changes:
+  - Latest load wins (`useShopLoad.ts:50-60`).
+  - Purchases and products now load concurrently but still fail together (`products.tsx:20`).
+  - Verification clears a stale error on reload (`verification.tsx:86-89`).
+  - The FindShops error became an `ErrorState` with retry (`customerViews.tsx:184`).
+- I found no lost handler.
+
+**Contrast (computed, `SP/r4i2_contrast.mjs`, `SP/r4i2_c2.mjs`).**
+- Shop Book: white on `greenFill` is 5.33 (dark) and 5.44 (light). White on `navyFill` (dark) is 9.76.
+- `admin/shopbook.html`, light theme: `--sub` 6.3–6.6, `--green` on its tag 4.73, `--warn` on its tag 5.46, white on `--danger-fill` 4.99.
+- `admin/index.html`, light theme: `--faint` 4.88. `--warn` #B7791F is only 3.36, but it is used only for the LED dot (`:85`), not for text.
+- **Shop Book dark-mode badge:** white on `C.danger` (#FDA29B) is **1.94:1**. See the shop-book Still-needed list.
+
+**Backend graceful degradation.**
+- `myShopAccount()` treats a missing `entitledPlan` or `proRequestedAt` as unknown and falls back to `entitledPlan()` (`services/shopBookService.ts:790-797`, `app/shop-book.tsx:386-391`). Today's server returns `{shop}`, so behaviour is the same as round 3.
+- Request Pro on today's server (404 with no JSON error) now says "Not available yet" (`reports.tsx:191-194`, `shopBookService.ts:986-988`).
+- The backend now selects `reject_reason` / `reject_note` for admin orders (`vaultchat-backend-go/internal/routes/shopbook_admin2.go:443`, `:469`), but this is not deployed.
+
+**Fixer's browser evidence.** I did not re-run it. `SP/r4adm_pw.txt` reports 61 PASS / 0 FAIL in headless Chromium against mocked APIs. The screenshot `SP/r4adm_logs_375.png` shows the ≤700px stack working. This is local only, not deployed.
+
+---
+
+#### `app/shop-book.tsx` (+ `components/shopbook/*`) — **7.5 → 8.0** (mean 8.08)
+- **Scores now:** Function 9 · States 8.5 · UI 7.5 · A11y 8 · Security 8 · Code 7.5
+
+**Original items** (`rerate3/I2.md` "Still needed" 1–9):
+1. ✅ **Dark-mode green contrast.**
+   - The `greenFill` token exists (`components/shopbook/theme.ts:58`) and is used by `chipActive`, `statusBtnActive`, `micBtnOn`, primary, add and small buttons (`:151`, `:256`, `:344`).
+   - The OrderTrack stepper tick also moved onto it (`:268`).
+   - ❌ New finding, see Still needed 1: the badge on `C.danger`.
+2. ✅ **Chip glyph names.** A typed `isGlyph` check against `Ionicons.glyphMap` (`shared.tsx:180`, `:187-189`). An unknown name falls back to text.
+3. ✅ **Unreachable Share.** `TxnRow` exposes `action` as an accessibility action (`shared.tsx:327-330`).
+4. ◐ **Deploy and verify.**
+   - The client is ready for `entitledPlan` and `proRequestedAt` (`app/shop-book.tsx:308-310`, `:386-391`; `reports.tsx:183`). Today's server returns neither.
+   - The reject note and Request Pro are still undeployed. The fallback is honest (`reports.tsx:191-194`).
+   - No device verification.
+5. ✅ **NotificationCenter.**
+   - It is now a FlatList (`customerViews.tsx:698`).
+   - Rows with a target are buttons with a hint. Tapping one marks it read and opens it (`:655-664`, `:680-685`). Rows with no target stay plain text (`:686-689`).
+   - The shell routes the target: `openTarget` (`app/shop-book.tsx:90-97`), the CustomerApp effect (`:220-226`) and the OwnerApp effect (`:313-319`).
+   - Routing is pure and selftested (`utils/shopbook.ts:554-568`).
+6. ✅ **Remaining state gaps.**
+   - BillScreen `patch` guard plus disabled controls (`invoices.tsx:47`, `:87`, `:177`, `:185`, `:209`).
+   - Suggest-alternative keeps its input until the save succeeds (`orders.tsx:547-552`, `:568-570`).
+   - FindShops retry (`customerViews.tsx:184`).
+   - `myLocationRequest` error with a retry (`settings.tsx:100-110`, `:289-293`).
+   - ProductSearch says "Type at least 2 letters to search." (`customerViews.tsx:306-308`).
+   - Stock history drops a stale answer (`products.tsx:595-602`, `:677`).
+   - ⚠ See regression R1.
+7. ◐ **Code health.**
+   - ✅ `useShopLoad` (`components/shopbook/useShopLoad.ts`, 70 lines), with 0 hand-rolled copies enforced by the selftest.
+   - ✅ Orphan comments and the "3,800-line" note are gone; the file headers are rewritten.
+   - ✅ 0 `as any`.
+   - ◐ The `entitledPlan()` double fetch remains until `/my-shop` is deployed. It carries a `ponytail:` note (`services/shopBookService.ts:994-999`).
+8. ✅ **Verification documents** open in the in-app viewer (`verification.tsx:131`). The token goes only to the app's own server (`app/file-viewer.tsx:146-150`). 📱
+9. ✅ **Small validation.**
+   - Tax % is capped at 100 (`products.tsx:320-323`).
+   - BulkAdd reports skipped and unpriced lines (`:801-810`).
+   - Pro support contact: a product decision (§5). The screen does not pretend one exists, so this is no deduction.
+
+**Other round-4 changes:**
+- Carts are lifted above the mode switch (`app/shop-book.tsx:57-60`).
+- The inbox is an overlay, so the app below stays mounted (`:104-110`).
+- CounterSale opens its bill in the in-app viewer (`ledger.tsx:262-266`).
+- A coupon that drops below its minimum is shown and not sent (`checkout.tsx:32`, `:61`, `:124-125`).
+- `C.onFill` replaces 29 `#fff` literals (`theme.ts:61`).
+
+**Regressions:**
+- **R1 (minor, from the new BillScreen guard).** `onBlur` returns early while `busy` (`invoices.tsx:152`). Example: the owner edits line A's packed quantity, which starts a patch. They then type line B and blur it while A is still in flight. B's value stays in the box, but it is **never sent**, and nothing hints at that. The bill total ignores it, and leaving the screen loses it. In round 3 it was sent, if racily.
+- **Split fidelity:** no behavioural loss found beyond the intended changes listed under Checks.
+- **New tokens:** no regression. Shop Book uses its own `C.onFill`, not the app's onPrimary/onDanger. But the new comment at `theme.ts:59-60` claims the "danger badge" fill clears AA under white. It does not in dark (Still needed 1).
+
+**Subscreens:**
+- Customer › FindShops — 7.5 → 8 (`ErrorState` with retry `:184`; `started` stops a false "No shops"/"Location off" `:58`, `:142`, `:185`)
+- Customer › ProductSearch — 7 → 8 (too-short hint `:306-308`; (0,0) guard `:264-265`)
+- Customer › ShopFlow details — 7.5 → 7.5
+- Customer › Catalog + type-any + voice — 7.5 → 7.5
+- Customer › CartView — 7.5 → 8 (`checkout.tsx:32`, `:61`, `:124-125`)
+- Customer › MyOrders — 7 → 7
+- Customer › OrderTrack — 7.5 → 8 (`greenFill` tick `theme.ts:268`; opens from the inbox `app/shop-book.tsx:220-226`)
+- ReasonModal — 7.5 → 8 (header `shared.tsx:103`; radiogroup label `:106`)
+- Customer › InvoiceView — 7.5 → 8 (visible "Invoice PDF" `invoices.tsx:334`)
+- Customer › ReturnRequest — 7.5 → 7.5
+- Customer › CustomerLedgerView — 7 → 7
+- Customer › CustomerProfile — 7 → 7.5 (loading state `customerViews.tsx:548-549`)
+- NotificationCenter — 6 → 8 (FlatList, routed rows, read on open; `order_status` side is guessed, Still needed 3)
+- Owner › load-failure state — 8.5 → 8.5
+- Owner › ShopSettings / Create shop — 7.5 → 8 (`settings.tsx:100-110`, `:289-293`)
+- Owner › OwnerDashboard — 7.5 → 7.5
+- Owner › Shop QR — 7 → 7.5 (header `reports.tsx:36`)
+- Owner › OwnerPlans — 7 → 7.5 (honest "Not available yet" `:191-194`; `requestedAt` prop `:183`)
+- Owner › OwnerReports — 7.5 → 7.5
+- Owner › OwnerCoupons — 7.5 → 7.5
+- Owner › OwnerSuppliers — 7.5 → 7.5
+- Owner › PurchasesScreen + Record step — 7 → 7.5 (`products.tsx:561`; chip glyphs fixed)
+- Owner › ReturnsScreen + Decline modal — 7.5 → 8 (header `orders.tsx:935`)
+- Owner › AuditScreen — 7 → 7
+- Owner › VerificationScreen — 7.5 → 8 (in-app viewer `verification.tsx:131`, 📱)
+- Owner › OwnerOrders — 7.5 → 8 (latest tab wins `orders.tsx:469-470`)
+- Owner › OwnerOrderDetail — 7.5 → 8 (opens from the inbox `app/shop-book.tsx:343`)
+- Owner › Suggest-alternative — 7 → 8 (`orders.tsx:568-570`, spinner `:635-637`)
+- Owner › BillScreen — 7.5 → 7.5 (guards added; R1 `invoices.tsx:152`)
+- Owner › Bill "Add an item" — 7.5 → 8 (header `:78`; disabled while busy `:86-87`)
+- Owner › OwnerProducts — 7.5 → 7.5
+- Owner › ProductEditor — 7.5 → 8 (`products.tsx:320-323`)
+- Owner › BulkAdd — 6.5 → 7.5 (`:801-810`)
+- Owner › StockScreen + item detail — 7.5 → 8 (`:595-602`)
+- Owner › OwnerKhata (+ Add customer) — 7.5 → 7.5
+- Owner › CounterSale — 7 → 7.5 (`ledger.tsx:262-266`, 📱)
+- Owner › KhataDetail (+ credit limit) — 7 → 8 (Share reachable `shared.tsx:327-330`; method chips render icons)
+
+**Still needed for 10/10:**
+1. **Dark badge contrast.**
+   - `cartBadge` is `C.danger` with `C.onFill` text (`theme.ts:123-127`). Dark `C.danger` is `#FDA29B` (`constants/financeTheme.ts:165`), and white on it is 1.94:1. This affects the bell's unread count (`app/shop-book.tsx:123`) and the SubHeader badge (`shared.tsx:172`).
+   - Add a `dangerFill` the way `greenFill` was added, and correct the claim at `theme.ts:59-60`.
+2. **R1.** When a quantity blurs while `busy`, either queue it until the patch settles, or show "not saved yet" (`invoices.tsx:150-152`).
+3. **Inbox routing edges.**
+   - `order_status` is routed by the current mode (`utils/shopbook.ts:566`), but the server sends it to both the customer (`vaultchat-backend-go/internal/routes/shopbook.go:2211`) and the owner (`:2339`; `shopbook_jobs.go:145-149`). An owner's "Order collected" tapped in Customer mode opens OrderTrack. Have the server tag the recipient side.
+   - `if (!shop || settings)` precedes `if (orderOpen)` (`app/shop-book.tsx:334`, `:343`), so an order tapped while Shop Settings is open stays hidden behind it. Clear `settings` in the OwnerApp effect (`:313-319`).
+4. **Deploy and verify** (§4).
+   - Deploy migrations 140/141 and the `/my-shop` fields. That retires `entitledPlan()` (`services/shopBookService.ts:994-999`) and fills "Requested on".
+   - Device-verify: the inbox overlay and Android back, notification navigation, in-app viewing of presigned documents and the CounterSale bill, location, safe area, contrast and repeat order.
+5. **Return-decision notifications** become tappable once the server sends `orderId`. The handoff is written (`fixes/R4BE.md` C18), not deployed.
+6. **Leftover literals.** `couponCode` border `#166534` (`theme.ts:299`) and `loyaltyTier` `#93C5FD` (`:311`). Each measures fine, but neither is a token.
+7. **Size.** `orders.tsx` (969 lines) and `products.tsx` (819) are still large. OwnerOrderDetail and StockScreen are natural splits.
+
+---
+
+#### `admin/index.html` — **7.5 → 8.0** (mean 8.08)
+- **Scores now:** Function 8.5 · States 8 · UI 8 · A11y 8 · Security 8 · Code 8
+
+**Original items** (`rerate3/I2.md` 1–5):
+1. ◐ **Fonts and framing.**
+   - Google Fonts are gone. The page self-hosts `@font-face` (`:19-23`) under `font-src 'self'` (`:9`).
+   - `frame-ancestors`, X-Frame-Options and nosniff are documented as nginx headers (`admin/LOGS_DEPLOY.md:99-122`), but they are not deployed.
+   - `style-src 'unsafe-inline'` remains (`:9`).
+   - JetBrains Mono and Sora 500/600 are not in the repo, so those fall back. This is documented (`:13-17`).
+2. ✅ **Deploy doc.** `shopbook.html` is documented, with a backup-and-diff caution (`LOGS_DEPLOY.md:65-97`).
+3. ✅ **Pause and status pill.**
+   - Pause has `aria-pressed` (`:234`, `:535-536`). The count shows "· paused".
+   - The pill is written only when its state changes (`:550-557`).
+4. ✅ **Dashboard guard.** One dashboard load at a time, and health is awaited inside it (`:377-397`).
+5. ✅ **Light theme.**
+   - `color-scheme: dark light` plus a light token set (`:11`, `:36-46`).
+   - Former literals moved to tokens (`--panel-end`, `--well`, `--err-txt`, `--topbar`, etc., `:30-31`).
+   - Text contrast is at least 4.5 by my computation, except the non-text LED.
+- **Also:** Revoke names the user and device (`:486`). Pager buttons are named (`:189-190`).
+
+**Regressions:** none. The hash matches.
+
+**Subscreens:**
+- Login — 7.5 → 7.5
+- Dashboard — 7.5 → 8 (`:377-381`)
+- Users — 7.5 → 7.5 (named pager; no in-flight guard, see Still needed 2)
+- Messages — 7.5 → 7.5
+- Sessions — 8 → 8.5 (`:486`)
+- Broadcast — 8 → 8
+- Live Log — 7.5 → 8 (`:234`, `:535`)
+- API Explorer — 7.5 → 7.5
+
+**Still needed for 10/10:**
+1. **Deploy and browser-verify.** Deploy the nginx headers and the five font files (`LOGS_DEPLOY.md:89-122`), then confirm them with the `curl -sI` checks at `:119-121`.
+2. **Stale page responses.** Users and Messages have no in-flight or latest-wins guard. Two quick Next clicks can render an older page under a newer count (`:420-442`, `:447-448`, `:451-467`).
+3. **`style-src 'unsafe-inline'`** (`:9`). Move the `style="…"` attributes (`:157`, `:218`, `:226`) into classes and pin a style hash.
+4. **SSE retries.** A 401 keeps retrying with backoff forever (`:621`, `:643`). Stop on 401 and return to login. `sessionStorage` access is unguarded (`:260-262`).
+
+---
+
+#### `admin/logs.html` — **8.0 → 8.0** (mean 8.17)
+- **Scores now:** Function 8.5 · States 8.5 · UI 7 · A11y 8.5 · Security 8 · Code 8.5
+
+**Original items** (`rerate3/I2.md` 1–3):
+1. ✅ **Polite live region.**
+   - A rebuild sets `aria-live=off` and restores it 600 ms after the last rebuild (`:230-236`, `:250-252`).
+   - A new "announce new lines" toggle has `aria-pressed`, is remembered with try/catch storage, and turns announcing off entirely (`:98`, `:146`, `:352-359`).
+   - How a real screen reader handles these toggles is not verifiable statically.
+2. ✅ **Highlighting.** Matching runs on the raw line, and each piece is escaped (`:194-201`). The selftest covers it.
+3. ✅ **Footer host** removed (`:127`).
+   - The ≤700px layout and CSP were checked in the fixer's headless run (`SP/r4adm_pw.txt`, `SP/r4adm_logs_375.png`). That run is local, not deployed.
+- **Also:** Wrap is now an `aria-pressed` toggle, and the dead `.active` style is gone (`:39`, `:351`).
+
+**Regressions:** none. The hash matches.
+
+**Subscreens:**
+- Token overlay — 8 → 8
+- Source navigator — 7.5 → 7.5 (`localStorage` unguarded `:134`, `:180`)
+- Log view — 8 → 8.5 (`:194-201`, `:230-252`, `:352-359`)
+
+**Still needed for 10/10:**
+1. **Status region chatter.** `setConnected(true, 'connected')` rewrites the `role=status aria-live=polite` text on every poll (`:269-272`, `:286`, `:310`; region `:81`), every 2–10 s. `index.html` fixed this pattern (`:550-553`) and this page should match: write only on change.
+2. **Unguarded storage.** `localStorage` for `lv_src` (`:134`, `:180`) is not in try/catch, unlike the new `lv_announce` (`:146`, `:354`). A throwing storage stops the whole script at `:134`.
+3. **Narrow screens.** It is still dark-only with no `color-scheme` meta. At 375px the header takes about 45% of the height (screenshot `SP/r4adm_logs_375.png`), so consider collapsing the controls on narrow screens (`:67-73`).
+4. Deploy the nginx headers (`LOGS_DEPLOY.md:99-122`), and check the live-region behaviour with a real screen reader.
+
+---
+
+#### `admin/shopbook.html` — **7.5 → 8.0** (mean 8.17)
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8 · Security 8 · Code 8
+
+**Original items** (`rerate3/I2.md` 1–4):
+1. ✅ **Entitlement form.** The `prompt()` chain is replaced by an inline form (`:549-572`):
+   - A date input with `min=tomorrow`, an optional reference, and an in-form `role=alert` error with `aria-invalid` and focus (`:593-603`).
+   - A Review → Confirm summary in `role=status`, withdrawn on any edit (`:583-587`, `:605-611`, `:631-634`).
+   - Cancel returns focus to the opener (`:574-579`).
+   - The pure `entitlementExpiry` is selftested. It rejects past and today's dates, impossible dates and half-typed dates (`:531-540`).
+   - ⚠ See Still needed 2.
+2. ◐ **Deploy doc and returns filter.**
+   - The deploy is documented (`LOGS_DEPLOY.md:81-87`).
+   - The `?shopId=` filter is still undeployed. The page is honest about it (`:664-665`).
+3. ✅ **Enter-to-connect.** Enter in the key or base field clicks Connect, so it goes through the busy guard (`:724-726`). `.click()` on a disabled button does nothing.
+4. ✅ **Button names and theme.**
+   - Repeated buttons carry `aria-label="<visible>, <shop>"` (label-in-name), escaped via `esc` (`:154`, `:228-231`, `:263`, `:285`, `:377-379`, `:423-424`, `:462-463`, `:511-513`).
+   - Light theme (`:23-30`). The danger fill is 4.99:1 (`:18`, `:45`).
+- **Also:** the "Pro requested" tag and count (`:493-496`, `:505`) show only when the server sends the field. The reject note in orders renders only when the field is present (`:650`).
+
+**Regressions:**
+- **None in behaviour.** The hash matches.
+- **Weaker confirmation (minor, new):** the two-step confirm can be skipped by a double-click.
+  - After the first press, the same enabled button becomes "Confirm" and keeps focus (`:605-611`).
+  - A double-click on "Review" therefore POSTs the entitlement without the summary being read.
+  - The old `confirm()` dialog could not be clicked through that way.
+
+**Subscreens:**
+- Connect bar — 7.5 → 8 (`:724-726`)
+- Platform stats — 7.5 → 7.5
+- Shop approvals — 8 → 8 (named buttons; reject still uses `prompt()` `:248`)
+- Verification queue + Documents — 8 → 8 (named; note `prompt()`s `:392`, `:433`)
+- Location changes — 8 → 8 (refuse `prompt()` `:474`)
+- Subscriptions / entitlements — 7.5 → 8.5 (form `:549-634`; double-click gap)
+- Country tax engine — 7.5 → 7.5
+- Categories & starter catalogs — 7.5 → 7.5
+- Support windows — 7 → 7.5 (reject note `:650`; returns filter needs the deploy `:665`)
+
+**Still needed for 10/10:**
+1. **Deploy the backend.** This means `?shopId=` for returns, the reject fields in `sbAdminOrders` and `proRequestedAt`, plus the page itself with the nginx headers (`LOGS_DEPLOY.md:81-122`). The comment at `:641-644` ("sbAdminOrders does not select them yet") is now stale: the backend selects them at `shopbook_admin2.go:443`, `:469`.
+2. **Double-click on Confirm.** Ignore a confirm press within a short delay of the review step, or make Confirm a separate button that appears below the summary (`:605-611`).
+3. **The other `prompt()`s.** Replace the four single-note prompts with the same inline pattern: reject shop `:248`, verify note `:392`, reject document `:433`, refuse move `:474`.
+4. **A11y details.**
+   - The filter buttons do not show which filter is active. Add `aria-pressed` (`:92-93`, `:100-102`, `:110-111`).
+   - Focus falls to `<body>` after a successful save re-renders the list (`:618`). Return it to the shop's opener.
+   - `proRequestedAt` is shown as raw ISO (`:505`).
+5. **Storage.** `localStorage.setItem` at `:192` sits outside the try. A throwing storage aborts `loadAll()` after stats, with no sections and no toast. The same applies to `:728`.
+
+---
+
+### J — Settings, privacy & vault: round-4 re-rating
+
+Base 43c2d19 → HEAD 4910069. The round-4 commit for this batch is 6842f7a (R4J). The cross-package handoffs landed in 4910069: `lib/mediaPrefs.ts:26-30`, `lib/galleryExport.ts:66-69`, `lib/usageCounter.ts:92-102`, `services/d2deService.ts:55-59`, and `noteWindowSecure` in `lib/call/engine.ts:1101-1108` and `lib/golive/native.ts:110`. The working tree is clean.
+
+"Old" scores and open items come from `rerate3/J.md`. The round-3 regressions listed for J in fix_status §3 were fixed in 298f739, which comes before 43c2d19. I re-checked each of them in the current code. I checked the claims in `fixes/R4J.md` against the code.
+
+This review is static and read-only. **Nothing here is deployed or device-verified.** The following count only for what the code shows:
+- FileHandle I/O on picker cache files
+- iOS app-switcher blur
+- the iOS reminder sheet inside the editor Modal
+- VoiceOver reachability
+- contrast
+
+**Checks I ran (outputs are in `scratchpad/rerate4/J_*`):**
+- `npx tsc --noEmit -p .` exited 0 with no errors (`J_tsc.txt`).
+- `npx eslint` on the 13 screens, `components/notes`, `components/vault`, `lib/vaultCrypto.ts`, `lib/vaultKeyStore.ts` and `lib/screenGuard.ts` gave 0 errors and 1 warning. The warning is a pre-existing `require()` at `lib/vaultCrypto.ts:26`. The two exhaustive-deps warnings in encrypted-notes are gone (`J_eslint.txt`).
+- `npx tsx` selftests, all exit 0:
+  - vaultCrypto (now covers v3)
+  - privacyChecklist (6)
+  - statusPrivacySelection
+  - a11yCoverage
+  - themeCoverage (22/20)
+  - orphanRoutes (51)
+  - silentFailure
+  - uiDebtRatchet ("no file got worse", 5 unroled touchables and 306 hex literals left repo-wide)
+  - resumeLockPolicy
+  - notesVault
+  - screenBackCoverage
+  - services/security/pinFormat
+  - vaultManifestParse
+- Not run: full `npm test`, `npm run lint`, `openspec validate`.
+
+**The splits and tokens:**
+- I compared the encrypted-notes split against `git show 43c2d19:app/encrypted-notes.tsx` (saved as `J_notes_r3.tsx`). The re-lock handler, load/save gating, draft seal/offer, editor fields, `snapshotOf`, trash, locked-note and backup flows match. The only differences are the logged fixes. Editor `preview` was not reset on open before either.
+- `onPrimary` is `#FFFFFF` in both schemes (`constants/theme.ts:228`, `:272`), the same value as `bubbleOutText` (`:209`, `:257`). Moving to it changes nothing on screen. White on dark `primary` is 4.11:1 (`constants/theme.ts:222-226`). That is an open design decision (§5), not a deduction.
+- No file in the batch uses `onDanger` or `warning`.
+
+| Screen | Old | New | Δ |
+|---|---|---|---|
+| app/settings.tsx | 8.5 | 8.5 | 0 (mean 8.33 → 8.67) |
+| app/privacy-dashboard.tsx | 8.5 | 8.5 | 0 (mean 8.42 → 8.58) |
+| app/ghost-mode.tsx | 8.5 | 8.5 | 0 (mean 8.25 → 8.5) |
+| app/last-seen-privacy.tsx | 8.5 | 8.5 | 0 (mean 8.5 → 8.67) |
+| app/status-privacy.tsx | 8.5 | 8.5 | 0 (mean 8.25 → 8.5) |
+| app/login-history.tsx | 8.5 | 8.5 | 0 (mean 8.42 → 8.5) |
+| app/vault.tsx | 7.5 | 8.0 | +0.5 |
+| app/vault-features.tsx | 8.0 | 8.5 | +0.5 |
+| app/vaultcheck.tsx | 8.0 | 8.5 | +0.5 |
+| app/vaultbeam-settings.tsx | 7.5 | 7.5 | 0 (mean 7.33 → 7.67) |
+| app/filevault.tsx (redirect) | 8.5 | 8.5 | 0 (mean 8.5 → 8.58) |
+| app/encrypted-notes.tsx | 7.0 | 8.0 | +1.0 |
+| app/d2de-status.tsx | 8.0 | 8.0 | 0 (mean 7.75 → 8.0) |
+
+---
+
+#### Crypto and data-loss review: v3 vault format and the "New key" path
+
+**What is sound (checked in the code):**
+- **Layout.** A file is `'VCV3' | nonce(8) | chunks`. Each chunk is `AES-256-GCM(dek, iv = nonce ‖ u32be(index | LAST), aad = header)` (`lib/vaultCrypto.ts:207-218`, `:239-245`, `:268`, `:286`). The 64-bit random nonce per file plus a 31-bit chunk counter gives unique IVs under one DEK, up to about 2³² files by the birthday bound.
+  - The LAST bit plus the header AAD make truncation at a chunk boundary, dropping or appending a chunk, reordering, and splicing between files fail the tag check.
+  - The selftest covers this: sizes 0, 1, CHUNK±1, CHUNK, 2·CHUNK, 2·CHUNK+777; wrong key, bit flip, dropped tail, splice and short source all rejected.
+- **Size mapping.** `v3PlainSize` (`:231-237`) inverts `size = 12 + P + 16·max(1, ⌈P/CHUNK⌉)` uniquely. I checked P = 0, P = k·CHUNK and P = k·CHUNK + r. Any other length throws "damaged".
+- **Fail-closed sealing.** `vaultFileEncrypt` and `sealFileToVault` throw `VaultKeyMissingError` without keys (`lib/vaultCrypto.ts:176-177`, `components/vault/vaultFileIO.ts:53`). Add is disabled in the UI and in the handler (`app/vault.tsx:382`, `:728-730`). The constant-SALT v1 path is now only read, never written for vault files.
+- **Short reads.** The reader catches Android's zero-padded short read. The native `read` returns `buffer.array()` at the allocated length whatever `fileChannel.read` filled (`node_modules/expo-file-system/android/.../FileSystemFileHandle.kt:24-29`). The offset check at `vaultFileIO.ts:24-26` turns that into an error instead of sealing zeros. iOS returns the real short `Data` (`ios/FileSystemFileHandle.swift`, `read(upToCount:)`), which fails the length check.
+- **No partial outputs kept.** A failed seal deletes its partial output (`vaultFileIO.ts:64-67`). A failed open deletes the partly written plaintext (`:93-98`). The manifest is written only after a successful seal, and a failed manifest save deletes the new `.enc` (`app/vault.tsx:365-370`).
+- **Archiving.** `replaceVaultKeys` never replaces a record this PIN opens (`lib/vaultKeyStore.ts:82-86`). It writes the archive copy before the new record, so a failed write changes nothing (`:87-90`).
+
+**Flaws and gaps:**
+1. **(Regression, medium: data recoverability.) The "New key" archive is write-only, and starting a new key removes the one recovery path that existed.**
+   - Before round 4, a user whose PIN was reset and who later remembered the old one could set the Device PIN back to it. `rewrapVaultKeys` leaves a record the current PIN cannot open untouched (`lib/vaultKeyStore.ts:65-69`). The gate would then verify the old PIN and open `vault_key_v2`.
+   - After "New key", `vault_key_v2` holds the new key. A later PIN change re-wraps the new key (`app/backup-pin.tsx:100`). The old record now sits at `vault_key_v2_prev_<Date.now()>` (`lib/vaultKeyStore.ts:87`), and nothing reads it: a grep for `_prev_` finds only the writer. SecureStore cannot list keys, and the timestamped name is not stored anywhere. So the archived record is unreachable from code.
+   - Two texts overstate this. The header comment says "so an old PIN that comes back can still be tried" (`:14-15`). The confirm says "still cannot be opened with this PIN. The old key is kept on this phone" (`app/vault.tsx:326`). Both suggest a recovery the app does not offer.
+   - Fix: store the archive names in a fixed index key, and on unlock try the PIN against the archived records too, opening those files read-only. Otherwise, reword the confirm to say the old files become permanently unopenable.
+2. **(Low.) The Android source handle is opened read-write and creates a missing file.** `File.open()` is `RandomAccessFile(file, "rw")` (`FileSystemFileHandle.kt:7`), and `sealFileToVault` opens the picked source with it (`vaultFileIO.ts:56`).
+   - If the cache copy vanished, it would be created empty, sealed as 0 bytes, and reported "Added to Vault" (`app/vault.tsx:372`). Nothing compares the size with `asset.size`.
+   - It also needs write permission on the picker's file (📱).
+   - Fix: check `src.exists` (or that the size is above 0 when the picker reported a size) before opening.
+3. **(Low.) No read-back or offset check on writes.** `writer` trusts a single `FileChannel.write` (`vaultFileIO.ts:31-39`; native `:35-43`), unlike the reader. Nothing re-opens the new `.enc` before it is listed. A silent short write would only show up as "damaged" on first open.
+4. **(Low, hardening.) File identity is not bound into the AAD.** Two `.enc` files under the same DEK can be swapped by anyone with write access to the app sandbox, and each manifest entry would then open the other's bytes (`lib/vaultCrypto.ts:258-268`; `encPath` at `app/vault.tsx:356-357`). Putting `fileId` in the header or AAD would close this.
+5. **(Low.) Orphans on process death.** The seal writes straight to the final path (`vaultFileIO.ts:60-62`). If the app is killed mid-seal, a partial `.enc` stays that is never listed and never swept: `app/vault.tsx` has no orphan sweep of `VAULT_DIR`. Streaming makes this window longer.
+6. **(Low, 📱.) Speed.** The cipher is pure JS on the JS thread, 1 MiB per chunk with a yield between chunks (`lib/vaultCrypto.ts:249-250`, `:269`). A large video means many seconds of "Encrypting…" with no progress and no cancel (`app/vault.tsx:663-667`).
+7. **(Pre-existing, not round 4; low.)** On Android, `expo-secure-store` returns `null`, and on BadPadding deletes the value, when the keystore key is invalidated (`node_modules/expo-secure-store/android/.../SecureStoreModule.kt:156-168`). `unlockVaultKeys` reads `null` as "no record" and silently mints a new key (`lib/vaultKeyStore.ts:28-29`, `:50-56`). Every v2/v3 file then fails with "sealed with another key" and no notice. All new files now depend on the DEK, so this case matters more than it did.
+8. **Stale comment.** `lib/vaultKeyStore.ts:9-10` still says "new files fall back to v1". That contradicts `:12-13` and `lib/vaultCrypto.ts:172-177`.
+
+---
+
+#### `app/settings.tsx` — **8.5 → 8.5** (mean 8.67)
+- **Scores now:** Function 9 · States 9 · UI 8.5 · A11y 9 · Security 8.5 · Code 8
+- **Original items:**
+  1. ✅ **Local preferences fail visibly.** `saveLocal` applies the change at once, rolls back and shows "Not saved" if the write rejects (`app/settings.tsx:94-100`).
+     - It is used for auto-download, gallery and usage (`:155-157`, `:317-319`, `:341`).
+     - The lib setters now reject (`lib/mediaPrefs.ts:26-30`, `lib/galleryExport.ts:66-69`, `lib/usageCounter.ts:92-102`).
+     - The getters have `.catch` (`:90-91`).
+     - A failed MFA read says "Could not check" (`:162`, `:396-398`).
+     - A failed profile load says so on the card (`:125`, `:281`, `:290-291`).
+  2. ✅ **Unblock.** It is single-flight with a spinner and busy state (`:217-235`, `:512-516`). The button is now `minHeight: 44, minWidth: 88` (`:681`).
+  3. ◐ **Casts and size.** There are 0 `as any` left; the routes are typed and tsc is clean. Five `e: any` catches remain (`:107`, `:118`, `:140`, `:200`, `:227`), and the file is 698 lines.
+- **Regressions:** none found. If the usage-counter write fails while switching off, the row rolls back to "On" while counting has already stopped for this session (`lib/usageCounter.ts:98`). The persisted value really is On, and this follows the documented privacy choice, so it is not scored.
+- **Subscreens:**
+  - Picker Sheet — 8.5 → 8.5.
+  - Appearance — 8.5 → 8.5.
+  - Blocked users — 8.5 → 9. Guarded, with a 44pt target.
+- **Still needed for 10/10:**
+  1. Split the 698-line file (profile card, blocked users and appearance are natural parts) and type the five `e: any` catches.
+  2. Dark-theme white on `primary` is 4.11:1 (`constants/theme.ts:222-226`). This is an open design decision.
+
+#### `app/privacy-dashboard.tsx` — **8.5 → 8.5** (mean 8.58)
+- **Scores now:** Function 9 · States 8.5 · UI 8.5 · A11y 8.5 · Security 8.5 · Code 8.5
+- **Original items:**
+  1. ✅ **The screenshot fact is a pure read.**
+     - The dashboard calls `readSecureState()` (`app/privacy-dashboard.tsx:80`).
+     - `setSecure` now records only a confirmed apply, and returns `confirmed && enabled` (`lib/screenGuard.ts:133-144`).
+     - The read returns false in dev and on non-Android, otherwise the last confirmed state or `'unknown'` (`:160-163`).
+     - The two `VaultCalls.setWindowSecure` paths report through `noteWindowSecure` (`lib/call/engine.ts:1101-1108`, `lib/golive/native.ts:110`).
+     - A `ponytail:` comment names the limit: this is not a native read of the window flag (`lib/screenGuard.ts:153-158`).
+  2. ◐ **Icon ink.** It is now `onPrimary` (`:158`), the same white as before. Contrast is not verifiable statically.
+  3. ✅ **Casts and assertion.** `openRoute(route: Href)` replaces the casts and `r.route!` (`:105-108`, `:270`).
+- **Regressions:** none found.
+- **Subscreens:**
+  - Score ring — 8.5 → 8.5.
+  - Checks list — 9 → 9.
+  - Who can see — 8.5 → 8.5.
+  - Improve your score — 8.5 → 9. Typed routes.
+- **Still needed for 10/10:**
+  1. Read FLAG_SECURE natively. This needs the proposed `VaultViewGuard.isSecure`; until then the fact is "last applied" (`lib/screenGuard.ts:153-158`).
+  2. The fact is read once per focus. A load that runs before the root layout's `setSecure` resolves shows "Could not check" until the next focus (`:80`). Not verifiable statically.
+
+#### `app/ghost-mode.tsx` — **8.5 → 8.5** (mean 8.5)
+- **Scores now:** Function 8.5 · States 9 · UI 8.5 · A11y 8.5 · Security 8 · Code 8.5
+- **Original items:**
+  1. ✅ **Editor stale refresh.** A `stale` banner with Try again (`app/ghost-mode.tsx:217-218`, `:234-235`, `:309-316`).
+  2. ✅ **Other switches while one saves.** They are disabled through `waiting` (`:331`, `:339`, `:347`, `:355`, `:392`), and the Switch has a hint (`:389`).
+  3. ✅ **Cast.** The `'/ghost-mode' as any` cast is gone (`:157`).
+- **Regressions:** none found.
+- **Subscreens:**
+  - List view — 8.5 → 8.5.
+  - Per-target editor — 8 → 8.5.
+- **Still needed for 10/10:**
+  1. A disabled "waiting" Switch is not announced as busy. Add `accessibilityState={{ busy: true }}` or a hint while another key saves (`:386-394`).
+  2. Server enforcement of the overrides is not verifiable statically. Offline, the sealed-cache decision applies (§5).
+
+#### `app/last-seen-privacy.tsx` — **8.5 → 8.5** (mean 8.67)
+- **Scores now:** Function 9 · States 9 · UI 8.5 · A11y 9 · Security 8 · Code 8.5
+- **Original items:**
+  1. ✅ **Unmount guard.** The `mounted` ref guards the rollback, the Alert and `setBusy` (`app/last-seen-privacy.tsx:51-52`, `:70`, `:75`). The cast is dropped (`:68`).
+  2. ✅ **Switch hint.** `accessibilityHint={row.info}` (`:125`).
+  3. ❌ **Server enforcement.** Not verifiable statically.
+- **Regressions:** none found.
+- **Still needed for 10/10:**
+  1. Confirm on the server that the four settings are enforced (not verifiable statically).
+  2. The optimistic update spreads the render-time `settings` (`:65`). It is safe while saves are serialised, but `setSettings(cur => …)` would be more robust.
+
+#### `app/status-privacy.tsx` — **8.5 → 8.5** (mean 8.5)
+- **Scores now:** Function 8.5 · States 9 · UI 8 · A11y 8.5 · Security 8.5 · Code 8.5
+- **Original items:**
+  1. ✅ **Contacts load separately.**
+     - Privacy and contacts now load apart (`app/status-privacy.tsx:55-68`, `:70-88`).
+     - A privacy failure still blocks the screen, so the default is never saved over the real list (`:161-170`).
+     - A contacts failure shows its own notice and Try again, and mode selection stays usable (`:207-213`).
+  2. ✅ **Saving several people.** A latest-wins serial saver (`:50-53`, `:94-122`). Rows stay enabled (`:222-228`); a tap builds on the newest wanted list (`:141`); a failure restores the last accepted state (`:105-110`).
+  3. ❌ **"My contacts".** What the server means by it is not verifiable statically. The list is still direct-chat peers only (`:78-82`).
+- **Regressions:** none found. A failure drops any queued newer state, by design: it alerts and restores the last accepted state.
+- **Subscreens:** Contact selector — 8 → 8.5.
+- **Still needed for 10/10:**
+  1. Source the picker from real contacts, not only direct-chat peers (`:78-82`). Confirm the server's meaning of "My contacts".
+  2. Back is 40×40 with `hitSlop={8}` (`:151`, `:246`). Make it 44×44 like its siblings.
+
+#### `app/login-history.tsx` — **8.5 → 8.5** (mean 8.5)
+- **Scores now:** Function 8 · States 9 · UI 8.5 · A11y 9 · Security 8 · Code 8.5
+- **Original items:**
+  1. ✅ **Failed refresh over cached rows.** The error is kept on any failure (`app/login-history.tsx:65-68`), and the notice reads "Showing your saved list — it could not be refreshed" (`:168`).
+  2. ✅ **Try again progress.** It shows a spinner with busy/disabled state (`:170-172`), and `setRefreshing` is mount-guarded (`:85`).
+  3. ✅ **"Done" after unmount.** It returns when unmounted (`:122`), and the count is pluralised (`:123`).
+- **Regressions:** none found.
+- **Still needed for 10/10:**
+  1. The failure Alerts in both revoke handlers are not mount-guarded (`:100-101`, `:125-126`).
+  2. Offline there is nothing to show while `VAULT_CACHE_ENCRYPTED` is off (§5 decision). Server-side revocation is not verifiable statically.
+
+#### `app/vault.tsx` — **7.5 → 8.0** (mean 8.0)
+- **Scores now:** Function 8.5 · States 8 · UI 8 · A11y 8 · Security 8.5 · Code 7
+- **Original items:**
+  1. ◐ **Streaming.** New files are v3 and streamed disk to disk (`app/vault.tsx:356-358`, `:452`; `components/vault/vaultFileIO.ts:52-72`, `:79-104`). Old v1/v2 files still open whole-file, under a `ponytail:` comment (`vaultFileIO.ts:106-111`). Needs a device check (📱).
+  2. ✅ **Export scrim.** The backdrop is a sibling of the panel (`:743-747`, fixed in 298f739).
+  3. ◐ **No v1 fallback.**
+     - Sealing fails closed without keys (`lib/vaultCrypto.ts:176-177`).
+     - Add is disabled and the notice says why (`:597-612`, `:728-730`).
+     - "New key" has a destructive confirm (`:322-341`), but the archive it writes is unreachable. See crypto flaw 1.
+  4. ◐ **Inactive and app switcher.** `holdAppSwitcherBlur()` is held while unlocked (`:240`; `lib/screenGuard.ts:172-186`), which is 📱. `vaultPin` still stays in state while unlocked (`:202`); v1 files need it.
+  5. ◐ **Small fixes and size.**
+     - ✅ MIME types come from `asset.mimeType` (`:404`, `:420`).
+     - ✅ `keyBusy` gives Try again and New key a spinner and disabled state (`:313-318`, `:606-609`).
+     - ✅ `e?.message` (`:374`, `:466`).
+     - ❌ The file is 960 lines.
+- **Regressions:**
+  1. New key removes the PIN-revert recovery path while its copy suggests the old key is still usable (`lib/vaultKeyStore.ts:14-15`, `:87`; `app/vault.tsx:326`). See crypto flaw 1.
+  2. Stale comment at `lib/vaultKeyStore.ts:9-10`.
+- **Subscreens:**
+  - PIN gate — 8 → 8.
+  - File tabs and list — 8 → 8.5.
+  - Export file list modal — 7 → 8.5. Sibling scrim.
+  - Key notice / New key (new) — **7**. Honest notice and confirm, but the archive cannot be read back.
+- **Still needed for 10/10:**
+  1. Make the archived key records reachable: an index key, plus trying archived records on unlock. Otherwise say plainly that New key makes the old files permanently unopenable (`lib/vaultKeyStore.ts:79-91`, `app/vault.tsx:326`). Fix the stale header (`:9-10`).
+  2. Check that the source exists and its size is plausible before sealing, because Android's `open()` creates a missing file (`vaultFileIO.ts:54-59`). Verify the written length after the seal (`:31-39`).
+  3. Sweep `VAULT_DIR` for `.enc` files that are not in the manifest after a good manifest read (`app/vault.tsx:289-299`). Or seal to a temporary name and move it into place.
+  4. Show seal and open progress and offer a cancel for large files (`:663-667`). Stop or ignore a `handleOpen` still running after a re-lock (`:443-476` vs `:256-268`).
+  5. Bind `fileId` into the v3 header or AAD (`lib/vaultCrypto.ts:258-268`).
+  6. Do not treat a SecureStore `null` as "no record" when the manifest lists v2/v3 files (`lib/vaultKeyStore.ts:50-56`). This is pre-existing.
+  7. Move the PIN gate out of the 960-line file, and update `services/security/pinFormat.selftest.ts`, which scans this file (R4J partial 3). Add a test for `replaceVaultKeys` and for the IO wrapper using a fake handle.
+
+#### `app/vault-features.tsx` — **8.0 → 8.5** (mean 8.58)
+- **Scores now:** Function 8.5 · States 8.5 · UI 8.5 · A11y 8.5 · Security 8 · Code 8.5
+- **Original items:**
+  1. ✅ **Scrim.** The backdrop is a sibling and the panel is a `radiogroup` (`app/vault-features.tsx:388-398`, fixed in 298f739).
+  2. ✅ **`lockApplies`.** It is re-read on every focus, with a live guard (`:110-115`).
+  3. ✅ **Copied timer.** It is kept in a ref, cleared on re-copy and on unmount (`:117-118`, `:207-208`).
+- **Regressions:** none found.
+- **Subscreens:**
+  - Temp Chat Code — 8.5 → 8.5.
+  - Auto screen lock picker — 7 → 8.5.
+  - Privacy link — 8.5 → 8.5.
+  - Vault link — 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. The code countdown re-renders the screen every second (`app/vault-features.tsx:154-157`). Isolate the tick in a small component.
+  2. Whether the server enforces single use of the code is not verifiable statically.
+
+#### `app/vaultcheck.tsx` — **8.0 → 8.5** (mean 8.5)
+- **Scores now:** Function 8 · States 9 · UI 8.5 · A11y 8.5 · Security 8.5 · Code 8.5
+- **Original items:**
+  1. ✅ **Timeout.** The in-flight analysis is reused on retry, and the timeout says the check is still running (`app/vaultcheck.tsx:50-52`, `:76-86`; 298f739).
+  2. ✅ **Elapsed counter.** It no longer has a live region (`:122-124`).
+  3. ✅ **Keys and icons.** Keys are built from content and index (`:172`, `:200`). The decorative icons are hidden (`:130`, `:146`, `:155`, `:182`, `:196`, `:207`).
+- **Regressions:** none found.
+- **Subscreens:**
+  - Report view — 8.5 → 9.
+  - Error state — 8 → 8.5.
+- **Still needed for 10/10:**
+  1. `verifyMedia` cannot be cancelled. It keeps using CPU after the user leaves (`:50-52`).
+  2. Screen-reader users get no progress after "Checking on this device…". One announcement after about 30 s would help (`:115-125`).
+
+#### `app/vaultbeam-settings.tsx` — **7.5 → 7.5** (mean 7.67)
+- **Scores now:** Function 5.5 · States 8.5 · UI 8.5 · A11y 8.5 · Security 7 · Code 8
+- **Original items:**
+  1. ❌ **Feature off.** `VB_AUTODOWNLOAD = false` (`constants/flags.ts:165`), and the screen discloses it. It is not among the §5 decisions, so the Function cap stays as in earlier rounds.
+  2. ✅ **Saves.** They are chained on a promise ref (`app/vaultbeam-settings.tsx:28-32`), and the failure notice has Try again (`:62-71`).
+  3. ✅ **Casts and thumb colour.** The casts are removed (`:75-85`), and `thumbColor` is set (`:147`).
+- **Regressions:** minor. `patchSettings` applies the in-memory value only when it runs (`lib/vaultBeamSettings.ts:103-111`), so a queued tap now updates the UI only after the previous write finishes. That is milliseconds, and it is not scored.
+- **Subscreens:** Auto-download options — 6.5 → 7.
+- **Still needed for 10/10:**
+  1. Ship the feature, or hide the screen until it ships (`constants/flags.ts:165`).
+  2. Apply the cache synchronously and queue only the disk write (`lib/vaultBeamSettings.ts:103-111`).
+
+#### `app/filevault.tsx` (redirect) — **8.5 → 8.5** (mean 8.58)
+- **Scores now:** Function 8 · States 9 · UI 8.5 · A11y 9 · Security 8.5 · Code 8.5
+- **Original items:** ✅ The comment is fixed (`app/filevault.tsx:10-11`, 298f739).
+- **Regressions:** none.
+- **Still needed for 10/10:**
+  1. Delete the alias once no external link uses `/filevault`. Whether any does is not verifiable statically.
+
+#### `app/encrypted-notes.tsx` — **7.0 → 8.0** (mean 8.0)
+- **Scores now:** Function 8.5 · States 8.5 · UI 7.5 · A11y 8 · Security 8.5 · Code 7
+- **Original items:**
+  1. ✅ **Split.** The screen is 725 lines (`app/encrypted-notes.tsx`). The rest moved to `components/notes/`: `notesModel.ts` (87), `notesStyles.ts` (139), `useNoteEditor.ts` (53), `NoteEditorModal.tsx` (227), `NotesBackupModal.tsx` (262) and `NotesModals.tsx` (187). eslint now reports 0 warnings for the screen; the load effect goes through a ref (`:254-258`).
+  2. ✅ **Re-lock only on background.** It ignores `inactive` (`:135-136`), and iOS gets `holdAppSwitcherBlur()` while open (`:161`, 📱).
+  3. ✅ **Gate PIN length.** The gate PinPad takes `length={PIN_MAX} minLength={PIN_MIN} onSubmit onComplete` (`components/notes/NotesModals.tsx:44-52`). The lock challenge has `length` and `minLength` (`:158-165`).
+  4. ✅ **Rejections and orphans.**
+     - The re-arm in `restoreNote` has a catch (`:461`).
+     - `openAttachmentFile` is wrapped (`:392-402`).
+     - A failed draft seal deletes the draft's new attachments (`:132`, `:141-142`, `:333-337`).
+  5. ◐ **Palette hex.** Exempted with a reason, not tokenised. It moved to `components/notes/notesModel.ts:8-27` (stored `tagColor` data and identity hues), and the `.tsx` now has 0 hex. The ratchet counts `.tsx` only, so the 15 values in the `.ts` file are outside it.
+  6. ✅ **Glyphs.** Status glyphs became Ionicons. The card's glyph row is hidden (`:614-625`), and category emoji are hidden (`:591`; `NoteEditorModal.tsx:83`).
+  7. ✅ **Chip targets.** `hitSlop` was added (`:584`, `:589`; `NoteEditorModal.tsx:81`, `:168`).
+  8. ◐ **iOS reminder.** It uses the shared `useDatePicker('datetime')` (`NoteEditorModal.tsx:47-53`), but `picker.element` is rendered inside the editor's Modal (`:222-223`). The hook's own comment warns against exactly that (`components/ui/useDatePicker.tsx:66-68`). Needs a device check (📱).
+- **Regressions:** the iOS sheet nested in a Modal (item 8; 📱). Nothing else: the split matches the round-3 file apart from the logged fixes.
+- **Subscreens:**
+  - PIN gate — 7.5 → 8.5. 4–8 digits.
+  - Notes list — 7.5 → 8.
+  - Note editor — 8 → 8.5. iOS reminder 📱, hitSlop.
+  - Markdown preview — 8 → 8.
+  - Password generator — 8 → 8.5.
+  - Image viewer — 7 → 7.
+  - Secure Trash — 8 → 8.
+  - Locked-note challenge — 8 → 8.5.
+  - Backup & restore — 8.5 → 8.5. Its passphrase state now unmounts with the re-lock.
+- **Still needed for 10/10:**
+  1. Draw the iOS picker inline in the editor, as group-calendar does, or check the nested Modal on a device (`NoteEditorModal.tsx:222-223`).
+  2. Make `submitPin` and `submitLockPin` single-flight (`:168-178`, `:316-329`). A ✓ double-tap sends two server PIN checks, which counts twice against the server attempt limit once R4BE C1 deploys.
+  3. Clear the editor fields on re-lock (`useNoteEditor().load(emptyFields(...))` in the handler at `:134-158`). Today the draft's plaintext title and content stay in React state behind the gate. This is pre-existing.
+  4. If `openDraft` fails, the draft's attachments are orphaned: the key is removed before the open (`:271-275`).
+  5. The screen is still 725 lines with about 30 handlers. Move the attachment and save handlers into a hook.
+  6. Decide on the palette: tokens, or a ratchet that also counts `.ts` modules (`notesModel.ts:13-27`).
+
+#### `app/d2de-status.tsx` — **8.0 → 8.0** (mean 8.0)
+- **Scores now:** Function 6.5 · States 8 · UI 8 · A11y 8.5 · Security 8.5 · Code 8.5
+- **Original items:**
+  1. ✅ **Service labels.** They are worded as build intent (`services/d2deService.ts:55-59`, landed in 4910069).
+  2. ✅ **Path copy.** It is derived from `E2EE_ENABLED`, the same flag as contact-info (`app/d2de-status.tsx:13`, `:83-88`).
+  3. ❌ **Function cap.** Function stays capped by design: this is a readout of compile-time flags.
+- **Regressions:** none found.
+- **Still needed for 10/10:**
+  1. Link to `verify-contact` from a chosen conversation (D6), or show the live per-chat session state. Today it is static (`:1-4`).
+
+---
+
+#### Regressions introduced in round 4 (this batch)
+1. **Vault "New key": the archived key cannot be read back.** After it runs, setting the Device PIN back to the old one no longer reopens the old files, though it did before. The copy says the old key is "kept" (`lib/vaultKeyStore.ts:14-15`, `:79-91`; `app/vault.tsx:326`; `app/backup-pin.tsx:100`). Medium.
+2. **Stale comment.** `lib/vaultKeyStore.ts:9-10` still says new files fall back to v1. Trivial.
+3. **Encrypted Notes iOS reminder sheet** is a Modal inside the editor Modal, against `components/ui/useDatePicker.tsx:66-68` (📱). Low to medium.
+4. **VaultBeam:** a queued write also delays the in-memory apply (`app/vaultbeam-settings.tsx:31`; `lib/vaultBeamSettings.ts:103-111`). Negligible.
+
+No regressions from the encrypted-notes split or from the `onPrimary` token. It is the same `#FFFFFF`, and no file in the batch uses `onDanger` or `warning`.
+
+---
+
+## Appendix E — Round 5 re-rating (174 screens)
+
+The 13 round-5 batch reports, as the re-raters wrote them; only the heading levels are shifted. They score the code at `2a05e46` (reviewing `4910069` → `2a05e46`). Fixes made after that (§3, `bf68b93` and round 6) are not reflected here.
+
+### A — Launch, auth & lock — round-5 re-rating
+
+Independent, static, read-only review of `4910069` → `HEAD` (`2a05e46`), with the same rubric (`RUBRIC.md`) and format (`RERATE.md`/`RERATE5.md`).
+
+**Baselines.** "Old" is each screen's round-4 "→ new" score in `rerate4/A.md`. The open items are that file's "Still needed for 10/10" lists and its three round-4 regressions.
+
+**What I read.**
+- The full round-5 diff for every batch file: 16 screens changed, and `app/delete-account.tsx` is unchanged.
+- The changed helpers, each in full or around the change: `lib/pendingLink.ts` (new `:203-246`), `lib/authNav.ts`, `lib/launchGate.ts`, `lib/postSignIn.ts`, `lib/otpFirstRoute.ts`, `components/UpdateGate.tsx`, `constants/theme.ts`, the new i18n keys, and the new `lib/gateReentry.selftest.ts`.
+- The server's possession gate, which is written but not deployed (`vaultchat-backend-go/internal/routes/auth.go:1976-2020,2082,2153,2195`).
+
+**No screen in this batch was split in round 5.** `git diff --stat` shows no change under `components/root/`. The new tokens changed no value used here: `onPrimary`/`onDanger` are still `#FFFFFF` (`constants/theme.ts:235-236,279-280`), and only `tickRead` moved, which is not used in this batch.
+
+**Fixer claims checked: R5A #1–#12, plus R5HO #2, #3, #4 and #11.** All are present as described, with one minor gap:
+- R5A #10 says `otp_required` is mapped "on any step" (comment at `app/mpin-recover.tsx:43-44`). The code maps it only on the question load and the answer check (`:73-74,94`). The reset step is not mapped (`:111-115`).
+- This does not matter, because the server's `/auth/mpin/recover` is not behind `authPossessionGate`. The three gated calls are at `auth.go:2082,2153,2195`.
+
+**Checks I ran myself.** Nothing was device-tested. Backend C15 is still not deployed.
+- `npx tsc --noEmit -p .`: exit 0.
+- `npx eslint` on the 17 screens plus `components/root`, `UpdateGate`, `pendingLink`, `authNav`, `otpFirstRoute`, `postSignIn`, `launchGate` and `theme`: exit 0, with **0 warnings**. The round-4 deps warning on the root's gate effect is gone.
+- These `npx tsx` selftests exited 0:
+  - gateReentry (new), otpFirstRoute, pendingLink, onboardNav, securityVerdict, launchVeil, startupColdPath, i18n
+  - a11yCoverage, themeCoverage (22/20), screenBackCoverage, orphanRoutes (51), uiDebtRatchet ("no file got worse", 283 hex)
+  - resumeLockPolicy, responsiveLayout (28), keyboardAvoidance, termsPolicy, termsNegotiation, weakPin, confirmIdentity, permissionDeadEnd, silentFailure
+  - auroraGlass (161), backupMetaNegotiation, onboardDate, call/duplicateCall, pinFormat
+
+**Rounding.** Each overall score is the mean of the six dimensions, rounded to the nearest 0.5. Ties round up, as in rounds 2–4.
+
+| Screen | Old | New | Δ |
+|---|---|---|---|
+| `app/_layout.tsx` (root shell) | 8.0 | 8.0 | 0 (mean 7.83 → 8.0) |
+| `app/index.tsx` | 8.5 | 8.5 | 0 (mean 8.33 → 8.5) |
+| `app/(tabs)/_layout.tsx` | 8.0 | 8.0 | 0 (mean 8.08 → 8.08) |
+| `app/onboard.tsx` | 8.0 | 8.0 | 0 (mean 7.83 → 7.92) |
+| `app/phone-verify.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/onboard-profile.tsx` | 8.0 | 8.0 | 0 (mean 8.0 → 8.08) |
+| `app/onboard-security.tsx` | 8.0 | 8.0 | 0 (mean 8.08 → 8.17) |
+| `app/onboard-mpin.tsx` | 8.5 | 8.5 | 0 (mean 8.33 → 8.42) |
+| `app/onboard-success.tsx` | 8.5 | 8.5 | 0 (mean 8.25 → 8.33) |
+| `app/mpin-entry.tsx` | 8.0 | 8.5 | +0.5 (tie, 8.25) |
+| `app/mpin-recover.tsx` | 8.0 | 8.0 | 0 (mean 8.08 → 8.17) |
+| `app/app-lock.tsx` | 8.0 | 8.5 | +0.5 (tie, 8.25) |
+| `app/restore-backup.tsx` | 8.0 | 8.5 | +0.5 (tie, 8.25) |
+| `app/delete-account.tsx` | 8.5 | 8.5 | 0 (file unchanged) |
+| `app/blocked.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/permissions.tsx` | 8.0 | 8.5 | +0.5 (tie, 8.25) |
+| `app/backup-pin.tsx` | 8.0 | 8.0 | 0 (mean 8.0 → 8.08) |
+
+**The three round-4 regressions are closed:**
+1. **The blocked "Check again" dead-end is closed.**
+   - The root records where its gate sent the launch, on all four branches: `noteAuthEdge` (`app/_layout.tsx:291,297,302,313`).
+   - `resetTo` records every later crossing (`lib/authNav.ts:31`), and `lib/postSignIn.ts:29` clears it after sign-in.
+   - With nothing underneath, `/blocked` now leaves to that recorded route (`app/blocked.tsx:161-164`).
+   - A later visit to `/` routes itself through `splashNext` (`app/index.tsx:34,61-63`, `lib/pendingLink.ts:243-246`).
+   - Nothing is bypassed: the recorded route is a lock or sign-in route, or `null` once the user is inside the app.
+2. **The token docs now match the values.** The doc says both schemes are white, dark is below AA, and the owner's decision is open (`constants/theme.ts:80-87`). The AuroraDark note agrees (`:229-234`). No values changed.
+3. **phone-verify "conflict" now clears the code and hides Resend.** A `conflict` state clears the code and the ticket and hides the card and "Didn't get it?". It offers "Use a different number" → `back()` instead (`app/phone-verify.tsx:95-101,187,217-232`).
+
+**New in round 5:**
+1. **Root remount in the same JS process (low; not verifiable statically).**
+   - `coldVisit` is derived from a process-level flag (`app/index.tsx:34`, `lib/pendingLink.ts:218-228`). The root gate effect runs per mount (`app/_layout.tsx:259-319`).
+   - If the React tree remounts while the JS context survives (Android activity re-creation), index's first render sees `gateDecided === true`. It then routes by the *previous* edge while the root gate is re-deciding.
+   - Example: the first launch was refused, the user later unlocked, and the remount's gate now says lock. Index replaces to Chats in parallel with the root's `replace('/app-lock')`. Before round 5 it waited.
+   - The veil stays up unless `launchGate === pathname` (`app/_layout.tsx:338-344`). So the worst case is a wedged veil, not a bypass. In the opposite case (refused first, allowed now), the new code is better than the old silent splash.
+   - Whether the root remounts this way is a device question 📱.
+2. **The new tokens add no visual change in this batch.** That is consistent with round 4.
+
+---
+
+#### `app/_layout.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8 · States 8.5 · UI 8.5 · A11y 7.5 · Security 8.5 · Code 7 (mean 8.0)
+- **Original items:**
+  1. ✅ **Deps warning gone.**
+     - The launch href is read through `launchHrefRef` and captured at the top of the run-once effect (`app/_layout.tsx:247-248,261`). That is the same value as before.
+     - eslint shows 0 warnings, and the pendingLink pins pass.
+  2. ✅ **UpdateGate build line localised.** It uses `t('update.build', …)` (`components/UpdateGate.tsx:103`), with keys in en, hi and te (`lib/i18n/index.ts:59,114,163`).
+     - ❌ `expo.ios.appStoreUrl` is still unset in `app.json` (ops). The reader is ready (`components/UpdateGate.tsx:39`).
+  3. ✅ The gate now records the auth edge on every branch (`:291,297,302,313`). That is what lets blocked and index leave correctly.
+  4. ❌ The boot effect is still about 300 lines inline (`:352-659`). R5A P1 says other selftests pin its text in this file.
+  5. ❌ `useGlobalSearchParams()` still re-renders the root (`:243`). The fixer explains why (P2). The stale-closure risk is fixed.
+  6. ❌ Resume ordering (`app/app-lock.tsx:49-57`) 📱.
+- **Regressions:** none in the file. See "Root remount" above, which concerns the edge flag this file sets.
+- **Subscreens:**
+  - Launch veil — 8 → 8
+  - ResumeLock — 8.5 → 8.5
+  - UpdateGate — 8.5 → 9
+  - TermsGate — 9 → 9
+  - ErrorBoundary — 8 → 8
+  - UsageCounter — 8.5 → 8.5
+  - CallBar — 7.5 → 7.5
+- **Still needed for 10/10:**
+  1. Move the boot effect (`app/_layout.tsx:352-659`) into `components/root/`, and update the selftests that pin its text in the same change.
+  2. Make sure the edge and "decided" state survive a root remount: reset or re-derive them per mount (`lib/pendingLink.ts:218-228`, `app/index.tsx:34`). Device-check it 📱.
+  3. Set `expo.ios.appStoreUrl` (ops).
+  4. Device-check the resume ordering 📱.
+
+#### `app/index.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 9 · States 9 · UI 8 · A11y 8 · Security 8 · Code 9 (mean 8.5)
+- **Original items:**
+  1. ✅ A visit while `launchAllowed` is `false` no longer returns silently.
+     - `splashNext` returns `wait` only on the cold-start visit, otherwise the lock or sign-in route, or `route` (`app/index.tsx:61-63`, `lib/pendingLink.ts:243-246`).
+     - gateReentry covers the table: 22 checks.
+  2. ✅ **Strings and comment fixed.**
+     - The spinner, retry label and retry text use `t()` (`:134,141,143`).
+     - The misplaced style comment now sits on `retryTxt` (`:158-160`).
+  3. ❌ The held tap → replace → push sequence (`:84-87`) 📱.
+- **Regressions:** the remount case (see top; `:34`) is low and 📱.
+- **Subscreens:** Fallback splash — 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. Do not trust `launchGateDecided()` across a root remount (`:34`).
+  2. `splashNext` ignores a lock raised without an edge.
+     - ResumeLock's push and the sealed relock in `lib/api.ts:408` record no edge, so a later bare visit to `/` while one is up would route into Chats.
+     - This is not new: an allowed launch did the same before.
+     - Whether expo-router mounts `/` over the lock is not verifiable statically.
+  3. Device-check (`:84-87`) 📱.
+
+#### `app/(tabs)/_layout.tsx` — **8.0 → 8.0** (mean 8.08)
+- **Scores now:** Function 8 · States 8 · UI 8.5 · A11y 8 · Security 8 (n/a) · Code 8
+- **Original items:**
+  1. ✅ The disc glyph uses `APPS_DISC_INK`, with a comment (`app/(tabs)/_layout.tsx:42-43`, `constants/theme.ts:131-132`).
+  2. ❌ The badge is white on dark `#EF4444` at 3.76:1, 10 pt (`:84`, `constants/theme.ts:236`). This is the owner's decision, which is not listed in fix_status §5.
+  3. ❌ Labels at 2.0 scale 📱.
+- **Regressions:** none.
+- **Subscreens:** Mini Apps center button — 7.5 → 8.
+- **Still needed for 10/10:**
+  1. Decide the dark `onDanger` and `onPrimary` ink (`constants/theme.ts:229-236`), and record it in fix_status §5.
+  2. Device-check the labels at the top font scale (`:44,87`) 📱.
+
+#### `app/onboard.tsx` — **8.0 → 8.0** (mean 7.92)
+- **Scores now:** Function 8 · States 8 · UI 8 · A11y 8.5 · Security 6.5 · Code 8.5
+- **Original items:**
+  1. ✅ The cast is dropped (`app/onboard.tsx:55`).
+  2. ❌ C15 is not deployed. `AUTH_REQUIRE_PHONE_TICKET` is off by default (`vaultchat-backend-go/internal/routes/auth.go:1976`).
+  3. ❌ Device pass 📱.
+- **Regressions:** none.
+- **Subscreens:** Country picker — 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. Deploy C15 and set the flag (backend and ops).
+  2. Device pass of the OTP-first sign-in 📱.
+
+#### `app/phone-verify.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 9 · UI 8 · A11y 8.5 · Security 7.5 · Code 8.5 (mean 8.33)
+- **Original items:**
+  1. ✅ **Conflict.**
+     - It clears the digits and the `phoneTicket` and sets `stuck=false` (`app/phone-verify.tsx:95-101`).
+     - The card and "Didn't get it?" are hidden (`:187,223-232`).
+     - "Use a different number" (button role, 44 pt hit area) goes back to `/onboard`, which pushed this screen (`:217-221,275`, `app/onboard.tsx:55`).
+     - The retry → conflict path is also covered: `go()` sets conflict before `setStuck(false)` (`:128-133`).
+  2. ✅ The three casts are dropped (`:93,94,155`).
+  3. ❌ C15 deploy, and SMS-autofill single submit 📱.
+- **Regressions:** none.
+- **Subscreens:**
+  - "Didn't get the code?" Sheet — 8 → 8.
+  - Conflict state (new) — 8.5.
+- **Still needed for 10/10:**
+  1. Deploy C15.
+  2. Device-check the autofill latch (`:105-125`) 📱.
+  3. Rewrap the header comment: line 8 is about 140 characters (`:7-8`).
+
+#### `app/onboard-profile.tsx` — **8.0 → 8.0** (mean 8.08)
+- **Scores now:** Function 8 · States 8.5 · UI 8 · A11y 8.5 · Security 7 · Code 8.5
+- **Original items:**
+  1. ✅ The cast is dropped (`app/onboard-profile.tsx:111`).
+  2. ❌ Photo-picker refusals 📱.
+- **Regressions:** none.
+- **Subscreens:**
+  - Photo source Sheet — 8.5 → 8.5.
+  - DOB picker — 8 → 8.
+- **Still needed for 10/10:**
+  1. Device-check the photo-picker refusal paths 📱.
+  2. Security 7 is tied to the not-yet-enforced ticket for `/auth/profile/init` (C15).
+
+#### `app/onboard-security.tsx` — **8.0 → 8.0** (mean 8.17)
+- **Scores now:** Function 8 · States 8.5 · UI 8 · A11y 8.5 · Security 7 · Code 9
+- **Original items:**
+  1. ✅ The cast is dropped (`app/onboard-security.tsx:48`).
+  2. ❌ **Answers still need only 2 characters** (`components/auth/SecurityQuestionRow.tsx:16`).
+     - The server rule is also 2 runes (R5A D1, `auth.go:1856`).
+     - It is still the whole recovery proof until C15 is deployed.
+- **Regressions:** none.
+- **Subscreens:** Question picker — 8 → 8.
+- **Still needed for 10/10:**
+  1. Raise the answer minimum on the server and the client together. Or deploy C15 so recovery also needs possession.
+
+#### `app/onboard-mpin.tsx` — **8.5 → 8.5** (mean 8.42)
+- **Scores now:** Function 9 · States 8.5 · UI 8 · A11y 8 · Security 8.5 · Code 8.5
+- **Original items:**
+  1. ✅ The cast is dropped (`app/onboard-mpin.tsx:103`).
+  2. ❌ Screen-reader entry into the hidden input 📱 (`components/auth/MpinInput.tsx:61-92`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Create step — 8.5 → 8.5.
+  - Confirm step — 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. TalkBack/VoiceOver pass 📱.
+
+#### `app/onboard-success.tsx` — **8.5 → 8.5** (mean 8.33)
+- **Scores now:** Function 8.5 · States 9 · UI 8.5 · A11y 8 · Security 8 · Code 8
+- **Original items:**
+  1. ✅ **`otp_required` handled.**
+     - `needsFreshOtp(e)` leads to the non-cancelable "Number check expired" Alert, which says the account exists.
+     - "Verify number" wipes the RAM store and does `resetTo('/onboard')`, which also records the edge (`app/onboard-success.tsx:98-109`, `lib/otpFirstRoute.ts:42-48`).
+     - Against today's server this branch never fires.
+  2. ❌ Large-font layout 📱.
+- **Regressions:** none.
+- **Subscreens:**
+  - "Could not continue" Alert — 8 → 8.
+  - "Number check expired" Alert (new) — 8.
+- **Still needed for 10/10:**
+  1. Device-check the large-font layout (`:119,172,184` per round 4) 📱.
+
+#### `app/mpin-entry.tsx` — **8.0 → 8.5** (tie, 8.25)
+- **Scores now:** Function 9 · States 9 · UI 8 · A11y 8 · Security 6.5 · Code 9
+- **Original items:**
+  1. ✅ **`otp_required` handled.**
+     - It sets `otpExpired`, shows the shared message, and does not shake (`app/mpin-entry.tsx:63`).
+     - The cells and "Forgot MPIN?" are hidden (`:89,110`).
+     - "Verify your number again" → `dismissTo('/onboard')`, with button role and a 44 pt target (`:101-107,135`).
+  2. ✅ **Ref latch and cast.**
+     - The `inFlight` ref latch is released in `finally` (`:37,47,52,66`).
+     - The cast is dropped (`:113`).
+  3. ❌ C15 deploy (`auth.go:2082`).
+- **Regressions:** none.
+- **Still needed for 10/10:**
+  1. Deploy C15 and set the flag. Security stays at 6.5 until the server enforces possession.
+  2. Device-check the autofill double-complete 📱.
+
+#### `app/mpin-recover.tsx` — **8.0 → 8.0** (mean 8.17)
+- **Scores now:** Function 9 · States 9 · UI 8 · A11y 8 · Security 7 · Code 8
+- **Original items:**
+  1. ✅ **Reset failure handled inline.**
+     - The failure now shows inline in the live-region error (`app/mpin-recover.tsx:111-116`).
+     - `onConfirm` has a ref latch, released on failure (`:48,101-104,112`).
+  2. ✅ **`otp_required` handled on the question load and the answer check.**
+     - It shows the load-error view with "Verify your number again" → `dismissTo('/onboard')` (`:73-74,94,145-152`).
+     - The reset step is not mapped, and does not need to be, because `/auth/mpin/recover` is not possession-gated. The comment at `:43-44` overstates this ("any step").
+  3. ❌ C15 deploy.
+- **Regressions:** none.
+  - The removed `accessibilityLabel` on the retry button is fine: the label now comes from its visible text (`:152`).
+- **Subscreens:**
+  - Answer phase — 8 → 8.
+  - New/confirm MPIN — 8.5 → 9.
+  - Load error / expired — 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. Deploy C15.
+  2. `verify` still guards on `busy` state (`:83`), so two taps in one frame can send the answers twice and spend two attempts. Use a ref latch like `onConfirm`.
+  3. Correct the "any step" comment (`:43-44`).
+
+#### `app/app-lock.tsx` — **8.0 → 8.5** (tie, 8.25)
+- **Scores now:** Function 9 · States 8.5 · UI 8 · A11y 8.5 · Security 7.5 · Code 8
+- **Original items:**
+  1. ✅ The PIN field uses `minHeight: 56`, with a comment (`app/app-lock.tsx:282-284`).
+  2. ✅ `signInAgain` is defined once (`:125-129`). The Alert's destructive choice and `forgotMpin` both call it (`:144,152`).
+  3. ❌ White on dark primary is 4.11:1 (`:277`, `constants/theme.ts:235`). This is the owner's decision, not in §5.
+  4. ❌ Resume ordering (`:49-57`) 📱. C15 is not deployed.
+- **Regressions:** none.
+- **Subscreens:**
+  - Sealed PIN — 8 → 8.5.
+  - Device-PIN — 8.5 → 8.5.
+  - Biometric — 8 → 8.
+  - MPIN — 8.5 → 8.5.
+  - Forgotten PIN Alert — 8 → 8.
+- **Still needed for 10/10:**
+  1. Decide the dark on-fill ink (`constants/theme.ts:229-236`).
+  2. Device-check the resume ordering 📱, and the 24 pt field at large font 📱.
+  3. Deploy C15.
+
+#### `app/restore-backup.tsx` — **8.0 → 8.5** (tie, 8.25)
+- **Scores now:** Function 9 · States 9.5 · UI 8 · A11y 8 · Security 7 · Code 8
+- **Original items:**
+  1. ✅ `inFlight` ref latch, released on failure and on finish. `run` deps are now `[]` (`app/restore-backup.tsx:94-97,105,130`).
+  2. ✅ The failed-lookup copy names the re-offer at next launch and the Settings path (`:165`).
+- **New (R5HO #2):**
+  - An end-to-end encrypted backup now gets a specific Alert: "Your backup is end-to-end encrypted", naming key or password. It offers Later or "Open Chat backup" → `push('/chat-backup')` (`:108-117`).
+  - Before, it said only "did not finish". The type guard is real (`lib/cloudBackup.ts:278`).
+- **Regressions:** none.
+- **Subscreens:**
+  - "Chats restored" — 8 → 8.
+  - E2EE Alert (new) — 8.
+- **Still needed for 10/10:**
+  1. `BackupMeta` has no mode (`lib/cloudBackup.ts:79-80`). The screen offers "Restore now" for an e2ee backup and explains only after the tap fails. Expose the mode in the meta, and say so up front.
+  2. After "Open Chat backup" and a successful restore there, Back returns to this screen still offering "Restore now" (`:185-198`). It should re-check or offer Continue.
+  3. The CTA ink is 4.11:1 on dark primary (`:283`). This is the token decision.
+
+#### `app/delete-account.tsx` — **8.5 → 8.5** (file unchanged)
+- **Scores now:** Function 9 · States 8.5 · UI 8 · A11y 8.5 · Security 8 · Code 8.5
+- **Original items:** ❌ Both remain:
+  - Drop the pre-check after the server MPIN check is deployed (`app/delete-account.tsx:112-126`).
+  - 3.76:1 CTA ink (`:328`).
+- **Regressions:** none. `resetTo('/onboard')` (`:138`) now also records the edge, which is correct.
+- **Subscreens:** Final "Delete account?" Alert — 7.5 → 7.5.
+- **Still needed for 10/10:**
+  1. Deploy the server check, then remove the pre-check.
+  2. The dark `onDanger` decision.
+
+#### `app/blocked.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8 · Security 9 · Code 8 (mean 8.33)
+- **Original items:**
+  1. ✅ **A clean re-scan now leaves correctly.**
+     - It goes to `authEdge() ?? '/'` when nothing is underneath (`app/blocked.tsx:161-164,174`).
+     - That is `/app-lock` or `/onboard` after a refused launch, and `/` (which then routes on) for a user who is inside the app.
+     - Pinned by gateReentry.
+  2. ✅ The Support copy now points to Check again (`:188`). The cast is replaced by `Href` (`:28,163`).
+- **Regressions:** none in the file. The remount note at the top applies only to index.
+- **Subscreens:**
+  - Contact Support Alert — 7 → 8.
+  - "Nothing is blocked" — 8.5 → 8.5.
+  - Check again — 6.5 → 8.5.
+  - Technical details — 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. The red bar is 3.76:1 white on dark danger (`:368`). This is the token decision.
+  2. The re-scan exit to the lock or sign-in route needs a device check 📱 (`:161-164`).
+
+#### `app/permissions.tsx` — **8.0 → 8.5** (tie, 8.25)
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8 · Security 8 · Code 8.5
+- **Original items:**
+  1. ✅ The cast is dropped (`app/permissions.tsx:66`).
+  2. ❌ Emoji row icons (`:28-56`) 📱.
+  3. ❌ Grant flows 📱.
+- **Regressions:** none.
+- **Subscreens:** Full-screen-intent row — 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. Replace the emoji glyphs with Ionicons so they render the same on every platform (`:28-56`).
+  2. Device-check the grant flows 📱.
+
+#### `app/backup-pin.tsx` — **8.0 → 8.0** (mean 8.08)
+- **Scores now:** Function 8.5 · States 8 · UI 7.5 · A11y 8.5 · Security 7.5 · Code 8.5
+- **Original items:**
+  1. ✅ The cast is dropped (`app/backup-pin.tsx:55`).
+  2. ❌ PinPad palette over AuthSky 📱 (`components/PinPad.tsx:33`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Current PIN — 8.5 → 8.5.
+  - Set PIN — 8 → 8.
+  - Confirm PIN — 8 → 8.
+- **Still needed for 10/10:**
+  1. Device-check the PinPad palette 📱.
+  2. `checkCurrent` guards on `busy` state (`:58`). Use a ref latch, as phone-verify and mpin-entry now do.
+
+---
+
+### B — Main tabs, contacts & links — re-rating (round 5)
+
+Static, read-only review of `4910069` → HEAD (`2a05e46`), using the same rubric (`RUBRIC.md`) and format (`RERATE.md`).
+
+**Baselines**
+- "Old" is the round-4 "→ new" score in `rerate4/B.md`.
+- Open items are that file's "Still needed for 10/10" lists, its "Regressions" (none), and its "Found for the first time" items 1 and 2 (the protected and locked preview/search leak, and verify-contact keeping "Verified" across a key change).
+
+**What I read**
+- Every screen in full at HEAD, plus its `git diff 4910069 HEAD`.
+- The files the screens now import, also with their diffs:
+  - `components/chats/{ChatListRow.tsx, chatListStyles.ts, chatPreview.ts (new)}`
+  - `lib/lockedChats.ts` (new)
+  - `lib/localDb.ts:823-964`
+  - `lib/chatService.ts:1113-1140` (`hydrateOwnPreviews`)
+  - `lib/chatLock.ts:1-100`
+  - `lib/verification.ts`, `lib/keyChange.ts`, `lib/viewerPrefs.ts`
+  - `constants/theme.ts` (diff, token values)
+  - `components/ui/Text.tsx:81-94`
+  - `app/split.tsx:1-80`, `app/hidden-chats.tsx:1-14`
+- Fix claims I checked against the code:
+  - all of `fixes/R5B.md` (31 fixed rows, plus the partial, not-reproduced and not-done tables);
+  - the rows of `fixes/R5HO.md` (handoffs 7 and 8, not-done 2) and `fixes/R5A.md` (theme comment) that touch this batch.
+  - Every R5B "fixed" row matches the code. Where a row is only partly true, it is noted below.
+
+**Evidence I ran.** Outputs are in `rerate5/B_*.txt`. Nothing was device-tested or deployed.
+- `npx tsc --noEmit -p .` exited 0, with no output.
+- `npx eslint` on the 16 screens, `components/chats`, `components/status` and `lib/{localDb,verification,keyChange,lockedChats,viewerPrefs}.ts` exited 0, with 0 errors. It gave 3 warnings, all older `Array<T>` lines in `localDb.ts` (1094, 1218, 1455).
+- The new selftests all exited 0:
+  - `lib/localDb.protectedSearch.selftest.ts`. It runs the real `localDb.ts` on `node:sqlite` and covers the FTS and page-scan paths, view-once, Ink, unreadable meta, the locked skip and the preview.
+  - `lib/chatPreviewPrivacy.selftest.ts`
+  - `lib/verifiedNumber.selftest.ts`
+  - `lib/viewerPrefs.selftest.ts`
+- These existing selftests all exited 0:
+  - a11yCoverage
+  - themeCoverage (22 passed, 20 exemptions)
+  - screenBackCoverage
+  - orphanRoutes (51)
+  - silentFailure, temporaryChat, chatListResync, chatCode, chatUnreadCursor, callHistory, searchSnippet, vaultIdLink, status/gateWiring
+  - uiDebtRatchet ("no file got worse; 5 unroled / 283 hex")
+  - permissionDeadEnd, responsiveCoverage, responsiveLayout, keyboardAvoidance, rowOverflow, pendingLink, onboardNav, safetyQr
+  - lastMessageQuery, localDb.staleData, contactVerificationsNegotiation, twoUserConversation, backupSecrets, bookmarkProtected, userProfileNegotiation
+- `npm test` passed 460 of 464. The 4 failures are the known, pre-existing ones (call/minimize, layoutMetrics, securityEmulatorFlag, moneySeam), and none of them is in this batch.
+
+**Rounding.** Overall is the mean of the six dimensions, rounded to the nearest 0.5.
+
+| Screen | Old | New | Δ |
+|---|---|---|---|
+| `app/(tabs)/chats.tsx` | 8 | 8.5 | +0.5 |
+| `app/(tabs)/status.tsx` | 8.5 | 8.5 | 0 |
+| `app/(tabs)/calls.tsx` | 9 | 9 | 0 |
+| `app/(tabs)/mini.tsx` | 9 | 9 | 0 |
+| `app/(tabs)/profile.tsx` | 8.5 | 8.5 | 0 |
+| `app/(tabs)/alerts.tsx` | 9 | 9 | 0 |
+| `app/new-chat.tsx` | 8.5 | 8.5 | 0 |
+| `app/search.tsx` | 8.5 | 8.5 | 0 |
+| `app/contacts.tsx` | 8.5 | 8.5 | 0 |
+| `app/contact-info.tsx` | 8.5 | 9 | +0.5 |
+| `app/qr-contact.tsx` | 8 | 8.5 | +0.5 |
+| `app/verify-contact.tsx` | 8.5 | 9 | +0.5 |
+| `app/add/[...segments].tsx` | 8.5 | 8.5 | 0 |
+| `app/join/[code].tsx` | 8.5 | 8.5 | 0 |
+| `app/i/[token].tsx` | 7.5 | 8 | +0.5 |
+| `app/invite-link.tsx` | 8.5 | 8.5 | 0 |
+
+#### Privacy fixes, verified end to end
+
+**1. Protected (view-once / Invisible Ink) text is kept out of the preview and global search: ✅**
+- `getLastMessagePerChat` now selects `m.meta`. It runs `searchHidden`, which treats unreadable meta as protected, and decrypts nothing for hidden rows. It marks them `protected: true` (`lib/localDb.ts:843, 851-858`; rule at `:960-964`).
+- `searchAllMessages` selects `meta` and skips protected rows on both paths: FTS (`:889, 899`) and page scan (`:927, 934`).
+- The own-message refill cannot bring the text back:
+  - `hydrateOwnPreviews` still rewrites `content` for your own rows, but it spreads `...row`, so the flag survives (`lib/chatService.ts:1126-1138`, now generic per R5HO #7).
+  - `chatRowPreview` reads `protected` before it reads `content` (`components/chats/chatPreview.ts:40, 59`).
+- Text rows show "🔒 Protected message". Media keep their type label (`chatPreview.ts:59-68`).
+
+**2. Locked chats are kept out of the Chats preview and drafts: ✅**
+- `readPreviews()` reads the previews and `lockedChatIds()` together (`app/(tabs)/chats.tsx:51-57`). Both the mount path and the refresh path set them together (`:181, 234-238`).
+- While `lockedIds` is still `undefined`:
+  - `lastMsgs` is still the empty initial Map;
+  - drafts are withheld (`:762`).
+- So no text is painted before the lock is known.
+- An unreadable lock table gives `null`, and `null` locks every row (`lib/lockedChats.ts:23-30`). This is the same fail-closed rule as `lib/chatLock.ts:31-55`.
+- The lock state is re-read on every refresh path that also re-reads previews: focus (`chats.tsx:278` → `fetchList`), pull, socket, and AppState (`:416, 214-218, 407-410`). So a chat locked from a pushed screen is masked when you come back.
+- A locked row shows "🔒 Locked chat" and no draft (`chatPreview.ts:29`). The screen-reader label uses the same `preview` (`ChatListRow.tsx:87`).
+- Split view embeds the real `app/chat.tsx`, which keeps its own lock gate (`app/split.tsx:6-9, 28`).
+
+**3. Global search skips locked chats: ✅**
+- Locks are re-read for every debounced query (`app/search.tsx:89`) and passed as `skipChats`. Those rows are skipped before decrypting (`lib/localDb.ts:899, 934`).
+- An unreadable table searches no messages and says so (`search.tsx:91-92, 150-155`).
+- The empty state is honest: "Messages in locked chats aren't searched" (`:169`).
+
+**4. contact-info hides a locked chat's shared media, files and links: ✅**
+- The lock is read with `isChatLocked(chatId).catch(() => true)` (`app/contact-info.tsx:135-142`).
+- The sections render only when the chat is known to be unlocked (`:375, 393, 412`), and a locked chat gets an explanation (`:367-372`).
+- The "Search" action still opens `in-chat-search`, which has its own lock gate (`app/in-chat-search.tsx:74`).
+
+**5. verify-contact binds "Verified" to the safety number: ✅ on one device; ◐ across devices (needs the backend)**
+- A SHA-256 fingerprint is stored under `vc_peer_ik_verified_*` (`lib/verification.ts:57-59`, `lib/keyChange.ts:31, 96-106`). The `vc_peer_ik_` prefix keeps it out of backups (`lib/backupSecretKeys.ts:28`).
+- `verificationStatus` (`verification.ts:75-81`):
+  - an unrecorded verification counts only while no key change is pending;
+  - `acknowledgeKeyChange` marks an unrecorded verification stale (`keyChange.ts:90-92`).
+- On screen (`app/verify-contact.tsx:92-98, 237-245`):
+  - the warning reads "Not verified — the security code changed since you verified X";
+  - the switch reads as unchecked.
+
+**What is still open in this area (details under each screen)**
+- Hidden (PIN-gated) chats are still searched. See search below. This is the only real gap left.
+- Locked rows still show your sent/read tick and "typing…" (metadata only).
+
+#### Round-5 regressions
+
+None found. Checked:
+- **`errText` swaps.** All 16 copies use `(e instanceof Error && e.message) || fallback`. `api()` throws real `Error` instances with `.status` (`lib/api.ts:612-618`), so the messages and the 404/410 branches behave as before. An empty message now falls back to the default wording instead of printing blank, which is a small improvement.
+- **The preview move into `chatPreview.ts`.** Every branch of the old IIFE is kept: famEvent, notes/tasks, the envelope lock and the type labels. The only additions are the two privacy checks.
+- **New tokens.** No `onPrimary`/`onDanger`/`warning` values changed (`constants/theme.ts:237, 281`; only comments and `tickRead` changed).
+  - The unread badge, the Pin swipe fill and alerts' Scan button moved to `accentDeep`. In light that is the same hex as `primary` (`:245, 276`). In dark it is a deliberately darker blue (`#1552E0`), which gives white 11–13 px text 6.33:1.
+  - The scrim swaps change opacity: 0.5/0.4 become 0.45 (light) and 0.6 (dark) (`:238, 282`). This is visual only and needs a device check (📱).
+- **contacts call mode.** The row body is no longer a touchable. That is intended: the 44-dp Voice and Video buttons replace the Alert (`app/contacts.tsx:300-317`).
+
+**Cross-cutting nit, not a regression.** The same one-line `errText` helper now exists in 16 files (`grep -l "const errText = (e: unknown"`), and there is no shared one in `lib/`.
+
+---
+
+#### `app/(tabs)/chats.tsx` — **8 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8.5 · A11y 9 · Security 9 · Code 8 (mean 8.58)
+- **Original items:**
+  1. ✅ Protected and locked previews are masked. See privacy sections 1 and 2 above:
+     - `chats.tsx:51-57, 113, 181, 234-238, 762-763`
+     - `chatPreview.ts:29, 40, 59`
+     - `lib/localDb.ts:843-858`
+  2. ◐ The last cast stays at 253, still pinned by `lib/chatUnreadCursor.selftest.ts:221` (comment 251-252). Every other loose type is gone:
+     - `catch (e: unknown)` with `errText` (49, 205, 394, 469-493);
+     - typed timers (119, 217);
+     - `Promise<unknown>` (524).
+  3. ✅ The sheet scrim uses `c.scrim` (`chatListStyles.ts:101`). "Split / Pick 2" now uses `splitLbl`, which scales by `textScale` (`chatListStyles.ts:122`, `chats.tsx:641`). The avatar-popup scrim stays `rgba(0,0,0,0.85)` on purpose, as a dark backdrop for the photo (`chatListStyles.ts:29-31`). Accepted.
+  4. ◐ The unread badge and the Pin fill moved to `accentDeep`, which gives 6.33:1 (`chatListStyles.ts:109-111`, `ChatListRow.tsx:60`). The Delete label is still white on dark `#EF4444` at 3.76:1 (`ChatListRow.tsx:76`, comment `chatListStyles.ts:116-118`). That waits on the open on-fill decision.
+- **Regressions:** none.
+- **Subscreens:**
+  - Temporary-chat sheet — 8.5 → 9. It uses the scrim token, has a sibling scrim and `accessibilityViewIsModal`.
+  - Avatar photo popup — 8.5 → 8.5. The dark scrim is documented.
+  - Selection / bulk mode — 8.5 → 9. The Split label scales now.
+  - Folder chips — 8.5 → 8.5.
+  - Swipe actions — 8 → 8.5. Pin is AA now. Delete ink needs the open decision, and contrast on a device is 📱.
+- **Still needed for 10/10:**
+  1. Locked rows still leak small metadata:
+     - the sent/delivered/read tick for your own last message (`ChatListRow.tsx:166-172`; it is gated only on `!draftText`);
+     - live "typing…" (`:162-163`).
+     - Hide both when `locked`.
+  2. When the lock table cannot be read, every row reads "🔒 Locked chat" and nothing says why (`chats.tsx:763`, `lockedChats.ts:23-25`). Show one notice, the same way search does (`search.tsx:150-155`).
+  3. After profile's failed sign-out, the seven `s.on` listeners stay on the dropped socket until a remount (`chats.tsx:381-387`). R5HO not-done #2 suggests `addPersistentListener`. Needs a device check (📱).
+  4. Drop the cast at 253 together with its selftest pin. Settle the dark Delete ink (`ChatListRow.tsx:76`).
+
+#### `app/(tabs)/status.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8 · States 9.5 · UI 8.5 · A11y 8.5 · Security 8.5 · Code 8.5 (mean 8.58)
+- **Original items:**
+  1. ❌📱 Video stills on a device, and the extractor on long clips (`lib/status/puzzleFrame.ts:94`). These are **not verifiable statically**.
+  2. ✅ `errText` (81, 145, 199, 360-361). Both `finally`s are guarded by `alive` (200, 364).
+  3. n/a — not reproduced, and I confirmed it. `AppText` multiplies any caller `fontSize` by `metrics.textScale` (`components/ui/Text.tsx:81-83`), so the static sizes do scale. Scaling them in `makeStyles` too would scale twice. My round-4 item was wrong. UI goes 8 → 8.5.
+- **Regressions:** none.
+- **Subscreens:** text composer 8.5, media preview 8.5 (📱), GatePicker 8.5, emoji panel 8, StoryRing 8 — all unchanged.
+- **Still needed for 10/10:**
+  1. Confirm on a device that video posters render and that the extractor finishes (📱).
+
+#### `app/(tabs)/calls.tsx` — **9 → 9**
+- **Scores now:** Function 9 · States 9.5 · UI 9 · A11y 9.5 · Security 8 · Code 9.5 (mean 9.08)
+- **Original items:**
+  1. ✅ All three parts are done:
+     - scrim → `c.scrim` (403);
+     - a hoisted `CallSeparator` (81-84, 315);
+     - "RECENT" has `accessibilityRole="header"` (314).
+  2. ❌📱 Real call placement and ringing are **not verifiable statically**.
+- **Regressions:** none. The info-sheet scrim in light is 0.45 instead of 0.5. The comment at 402 still says "dark in both themes", and it is still dark-ish. Visual only (📱).
+- **Subscreens:** actions sheet 8.5, info modal 9 → 9, Remove/Clear confirmations 9.
+- **Still needed for 10/10:**
+  1. Device verification of placement and ringing (📱). Nothing else is left statically.
+
+#### `app/(tabs)/mini.tsx` — **9 → 9**
+- **Scores now:** Function 9 · States 8.5 · UI 9.5 · A11y 9.5 · Security 8.5 · Code 9 (mean 9.0)
+- **Original items:**
+  1. ✅ The Notes glyph uses `darkGlyph` and `AuroraLight.text` on its amber (53, 135; comment 37-38). I recomputed the darkest remaining white-glyph tile (Shelf `#D97706`): 3.19:1, which is ≥3:1 for graphics. R5B's claim is correct.
+  2. n/a The to-do purge is an open §5 product decision, and the comment says so honestly (62-69). Not a deduction.
+- **Regressions:** none.
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. Act on the §5 to-do purge decision once it is made (62-69).
+  2. The tile glyph colours are inline literals (`'#FFFFFF'`, 135). An `APPS_DISC_INK`-style constant would match `constants/theme.ts:131-132`. Trivial.
+
+#### `app/(tabs)/profile.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 9 · States 9 · UI 8.5 · A11y 8.5 · Security 8.5 · Code 8.5 (mean 8.67)
+- **Original items:**
+  1. ❌📱 Re-attach after a failed sign-out is not done (`disconnectSocket` 271; re-`getSocket` 276). R5HO not-done #2 moved it to Chats.
+  2. ✅ An `alive` ref (85-86) guards the cache paint, the fetch result, the error and `setLoading` (98, 112, 120, 122). The cache write still happens.
+  3. ✅ `errText` replaces all seven `any` catches. The inline styles are now `flex1`/`scrollPad`/`backBtn`/`btnRow`/`chevron`/`valueRow` (601-606). `avatarBusy` uses `c.scrim` (615).
+- **Regressions:** none.
+- **Subscreens:** inline edit rows 9, phone OTP 9, sign-out confirmation 8.5, load-error card 8.5 — unchanged.
+- **Still needed for 10/10:**
+  1. After a failed `logoutUser()`, give listeners on the dropped socket a way to re-attach (271-276, together with Chats item 3; 📱).
+  2. `onSave`, the photo and the OTP handlers still set state in `finally` without the `alive` guard (146, 238, 253). Minor.
+
+#### `app/(tabs)/alerts.tsx` — **9 → 9**
+- **Scores now:** Function 9 · States 9.5 · UI 9 · A11y 9.5 · Security 8.5 · Code 8.5 (mean 9.0)
+- **Original items:**
+  1. ◐ The failed-refresh banner now has `disabled={refreshing}` and a disabled/busy `accessibilityState` (264-266). The severity `{ color }` stays inline (200), because it comes from per-row data. Accepted.
+  2. ✅ `scanBtn` is on `accentDeep`: the 13-px white label is 6.33:1 (318-320).
+  3. ❌📱 The real scan result is **not verifiable statically**.
+- **Regressions:** none.
+- **Subscreens:** expanded details 9, scan confirmation 8 — unchanged.
+- **Still needed for 10/10:**
+  1. Confirm the device scan on hardware (📱).
+  2. `syncAuditChain` is only verified through its return value. Nothing else is open statically.
+
+#### `app/new-chat.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8 · States 9 · UI 8.5 · A11y 8.5 · Security 8 · Code 9 (mean 8.5)
+- **Original items:**
+  1. ❌ Phone-number search needs a peer phone on `ChatSummary` (backend).
+  2. ✅ `errText` (24, 77, 158).
+- **Regressions:** none.
+- **Subscreens:** New contact by phone — 8.5.
+- **Still needed for 10/10:**
+  1. Phone-number search, once the summary carries a peer phone (backend and a product call).
+
+#### `app/search.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8.5 · States 9 · UI 8.5 · A11y 8.5 · Security 8.5 · Code 9 (mean 8.67)
+- **Original items:**
+  1. ✅ `searchHidden` is applied on both paths, and locked chats are skipped. See privacy sections 1 and 3 (`search.tsx:86-95, 150-155, 169`; `lib/localDb.ts:870-936`). The real-SQLite selftest covers both paths. It fails against the old `localDb`, according to R5B; I did not re-run it on the old code.
+  2. ✅ Back is now `canGoBack() ? back() : replace('/(tabs)/chats')` (127-128).
+- **Regressions:** none.
+- **Found now (older than round 5):** hidden chats are searched.
+  - Hidden ("deleted") chats are PIN-gated: `app/hidden-chats.tsx:1-8`, `lib/chatService.ts:2652-2654`, and the Delete copy "It stays reachable from Hidden chats" at `app/(tabs)/chats.tsx:486`.
+  - But their cached messages are still global-search hits. `searchAllMessages` filters only protected rows and `skipChats` (`lib/localDb.ts:899, 934`), and `cacheChats` prunes only the `chats` table, not `messages` (`:1230-1235`).
+  - Such a hit shows under the title "Chat", because the chat is missing from `listChats()` (`search.tsx:195, 203`).
+  - Tapping it opens `/chat` with no PIN (`:118-121, 199`).
+  - This is the same class of leak as the lock one, with PIN-gated content reached around the gate. Security 9 → 8.5.
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. Do not surface messages from hidden chats. Either:
+     - limit hits to chats in the visible list, using the `chatTitle` map (`search.tsx:99-103`) when the list is authoritative; or
+     - pass hidden ids as `skipChats`.
+     - Hits from unknown chats should not open without the hidden-chats PIN (195-200).
+  2. `locksUnreadable` is not reset when the query drops under 2 characters (83). A 1-character query can then show the stale "Couldn't read your chat locks" notice (150). Minor.
+  3. The lock-unreadable notice has no retry. Only the next keystroke re-reads it (150-155). Minor.
+
+#### `app/contacts.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 9 · States 8.5 · UI 8.5 · A11y 9 · Security 7.5 · Code 9 (mean 8.58)
+- **Original items:**
+  1. ❌ The keyed/OPRF lookup is backend work. The pepper is **not verifiable statically**.
+  2. ✅ The call-mode picker is now in the row:
+     - 44-dp Voice and Video buttons labelled "Voice call X" / "Video call X" (300-317, 453);
+     - disabled while any open is in flight, with a labelled spinner;
+     - `pickCall` is removed.
+     - Device check needed (📱).
+  3. ✅ `errText` (56, 182, 221, 263, 283).
+- **Regressions:** none.
+- **Subscreens:**
+  - Scanning progress — 8.5.
+  - Permission denied — 8.
+  - Call-mode Voice/Video chooser — 7 → 8.5. It is in-screen now.
+- **Still needed for 10/10:**
+  1. A keyed or OPRF contact lookup, and confirmation that the pepper is deployed (backend).
+  2. The permission-denied state is unchanged at 8; see rerate3.
+
+#### `app/contact-info.tsx` — **8.5 → 9**
+- **Scores now:** Function 9 · States 9 · UI 9 · A11y 8.5 · Security 9 · Code 9 (mean 8.92)
+- **Original items:**
+  1. ✅ The notice names every part that failed (355-364).
+  2. ✅ `errText` replaces all five `any` catches. The Privacy row uses `prefRow`/`prefBody` (329-330, 544-545).
+- **New in round 5 (verified):**
+  - The lock gate on the shared sections (135-142, 367-372, 375, 393, 412).
+  - `setShareViewing` now rejects on a failed write (`lib/viewerPrefs.ts:19-22`). The switch reverts only for the latest toggle and alerts (105-118). The viewerPrefs selftest passes.
+- **Regressions:** none.
+- **Subscreens:**
+  - Block / Unblock / Report — 8.5.
+  - Stale / groups notice — 8.5 → 9.
+  - Locked-chat note — new, 8.5.
+- **Still needed for 10/10:**
+  1. A locked chat still fetches, decrypts, classifies and writes its media, files and links into the `contact-info:` snapshot (182-220). It then shows the generic "Couldn't load shared media…" error card on failure (347-352). Skip the fetch and the error card while `chatLocked`.
+  2. Back is a bare `router.back()` (300). The screen is only ever pushed, so a fallback is consistency only.
+
+#### `app/qr-contact.tsx` — **8 → 8.5**
+- **Scores now:** Function 8 · States 9 · UI 8.5 · A11y 9 · Security 8 · Code 9 (mean 8.58)
+- **Original items:**
+  1. ❌ Verified App Links and iOS domains (hosting; fix_status §4).
+  2. ✅ The in-screen confirm card replaces the Alert:
+     - header role, a polite live region and `accessibilityViewIsModal` (192-206);
+     - "Open chat" has a busy state and is disabled while opening (196-199);
+     - Cancel means scan again (99, 203-206);
+     - it clears on a tab switch (129).
+     - Device check needed (📱).
+  3. ✅ `errText`/`errStatus` (21-22, 56, 91-92, 107).
+- **Regressions:** none.
+- **Subscreens:**
+  - My QR — 8.
+  - Scan — 8.
+  - "Contact found" confirm — 7 → 8.5.
+- **Still needed for 10/10:**
+  1. Verified links plus iOS Associated Domains (`app.json`; needs hosted `assetlinks.json` and AASA).
+  2. "Invalid" and "That's you" are still `Alert`s (83-84). Showing them in the same card would be consistent. Minor.
+
+#### `app/verify-contact.tsx` — **8.5 → 9**
+- **Scores now:** Function 9 · States 9 · UI 8.5 · A11y 8.5 · Security 9 · Code 9.5 (mean 8.92)
+- **Original items:**
+  1. ◐ Verification is now bound to the number (privacy section 5).
+     - Marking verified records the number and acknowledges the key-change banner (114-124).
+     - Clearing forgets the number (116).
+     - The cross-device fingerprint sync is backend-only (R5B partial #6). Another device binds on its next visit, and only while no key change is pending there.
+  2. ✅ `retryBtn`/`retryTxt`, `unknown` catches, and a guarded `setSaving` (100-101, 125-130, 320-321).
+- **Regressions:** none.
+- **Subscreens:**
+  - QR show/scan and the scanner modal — 8.5 (📱).
+  - "Code changed" warning — new, 9.
+- **Still needed for 10/10:**
+  1. Carry the fingerprint in `/user/contact-verifications` (R5B handoff; backend, not deployed).
+  2. A failed `getVerifiedContacts()` silently reads as "not verified" (81). Say that the status couldn't be loaded.
+  3. "Verified — tap to clear" is 15-px white on dark `primary`, at 4.11:1 (`verifyBtnOn` 315, used at 248; text 266). This waits on the on-fill decision. `setVerified(!next)` in the catch is unguarded after unmount (126).
+
+#### `app/add/[...segments].tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8 · States 9 · UI 8.5 · A11y 8.5 · Security 9 · Code 9 (mean 8.67)
+- **Original items:**
+  1. ❌ Verified links plus iOS domains (hosting).
+  2. ✅ `errText`/`errStatus` (22-23, 70-72, 91).
+- **Regressions:** none.
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. Verified App Links plus iOS Associated Domains.
+
+#### `app/join/[code].tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8.5 · States 9 · UI 8.5 · A11y 8.5 · Security 8 · Code 9 (mean 8.58)
+- **Original items:**
+  1. ❌ The preview endpoint is not deployed. The client degrades to the generic confirm, and the 410 path is kept (78-88).
+  2. ❌ Verified links plus iOS domains.
+  3. ✅ `errText`/`errStatus` (28-29, 71, 85).
+- **Regressions:** none.
+- **Subscreens:** confirm 8.5, joining 8, pending 8, error 9 — unchanged.
+- **Still needed for 10/10:**
+  1. Deploy `/chats/join/:code/preview`, then confirm on a device that the name shows.
+  2. Verified links plus iOS domains.
+
+#### `app/i/[token].tsx` — **7.5 → 8**
+- **Scores now:** Function 5 · States 8.5 · UI 8.5 · A11y 8.5 · Security 7.5 · Code 9 (mean 7.83)
+- **Original items:**
+  1. ❌ Retire the route or re-add a producer. It is undecided and not in fix_status §5, so Function stays at 5.
+  2. ❌ A token-bound preview (backend).
+  3. ✅ "Joining…" is a polite live region (106). `errText`/`errStatus` (33-34, 70-71).
+- **Regressions:** none.
+- **Subscreens:** error state — 8.5.
+- **Still needed for 10/10:**
+  1. Decide whether to retire the route or re-add a producer (header 3-7, 17-20).
+  2. A token-bound preview, so the confirm can name the group (backend).
+
+#### `app/invite-link.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8 · States 9.5 · UI 8.5 · A11y 9 · Security 8 · Code 8.5 (mean 8.58)
+- **Original items:**
+  1. ❌ Verified links for `JOIN_BASE` (hosting).
+  2. ◐ Back now falls back to Chats (148), and the catches are typed. `renderItem` is still an inline closure (192-), left on purpose (R5B partial #5).
+  3. ✅ `revokingId` allows one revoke at a time. The Revoke buttons are disabled and expose that state, and the guard is re-checked on tap (48, 110-125, 217-218).
+- **Regressions:** none.
+- **Subscreens:**
+  - QR modal — 8.5.
+  - Revoke confirmation — 8.5 → 9.
+  - Permanent-link confirmation — 8.
+- **Still needed for 10/10:**
+  1. Verified links plus iOS domains.
+  2. Hoist `renderItem` with stable handlers (192-).
+
+---
+
+### C1 — Chat conversation screen (round 5) — re-rating
+
+Base 4910069 → HEAD 2a05e46. Two round-5 commits touch C1 files:
+- `5492453`: fix(chat): distinct read tick, forward feedback, no `as any` in chat files.
+- `2a05e46`: handoffs. `constants/businessTheme.ts:56` tickRead; nothing else in chat files.
+
+The old score of 8.5 is the round-4 result in `rerate4/C1.md`. Open items are that file's "Still needed" 1-8 and regressions 1-3. I checked the fix claims in `fixes/R5C1.md`.
+
+**What I read:**
+- The full round-5 diff of:
+  - `app/chat.tsx`, which gained 52 lines.
+  - `components/chat/*`: `ChatBanners`, `ChatHeader`, `ChatLockGate`, `Composer`, `MediaBubbles`, `MediaCaptionPreview`, `MessageBubble`, `chatStyles`, `useMediaStaging` and `useMessageActions`.
+  - `components/MessageActionSheet.tsx`, `constants/theme.ts`, and the new `lib/chatBubbleTick.selftest.ts`.
+- Every file the chat imports that changed in round 5, with a script over all 86 resolved imports: `lib/chatService.ts` (generic `hydrateOwnPreviews` only), `lib/localDb.ts` (preview/search hide protected rows), `lib/screenGuard.ts` (in-flight tracking; the chat's `setSecure` calls at `app/chat.tsx:1671`, `1695` behave the same), `lib/viewerPrefs.ts` (`setShareViewing` now rejects; the chat imports only `getShareViewing`, `app/chat.tsx:66`) and `lib/groups/catalog.ts` (adds `GROUP_COLORS`).
+- Current code:
+  - `BubbleParts.tsx:315-376` (`BubbleMetaLine`) and `MessageBubble.tsx:440-560`.
+  - `lib/theme.tsx:80-96` (high-contrast overrides) and `lib/chatBubbleTheme.ts:1-55` (bubble presets).
+  - `lib/messageQueue.ts:139-153` (event bus), `195-275` (enqueue), `395-415` and `735-775` (`sent`/`failed` emits).
+  - `app/chat.tsx:1745-1782` (forward + listener), `2225-2260` (pane notice), `2290-2330` (veil wrapper and banners).
+  - `app/split.tsx:144`, `174`.
+
+**Checks I ran (read-only):**
+- `npx tsc --noEmit -p .`: **0 errors**, exit 0. The fixer had reported errors in other agents' files; they are now gone.
+- `npx eslint app/chat.tsx components/chat/ components/{MessageActionSheet,GifPicker,VaultBeamBubble}.tsx lib/{chatBubbleTick.selftest,messageQueue}.ts constants/theme.ts`: exit 0, 0 errors, 2 old warnings (`lib/messageQueue.ts:524`, `538`, `perf.*`). There are 0 in chat files.
+- `npx tsx` selftests, all exit 0:
+  - New: **chatBubbleTick**. It prints light, dark and high-contrast read ticks at 5.07:1 on `#1552E0`; delivered is 5.02 / 3.90 / 6.33.
+  - Chat and outbox: receiptEvents, outboxRecovery, chatCode, chatLockReceipts, chatTimeline, chatUnreadCursor, decryptReplayCost, messageDeletion, silentFailure, forwardPayload, forwardPolicy, messageQueue, messageQueue.flush, groupRefRouting, chatLockFactors, inChatSearchCount, editWindow, klipyAttribution, keyboardInset, chatReceipts and msgEnvelope.
+  - `components/chat/`: bubbleA11yActions, bubbleA11yLabel and protectedText.
+  - Coverage: a11yCoverage, themeCoverage (22/20), uiDebtRatchet ("no file got worse", 5 unroled, **283** hex), screenBackCoverage, orphanRoutes (51) and auroraGlass (161).
+- `grep "as any"` over `app/chat.tsx components/chat/* components/MessageActionSheet.tsx` finds only 2 hits, both prose in comments (`app/chat.tsx:2375`, `chatStyles.ts:365`). **22 → 0** casts.
+
+Nothing is deployed or device-verified. `notifSound` and `/receipts` count only for how gracefully the client behaves against today's server.
+
+#### Did round 5 change behaviour?
+These changes are behaviour-identical by construction:
+- **Removing the `as any` casts is type-only:**
+  - `app/chat.tsx:385`, `747`, `759`, `957`, `962`, `1801`, `2028`.
+  - The route literals in `ChatHeader.tsx:159`, `166`, `183`, `190`; `ChatBanners.tsx:95`; `useMessageActions.ts:83`, `112`; `MediaBubbles.tsx:108`, `112-115`.
+  - `useMediaStaging.ts:151`.
+  - The socket warn now logs `e.message`, or the raw value when `e` is not an Error (`app/chat.tsx:1286`). It is a log only.
+- **Every new token resolves to the value it replaced:**
+  - `ON_SEND_FAB = '#fff'` (`Composer.tsx:20`) replaces `"#fff"`.
+  - `ON_MEDIA_SCRIM = '#fff'` (`chatStyles.ts:112`) replaces `#fff` on the scrims (`MediaCaptionPreview.tsx:66`, `70`, `119`).
+  - `colors.onPrimary` and `colors.onDanger` are `#FFFFFF` in both palettes (`constants/theme.ts:235-236`, `279-280`), and `lib/theme.tsx:80-96` does not override them under Vision Comfort. So `MediaCaptionPreview.tsx:141`, `161` and `164` render as before.
+- **GroupRefBubble icon (`MessageBubble.tsx:76-79`): a deliberate, strictly better change.** A valid `gref.icon` is unchanged. An unknown server glyph now falls back to the type's icon and then to `'people'` instead of Ionicons' `?`.
+- **The only visible change is the read tick:** `#FFFFFF` → `#7CFFB2` on your own filled bubble (`constants/theme.ts:217`, `267`; used only at `BubbleParts.tsx:368`). This is intended; it fixes regression 1 from round 4.
+
+**No regressions found from the round-5 edits.**
+
+| Screen | Old | New | Δ |
+|---|---|---|---|
+| `app/chat.tsx` — Chat conversation (1:1, group, split pane), incl. `components/chat/*` | 8.5 | **9** | +0.5 |
+
+#### `app/chat.tsx` — **8.5 → 9**
+- **Scores now:** Function 9.5 · States 9.5 · UI 9 · A11y 9 · Security 9.5 · Code 8 (avg 9.08 → **9**)
+  - **Function (9 → 9.5):**
+    - Read and delivered are distinct again (`BubbleParts.tsx:366-368`; `constants/theme.ts:217`, `267`).
+    - A forward now confirms when it is queued (`app/chat.tsx:1757-1760`, `2326`) and reports a server rejection (`:1773-1782`).
+    - Left: two backend contracts that are not deployed (`useChatMenu.ts:95-112`, `lib/chatReceipts.ts:31-43`), with graceful fallbacks. Multi-select is a product decision.
+  - **States (9 → 9.5):**
+    - Forward outcomes now reach the source chat. The notice clears itself after 4 s (`ChatBanners.tsx:42-46`).
+    - A permanent rejection alerts; offline does not (`lib/messageQueue.ts:748-773`: `'failed'` only on `isPermanent`).
+    - `'sent'` clears the in-flight entry (`app/chat.tsx:1779`).
+    - Left: feedback only while this screen is mounted. This is a documented `ponytail:` (`app/chat.tsx:1768-1770`).
+  - **UI (8 → 9):**
+    - The read-tick regression is fixed, with 5.07:1 on the fill.
+    - The Composer whites are now one documented constant with a correct comment (`Composer.tsx:15-20`), and the caption preview uses tokens.
+    - The new notice uses neutral themed styles (`chatStyles.ts:202-204`).
+    - Left: the meta line, including the read tick, ignores a custom bubble colour. On the Emerald preset, mint is 2.03:1 and white is 2.54:1 (see Still needed 2). The scrim hexes stay fixed on purpose (`MediaCaptionPreview.tsx:36-37`, `64`, `69`, `118`).
+  - **A11y (9, unchanged):**
+    - Gains:
+      - The notice has a polite live region on Android and is announced on iOS (`ChatBanners.tsx:43`, `48`).
+      - The ✕ has a role, a label and `hitSlop` 12 (`:50`).
+      - The embedded lock veil has a real "Close this chat" button (`ChatLockGate.tsx:103-109`).
+    - Read and delivered are now told apart by hue alone. Their luminance contrast against each other is 1.25:1 per the fixer. The screen-reader label still differs (`BubbleParts.tsx:369`).
+    - Everything new is 📱 and not verified on a device.
+  - **Security (9.5, unchanged):**
+    - The rejection alert shows the server's error string and the chat name, not message content (`app/chat.tsx:1777-1778`).
+    - The lock-gate Close only unmounts the pane and reveals nothing (`app/split.tsx:144`, `174`).
+  - **Code (7.5 → 8):**
+    - `as any` went from 22 to 0 in the chat files.
+    - `SheetAction.icon` is now type-checked (`MessageActionSheet.tsx:20`).
+    - Left:
+      - `app/chat.tsx` is now 2,579 lines.
+      - The socket effect is still inline (`app/chat.tsx:986-~1295`), pinned by 4 selftests that read its source.
+      - 9 `catch (e: any)` remain.
+      - No selftest covers the new forward-feedback wiring.
+- **Original items** (`rerate4/C1.md` "Still needed" 1-8, regressions 1-3):
+  1. ✅ Read is distinct from delivered on your own filled bubble: `#7CFFB2` at 5.07:1 in light, dark and high contrast (`constants/theme.ts:217`, `267`; `BubbleParts.tsx:368`; selftest `lib/chatBubbleTick.selftest.ts:37-48`, which passes). ◐ The residual for custom bubble presets is in Still needed 2.
+  2. ✅ Forward feedback in the source chat: "Forwarding to <name>" (`app/chat.tsx:1757-1760`, `2326`; `ChatBanners.tsx:39-55`) and the "Not forwarded to <name>" alert on a permanent rejection (`app/chat.tsx:1771-1782`). The current chat is excluded from the targets (`:1606`), so there is no double report. Mounted-only, documented.
+  3. ❌ Backend deploy (`notifSound`, `/messages/:id/receipts`). Not done; outside this codebase's control. The client stays graceful.
+  4. ◐ `as any` ✅ (22 → 0; grep above). ❌ The socket effect is still inline (`app/chat.tsx:986-~1295`). It is pinned by `lib/receiptEvents.selftest.ts`, `decryptReplayCost`, `messageDeletion` and `chatUnreadCursor` (fixer's list; not re-read).
+  5. ❌ Device verification (VoiceOver/TalkBack, Hermes `\p{L}`). Still 📱, and it now also covers the notice bar, the mint tick and the lock-gate Close.
+  6. ✅ Fixed whites:
+     - `Composer.tsx` uses `ON_SEND_FAB` with an accurate comment (`:15-20`, `131`, `246`, `266-267`).
+     - `MediaCaptionPreview.tsx` uses `ON_MEDIA_SCRIM`, `onPrimary` and `onDanger` (`:66`, `70`, `119`, `141`, `161`, `164`).
+     - The old wrong comment is removed.
+  7. ✅ The embedded lock veil offers "Close this chat" through `onClosePane` (`ChatLockGate.tsx:103-109`; wired at `app/chat.tsx:2575`). The hint remains only as a fallback when no callback is passed (`:110-113`).
+  8. n/a Multi-select and full-name @mentions are product decisions (fix_status §5); the screen does not pretend otherwise.
+  - Round-4 regressions: 1 ✅ (item 1), 2 ✅ (the comment is gone, `Composer.tsx:131`), 3 ✅ (item 2).
+- **Regressions (round 5):** none found. Minor behaviour notes, not regressions:
+  - (a) Forwarding twice to the same chat within 4 s leaves `text` unchanged. The `NoticeBar` effect does not re-run (`ChatBanners.tsx:42-46`), so the second forward is not re-announced on iOS and the timer is not reset.
+  - (b) The visible label "Close this chat" and the accessibility label "Close this chat pane" differ, but the label contains the visible text (`ChatLockGate.tsx:107-108`; same as `app/chat.tsx:2248-2250`).
+- **Subscreens:**
+  - Message thread (FlatList + MessageRow) — 9 → 9.5. Distinct read tick (`BubbleParts.tsx:368`).
+  - Header (`ChatHeader`) — 9.5 → 9.5. 4 casts removed (`:159-190`).
+  - Overflow menu + Screenshot/Sound/Disappearing pickers — 9 → 9. The sound mark still waits on the backend.
+  - In-chat search bar — 9 → 9.
+  - ConnectionBanner — 9 → 9.
+  - Error bar — 8.5 → 8.5.
+  - Security-code-change banner — 9 → 9. Cast removed (`ChatBanners.tsx:95`).
+  - Inbound screenshot banner — 9 → 9.
+  - Memory Bubble — 8.5 → 8.5.
+  - Live-location banner — 9 → 9.
+  - Pinned-message bar — 9 → 9.
+  - Scroll FAB + "Load newer" pill — 9 → 9.
+  - @mention picker — 8 → 8 (first name only, product decision).
+  - Live viewers stack + "Viewing now" modal — 9 → 9.
+  - Typing indicator — 8.5 → 8.5.
+  - Edit-mode bar — 8.5 → 8.5.
+  - Vanish Mode / Invisible Ink bars — 8.5 → 8.5.
+  - Composer link-preview card — 8.5 → 8.5.
+  - Reply bar — 9 → 9.
+  - Composer + camera tap/slide — 9.5 → 9.5. Named `ON_SEND_FAB` and an accurate comment (`Composer.tsx:15-20`).
+  - Voice recording mode — 8.5 → 8.5.
+  - Long-press MessageActionSheet — 9 → 9. Typed icons.
+  - Message Info modal — 8.5 → 8.5 (backend times).
+  - Profile photo viewer — 8.5 → 8.5.
+  - Attach menu — 8 → 8.
+  - GifPicker overlay + preview — 9 → 9.
+  - Media caption preview — 8.5 → 9. Tokens on the fills, documented scrims (`MediaCaptionPreview.tsx:36-37`, `141`, `161`, `164`).
+  - Forward picker — 8.5 → 9. Queued notice and rejection alert. Mounted-only.
+  - **Forwarding notice** (new, `NoticeBar`, `ChatBanners.tsx:39-55`, rendered at `app/chat.tsx:2326`) — **9**. Themed, dismissible, live region and announcement, hidden under the veil wrapper. Same-text repeats are not re-announced; 📱.
+  - Per-chat lock gate — 9 → 9.5. Embedded "Close this chat" (`ChatLockGate.tsx:103-109`); 📱.
+  - Pane-ended notice — 9 → 9.
+  - Not-found / loading — 9.5 → 9.5.
+  - Failure / destructive Alerts — 8.5 → 9. Forward rejection is now reported (`app/chat.tsx:1777-1778`).
+  - Group-chat mode — 8.5 → 8.5.
+  - Embedded split-pane mode — 9 → 9.5. Both pane exits (the lock veil and the pane notice) now have Close.
+  - `components/chat/MessageBubble.tsx` (with `MediaBubbles`, `BubbleParts`, `bubbleText`, `ThreadDecor`, `chatFormat`) — 8.5 → 9. Read tick, 0 casts, validated group-ref glyph (`MessageBubble.tsx:76-79`).
+  - `components/MessageActionSheet.tsx` — 8 → 8.5. `icon: keyof typeof Ionicons.glyphMap` (`:20`), so a bad glyph is a compile error (`:92`).
+- **Still needed for 10/10:**
+  1. Device-verify with VoiceOver and TalkBack:
+     - The bubble actions (`MessageBubble.tsx:472-537`).
+     - The veil and GIF hide wrappers (`app/chat.tsx:2289-2292`).
+     - The sibling backdrops.
+     - The Send `activate`/`silent` actions.
+     - The new `NoticeBar` live region and announcement (`ChatBanners.tsx:43`, `48`).
+     - The lock-gate Close (`ChatLockGate.tsx:103-109`).
+     - The Hermes `\p{L}` regexes.
+     - Check visually that mint vs white reads under colour-vision deficiency, since the two ticks differ by hue only, at 1.25:1 luminance.
+  2. Make the meta line, read tick included, follow a custom bubble colour.
+     - `BubbleMetaLine` always uses `bubbleMetaOut`/`tickRead` (`BubbleParts.tsx:327-329`, `368`), even when `bubbleBg` is set (`MessageBubble.tsx:215-216`, `520`).
+     - On the Emerald preset (`lib/chatBubbleTheme.ts:16`) mint is 2.03:1, white meta is 2.21:1 and 0.70-white is 1.91:1. Sunset (`:25`) is 4.02 against 3.27.
+     - Extend `lib/chatBubbleTick.selftest.ts` to cover `BUBBLE_THEMES`.
+  3. Deploy and confirm `notifSound` on GET /chats/:id (`useChatMenu.ts:95-112`) and `/messages/:id/receipts` (`lib/chatReceipts.ts:31-43`).
+  4. Move the socket effect out of `app/chat.tsx:986-~1295`, retargeting the 4 selftests that read it. This would also bring `app/chat.tsx` (2,579 lines) down. Type the 9 `catch (e: any)`.
+  5. Add a selftest for the forward-feedback wiring: `forwardsInFlight`, the `'failed'`/`'sent'` listener and the notice (`app/chat.tsx:1757-1782`). Consider app-level outbox feedback to lift the mounted-only `ponytail:` (`:1768-1770`).
+  6. Re-announce and restart the notice timer when the same "Forwarding to X" repeats, for example by keying the bar on a counter (`ChatBanners.tsx:42-46`; `app/chat.tsx:1760`, `2326`).
+  7. Product decisions: multi-select, full-name @mentions, and the dark `onPrimary` value (`constants/theme.ts:229-235`).
+
+---
+
+### C2 — Chat tools, backup & import — round-5 re-rating
+
+This is a static, read-only review of `4910069` → `HEAD` (`2a05e46`). I did not edit the repo or run any git command that changes state. It uses the same rubric (`RUBRIC.md`) and format (`RERATE.md`, `RERATE5.md`). Each overall score is the mean of the six dimensions, rounded to the nearest 0.5, with ties rounded up (as in rounds 3 and 4).
+
+**Baselines.** "Old" is the round-4 score in `rerate4/C2.md`. Each screen's open items are that file's "Still needed", "Regressions" and new findings.
+
+**Fixer claims checked:** `fixes/R5C2.md`, plus the C2 handoffs in `fixes/R5HO.md`:
+- `useDatePicker` `minimumDate`.
+- The restore-backup E2EE prompt.
+- The `mediaToolsFixesZR` pin.
+- `waImport`, which now scans `useImportFlow`.
+
+I checked each claim against the code. Where a claim is partial or wrong, I say so per screen below.
+
+**Evidence I ran myself at HEAD:**
+- `npx tsc --noEmit -p .` exits 0.
+- `npx eslint` on the 17 screens, `app/restore-backup.tsx`, `components/chattools/`, the 5 backup and error libs and `useDatePicker` gives 0 errors and 1 warning (`lib/cloudBackup.ts:563` import/first, from before this round).
+- These `npx tsx` selftests all exit 0:
+  - Backup: backupSecretSwitch, backupCrypto, backupScheduler, backupSecrets, recoveryKeyCheck, backupMetaNegotiation, userErrorText, mediaToolsFixesZR. mediaToolsFixesZR passes now; it failed in R5C2's own run.
+  - Chat tools: chatExportFormat, waImport, bookmarkProtected, bookmarkBodies, chatCode, wallpaperFile, scopedChoice, messageReminderReset, missingRoute, chatTimeline, tintColor.
+  - Chat lock: chatLockFactors, chatLockReceipts, chatLockPin.
+  - Coverage and ratchets: a11yCoverage, themeCoverage (22/20), screenBackCoverage, orphanRoutes (51), uiDebtRatchet ("no file got worse", 5 unroled, 283 hex), keyboardAvoidance, silentFailure.
+
+**Status.** Nothing is deployed or device-verified. These are **not verifiable statically**:
+- the R4BE server routes;
+- the `dismissTo` behaviour (in-chat-search, hidden-chats);
+- the AppState timing;
+- the pickers' `minimumDate`;
+- the chunked export on a device;
+- the iOS key-screen gestures.
+
+**Split regression check:**
+- `components/chattools/LockConfigModal.tsx` against the old inline dialog in `4910069:app/app-lock-chats.tsx:67-193`: the markup, the option lists, `digitsOnly`, the bio filter (now `app/app-lock-chats.tsx:312`) and the pre-selection (`:145-146`, `:201-202`) are the same. `closeConfig` still clears only the PIN fields (`:218`), as before.
+- `components/chattools/useImportFlow.ts`: I diffed it with whitespace ignored against `4910069:app/import-chats.tsx`. The only new lines are imports, the `initial` params and the return object.
+
+The splits lost no behaviour.
+
+The new tokens (`onPrimary`, `onDanger`, `warning`) are used correctly. The round-4 nit is fixed: hidden-chats group initials are now `success` ink on `tint(success, .2)` (`app/hidden-chats.tsx:405`, `:408`).
+
+| Screen | Old | New | Δ |
+|---|---|---|---|
+| `app/backup-e2ee.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/chat-backup.tsx` | 8.0 | 8.0 | 0 |
+| `app/in-chat-search.tsx` | 8.5 | 8.5 | 0 |
+| `app/message-reminder.tsx` | 8.5 | 8.5 | 0 |
+| `app/schedule-message.tsx` | 8.5 | 8.5 | 0 |
+| `app/scheduled.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/create-poll.tsx` | 8.5 | 8.5 | 0 |
+| `app/bookmarks.tsx` | 8.5 | 8.5 | 0 |
+| `app/chat-code.tsx` | 8.5 | 8.5 | 0 |
+| `app/chat-export.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/chat-themes.tsx` | 8.5 | 8.5 | 0 |
+| `app/chat-wallpaper.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/receipt-control.tsx` | 8.0 | 8.0 | 0 |
+| `app/broadcast.tsx` | 8.0 | 8.0 | 0 |
+| `app/hidden-chats.tsx` | 8.0 | 8.0 | 0 |
+| `app/app-lock-chats.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/import-chats.tsx` | 8.0 | 8.0 | 0 |
+
+#### Regressions introduced in round 5
+
+1. **The backup lock is held across network calls with no time limit (backup-e2ee, chat-backup).**
+   - `backupLock` (`lib/cloudBackup.ts:205`) wraps:
+     - the presigned PUT, a raw `fetch` with no signal (`:533-537`);
+     - the Drive upload, raw `fetch` in `lib/googleDrive.ts:77`, `:90`, called under the lock at `lib/cloudBackup.ts:565-570`;
+     - the interactive Google sign-in, which `onBackUp` runs inside the lock (`app/chat-backup.tsx:141`).
+   - `lib/api.ts:330-338` itself documents that RN Android fetches have infinite timeouts and that a mutex held across one "never settles". That was the outbox bug.
+   - A connected-but-dead link during a scheduled run therefore queues every later backup, and also Make-a-new-key, Change password, Turn off and `confirmRecoveryKey` (`lib/cloudBackup.ts:219-226`, `:251`, `:274`), until the app is killed. The spinner never ends.
+   - Before round 5, the switch was independent of a hung scheduled upload. Device behaviour is **not verifiable statically**.
+2. **backup-e2ee: the key screen goes blank while confirming.**
+   - `submitKeyCheck` clears `recoveryKey` and `checkGroups` and then awaits `confirmRecoveryKey` (`app/backup-e2ee.tsx:81-86`), which now waits on the lock.
+   - Meanwhile `stage` is still `keyshown`, so the screen draws an empty key box with "I'VE SAVED IT" (`:310-344`). Tapping it calls `pickCheckGroups(0)` (`lib/recoveryKeyCheck.ts:16-20`), which gives a check screen with no fields.
+   - This is brief normally, and lasts minutes behind a large scheduled upload.
+3. **hidden-chats (probable, needs a device): any trip to the background now pops the open hidden chat.**
+   - `router.dismissTo('/hidden-chats')` runs on `background` or iOS `inactive` whenever the list is not focused (`app/hidden-chats.tsx:69-78`).
+   - On Android, the system photo and document pickers that chat uses (`app/chat.tsx`, `components/chat/useMediaStaging.ts`: `launchImageLibraryAsync` / `getDocumentAsync`) start another activity, which moves the app to the background. On iOS, Face ID and system alerts pass through `inactive`.
+   - So attaching a file in a hidden chat drops the user back to the PIN gate. The chat is popped, and with it the draft and the picked file.
+   - Round 4 re-locked only the list beneath the chat.
+4. **Trivial: a stale comment.** `components/chattools/useImportFlow.ts:5-8` says to "see the handoff in R5C2.md to add this file"; that is already done (`lib/waImport.selftest.ts:306`).
+
+#### New findings (they existed before round 5; found in this adversarial pass; they are not round-5 regressions)
+
+- **N1. Skipping a restore on a new phone overwrites the only server copy. Data loss for every user; for E2EE users it is also a downgrade.**
+  - On a fresh install, `getBackupSettings` returns the defaults: daily, `lastBackupAt: 0` (`lib/backupScheduler.ts:69-71`, `:95-98`). So `runScheduledBackupIfDue` is due 4 s after Chats mounts (`app/(tabs)/chats.tsx:284-290`, `lib/backupScheduler.ts:121-153`).
+  - It uploads this phone's near-empty history over the account copy. The server upserts unconditionally (`vaultchat-backend-go/internal/routes/user.go:3182-3187`, `:3224-3229`).
+  - The restore screen sends "Not now" straight to Chats (`app/restore-backup.tsx:84-89`) while saying "Skipping changes nothing — your backup stays where it is" (`:229-233`).
+  - Round 5 made this the likely path for E2EE users: restore-backup now answers a secret-required restore with "Later" / "Open Chat backup" (R5HO 2). A user without the key at hand taps Later, then Not now. Within seconds, on Wi-Fi, the E2EE copy is replaced by an account-key copy of an empty phone.
+  - The restore functions also run outside `backupLock` (`lib/cloudBackup.ts:546-556`, `:573-577`, `:626-631`). A scheduled empty upload can commit while a restore downloads.
+- **N2. Restoring an E2EE backup does not turn E2EE back on, so the next backup is account-readable.**
+  - `applyEncryptedBackup` never writes the e2ee slot (`lib/cloudBackup.ts:416-455`). After a password or key restore on a new phone, the device is in account mode. `writeSecret` falls back to the account key (`:290-294`), and the next scheduled or manual backup replaces the user's E2EE copy with one the server can read.
+  - Only the chat-backup row's "Off" (`app/chat-backup.tsx:333-336`) shows it. The restore success alert says nothing (`:204-209`).
+
+---
+
+#### `app/backup-e2ee.tsx` — **8.0 → 8.5** (adversarial review of the switch, lock, marker and key ids)
+- **Scores now:** Function 9 · States 8 · UI 8.5 · A11y 8 · Security 8 · Code 8.5 (mean 8.33)
+- **Original items:**
+  1. ✅ **`storedE2EE` fails closed.**
+     - A SecureStore error or a malformed record throws `BACKUP_SETTINGS_UNREADABLE` (`lib/cloudBackup.ts:139-174`).
+     - `writeSecret` therefore throws, so every destination refuses to write (`:290-294`), and `getBackupMode` rejects (`:208-210`).
+     - The error stage is reachable and honest, with Try again (`app/backup-e2ee.tsx:60-72`, `:250-265`).
+     - The selftest pins "no read failure returns null" (`lib/backupSecretSwitch.selftest.ts:266-267`).
+     - `decryptBlob` treats a read failure only as "ask the user" (`lib/cloudBackup.ts:319`), which is safe.
+  2. ✅ **One record.**
+     - `put` is a single `setItemAsync` of `{secret, header, unconfirmed?}` (`lib/cloudBackup.ts:176-183`).
+     - The legacy pair is read until the next write (`:167-172`).
+     - `clear` deletes the legacy items first (`:184-190`), so a partial clear never leaves half a pair.
+     - The switch reads back after storing, and the device's pair is treated as the truth (`lib/backupSecretSwitch.ts:87-94`).
+     - Selftest cases: "throws after landing" and "never landed" (`selftest :141-158`).
+  3. ✅ **Honest failure copy.**
+     - `BackupSwitchError{device, server}` (`lib/backupSecretSwitch.ts:55-65`, `:101-109`).
+     - "Not finished" names both sides (`app/backup-e2ee.tsx:123-138`).
+     - In key mode, the key the online copy is under is shown (`lib/cloudBackup.ts:257-259`, `app/backup-e2ee.tsx:124-127`, `:317-318`).
+     - Residual: an upload that threw is `server: 'unknown'`, and it still reads "Nothing was changed" (`app/backup-e2ee.tsx:140-143`). A PUT that landed but whose reply was lost leaves the copy under a new key that is never shown (`recoveryKey` is attached only for `server === 'next'`, `lib/cloudBackup.ts:258`). The pending marker repairs this on the next run.
+  4. ✅ **The lock.**
+     - A FIFO `createLock` (`lib/backupSecretSwitch.ts:118-125`).
+     - Every writer and the switch run under one `backupLock` (`lib/cloudBackup.ts:205`, `:220`, `:251`, `:274`, `:515`, `:566`, `:598`).
+     - The switch's own uploads use the unlocked `uploadCloudBackupUsing` (`:256`, `:274`), so there is no self-deadlock.
+     - The race selftest passes (`selftest :222-245`).
+     - Caveat: regression 1, a hang under the lock.
+  5. ✅ **Key ids.**
+     - `recoveryKeyId` is 8 bytes of a domain-separated SHA-256, normalised (`lib/backupCrypto.ts:143-146`), stamped by `newHeader` (`:149-153`).
+     - `heldSecretMayOpen` (`:160-164`) is used before the cached secret is tried (`lib/cloudBackup.ts:320-323`).
+     - A typed key with the wrong id is refused (`:313-315`).
+     - A pre-id copy that fails asks for the secret (`:321-323`).
+  6. ◐ **Off the JS thread, and user-facing error copy.**
+     - The header derivation uses `backupSecretAsync` (`lib/cloudBackup.ts:253`, `:316`), and `backupErrorText` maps errors (`lib/backupSecretSwitch.ts:132-142`).
+     - But every backup still runs the synchronous `vaultEncrypt` (`lib/cloudBackup.ts:410`), and restores run `vaultDecrypt` (`:311`, `:316`, `:321`). Both derive a 100k-round PBKDF2 key synchronously (`lib/vaultCrypto.ts:69-76`, `:81-92`) for each new secret, although `vaultEncryptAsync` and `vaultDecryptAsync` exist (`:97-106`). How long that stalls the UI with quick-crypto present is **not verifiable statically**.
+     - Separately, "Could not copy" still shows a raw `e.message` (`app/backup-e2ee.tsx:333`).
+  - Round-4 regression 1 (salt collision): fixed by item 5.
+  - Round-4 regression 2 (untrue "Nothing was changed"): fixed by item 3, apart from the residual noted there.
+  - Data-loss path (a): fixed by item 2.
+  - Data-loss path (b): fixed by item 3.
+  - Data-loss path (c): fixed by item 4.
+  - Data-loss path (d): fixed. The marker is set before the upload (`lib/backupSecretSwitch.ts:80-81`), and a pending switch makes a run due immediately, even when backups are set to manual (`lib/backupScheduler.ts:124-128`). An unconfirmed key is shown again on open (`lib/cloudBackup.ts:212-226`, `app/backup-e2ee.tsx:63-68`).
+  - Not detectable: mixed pairs that older builds already wrote (R5C2 partial 3).
+- **Adversarial residue:**
+  - **Turn-off, device unknown:** the alert says backups are paused but not that the online copy is now account-readable (`app/backup-e2ee.tsx:210-212`; the switch reports `server: 'next'`, `lib/backupSecretSwitch.ts:102`).
+  - **`serverOnly` with device unknown:** the copy says "This phone does not keep it" (`:317-318`), but the phone may hold it. This errs on the safe side.
+  - **A switch marker on "manual" backups** triggers one automatic upload. It honours the network policy (`lib/backupScheduler.ts:130-133`). This is acceptable and documented.
+  - **No plaintext path:** I found no path that uploads plaintext. The only account-key uploads are an explicit turn-off (`lib/cloudBackup.ts:274`, `:408-409`) and N1/N2.
+- **Regressions:** 1 and 2 above.
+- **Subscreens:**
+  - Loading: 7 → 7.
+  - Error: 7 → 8.5 (now reachable, accurate copy, Try again).
+  - Off: 8 → 8.
+  - Create/new password: 8.5 → 8.5.
+  - Key shown: 8 → 8.5 (unconfirmed shown again, `serverOnly` case).
+  - Key check: 8 → 7.5 (regression 2).
+  - On: 8 → 8.5.
+- **Still needed for 10/10:**
+  1. Fix N1 and N2, which make the E2EE promise breakable:
+     - Never auto-upload from a device that has no local history while a server copy exists that it has neither restored nor been told to replace (`lib/backupScheduler.ts:121-153`; reuse `deviceHasHistory` from `lib/restoreGate.ts:49-59`). Correct "Skipping changes nothing" (`app/restore-backup.tsx:229-233`).
+     - After a successful E2EE restore, store the pair it was opened with, so the device stays end-to-end encrypted (`lib/cloudBackup.ts:416-455`).
+     - Put the restores under `backupLock` (`:546-631`).
+  2. Bound the work under the lock: give the presigned PUT and the Drive calls an abort deadline (`lib/cloudBackup.ts:533`, `lib/googleDrive.ts:77`, `:90`), or time out the lock wait for the switch and show an error.
+  3. In `submitKeyCheck`, keep the key until `confirmRecoveryKey` settles, or show a busy state (`app/backup-e2ee.tsx:81-90`).
+  4. Use `vaultEncryptAsync` and `vaultDecryptAsync` in `buildEncryptedBackup` and `decryptBlob` (`lib/cloudBackup.ts:311-321`, `:410`).
+  5. On `server: 'unknown'` in key mode, keep or show the new key, as for `next` (`lib/cloudBackup.ts:258`). Say in the device-unknown turn-off alert that the online copy is account-readable (`app/backup-e2ee.tsx:210-212`). Map the copy error (`:333`).
+  6. Protect the key screen from the app switcher with `holdAppSwitcherBlur` (`lib/screenGuard.ts:195`, as `app/vault.tsx:36` does). In key mode, an unconfirmed key can be shown by anyone holding the unlocked phone (`app/backup-e2ee.tsx:267-269`).
+
+#### `app/chat-backup.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8 · Security 7 · Code 8 (mean 8.0)
+- **Original items:**
+  1. ✅ **The restore names its source.**
+     - Restore tries cloud, then Drive, then local, and the success alert names the copy and its date. It adds "The copy in your account could not be used" when another copy was used (`app/chat-backup.tsx:42-48`, `:180-209`).
+     - A secret-required error asks for that copy only (`ask.from`), and the typed secret is retried on that copy only (`:74`, `:190-193`, `:433`).
+     - The first real error is reported, not a later "none here" (`:195`).
+  2. ✅ **The wrong key's copy.** `decryptBlob` checks the key id first and asks instead of failing opaquely (`lib/cloudBackup.ts:308-324`). The modal copy covers a changed secret (`app/chat-backup.tsx:398-402`).
+  3. ✅ **Error copy and the unknown mode.**
+     - `backupErrorText` is used everywhere (`:106`, `:119`, `:152`, `:159`, `:163`, `:166`, `:222`).
+     - The unknown mode is never shown as "Off" (`:96`, `:326-341`, `:380-381`).
+     - `localOk` drives the "Nothing was saved" copy (`:139`, `:161-163`).
+     - "Backup paused" is shown when settings are unreadable (`:149-152`).
+  - Also: the stale scrim comment is gone (`:475`).
+- **Regressions:** round-5 regression 1 applies here: `onBackUp` runs the interactive Google sign-in and the Drive upload inside `backupLock` (`:141`, `lib/cloudBackup.ts:565-570`).
+- **New findings:** N1 and N2. This screen's Restore is the N2 path (`:180-209`), and its auto-backup setting drives N1 (`:311-316`). They are the reason Security drops from 8 to 7.
+- **Subscreens:**
+  - Backup secret modal: 8.5 → 8.5.
+  - Restore confirm: 7.5 → 8 (the copy is named).
+- **Still needed for 10/10:**
+  1. N1 and N2: block auto-backup on a fresh, unrestored device; re-adopt E2EE after a restore; lock the restores (`lib/backupScheduler.ts:121-153`, `lib/cloudBackup.ts:416-455`, `:546-631`).
+  2. Do not hold the lock across the Google sign-in, and bound the uploads (regression 1).
+  3. "Wrong password" is still inferred from "no mapped text" (`:215-219`). Classify GCM failures explicitly.
+  4. BACK UP has no `minHeight` (`:463`). Its padding gives about 48dp, which is **not verifiable statically**.
+
+#### `app/in-chat-search.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 9 · States 9 · UI 8 · A11y 8 · Security 8.5 · Code 8.5 (mean 8.5)
+- **Original items:**
+  1. ✅ Back to the chat: `back()` when the chat is underneath, otherwise `dismissTo('/chat', {id})` (`app/in-chat-search.tsx:164-174`). The entry from contact-info is at `app/contact-info.tsx:321`. Navigation is **not verifiable statically**.
+  2. ✅ The unreadable gate has Try again, through `gateKey` (`:60`, `:83`, `:220-224`). The comment now says "on-device search" (`:101`).
+  3. ✅ `HIT_LIMIT`, with the "Showing the first 80 matches" badge (`:34`, `:113`, `:303-305`).
+- **Regressions:** none.
+- **Subscreens:** Lock gate: 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. The `dismissTo` fallback merges `{id}` into whatever `/chat` route react-navigation pops to (`:173`). Check this on a device with a different chat lower in the stack.
+  2. The 80-hit cap stops at 80; there is no "load more" (`:113`).
+
+#### `app/message-reminder.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8.5 · States 9 · UI 8 · A11y 8.5 · Security 8.5 · Code 8 (mean 8.42)
+- **Original items:**
+  1. ✅ An `alive` guard covers load, reload, refresh and cancel (`app/message-reminder.tsx:320-355`, `:388`). `renderItem` is memoised (`:394-426`).
+  2. ✅ `userErrorText` (`:248`, `:379`).
+  3. ✅ Protected and missing text are told apart: `PROTECTED_TEXT` (`:95`, `:103`), and a dimmed "not saved on this phone" (`:268-270`, `:488`).
+- **Regressions:** none.
+- **Subscreens:** Composer: 8.5 → 8.5. Reminders list: 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. The file is 515 lines with two screens in it (Composer and RemindersList). Split it as the other chat tools were split, which would bring Code to 8.5 or more.
+  2. A protected message's text is shown in normal style, while a missing one is dimmed (`:268`). This is cosmetic.
+
+#### `app/schedule-message.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 9 · States 9 · UI 8.5 · A11y 8.5 · Security 8.5 · Code 8.5 (mean 8.67)
+- **Original items:**
+  1. ✅ `userErrorText` (`app/schedule-message.tsx:108`).
+  2. ✅ A minimum date and a check at pick time:
+     - `open(..., 'datetime', now + 60 s)` (`:125-131`).
+     - The hook passes it to both Android dialogs and to iOS (`components/ui/useDatePicker.tsx:38-49`, `:87`).
+     - Android's time dialog ignores it, so the check at pick time stays, and `doSchedule` re-checks (`:94`). On a device this is **not verifiable statically**.
+- **Regressions:** none.
+- **Subscreens:** Custom date/time picker: 8 → 8.5.
+- **Still needed for 10/10:**
+  1. Verify both picker paths on a device. The mean is 8.67, but the device-only picker risk keeps it at 8.5.
+
+#### `app/scheduled.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8 · States 9 · UI 8 · A11y 8 · Security 8.5 · Code 8.5 (mean 8.33)
+- **Original items:**
+  1. ✅ An `alive` guard covers the cache paint, load, refresh and remove (`app/scheduled.tsx:89-143`).
+  2. ✅ User copy on a cold load and on cancel (`:110`, `:152`).
+  3. n/a: the server's 7-day window is **not verifiable statically**.
+- **Regressions:** none.
+- **Subscreens:** Cancel dialog: 7.5 → 8.
+- **Still needed for 10/10:**
+  1. Media rows show only a type label (`:58-61`).
+  2. The cancel dialog previews up to 80 characters of the message (`:149`). That is correct for an unlocked chat; it was checked in round 4.
+
+#### `app/create-poll.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8.5 · Security 8.5 · Code 8.5 (mean 8.42)
+- **Original items:**
+  1. ✅ The note names the option count (`app/create-poll.tsx:190-196`). It matches the public meta.
+  2. ✅ `userErrorText` (`:99`).
+- **Regressions:** none.
+- **Still needed for 10/10:**
+  1. Votes stored by option number are visible to the server, which the note states. That is a product limit, not a defect.
+  2. No other cited gaps remain. The UI stays at 8 because nothing new was shown.
+
+#### `app/bookmarks.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8.5 · States 9 · UI 8 · A11y 8 · Security 9 · Code 8.5 (mean 8.5)
+- **Original items:**
+  1. ✅ The purge runs before the lock branch (`app/bookmarks.tsx:62-67`).
+  2. ✅ An `alive` guard and `userErrorText`. The cache write moved out of the updater, through `rowsRef` (`:90-93`, `:105-163`).
+- **Regressions:** none.
+- **Still needed for 10/10:**
+  1. Whether the server returns `meta` for the purge check is **not verifiable statically**.
+  2. No other cited gaps remain. Remove already has an accessibility action (`:183-184`). UI and A11y stay at 8 because nothing new was shown.
+
+#### `app/chat-code.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8.5 · States 9 · UI 8.5 · A11y 8.5 · Security 8 · Code 8.5 (mean 8.5)
+- **Original items:**
+  1. ✅ `retryRow` (44dp) and `retryTxt` in the sheet (`app/chat-code.tsx:236-240`, `:414-415`). The copy error uses fixed copy (`:263`).
+  2. ✅ Not a defect: `app.json:3` `"name": "crazzychat"` is the user-facing name, so the share text (`:273`) is correct.
+- **Regressions:** none.
+- **Subscreens:** Share tab: 8.5 → 8.5. Enter tab: 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. The share text carries a live join code in plain text to any app (`:273`). This is inherent; it is mitigated by the expiry.
+  2. The retry row's text keeps `S.hint` sizing at 12pt (`:237`).
+
+#### `app/chat-export.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8.5 · A11y 8 · Security 8.5 · Code 8.5 (mean 8.42)
+- **Original items:**
+  1. ◐ **Streaming.**
+     - Plaintext is chunked: `decryptChunk` hydrates each 500-row slice, oldest to newest (`app/chat-export.tsx:73-77`), inside `writeExportFile`.
+     - `cancelled` is checked before and after each decrypt (`components/chattools/chatExportFile.ts:34-38`).
+     - The merged raw envelope list is still held whole (`app/chat-export.tsx:56-71`), for `unionWithLocalHistoryAsc`. The fixer documents this.
+  2. ✅ **Web.** The no-Sharing fallback shares the file's text again (`chatExportFile.ts:61`). On web, both buttons are disabled, with an alert note (`app/chat-export.tsx:32`, `:281-292`). This closes round-4 regression 3.
+  3. ✅ **PIN modal and errors.** The PIN modal styles are in the sheet (`:335-347`, `:389-393`), and errors go through `userErrorText` (`:233`).
+- **Regressions:** none. `hydrateMessages` decrypts one message at a time (`lib/chatService.ts:817-880`), so chunking does not change the result.
+- **Subscreens:** Chat-lock PIN modal: 8 → 8.5.
+- **Still needed for 10/10:**
+  1. Page the server/local union, so the raw 100k list is never held (`:56-71`, `lib/messageHistory`).
+  2. Progress is static during a long decrypt: `onProgress` is not passed (`:228`, `:245`, `:254`).
+  3. A crash mid-write leaves a plaintext partial file in caches. Only a thrown error removes it (`chatExportFile.ts:31-46`). Sweep stale export files on start.
+
+#### `app/chat-themes.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8.5 · States 9 · UI 8.5 · A11y 8.5 · Security 8 · Code 8.5 (mean 8.5)
+- **Original items:**
+  1. ✅ `savedRef` and `applySeq`: only the latest tap rolls back, and only to what is stored (`app/chat-themes.tsx:44-46`, `:64-79`).
+  2. ✅ Try again (44dp, labelled) re-reads through `reloadKey` (`:41`, `:60`, `:127-135`, `:191`).
+- **Regressions:** none.
+- **Still needed for 10/10:**
+  1. After a failed load, a pick still overwrites the unknown stored value. The copy says so (`:129`), but saving is not blocked until a retry succeeds.
+  2. `savedRef` can end on the older value if two writes resolve out of order (`:73`). This is unlikely with AsyncStorage's ordered writes.
+
+#### `app/chat-wallpaper.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8 · Security 8 · Code 8.5 (mean 8.25, tie rounded up)
+- **Original items:**
+  1. ✅ A load failure shows an alert line with Try again through `reloadKey` (`app/chat-wallpaper.tsx:114-115`, `:131-135`, `:253-262`, `:389-391`).
+  2. ✅ The save error names the step, copy or store (`:162-195`). The picker error uses fixed copy (`:218`).
+- **Regressions:** none.
+- **Subscreens:** Colors: 8 → 8. Gradients: 8 → 8. My photo: 8 → 8.5 (copy failures are named).
+- **Still needed for 10/10:**
+  1. As in chat-themes, saving is allowed over an unread stored value (`:256`).
+  2. The photo wallpaper is stored unencrypted in documentDirectory (`:166-172`). This is acceptable but undocumented.
+
+#### `app/receipt-control.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8 · Security 7 · Code 8.5 (mean 8.08)
+- **Original items:**
+  1. ✅ The refresh waits for pending chains (`app/receipt-control.tsx:88-93`). A load that returns during a toggle keeps the screen's rules (`:86`, `:112`, `:142`, `:152`).
+  2. ✅ `userErrorText` (`:117`, `:150`), a memoised `renderItem` (`:157-170`), and `shownFor` at module scope (`:40-44`).
+- **Regressions:** none. A load that lands during a toggle now discards ALL fetched rules, not just that flag's (`:112`). The refresh silently does nothing; this is minor.
+- **Still needed for 10/10:**
+  1. Whether the server honours hideRead, hideTyping and hideLastSeen is **not verifiable statically**, so Security stays 7.
+  2. Merge the reloaded rules per flag instead of skipping the whole map (`:112`).
+
+#### `app/broadcast.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8 · States 8.5 · UI 8 · A11y 8.5 · Security 7 · Code 8 (mean 8.0)
+- **Original items:**
+  1. ❌ Deploy R4BE C4–C6. This needs a backend deploy. The client fallbacks remain honest (`components/chattools/BroadcastChannelView.tsx:149`, `:167`).
+  2. ❌ Posts are not E2EE, which the screen states (`:225`).
+  3. ✅ Admin posts have a visible 44dp "Delete post" button with a hint (`BroadcastChannelView.tsx:182-199`, `broadcastStyles.ts:41-42`). `userErrorText` is used throughout (`app/broadcast.tsx:64`, `:91`, `:105`; `BroadcastChannelView.tsx:76`, `:135`, `:150`, `:168`). The stale comment is gone (`broadcastStyles.ts:56`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Channel list: 8 → 8.
+  - Channel detail: 8 → 8.5.
+  - Create modal: 8 → 8.
+  - Join modal: 8 → 8.
+- **Still needed for 10/10:**
+  1. Deploy C4–C6.
+  2. Design end-to-end encrypted channels.
+
+#### `app/hidden-chats.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 7.5 · States 8.5 · UI 8 · A11y 8.5 · Security 8 · Code 8 (mean 8.08)
+- **Original items:**
+  1. ❌ Deploy the R4BE C1 limit. This needs a backend deploy (`app/hidden-chats.tsx:13-14`, `:45`).
+  2. ✅ A chat opened from the list is popped when the app backgrounds (`:69-78`). This creates regression 3. Device behaviour is **not verifiable statically**.
+  3. ✅ The gate title has the header role (`:170`). The group-avatar contrast nit is fixed (`:301`, `:405`, `:408`).
+- **Regressions:** 3. Background events from system pickers and Face ID pop the hidden chat; Function drops to 7.5.
+- **Subscreens:** PIN gate: 8 → 8.5. Hidden list: 8 → 8.
+- **Still needed for 10/10:**
+  1. Do not pop the chat for short trips to the background. Re-lock on return after a grace period, or skip while a picker is open. Blur the app switcher instead, with `holdAppSwitcherBlur` (`lib/screenGuard.ts:195`).
+  2. Deploy C1.
+
+#### `app/app-lock-chats.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8.5 · Security 8.5 · Code 8.5 (mean 8.42)
+- **Original items:**
+  1. ✅ `LockConfigModal` takes a `draft` and `onChange`, 7 props (`components/chattools/LockConfigModal.tsx:37-50`). The screen is 512 lines (`app/app-lock-chats.tsx`). The device filter stays in the screen (`:312`), and chatLockFactors passes.
+  2. ✅ `togglingId` shows "Removing lock…" and a labelled spinner on that row (`:160-161`, `:268`, `:286-288`, `:505`).
+- **Regressions:** none. The behaviour is identical, checked against `4910069`.
+- **Subscreens:** Lock config modal: 8 → 8. Remove-lock PIN prompt: 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. `renderChatItem` now depends on `togglingId` (`:300`), so every row re-renders on each removal. This is negligible.
+  2. The `patchDraft` updater parameter `d` shadows the dialog styles `d` (`:91` vs `:55`). Rename it.
+
+#### `app/import-chats.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8 · Security 7 · Code 8.5 (mean 8.08)
+- **Original items:**
+  1. ❌ Imported media is still unencrypted (`ponytail:` at `components/chattools/useImportFlow.ts:246`).
+  2. ✅ The flow is in `useImportFlow`, moved unchanged. The screen is 231 lines (`app/import-chats.tsx:33`, `:74`). waImport scans the new file (`lib/waImport.selftest.ts:306`).
+- **Regressions:** trivial, a stale handoff comment (`useImportFlow.ts:5-8`).
+- **Subscreens:** all unchanged. Pick chat, pick source, pick file, reading/matching, preview, importing and failed are 8. Done is 7.5.
+- **Still needed for 10/10:**
+  1. Seal imported media at rest (`useImportFlow.ts:246`).
+  2. Drop the stale comment.
+
+---
+
+### D — Groups & Communities — re-rating (round 5)
+
+Base `4910069` → `HEAD` (`2a05e46`). "Old" is the round-4 score (`rerate4/D.md`, the "→ new" value). The open items are that file's "Still needed for 10/10", "Regressions" and cross-screen lists.
+
+**Fix logs checked:** `fixes/R5D.md` (48 fixed, 7 partial or deferred) and `R5HO.md` #8 (`lib/viewerPrefs.setShareViewing` now rejects). R5A, R5C1, R5E, R5G2 and R5I1 mention group files only as tsc noise from in-progress work (`group-admin.tsx:208`, `group-info.tsx`), and R5J does not touch batch D. At HEAD that noise is gone: tsc exits 0. R5E's `group-call-active.tsx` is not a batch-D screen.
+
+**Files read.** Every claim was checked against `git diff 4910069 HEAD` and the current files, including the new and changed imports:
+- `components/groups/{GroupInfoSections, groupInfoStyles, CommunityDetailView, GroupNotFound}`
+- `lib/groups/{latestSave, serverContracts, catalog, groupScreensRound5.selftest}`
+- `lib/viewerPrefs.ts`, `lib/tintColor.ts` and `constants/theme.ts`
+- the backend handler `vaultchat-backend-go/internal/routes/communities.go:264-310`, which backs the C9 probe
+
+**Checks run (read-only, at HEAD).** The logs are in `rerate5/D_*.txt`.
+- `npx tsc --noEmit -p .` exits 0.
+- `npx eslint` on the 18 screens, `components/groups`, `lib/groups` and `lib/viewerPrefs.ts` exits 0.
+- These selftests (`npx tsx`) exit 0:
+  - `latestSave` (new) and `groupScreensRound5` (new)
+  - `groupScreensRound4`, `groupScreensRound3` and `groupScreenFixes`
+  - the `catalog.ts` self-check, which now covers `GROUP_COLORS`, and the `calendar.ts` self-check
+  - `viewerPrefs` (new)
+  - `uiDebtRatchet`: "no file got worse"; 5 unroled and 283 hex remain
+  - `a11yCoverage`, `themeCoverage` (22), `orphanRoutes` (51), `screenBackCoverage`, `silentFailure` and `keyboardAvoidance`
+
+**Deployment status.** Nothing is deployed or device-verified, and 📱 marks items that need a device check. Against today's server:
+- **C8:** `queueMerged([])` and rows without `source` keep group-admin's own list (`lib/groups/serverContracts.ts:162`).
+- **C9, management probe:** `PATCH /communities/:id {}` (`serverContracts.ts:119-131`).
+  - Today's Go mux has `GET /communities/{id}` but no PATCH, so it answers 405, the probe returns false, and the screen shows a note instead of the four actions.
+  - On a C9 server the owner gets 400 "name or description required" before any write (`communities.go:297-300`), and a non-owner gets 403 (`:273-275`).
+- **C10:** unchanged; editing stays author-only.
+
+**Split check (group-info).** I extracted the old file (`git show 4910069:app/group-info.tsx`) and diffed it against the new parts:
+- `makeStyles` against `makeGroupInfoStyles` is byte-identical.
+- `MemberRow` differs only in `useS()` → `useGroupInfoStyles()`.
+- The 128-line tools block differs only in the Switch handler prop and `thumbColor="#fff"` → `colors.onPrimary`.
+- Nothing was lost.
+
+**Token check.**
+- `onPrimary` and `onDanger` are still `#FFFFFF` in both schemes (`constants/theme.ts:235-236`, `:279-280`), so every swap gives the same pixels. The dark-mode AA gap is an open owner decision (`:229-234`), not a deduction.
+- Each `+ 'xx'` → `tint()` swap is numerically the same alpha (`22`→0.13, `12`→0.07, `14`→0.08, `1F`→0.12, `66`→0.4; `lib/tintColor.ts:9-22`).
+- The one intended visual change is the group-invitations "Waiting" chip text: accent → `colors.text`.
+- No token regressions.
+
+**Rounding:** an exact .25 or .75 mean rounds up, as in rounds 3 and 4.
+
+| Screen | Old | New | Δ |
+|---|---|---|---|
+| `app/group-admin.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/group-calendar.tsx` | 8.5 | 8.5 | 0 |
+| `app/group-chat.tsx` (redirect) | 10 | 10 | 0 |
+| `app/group-create.tsx` | 8.5 | 8.5 | 0 |
+| `app/group-info.tsx` | 8.0 | 8.0 | 0 |
+| `app/group-insights.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/group-invitations.tsx` | 8.5 | 8.5 | 0 |
+| `app/group-invites.tsx` | 8.5 | 8.5 | 0 |
+| `app/group-join.tsx` | 8.5 | 8.5 | 0 |
+| `app/group-members.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/group-notes.tsx` | 8.0 | 8.0 | 0 |
+| `app/group-privacy.tsx` | 8.5 | 8.5 | 0 |
+| `app/group-tasks.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/group-trip.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/group-calls.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/create-group.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/communities.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/creator-channels.tsx` (redirect) | 10 | 10 | 0 |
+
+#### Cross-screen items
+- ✅ **`GroupNotFound` cast removed** (`components/groups/GroupNotFound.tsx:16`). group-join now uses it too (`app/group-join.tsx:114`).
+- ◐ **Approval queues.** The read side is fixed: once C8 answers in the merged shape, group-admin shows a count and a link to Add people → Waiting instead of a second list (`app/group-admin.tsx:132-139`, `:417-425`; `serverContracts.ts:162`). Today it keeps its own list. The write path stays split, which is a backend and §5 decision.
+- ❌ **Per-focus decrypt cost (notes/tasks).** Deferred with a reasoned case (R5D partial #1). The `ponytail:` at `lib/groups/opThread.ts:24` still applies.
+- n/a **Two creation UIs.** This is a §5 decision, honest in both headers.
+
+---
+
+#### `app/group-admin.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8.5 · Security 8 · Code 8 (mean 8.25)
+- **Original items:**
+  - ◐ **Approval-queue merge.** The read side is done and switches on `queueMerged` (`:132-139`, `:414-425`). The write side needs the backend and §5.
+  - ✅ **Headers.** "Group Info", "Group Controls" and the four control labels are headers (`:321`, `:350`, `:352`, `:355`, `:370`, `:373`).
+  - ✅ **A different option tapped during a save** is shown at once and written next, and only the last choice is written (`:196-205`; `lib/groups/latestSave.ts:20-49`, 6-case selftest).
+    - On failure the control returns to the last value the server accepted (`latestSave.ts:43-45`).
+    - The banner names the final value (`:202`).
+    - `toggleApprove` acts on the saved value (`:217-222`).
+  - ✅ **Members-link cast removed** (`:389`).
+  - ✅ **Approve `hitSlop`** is now `{8,8,8,0}` (`:437`).
+- **Round-4 regressions:**
+  - ✅ The dropped tap is fixed (above).
+  - ✅ `extraData` is now the memoised `rowDeps` (`:174`, `:312`).
+  - ✅ The latent C8 duplication is fixed (above).
+- **Regressions:** none functional. Nit: each control label is now a header and is followed by a radiogroup with the same label (`:352-353`, `:370-374`), so a screen reader says it twice.
+- **Subscreens:**
+  - Role menu: 7.5 → 7.5
+  - Remove confirm: 7.5 → 7.5
+  - Link join requests: 8 → 8.5 (merged pointer, larger Approve target)
+- **Still needed for 10/10:**
+  1. Fold the write side of the approval queues once C8 and §5 are settled (`:132-139`).
+  2. The role-menu radios have no `radiogroup` wrapper (`:498-516`).
+  3. Approve has no busy state; the row is removed optimistically and restored on failure (`:224-228`).
+  4. `bannerErr` still concatenates `c.danger + '1F'` (`:544`). Every sibling now uses `tint()`.
+  5. Header Back has no cold-start fallback (`:296`).
+
+#### `app/group-calendar.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8.5 · States 9 · UI 8 · A11y 8.5 · Security 8.5 · Code 8 (mean 8.42)
+- **Original items:**
+  - 📱 **iOS inline picker and Android dialogs.** Unchanged; they need a device.
+  - ✅ **Day, Time and Repeat chips** are inside labelled `radiogroup`s (`:420`, `:433-434`, `:450`). The month label is a header (`:311`).
+  - ◐ **Admin edit** goes live only with the C10 deploy; the client is wired.
+  - ✅ **In-place reload.** The full spinner shows only when `days` is empty (`:321`). Otherwise the list stays, dimmed, with a small spinner by the month (`:314`, `:342`). Banner Retry and the post-save reload keep the list.
+    - Note: `days` is filtered to the *new* month's bounds (`:192-206`). On a month switch, non-recurring events of the old month fall out at once, so most switches still show the full spinner. This is honest, because nothing of the new month is known yet.
+  - ❌ **Composer extraction** was skipped (R5D partial #2). The file is 567 lines.
+- **Regressions:** none.
+- **Subscreens:** Event sheet: 8.5 → 8.5 (radiogroups added; the picker is 📱).
+- **Still needed for 10/10:**
+  1. 📱 Device-check the inline iOS `datetime` picker (`:409-418`) and Android's native dialogs (`:282-285`).
+  2. C10 deploy for admin edits (`:90-93`, `:208-211`).
+  3. Delete has no in-flight guard or busy state (`:269-276`).
+  4. The composer (`:370-480`) could be its own component.
+
+#### `app/group-chat.tsx` — **10 → 10** (rated as a redirect)
+- **Scores now:** 10 across all six. Unchanged (`:15-22`).
+- **Regressions:** none.
+- **Subscreens:** none.
+- **Still needed for 10/10:** nothing.
+
+#### `app/group-create.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8 · States 8.5 · UI 8.5 · A11y 8.5 · Security 8 · Code 8.5 (mean 8.33)
+- **Original items:**
+  - n/a **Two creation flows** (§5).
+  - ✅ **`PALETTE` moved to `GROUP_COLORS`** (`lib/groups/catalog.ts:115-119`; screen `:33`). The self-check asserts valid, distinct and ≥4.5:1 ink (`catalog.ts:218-226`).
+  - ✅ **`/group-invites` cast removed** (`:94`).
+  - ✅ **`busy` stays set while leaving** (`:91-94`).
+- **Regressions:** none.
+- **Subscreens:** Type, colour, icon and privacy pickers: 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. Decide the two creation flows (§5).
+  2. Hex-suffix tints remain: `shownColor + '22'` (`:108`), `g.color + '1a'` (`:126`) and `shownColor + '1a'` (`:172`). Siblings use `tint()`.
+  3. create-group now tells the user that the new group exists with just them in it (`fresh=1`). This screen does not pass `fresh` (`:94`), so Add people here gives no such note.
+
+#### `app/group-info.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8.5 · States 9 · UI 8 · A11y 8 · Security 7.5 · Code 8 (mean 8.17)
+- **Original items:**
+  - ✅ **Split.** The screen is 516 lines. The tools block and `MemberRow` are in `components/groups/GroupInfoSections.tsx:17-220`, and the styles are in `groupInfoStyles.ts`. The split is verbatim (split check above).
+  - ✅ **Viewing-status toggle.** `setShareViewing` now rejects (`lib/viewerPrefs.ts:20-22`). The screen reverts the latest toggle only, using a sequence ref, and alerts (`:83-96`).
+  - ✅ **Route casts.** All 8 `as any` casts are gone (`:277`, `:296`; `GroupInfoSections.tsx:40`, `:57`, `:75`, `:100`, `:138`, `:151`).
+  - ✅ **Stale Retry** has a busy and disabled state with a spinner, and the banner is kept until the refresh settles (`:148-153`, `:403-412`).
+- **Round-4 regression:** ✅ Media fix. Local media paints first, then one server page is merged. A server failure keeps the local strip (`:161-175`). The trade-off is that every visit fetches a 200-message page again (`:169`).
+- **Regressions:** none. The split is verbatim, and `thumbColor` `onPrimary` is the same white.
+- **Subscreens:**
+  - Rename: 7.5 → 7.5
+  - Description: 7.5 → 7.5
+  - Leave confirm: 7 → 7
+  - Remove confirm: 7.5 → 7.5
+- **Still needed for 10/10:**
+  1. The `ChatDetail` cache holds member names and emails in plain AsyncStorage (`:110`, `:132`; `lib/localCache.ts:30`). It should be sealed, or left without emails.
+  2. Leave and Remove have no in-flight guard or busy state (`:246-284`).
+  3. The section labels SHARED, PRIVACY, ADMIN, DESCRIPTION and "N MEMBERS" are not headers (`GroupInfoSections.tsx:87`, `:114`, `:133`; `:442`, `:461`).
+  4. The three Back buttons have no cold-start fallback (`:317`, `:329`, `:350`).
+  5. The media strip reads a 200-message server page on every visit (`:169`).
+
+#### `app/group-insights.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8 · Security 8.5 · Code 8 (mean 8.25)
+- **Original items:**
+  - ✅ **No false "No group trips".** `tripsState` 'failed' or 'partial' shows its own note with Retry (`:68`, `:141-164`, `:334-347`). `complete` is used (`:141`, `:160`).
+  - ✅ **Names failure** shows a note with Retry, and ids fall back to those in the track so recorded members still count (`:110-131`, `:288-295`).
+  - ✅ **`tint()`** in place of `+ '22'` (`:223`, `:362`).
+- **Regressions:** none.
+- **Subscreens:** Week/Month tabs: 7.5 → 8.
+- **Still needed for 10/10:**
+  1. The 'partial' note offers Retry, but Retry re-runs the same capped `pageBack`, so it will usually come back partial again (`:141-145`, `:340-342`). Say "older trips are beyond what can be read" instead.
+  2. Every Retry (names, trips, whole screen) swaps the screen for the full spinner (`:186`, `:232-233`). Retry in place, as notes and members do.
+
+#### `app/group-invitations.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8.5 · A11y 8.5 · Security 8.5 · Code 8.5 (mean 8.5)
+- **Original items:**
+  - ✅ **Waiting chip.** Text is `colors.text` and the icon `textDim`; the accent is on the border only (`:180-187`).
+  - ✅ **Casts removed** (`:81-82`).
+  - 📱 **Stacked push** `/family` → `/group-privacy` still needs a device.
+- **Regressions:** none.
+- **Subscreens:**
+  - Decline/withdraw confirm: 7.5 → 7.5
+  - Waiting alert: 7.5 → 7.5
+- **Still needed for 10/10:**
+  1. Decline's `if (acting) return` inside the Alert callback reads the value captured when the Alert opened (`:107`). This is the stale guard fixed with a ref in group-invites.
+  2. The accent icon on its `accent + '22'` disc is drawn unchecked for light server colours (`:143-144`).
+  3. 📱 Device-check the stacked push (`:80-82`).
+
+#### `app/group-invites.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8.5 · States 9 · UI 8.5 · A11y 8 · Security 8 · Code 8 (mean 8.33)
+- **Original items:**
+  - ✅ **Exact guards.** `actingRef` guards approve and turn-down, and `withdrawingRef` guards withdraw/revoke (`:156-188`, `:206-223`).
+  - 📱 **C8 link rows** need deploy and device verification.
+  - ◐ **`.map` lists** are kept and documented as small (R5D partial #5).
+- **Additional:**
+  - ✅ The `fresh=1` note says the group already exists with just you in it (`:261-266`).
+  - ✅ `tint()` (`:405`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Turn-down confirm: 7.5 → 8
+  - Withdraw/revoke confirm: 7.5 → 8
+- **Still needed for 10/10:**
+  1. Deploy-verify C8 link rows, which are approved by user id through `/join-requests` (`:160-163`, `:180-181`).
+  2. The `fresh` note says the group "can be left from Group info". Whether the server lets the sole owner leave is not verifiable statically.
+  3. The search results, Waiting and Sent lists are `.map` in one ScrollView (`:311`, `:343`, `:398`). This is fine for small groups.
+
+#### `app/group-join.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8.5 · States 9 · UI 8.5 · A11y 8.5 · Security 8.5 · Code 8.5 (mean 8.58)
+- **Original items:**
+  - ✅ **Not-found** uses `GroupNotFound` (`:114`).
+  - ✅ **"Done"** uses `canGoBack` or replaces to `/(tabs)/chats` (`:83`, `:190`).
+  - ✅ **Live regions** on the state notes (`:135`, `:143`, `:156`, `:164`), plus `announceForAccessibility` (`:85-93`, `:101`, `:107`).
+- **Regressions (possible, 📱):** the comment says "Android reads the live region; iOS needs the announcement" (`:85-86`), but the announcement is not platform-gated. TalkBack may speak both the announcement and the live-region text.
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. Gate `announce` to iOS, or drop the live regions, so TalkBack speaks once (`:86-93`).
+  2. The accent icon on its tinted disc is unchecked for light accents (`:123-125`, `:144`, `:157`, `:165`).
+
+#### `app/group-members.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8 · States 9 · UI 8 · A11y 8.5 · Security 8 · Code 8.5 (mean 8.33)
+- **Original items:**
+  - ◐ **Approval merge** (backend and §5; see cross-screen).
+  - ✅ **`retryInPlace`.** The banner spinner and busy state show while the list stays (`:113-119`, `:300-309`).
+  - ✅ **`FlatList`.** The banner and count are the header; Add people and How people join are the footer (`:294-383`). 📱 visual.
+  - ✅ **Non-actionable rows** have `accessibilityRole="text"` (`:246`).
+- **Additional:** ✅ `shareRef` guard (`:86`, `:192-199`) and the cast removed (`:325`).
+- **Regressions:** none. Nit: a text row still carries `accessibilityState.disabled: true` (`:248`), so it is announced as dimmed. This predates round 5.
+- **Subscreens:**
+  - Member actions sheet: 8.5 → 8.5
+  - Share picker: 8 → 8.5
+  - Join-mode list: 8 → 8
+- **Still needed for 10/10:**
+  1. Fold the approval queues (backend, §5).
+  2. Drop `disabled` from `accessibilityState` on non-actionable text rows (`:248`).
+  3. First-load Retry still uses the full spinner (`:285-288`). That is acceptable, because nothing is on screen then.
+
+#### `app/group-notes.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8 · States 8.5 · UI 8 · A11y 8 · Security 7.5 · Code 8 (mean 8.0)
+- **Original items:**
+  - ❌ **Per-focus decrypt.** Deferred, with a sound written case (R5D partial #1; `opThread.ts:24`).
+  - n/a **Any member may delete.** This is a recorded decision with a confirm (`:132-138`).
+  - ✅ **`publish` folds onto `opsRef`**, the ops the list came from, instead of a replay rebuilt from folded notes (`:60-62`, `:68`, `:89-100`). Behaviour on a failed send matches round 4: `rebuild()`.
+  - ✅ **`FlatList`.** The banner is the header and `ThreadGaps` the footer (`:183-226`).
+- **Regressions:** none.
+- **Subscreens:** Note editor: 8 → 8.
+- **Still needed for 10/10:**
+  1. Replace the re-decrypt of up to about 2,200 messages on each focus with a server op index (`opThread.ts:24-31`).
+  2. Deleting any note is still open to every member (decision, `:132-138`).
+  3. A failed send leaves the op in `opsRef` and on screen if the follow-up `rebuild()` also fails (`:90-98`). It needs a revert, or a "not sent" mark.
+
+#### `app/group-privacy.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8.5 · States 9 · UI 8 · A11y 8.5 · Security 8.5 · Code 8.5 (mean 8.5)
+- **Original items:**
+  - 📱 **Live publisher** `reloadPrivacy` still needs a device (`:121-126`).
+  - ✅ **`pending` count.** "Saving… (in group)" shows in a polite live region (`:100-108`, `:185-187`).
+  - ✅ **The `.catch`** on the queue is now documented (`:103-104`).
+- **Regressions:** none.
+- **Subscreens:** Stop-timer confirm: 7.5 → 7.5.
+- **Still needed for 10/10:**
+  1. 📱 Device-check the live publisher reload.
+  2. The live region is Android-only. iOS VoiceOver gets no "Saving…" or "saved" announcement (`:185`).
+
+#### `app/group-tasks.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8 · States 8.5 · UI 8 · A11y 9 · Security 7.5 · Code 8.5 (mean 8.25)
+- **Original items:**
+  - ❌ **Per-focus decrypt.** Deferred, as for notes.
+  - n/a **Shared delete** is a decision (`:139-145`).
+  - ✅ **Checkbox label** is now title, "for X" and "(overdue,) due …", with a hint. The visual text is hidden from the screen reader (`:249-262`).
+  - ✅ **`FlatList`.** The composer is the header, and `extraData={members}` (`:160-288`).
+  - ✅ **`opsRef`** replaces the add-replay (`:68-77`, `:106-108`).
+- **Regressions:** none. The composer `TextInput` in `ListHeaderComponent` is an element, not a component, so it is not remounted on each keystroke (`:167-180`).
+- **Subscreens:** Due-date and assignee chips: 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. Per-focus decrypt cost (`opThread.ts:24`).
+  2. Shared delete is a decision (`:139-145`).
+  3. 📱 The FlatList keyboard behaviour with the header composer needs a device.
+
+#### `app/group-trip.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8 · States 8.5 · UI 8.5 · A11y 8.5 · Security 8 · Code 8 (mean 8.25)
+- **Original items:**
+  - ✅ **`namesFailed`** shows a note with Retry, using `loadNames` (`:67-74`, `:85-87`, `:315-321`).
+  - ✅ **`tint()`** replaces every hex suffix (`:238`, `:263`, `:295`, `:303`, `:334`).
+  - 📱 **Geocode, permission and navigation** still need a device.
+- **Regressions:** none. Nit: `loadNames` has no unmount guard (`:70-73`).
+- **Subscreens:** Leave/End confirms: 8 → 8.
+- **Still needed for 10/10:**
+  1. 📱 Geocode, permission and navigation hand-off on a device.
+  2. Guard `loadNames` against unmount, like the focus effect (`:70-73`).
+
+#### `app/group-calls.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 9 · UI 8 · A11y 8.5 · Security 7.5 · Code 8 (mean 8.25)
+- **Original items:**
+  - 📱 **Device-verify** group and 1:1 calls and the legacy ring path (`:113-122`).
+  - ✅ **Dead branch and casts removed.** `!chatId` returns inside the effect (`:63-77`), and the route casts are gone (`:90-93`, `:123-131`).
+  - ✅ **`startBusy`** mirrors the ref, with a spinner and disabled/busy state (`:58-62`, `:168-180`).
+- **Regressions:** none. Nit: the 3 s `setTimeout` is not cleared on unmount (`:137`).
+- **Subscreens:** Voice/Video toggle: 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. 📱 Device-verify calls, including the legacy client-side `call_incoming` emit path (`:113-122`).
+  2. Clear the 3 s timer on unmount (`:137`).
+
+#### `app/create-group.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8.5 · A11y 8.5 · Security 8 · Code 8 (mean 8.33)
+- **Original items:**
+  - ✅ **Abandoned "Create & add people".** Add people is pushed with `fresh: '1'` (`:118-121`). The note is at `app/group-invites.tsx:261-266`.
+  - ✅ **"N SELECTED"** is not a header; it is a polite live region with a spoken label (`:200-204`).
+  - ✅ **Casts removed** (`:119-120`, `:128`). `errorBar` uses `tint()` (`:267`).
+- **Regressions:** none. Nit: the comment above `errorBar` still says "a hex alpha suffix is valid" (`:266`), which is now stale.
+- **Subscreens:** Selected-member chips: 8 → 8.
+- **Still needed for 10/10:**
+  1. Decide the two creation flows (§5).
+  2. Whether the sole owner can actually leave the empty group, as the note promises, is not verifiable statically.
+  3. Remove the stale comment (`:266`).
+
+#### `app/communities.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 7.5 · States 8.5 · UI 8 · A11y 8 · Security 7 · Code 8 (mean 7.83)
+- **Original items:**
+  - ◐ **C9.** `communityManagementSupported` probes once per session (`app/communities.tsx:56-69`; `serverContracts.ts:101-131`).
+    - On 'no', the Edit button and the attach, delete and leave rows are replaced by an honest note (`CommunityDetailView.tsx:45`, `:65`, `:123-133`).
+    - On 'unknown' (offline or 5xx) the actions stay, with the "Not available yet" fallback. The fallback now also flips to 'no' (`:71-77`; `serverContracts.ts:64`).
+    - The probe's assumptions match the backend (`communities.go:26`, `:254`, `:273-275`, `:297-300`, `:427`). Covered by `groupScreensRound5` §2.
+    - Real management still waits on the deploy.
+  - ✅ **Delete and leave clear `community:<id>`** (`:170-171`).
+  - ✅ **`/chat` cast removed** (`:234`).
+- **Round-4 regression:** ✅ The four actions no longer fail after a confirm or a pick on today's server (`CommunityDetailView.tsx:123-126`).
+- **Regressions:** none functional. Nits:
+  - While `manage === 'probing'`, all four actions are hidden with no indicator, then appear or are replaced (`CommunityDetailView.tsx:45`). This is a brief layout shift.
+  - The probe is a write verb (`PATCH {}`) used as a capability check. It is safe because the server refuses an empty body before writing (`communities.go:297-300`). The `ponytail:` notes the per-session memo (`serverContracts.ts:108-111`).
+- **Subscreens:**
+  - Community detail: 8 → 8.5
+  - Name modal (new group and edit): 8 → 8
+  - Attach sheet: 7 → 7 (unreachable on today's server because the row is hidden; it works only after C9)
+- **Still needed for 10/10:**
+  1. Deploy C9. Until then, members cannot leave a community, only each group (note at `CommunityDetailView.tsx:128-131`).
+  2. Show the probing state, for example a small spinner in the footer, instead of a silent gap (`CommunityDetailView.tsx:123-133`).
+  3. Replace the probe with a server capability list when one exists (`serverContracts.ts:108-111`).
+
+#### `app/creator-channels.tsx` — **10 → 10** (rated as a redirect)
+- **Scores now:** 10 across all six. Unchanged (`:38-40`).
+- **Regressions:** none.
+- **Subscreens:** none.
+- **Still needed for 10/10:** nothing.
+
+---
+
+#### Regressions introduced in round 5 (all minor; none from the split or the tokens)
+1. **group-join double announcement (📱, possible).** `announceForAccessibility` runs on every platform, as well as the new polite live regions, so TalkBack may speak twice (`app/group-join.tsx:85-93`, `:135`, `:143`, `:156`, `:164`).
+2. **group-info media strip cost.** The fix for the round-4 staleness regression now reads a 200-message server page on every visit (`app/group-info.tsx:169`). It is correct, but the round-4 network saving is gone.
+3. **communities probing gap.** Management rows are hidden, with no indicator, until the probe answers (`components/groups/CommunityDetailView.tsx:45`, `:123-133`).
+4. **group-admin double label.** Control labels became headers right above radiogroups that carry the same label, so it is read twice (`app/group-admin.tsx:352-353`, `:370-374`).
+5. **create-group stale comment** above the `tint()` line (`app/create-group.tsx:266`). Cosmetic.
+
+Split and token verification: the group-info parts match `4910069` verbatim, apart from the declared prop rename and the `onPrimary` thumb (same `#FFFFFF`). Every `tint()` swap has the same alpha as the hex suffix it replaced, and `onPrimary`/`onDanger` are unchanged white in both schemes. No visual or behaviour change beyond the intended Waiting-chip ink.
+
+---
+
+### E+K — Calls, Live, Network + Utilities, Comfort, Games — round-5 re-rating
+
+| Screen | Old | New | Δ |
+|---|---|---|---|
+| `app/voicecall.tsx` | 7.5 | 7.5 | 0 |
+| `app/videocall.tsx` | 7.5 | 7.5 | 0 |
+| `app/incoming-call.tsx` | 8.0 | 8.0 | 0 |
+| `app/group-call-active.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/call-reliability.tsx` | 8.0 | 8.0 | 0 |
+| `app/network-test.tsx` | 8.0 | 8.0 | 0 |
+| `app/live.tsx` | 8.5 | 8.5 | 0 |
+| `app/live-view.tsx` (+ `components/live/*`) | 8.0 | 8.0 | 0 |
+| `app/live/join/[code].tsx` | 8.5 | 8.5 | 0 |
+| `app/notifications.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/notification-sounds.tsx` | 8.5 | 8.5 | 0 |
+| `app/storage-manager.tsx` | 8.0 | 8.0 | 0 |
+| `app/cache-cleanup.tsx` | 8.5 | 8.5 | 0 |
+| `app/offline-mode.tsx` | 8.5 | 8.5 | 0 |
+| `app/vision-comfort.tsx` | 8.5 | 8.5 | 0 |
+| `app/eye-check.tsx` (+ `components/comfort/*`) | 8.5 | 8.5 | 0 |
+| `app/perf-debug.tsx` | 8.5 | 8.5 | 0 |
+| `app/dashboard.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/games.tsx` (+ boards/sheets) | 8.5 | 8.5 | 0 |
+
+**Method and evidence**
+- This is an independent, read-only review. "Old" is the "→ new" score in `rerate4/EK.md`. The open items come from that file's "Still needed for 10/10" and "Regressions" lists.
+- For every screen I read `git diff 4910069 HEAD -- <file>` and the changed files it imports.
+  - Changed this round: 14 screens, plus `components/live/LiveInvitePanel.tsx`, `components/games/{InviteSheet,feedback}.tsx`, `components/comfort/eyeCheckField.ts`, `constants/callTheme.ts`, `constants/theme.ts` (comments and `tickRead` only), `lib/sosReachCopy.ts` (additions only) and the new `lib/r5eScreenFixes.selftest.ts`.
+  - Unchanged: `app/{voicecall,live-view,eye-check,perf-debug,games}.tsx`, the rest of `components/{live,comfort,games,call}/*`, and `lib/{call,golive,games}/*`.
+  - No screen in this batch was split in round 5, so there is no split-equivalence check this round.
+- I checked every R5E claim against the code. The only R5HO item that touches this batch is the ccwire semantic ack, which is unchanged (blocked; `R5HO.md:42`).
+- **Not reproduced (R5E):** the `notifications` `Promise.all` "no catch" item. I confirmed both getters catch internally and fall back to the cached value (`lib/privacyPrefs.ts:79-85`, `:100-106`), so the call cannot reject.
+- **Token check:**
+  - Round 5 did not change any token value. Dark `onPrimary` and `onDanger` are still `#FFFFFF`, and `warning` is still `#F59E0B` / `#93370D` (`constants/theme.ts:235-237`). The `theme.ts` diff only rewrites comments and changes `tickRead`, which is not used by this batch.
+  - The 5 new `CALL` tokens have exactly the values of the literals they replace (`constants/callTheme.ts:26-30` against the old `group-call-active` styles in the diff). The rendering is identical.
+- **Equivalence of the style refactors.** I compared each refactor line by line against the old inline objects.
+  - `vision-comfort` `makeThemed` (`app/vision-comfort.tsx:332-343`): every inline object maps 1:1. `busy && s.busy` gives the old `opacity: busy ? 0.6 : 1`.
+  - `dashboard` `makeStyles` additions (`app/dashboard.tsx:269-286`): every static inline object maps 1:1.
+  - `group-call-active` `CTRL_BTN` (`:842`, `:848-850`): same geometry, with the state colour still inline.
+  - The visuals are unchanged. No behaviour change found.
+- **Checks I ran.** Logs are `SP/rerate5/ek5_tsc.txt`, `ek5_eslint.txt` and `ek5_st.txt`.
+  - `npx tsc --noEmit -p .` exited 0.
+  - `npx eslint` on the 19 changed files: 0 errors and 10 warnings. All are existing `exhaustive-deps` / `array-type` warnings in videocall, group-call legacy, incoming-call, network-test (`:96`) and call-reliability (`:88`).
+  - Selftests, all exit 0:
+    - `lib/r5eScreenFixes` (12)
+    - `components/call/inviteResult` (11), `lib/call/{addPerson,callControls}`
+    - `lib/golive/{immersiveStage,pipCorner (7),hostPasscodeMemo (6)}`
+    - `lib/speedTarget` (14), `lib/sosReachCopy` (8 groups), `lib/comfortStorageFixes` (11), `lib/privacyPrefs`, `lib/outboxSummary` (9), `lib/eyeCheckModel`, `lib/settingReadBack` (10)
+    - `lib/games/{invite,ludoGlass,gamesNative,boardLabels (41)}`, `lib/gamesBackCoverage` (17)
+    - `lib/{a11yCoverage,themeCoverage (22),screenBackCoverage,orphanRoutes (51),silentFailure,responsiveLayout (28)}`
+    - `lib/uiDebtRatchet`: "no file got worse (5 unroled touchables, 283 hex literals remain)".
+- **Not verifiable statically, and not deployed:**
+  - These need a device:
+    - Calls: ringing and decline timing.
+    - Live: PiP and stage screen-reader actions, chat follow-at-bottom.
+    - Storage: the `announceForAccessibility` start and finish timing.
+    - Offline: the live-region timing.
+    - Comfort: `dismissTo` / `beforeRemove`.
+    - Games: every screen-reader change.
+  - Backend (R4BE C13 `contactsReached`, C14 `/net/speed/*`, golive reapers) is still not deployed. The client is credited only for its fallbacks: "Sent to N" and Cloudflare with disclosure.
+
+**Regressions introduced in round 5 (this batch)**
+- None of substance. Every change keeps the previous behaviour apart from its stated fix. Nits:
+  1. **VoiceSheet speaker button: the visible text and the accessible name no longer match.** The button shows "Speaker on" / "Speaker off", but its accessible name is now the fixed "Loudspeaker" plus `selected` (`components/games/feedback.tsx:441-449`). The state is now announced correctly. Voice Control users, however, say what they see ("Speaker on"), and that phrase is not the accessible name (WCAG 2.5.3, label in name). Either make the visible text "Loudspeaker", or include it in the name.
+  2. **Inconsistent rapid-toggle policy between two sibling screens (not a bug).**
+     - call-reliability's low-data Switch is `disabled` while it saves, so a second tap is ignored (`app/call-reliability.tsx:204-207`).
+     - notification-sounds queues every toggle, and the last one wins (`app/notification-sounds.tsx:43-55`).
+     - Both are correct. They just behave differently.
+- Carried over and still open: `lib/call/callControls.selftest.ts:98-101` still asserts "Beauty is gone", while `app/videocall.tsx:554` renders "Tint". This is a product decision (§5, `2026-10-04_fix_status.md:186`).
+
+---
+
+#### `app/voicecall.tsx` — **7.5 → 7.5**
+- **Scores now:** Function 8.5 · States 8 · UI 7.5 · A11y 8 · Security 7.5 · Code 5.5 (mean 7.5). The file is unchanged this round.
+- **Original items:**
+  - ❌ `VoiceCallLegacy` is still present (`:369`–`:748`). This is §5 (`2026-10-04_fix_status.md:185`).
+  - n/a: device ringing is not verifiable statically.
+- **Regressions:** none.
+- **Subscreens:** Add-to-call sheet 8.5 → 8.5 · In-call chat 8 → 8 · Reaction picker 8 → 8.
+- **Still needed for 10/10:**
+  1. Delete `VoiceCallLegacy` (`:369`–`:748`) once the CALLS_README device pass retires the `CALL_ENGINE_V2` rollback (§5).
+  2. Ringing and invite delivery on real devices (📱).
+
+#### `app/videocall.tsx` — **7.5 → 7.5**
+- **Scores now:** Function 8 · States 8 · UI 7.5 · A11y 7.5 · Security 7.5 · Code 5 (mean 7.25)
+- **Original items:**
+  - ✅ The V2 Tint chip's `'#FFFFFF'` is now `CALL.text` (`:512`). `filterLabelActive` uses it too (`:1133`).
+  - ❌ The legacy body is still present (`:580` onward; §5).
+  - ❌ Tint against `callControls.selftest.ts:98-101`: §5, untouched.
+- **Regressions:** none.
+- **Subscreens:** Add-to-call sheet 8.5 → 8.5 · Tint strip 7 → 7 · In-call chat / reactions 8 → 8.
+- **Still needed for 10/10:**
+  1. Remove `VideoCallLegacy` (`:580`–`:1105`) after the rollback gate (§5).
+  2. Resolve Tint: remove it, or make selftest #4 say "renamed to Tint" (`lib/call/callControls.selftest.ts:98-101`).
+  3. The V2 Tint chip still has inline rgba literals: the unselected swatch at `:511`, and `filterLabel` / `filterNote` at `:1132`, `:1134`. Move them to `CALL` as was done for group-call.
+
+#### `app/incoming-call.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8 · Security 7 · Code 8 (mean 8.0)
+- **Original items:**
+  - ✅ The ponytail now names the right place (`:293-298`): `internal/realtime/ccwire_app_events.go` `appEvent`.
+    - That function exists (`vaultchat-backend-go/internal/realtime/ccwire_app_events.go:143`).
+    - The quoted phrase "must never be interpreted as durable delivery" is at `:193`.
+    - The condition for replacing the shortcut is stated.
+  - ❌ The acknowledged decline is blocked: it needs a ccwire semantic ack (backend protocol; `R5HO.md:42`).
+- **Regressions:** none.
+- **Subscreens:** Call-waiting mode 8 → 8.
+- **Still needed for 10/10:**
+  1. Add a ccwire semantic ack for relayed call events, on server and client, so that "told" means "received". Then `sendDecline` (`:300`) can await it and drop the ponytail.
+  2. Existing `exhaustive-deps` warning at `:169` (`chatId`, `displayName`, `type`): document why, or add the dependencies.
+
+#### `app/group-call-active.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8.5 · A11y 7.5 · Security 8 · Code 6 (mean 7.83)
+- **Original items:**
+  - ✅ Unmount guard (round-4 regression #3).
+    - State is now `setSheetState`, and `setSheet` is a `useCallback` that drops the update once unmounted (`:145-151`).
+    - Every write goes through it: `changeRole` `:178`, `lowerHand` `:185`, `moderate` `:188`, `reportInvite` `:221`, and `invite` `:231`, `:264`, `:269`. `onClose` at `:536` does too.
+    - The dependency lists are updated (`:179`, `:186`, `:204`, `:222`, `:290`).
+    - Selftest `r5eScreenFixes` #3 pins it.
+  - ✅ The rgba chrome literals are now `CALL.textMuted / nameScrim / badgeScrim / shareTint / pill`, with identical values (`constants/callTheme.ts:26-30`). `CtrlBtn` geometry is `CTRL_BTN.btn` (`:842`, `:848-850`). There are no `'rgba(` literals left in the file (selftest #3a).
+  - ❌ `GroupCallLegacy` is still present (`:545` onward; §5). Its `RTCPeerConnection` `as any` casts are at `:606` and `:610`.
+- **Regressions:** none.
+- **Subscreens:** Moderation sheet 8.5 → 8.5 · Add people sheet 8 → 8.5 (result can no longer land on an unmounted screen) · Pager 8 → 8 · In-call chat / reactions 8 → 8.
+- **Still needed for 10/10:**
+  1. Remove the legacy body (`:545`–`:825`) after the rollback gate (§5). The `as any` casts and the eslint warnings at `:562` and `:752` go with it.
+  2. The A11y dimension has had no work since round 3. Device screen-reader pass of the tile grid and the pager (📱).
+
+#### `app/call-reliability.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8 · States 8.5 · UI 8 · A11y 8 · Security 7.5 · Code 8 (mean 8.0)
+- **Original items:**
+  - ✅ Mount guard.
+    - There is a `mounted` ref and an `ifMounted` wrapper (`:42-45`).
+    - These are guarded: FSI (`:83`), battery (`:85`), OEM and `DONE_KEY` (`:49-50`), the reverted write (`:57-59`), the opener results (`:64`) and the low-data read (`:46`).
+  - ✅ In-flight guard on low data. The Switch is `disabled` while saving, with `{checked, disabled, busy}` (`:204-205`). The handler returns early (`:207`). A failure reverts and shows the inline error (`:212-215`).
+  - ❌ `VaultPower` presence decides whether the battery card can ever say "Done". It is not in the repo, so this is not verifiable statically (📱).
+- **Regressions:** none. Nit: the drop-second-tap policy differs from notification-sounds (top section #2).
+- **Subscreens:** Full-screen intent 8 → 8 · Battery 8 → 8 · OEM auto-start 8 → 8 · Low-data 8 → 8.5.
+- **Still needed for 10/10:**
+  1. Confirm on a device build that `VaultPower` is linked and that `readBatteryExemption` returns booleans (📱).
+  2. `ifMounted(...)` builds new closures on every render (`:44-45`). `refresh` is captured once by `useFocusEffect([])`, with an eslint warning at `:88`. It works because `mounted` is a ref, but `setBattOk` should be a stable `useCallback` and `refresh` should be in the dependency list.
+
+#### `app/network-test.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8.5 · States 8.5 · UI 7.5 · A11y 8 · Security 8 · Code 7.5 (mean 8.0)
+- **Original items:**
+  - ✅ History rows record the server.
+    - `TestResult.server?` is optional, so older rows still load (`:41-42`).
+    - New rows store `t.host` (`:319`).
+    - The row shows "WiFi · host" (`:523`) and says "measured by host" to screen readers (`:518`).
+  - ✅ The probe uses a fresh token.
+    - Every run re-probes with the current token (`:274-279`).
+    - A 401 mid-run ends the run with a sign-in-again sentence instead of "No request reached …" (`:160`, checked at `:298`).
+    - A 429 is still recorded first and not overwritten (`!limitHit.current`, `:160`).
+  - ◐ The app-owned endpoint: the client is done, but C14 is not deployed. Today it falls back to Cloudflare with the disclosure (`:433-436`).
+- **Regressions:** none. Each run now also sends one HEAD to Cloudflare when ours is absent (`:143-150`). That is already covered by the disclosure.
+- **Subscreens:** Results grid 8 → 8 · History list 8.5 → 9 (server per row) · Failed panel 8 → 8.5 (401 copy).
+- **Still needed for 10/10:**
+  1. Deploy R4BE C14 (ops).
+  2. History mixes servers in one list. Rows are labelled, but there is no filter or grouping (`:513-530`).
+  3. Code: `(state as any).details` (`:107`), `catch (e: any)` (`:322`), and the mount-probe effect's `exhaustive-deps` warning (`:96`).
+
+#### `app/live.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8.5 · States 9 · UI 8 · A11y 8.5 · Security 8 · Code 8.5 (mean 8.42)
+- **Original items:**
+  - ✅ `goLive` classifies by `e.status` (409 = already live, 503 = not configured; `:133-139`). `lib/api.ts:613` sets `err.status`. `startBroadcast` is a plain `api()` call (`lib/broadcast.ts:108-110`). Selftest #6 pins it.
+  - ✅ Mount guard on `load`, `refresh` and `goLive`'s `finally` (`:83-96`, `:149`).
+- **Regressions:** none.
+- **Subscreens:** Go-live composer 8 → 8 · Join card 8.5 → 8.5 · Live-now list 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. The Public/Private segment container has no `accessibilityRole="radiogroup"` around its `radio` children (`:194`). Siblings such as vision-comfort and cache-cleanup use one.
+  2. Many per-render inline colour objects remain in the JSX (for example `:154`, `:163`, `:167`, `:179`, `:222`). Move them into a themed stylesheet.
+  3. `catch (e: any)` (`:128`). Type it as `unknown` and read `status` through a guard.
+
+#### `app/live-view.tsx` (+ `components/live/*`) — **8.0 → 8.0**
+- **Scores now:** Function 8.5 · States 8.5 · UI 7.5 · A11y 8.5 · Security 8 · Code 7.5 (mean 8.08)
+- **Original items:**
+  - ✅ Copy now goes through `copyAndSay`, which alerts "Could not copy" on failure (`components/live/LiveInvitePanel.tsx:17-25`, `:67`, `:77`). Share has a catch (`:84`).
+  - ✅ The stale comment is fixed: it now says "from this device's memory … hostPasscodeMemo" (`:53-55`). The header no longer says "unchanged" (`:3`).
+  - ❌ Golive reapers are not deployed, and end-on-unmount was not added (ZE D3; R5E deferred #6).
+  - ❌ `useLiveStage.ts` is still one large SFU effect. R5E deferred this because reordering join, publish and teardown needs a device pass.
+- **Regressions:** none. `app/live-view.tsx` is unchanged.
+- **Subscreens:**
+  - Invite panel 8 → 8.5.
+  - Unchanged: Waiting / Failed / Ended 8 · Top chrome 8.5 · Live chat 8.5 · Poll card 8.5 · Poll composer 8 · Host media 8 · Camera PiP 8 · Stage strip 8.
+- **Still needed for 10/10:**
+  1. Deploy and confirm the golive reapers (ops), or decide end-on-unmount (ZE D3).
+  2. Split `components/live/useLiveStage.ts`'s single connection effect, with a device pass for join, publish and teardown order (📱).
+  3. Device pass of the PiP and stage screen-reader actions and follow-at-bottom (📱).
+
+#### `app/live/join/[code].tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8.5 · Security 8.5 · Code 8 (mean 8.33)
+- **Original items:**
+  - ✅ Header roles on "Join the live" (`:159`), "Joining live…" (`:213`) and "This live is protected" (`:264`). Error already had one (`:227`).
+  - ✅ A `mounted` ref (`:85-86`). Nothing is set after the redeem if the screen is gone (`:110`, `:119`).
+- **Regressions:** none.
+- **Subscreens:** Name 8 → 8.5 · Joining 8 → 8.5 · Passcode 8.5 → 8.5 · Error 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. `const me: any = await getMyProfile()` (`:94`). Use the profile type.
+  2. Device check of the invite-link arrival and the replace into `/live-view` (📱).
+
+#### `app/notifications.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 9 · UI 8 · A11y 8.5 · Security 8 · Code 7.5 (mean 8.25, ties round up as in rounds 3–4)
+- **Original items:**
+  - ✅ The mount guard covers `loadSos` (`:72-78`), `refreshSos` including its alert (`:84`), and `fireSOS`'s `setSending` (`:161`). The "Emergency alert sent" alert is deliberately never suppressed (`:156`).
+  - n/a (not reproduced, verified): the `Promise.all` getters cannot reject (`lib/privacyPrefs.ts:79-85`, `:100-106`).
+  - ❌ "Reached X of N" waits on the R4BE C13 deploy. Until then the screen honestly says "Sent to N" (`:154-156`).
+- **Regressions:** none.
+- **Subscreens:** SOS history 8.5 → 8.5 · Privacy 8.5 → 8.5 · Panic 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. Deploy R4BE C13.
+  2. Code: `catch (e: any)` (`:158`). `fireSOS` calls `loadSos()` unawaited, so its `false` result is ignored and a failed reload after an SOS is silent (`:157`).
+
+#### `app/notification-sounds.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8.5 · States 9 · UI 8 · A11y 8.5 · Security 8 · Code 8.5 (mean 8.42)
+- **Original items:**
+  - ✅ Switch saves run one after another on `saveChain` (`:32`, `:43-55`), so concurrent read-merge-write saves cannot undo each other. Each run catches, so the chain never rejects. Updates and alerts are mount-guarded (`:47`, `:50`, `:63`).
+  - ✅ The loading state keeps the header (Back with fallback, title as header; `:66-73`) above a labelled spinner (`:76-87`).
+- **Regressions:** none.
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. The Switches are driven only by `prefs` (`:111`, `:127`), which updates after the save resolves. There is no optimistic value and no `busy` state, so the thumb may flip back until the write lands. Device behaviour is not verifiable statically.
+  2. Inline `contentContainerStyle={{ paddingBottom: 40 }}` (`:101`).
+
+#### `app/storage-manager.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8.5 · Security 8 · Code 7.5 (mean 8.17)
+- **Original items:**
+  - ✅ The chatty live region is gone (round-4 regression #1).
+    - The loading view is no longer a live region (`:321-324`). The count still shows on screen.
+    - The start is announced once (`:156`), and the finish once, as success or failure (`:204-208`).
+    - The finish is skipped after unmount, because the `if (!mounted.current) return` at `:165` leaves `mounted` false in `finally`.
+    - Selftest #1 and #1a pin it.
+  - ❌ Walk speed on a large media folder: 📱. Delete-old's walk is still sequential per directory (`:283`).
+- **Regressions:** none.
+- **Subscreens:** Loading 7.5 → 8.5 · Destructive confirmations 8.5 → 8.5 · Load-failed 8 → 8.
+- **Still needed for 10/10:**
+  1. After the walk, `listChats()` (`:170`), `AsyncStorage` and `getFreeDiskStorageAsync` (`:197`) all set state after awaits without re-checking `mounted`. Only the walk itself is guarded (`:165`).
+  2. Measure the walk and the Delete-old walk on a device (📱).
+
+#### `app/cache-cleanup.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 9 · States 9 · UI 8.5 · A11y 8.5 · Security 9 · Code 8 (mean 8.67)
+- **Original items:**
+  - ✅ `load` sets nothing after unmount (`:53-54`, `:63-68`). The cleanup's `finally` only resets and reloads while mounted (`:101`).
+- **Regressions:** none.
+- **Subscreens:** Clear confirmation 8.5 → 8.5 · Load-failed 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. `chooseAutoDays` and `toggleLogout` (`:112-123`) revert after an await with no mount guard and no in-flight guard. A rapid second tap can be reverted by the first tap's failure: the same class of problem fixed this round in call-reliability and notification-sounds.
+  2. Inline `{ flex: 1 }` and `{ paddingBottom: 40 }` objects in the JSX (`:131`, `:137`, `:170`, `:202`).
+
+#### `app/offline-mode.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8.5 · States 9 · UI 8.5 · A11y 8.5 · Security 8 · Code 8 (mean 8.42)
+- **Original items:**
+  - ✅ `retryBase` is cleared once the retry settles (`next.waiting === 0`, `:98`), and when a new message is queued (`:116-117`).
+    - `'pending'` is emitted only by `messageQueue.enqueue` (`lib/messageQueue.ts:216`), so a manual retry does not clear its own base.
+    - A manual retry still resets it (`:133`).
+    - Selftest #2 and #2a pin it.
+- **Regressions:** none.
+- **Subscreens:** Outbox card 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. Live-region timing of the retry line (`:251`) on TalkBack and VoiceOver (📱).
+  2. `catch (e: any)` (`:100`, `:140`).
+
+#### `app/vision-comfort.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 9 · States 8.5 · UI 9 · A11y 9 · Security 8.5 · Code 8 (mean 8.67)
+- **Original items:**
+  - ✅ The theme colours are a memoised `makeThemed(colors)` stylesheet (`:43`, `:332-343`). Static `bold` and `busy` are at `:328-329`. Only the draft-driven live preview stays inline (from `:181`), which is justified. The mapping is 1:1 (see Method).
+  - ❌ The `dismissTo` params plus `beforeRemove` delivery need a device (📱).
+- **Regressions:** none.
+- **Subscreens:** Sight step 8.5 → 8.5 · Discard dialog 9 → 9 · Eye Check suggestion 8.5 → 8.5 · Preview and slider 9 → 9.
+- **Still needed for 10/10:**
+  1. A device check of the eye-check → `dismissTo` → re-apply path (`:70-81`) and the `beforeRemove` guard (📱).
+
+#### `app/eye-check.tsx` (+ `components/comfort/*`) — **8.5 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8.5 · A11y 9 · Security 9 · Code 8.5 (mean 8.67)
+- **Original items:**
+  - ✅ The stale comment now points to `ON_WHITE_FIELD` in `components/comfort/EyeCheckPhases.tsx` (`components/comfort/eyeCheckField.ts:8-9`). The constant is at `EyeCheckPhases.tsx:26`.
+  - ❌ A device check that the summary's `dismissTo` is not blocked by `beforeRemove` (📱).
+- **Regressions:** none. The screen file is unchanged.
+- **Subscreens:** Acuity 8.5 → 8.5 · Colour plates 8.5 → 8.5 · Others 8–8.5 (unchanged).
+- **Still needed for 10/10:**
+  1. Device pass of the summary's `dismissTo` back to Vision Comfort (📱).
+
+#### `app/perf-debug.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 9 · States 8.5 · UI 9 · A11y 8.5 · Security 7.5 · Code 8.5 (mean 8.5). The file is unchanged.
+- **Original items:**
+  - ◐ Gating is a product decision (§5, `2026-10-04_fix_status.md:195`). The entry point is unchanged: `onLongPress` and the `longpress` accessibility action (`app/(tabs)/profile.tsx:523`, `:528`).
+- **Regressions:** none.
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. If the owner decides to, gate the long-press behind `__DEV__` or a diagnostics flag (`app/(tabs)/profile.tsx:523-528`; §5).
+
+#### `app/dashboard.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8.5 · A11y 8.5 · Security 8 · Code 8 (mean 8.33)
+- **Original items:**
+  - ✅ The E2EE row with E2EE off stays scored, but now says why and that nothing can be changed (`:27-32`). It is honest about current behaviour (an R5E logged decision), so I make no deduction.
+  - ✅ The static inline styles moved into `makeStyles` (`:269-286`). Only the per-row state colours stay inline (`:210`, `:216-217`). The mapping is 1:1.
+- **Regressions:** none.
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. The alpha tints are built by string concatenation (`col+'18'`, `col+'44'`; `:210`, `:216`). They only work while every token is 6-digit hex. Use the shared `tint()` (`lib/tintColor.ts:9`), as the Z-B screens did (`2026-10-04_fix_status.md:73`).
+  2. `catch (e: any)` (`:95`).
+
+#### `app/games.tsx` + boards/sheets — **8.5 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8.5 · Security 8.5 · Code 8.5 (mean 8.42)
+- **Original items:**
+  - ✅ InviteSheet:
+    - A failed chat load shows "Couldn't load your chats" with a Try again row, instead of "No chats yet." (`components/games/InviteSheet.tsx:32-34`, `:49-52`, `:109-116`).
+    - The spinner is labelled (`:107`).
+    - Rows say "Send the invite to X[, group]" (`:128`).
+    - `SettingRow` takes an optional `accessibilityLabel` (`components/games/feedback.tsx:253-267`).
+  - ✅ VoiceSheet:
+    - The status is a polite live region (`feedback.tsx:401`).
+    - Each participant is one labelled stop ("Name, speaking"; `:416`).
+    - The speaker toggle carries `selected` (`:448`). This only adds `accessibilityState.selected`, with no visual change (`components/games/ui.tsx:470`).
+  - ❌ The VoiceOver and TalkBack device pass of every board (📱).
+  - ❌ The draw offer still comes from a toast regex (`components/games/Chess.tsx:215`). It needs a field from the external games server.
+- **Regressions:** nit #1. The speaker button shows "Speaker on/off" but its accessible name is "Loudspeaker" (`feedback.tsx:443-449`).
+- **Subscreens:**
+  - InviteSheet 7 → 8.
+  - VoiceSheet 7.5 → 8.
+  - Unchanged: ModeSheet 8 · Searching 8.5 · BotOffer 8 · LeaderboardSheet 8.5 · HistorySheet 8 · RulesSheet 8 · "Which game" code sheet 8 · Chess 8.5 (its draw-offer banner 6.5) · Ludo 8.5 (settings 8) · Rummy 8.5 (leave confirmation 8, table info / score 7.5) · Tic-Tac-Toe 8.5.
+- **Still needed for 10/10:**
+  1. VoiceOver and TalkBack pass of every board, especially Rummy's `accessibilityActions` on a `GestureDetector` child and the GameCard `quickMatch` action (📱).
+  2. A protocol field for draw offers (`components/games/Chess.tsx:215`). It needs the games server.
+  3. Make the speaker button's visible text and accessible name match (`feedback.tsx:443-449`). The same applies to the Mute button: "Mute" / "Unmute your microphone" (`:434-440`) is acceptable, because the visible word is part of the name.
+  4. Rummy table info / score (7.5) is still the lowest board subscreen. It was not part of this round.
+
+---
+
+### F — Media, Files & Documents — round-5 re-rating
+
+- **Old scores.** "Old" is each screen's round-4 score (the "→ new" value in `rerate4/F.md`). The open items are that file's summary regressions 1–6, its "pre-existing problems" (docscanner data loss, backdrops), and each screen's "Still needed for 10/10".
+- **What changed.** I read `git diff 4910069 HEAD` for all 13 screens and for the parts they import:
+  - `components/media/ZoomableImage.tsx`, `components/PdfView.tsx`
+  - `components/fileviewer/{Panes.tsx,fileTypes.ts,styles.ts}`
+  - new `lib/media/{scanRecent,fileUrl,blankImage}.ts` and their selftests
+  - `lib/docs/docStyle.ts`, `constants/theme.ts`, `lib/mediaToolsFixesZR.selftest.ts`
+  - `lib/scanVault.ts` (unchanged), read in full for the key-loss review
+
+  I read the round-5 hunks of every screen in context. I read `app/docscanner.tsx` in full.
+- **No splits in this batch in round 5.** The file-viewer split was round 4. No screen in F was split again.
+- **Fixer claims.** Checked `fixes/R5F.md` (#1–#40) and `R5HO.md` #5 (docStyle icon type) against the code. All 40 "Fixed" rows hold in the code. There are three inaccuracies, all in the fixer's favour or harmless:
+  1. **Cap note is stale.** R5F "Decisions" says docscanner "keeps the 20-entry recent cap (`RECENT_LIMIT`)". The code has **no cap**: `lib/media/scanRecent.ts:12-13`, and the selftest checks that a 21st scan keeps all 20 older keys (`scanRecent.selftest.ts:49-51`). The `RECENT_LIMIT` handoff is stale too. The ZR pin now matches `sealJson(docs)` (`lib/mediaToolsFixesZR.selftest.ts:38`).
+  2. **ZR selftest now passes.** R5F says `lib/mediaToolsFixesZR` fails. It now exits 0, because the handoff landed later.
+  3. **Camera cast is fully removed.** R5F says the camera chip-icon cast is "narrowed, still a cast". R5HO #5 then typed `DocStyle.icon` (`lib/docs/docStyle.ts:12-20`), and the cast is gone (`app/camera.tsx:664`).
+- **What I ran.** Everything was read-only. Logs are in `SP/rerate5/F_*.txt`.
+  - `npx tsc --noEmit -p .`: exit 0.
+  - `npx eslint` on the 13 screens, `components/PdfView.tsx`, `components/media`, `components/fileviewer`, `lib/media` and `lib/scanVault.ts`: 0 errors and 1 warning. The warning predates this round: `lib/media/compressMedia.ts:32` uses `require`.
+  - 28 selftests, all exit 0:
+    - new: scanRecent, fileUrl, blankImage
+    - media: pdfZoom, editExport, videoResumeKey, fflateBound, fileTypes, docStyle
+    - mediaToolsFixesZR
+    - coverage: a11yCoverage, themeCoverage (22/20), screenBackCoverage, orphanRoutes (51)
+    - uiDebtRatchet: "no file got worse … 283 hex literals remain"
+    - zoomPan, videoSeek, reader, shelfOpen, docOpen, strokePath, cameraMode
+    - silentFailure, keyboardAvoidance, permissionDeadEnd, rowOverflow, responsiveLayout, whiteboardStroke
+  - Remaining `any` in the 13 screens: only `app/media-viewer.tsx:580` and `:615` (`catch (e: any)`).
+- **Not verified on a device.** None of these counts beyond what the code shows. Each is **not verifiable statically**:
+  - expo-image `cachePolicy` behaviour (Glide/SDWebImage)
+  - the iOS WKWebView URL form (including a `/private/var` vs `/var` difference)
+  - view-shot's offscreen capture and the blank probe
+  - every `accessibilityViewIsModal` / `importantForAccessibility` and `accessibilityActions` change
+  - the video-player controls with a screen reader on
+  - the whiteboard announcements
+- **Rounding.** Mean of the six dimensions, rounded to the nearest 0.5, ties rounded up (same as rounds 2–4).
+
+| Screen | Old | New | Δ |
+|---|---|---|---|
+| app/camera.tsx | 8 | 8.5 | +0.5 |
+| app/media-viewer.tsx | 8 | 8.5 | +0.5 |
+| app/media-gallery.tsx | 8 | 8.5 | +0.5 |
+| app/image-editor.tsx | 7.5 | 8 | +0.5 |
+| app/file-preview.tsx | 8 | 8.5 | +0.5 |
+| app/file-viewer.tsx | 8 | 8.5 | +0.5 |
+| app/video-player.tsx | 7.5 | 8 | +0.5 |
+| app/reader.tsx | 8.5 | 8.5 | 0 |
+| app/shelf.tsx | 8.5 | 8.5 | 0 |
+| app/archive-viewer.tsx | 8.5 | 8.5 | 0 |
+| app/docscanner.tsx | 7.5 | 8.5 | +1 |
+| app/story-viewer.tsx | 8 | 8.5 | +0.5 |
+| app/whiteboard.tsx | 8 | 8 | 0 |
+
+#### Round-4 summary items
+1. ✅ **View-once disk cache.**
+   - `ZoomableImage` takes `cachePolicy`. It defaults to `'memory'` for local files and `'disk'` for http(s) (`components/media/ZoomableImage.tsx:22-25`, `:86`).
+   - media-viewer passes `'none'` for view-once (`app/media-viewer.tsx:90-92`, `:633`).
+   - The Fresco comment is rewritten (`:409-410`).
+   - Device behaviour is not verifiable statically.
+2. ◐ **reader's dependence on local SQLite.** The screen is now honest about it (`app/reader.tsx:63`, `:81-82`, `:183-198`). Showing the text still needs a bubble hand-off, which R5F lists as an open decision.
+3. ✅ **story-viewer 12 s stall** (`app/story-viewer.tsx:320`).
+4. ✅ **video-player resume race** (`app/video-player.tsx:97-118`, `:262`).
+5. ✅ **iOS PdfView URL** (`components/PdfView.tsx:149`, `lib/media/fileUrl.ts:9-24`, selftest passes). Device behaviour is not verifiable statically.
+6. ✅ **image-editor export.** The wait is 4 s, an `onError` reject was added, and a blank capture is detected (`app/image-editor.tsx:101-114`, `:425-445`, `lib/media/blankImage.ts`).
+
+#### Docscanner recent list: remaining key-loss paths (the requested check)
+The round-4 data-loss path is **closed**:
+- Every change goes through `updateRecent`, which re-reads the **stored** list. It writes nothing on a read failure, and refuses on `locked`/`legacy` (`lib/media/scanRecent.ts:35-47`; `app/docscanner.tsx:135-149`).
+- Save and delete both use it (`:320`, `:425`).
+- The screen's `recentDocs` copy is never written back.
+- The 20-entry cap, which evicted keys, is gone (`scanRecent.ts:12-13`).
+- The selftest covers each of these cases (`scanRecent.selftest.ts:22-53`).
+
+None of the paths left is likely through the UI, and none was introduced in round 5. In order of how material each one is:
+
+1. **The install key is minted silently when SecureStore returns null** (`lib/scanVault.ts:31-43`).
+   - If the stored key read comes back null while a sealed list exists, a new key is generated and **overwrites** the old one. This happens after keystore invalidation or a backup restore, and also if a read ever comes back null spuriously.
+   - The list then opens as `locked`. The only way out is "Reset list", which deletes `VaultScans/` (`app/docscanner.tsx:186-204`).
+   - If the key was really gone, nothing extra is lost. If the null was transient, the overwrite makes the loss permanent.
+   - R5J applied "never mint while something depends on the key" to the vault (`fixes/R5J.md:10`). The scanner has no such guard.
+   - Whether expo-secure-store can return a transient null is not verifiable statically.
+2. **Overlapping list changes are not serialised.** `changeRecent` does read → change → write with no queue (`app/docscanner.tsx:141-149`).
+   - If an add and a delete overlap, the later writer can drop the other's entry.
+   - If the scan's write lands first and the delete's write (computed from the older read) lands second, the new scan's key is lost.
+   - Reaching this needs Back during the save. `processToPdf` does no stale check around `changeRecent` (`:311` is the last one before `:320`), and Back shows the list again (`:435-440`). The user would then have to confirm a delete within the few milliseconds of the save.
+   - Two overlapping deletes only resurrect a ghost row whose `.vcs` is gone (`:430`), not a key.
+   - Shelf already chains its writes (`app/shelf.tsx:104-118`). The same one-line promise chain would close this.
+3. **The read order in `updateRecent` leaves a theoretical window against the legacy migration.**
+   - `updateRecent` reads the sealed list first and the legacy list second (`scanRecent.ts:36`, `:42`).
+   - The migration writes the sealed list, deletes the plaintexts, and only then removes the legacy list (`app/docscanner.tsx:168`, `:176-177`).
+   - A save that read "no sealed list" before the migration's write, and "no legacy list" after its removal, would write `[doc]` over the migrated list. The plaintext would already be gone.
+   - AsyncStorage's serial queue makes this practically unreachable. Reading `hasLegacy` first would close it outright.
+4. **Two concurrent migrations can mismatch key and file.**
+   - Retry calls `loadRecent` with no in-flight guard (`:509`). Only `setRecentError(null)` (`:152`) hides the button after the next render.
+   - Two concurrent migrations would each encrypt the same `<id>.vcs` path under different keys (`:75-82`). The list that wins may not match the file that wins, and both delete the plaintext (`:176`).
+   - This needs a double tap inside one frame.
+   - Related: after a failed migration, the `.vcs` cleanup is fire-and-forget (`:172`). A Retry that lands before it finishes could have its new file deleted.
+5. **The migration does not verify what it wrote.** It deletes the plaintext after a successful save without decrypt-checking the new `.vcs` (`:176`). This predates round 5, and the risk is low.
+
+Copy nit: the `legacy` refusal says "Tap Retry on the Doc Scanner start page" (`:335`). `changeRecent` only sets an error for `locked` (`:146`), and Retry only appears for `'read'` (`:503-513`). So while a migration is still running there is no Retry to tap.
+
+---
+
+#### `app/camera.tsx` — **8 → 8.5**
+- **Scores now:** Function 9 · States 9 · UI 8 · A11y 8.5 · Security 8 · Code 8 (mean 8.42)
+- **Round-4 items:**
+  - ✅ 1 The review sheet wrapper is `accessibilityViewIsModal` (`app/camera.tsx:625`). The top rail and footer are `no-hide-descendants` while reviewing (`:469`, `:498`). Device behaviour is not verifiable statically.
+  - ✅ 2 `pagesBlockCapture` asks before a photo, video or gallery pick throws scanned pages away, and captures nothing either way (`:250-262`). It is used by takePhoto (`:266`), startRecording (`:276`, which also clears `holdRef`) and openPicker (`:373`).
+  - ✅ 3 There is no `any` left (`:664`; R5HO typed `DocStyle.icon`). The `returnTo` route param is no longer read, and the pathname is the literal `'/chat'` (`:211-224`). All callers passed `'/chat'` (`app/chat.tsx:1853`, `:1970`, `:1981`).
+- **Regressions:** none found.
+- **Subscreens:** Permission gate 8 → 8 · Mode tabs 8.5 → 8.5 · Scan review sheet 9 → 9 · Discard-pages confirm (new) — 8.5
+- **Still needed for 10/10:**
+  1. The `notice` banner (`:489-494`) is not hidden while reviewing. It is harmless text, but it sits outside the modal.
+  2. Verify on a device that the modal and hidden rails behave on VoiceOver and TalkBack.
+  3. The file is 834 lines. The colours are fixed AuroraDark values on the camera stage, which is deliberate.
+
+#### `app/media-viewer.tsx` — **8 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8 · Security 8.5 · Code 8 (mean 8.25 → 8.5, tie rounded up)
+- **Round-4 items:**
+  - ✅ 1 View-once uses `cachePolicy 'none'` (`app/media-viewer.tsx:85`, `:90-92`, `:633`). Other local or decrypted sources default to `'memory'` (`components/media/ZoomableImage.tsx:86`). The Fresco comment is fixed (`:409-410`).
+  - ✅ 2 CodeViewer is a `FlatList` with the 500-row cap kept (`:322-357`).
+  - ✅ 3 The HEAD probe sends the token to our own server only. It has a `dead` guard and drops non-OK replies (`:526-538`). `u` is typed (`:373-374`). The `fullImg` style is removed.
+- **Regressions:** none found.
+- **Subscreens:** ImageViewer 7.5 → 8.5 · VideoPlayer 8 → 8 · AudioPlayer 8 → 8 · CodeViewer 7.5 → 8.5 · ArchiveCard 8 → 8 · GenericViewer 8 → 8 · "Nothing to show" 8 → 8 · ProtectedMediaView 8 → 8 · Error+Retry 8.5 → 8.5
+- **Still needed for 10/10:**
+  1. Type the 2 remaining `catch (e: any)` (`:580`, `:615`).
+  2. Confirm on a device that `'none'` and `'memory'` keep decoded copies out of the Glide and SDWebImage disk caches.
+  3. The file is 794 lines with several players inline. The VideoPlayer, AudioPlayer and CodeViewer components could live under `components/media/`.
+
+#### `app/media-gallery.tsx` — **8 → 8.5**
+- **Scores now:** Function 9 · States 8.5 · UI 8.5 · A11y 8 · Security 8 · Code 8 (mean 8.33)
+- **Round-4 items:**
+  - ✅ 1 An `open` id that is not in the walked history alerts, with different copy for capped and uncapped walks (`app/media-gallery.tsx:350-361`). It is gated on `walked` (`:170`, `:241`), so a failed walk relies on the error banner.
+  - ✅ 2 Auto-open waits for `meKnown` (`:151`, `:254-258`, `:350`).
+  - ✅ 3 Types are fixed (`:255`, `:329`, `:389`). Inline styles are moved into the sheet (`:572-580`). The play badge uses `AuroraDark.scrim` (`:598`).
+  - Found by the fixer: decrypted `file://` thumbnails are now memory-only (`:90-93`).
+- **Regressions:** none found.
+- **Subscreens:** Tabs 8.5 → 8.5 · Album grouping 8 → 8 · Error/stale states 8 → 8.5 · Auto-open file 7.5 → 8.5
+- **Still needed for 10/10:**
+  1. One inline colour remains on link rows (`{ color: colors.accent }`, around `:432`).
+  2. A 12 px active-tab label in `onPrimary` on dark `primary` is 4.11:1. This is the open theme decision (`constants/theme.ts:229-235`) and is not deducted here.
+  3. The tiles are plain touchables. Check large-font wrapping of the file and link rows on a device.
+
+#### `app/image-editor.tsx` — **7.5 → 8**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8 · Security 8 · Code 7.5 (mean 8.08)
+- **Round-4 items:**
+  - ✅ (code), device unverified: 1 The wait is `EXPORT_LOAD_MS = 4000` with an `onError` reject (`app/image-editor.tsx:101`, `:425-435`, `:620-621`). A blank capture is detected with `captureLooksBlank` → `isUniformPng`, and Done falls back to the screen capture (`:105-114`, `:444`, `:481-490`). A probe that fails counts as "not blank" (`:111-113`).
+  - ✅ 2 The live stroke is kept in a ref, with one render per frame (`:160-169`, `:243-258`). The frame request is cancelled on unmount.
+  - ✅ 3 Text overlays expose Move up/down/left/right actions (`:96-99`, `:386-391`, `:560-565`). The route cast is gone (`:500`). Undo is on tokens with `hitSlop` (`:721`, `:888-889`). Inline styles are moved into the sheet (`:890-894`).
+- **Regressions:** none to existing behaviour. New-code notes:
+  - The blank probe treats a near-uniform edited image as blank, so an edited plain-colour photo drops to screen resolution. That is a degradation, not a loss (`lib/media/blankImage.ts:65-71`, tolerance 2).
+  - `nudgeText` does not clamp to the canvas (`:386-391`), so screen-reader moves can push text off the photo.
+- **Subscreens:** Crop 8.5 → 8.5 · Draw 8 → 8.5 · Text 7.5 → 8 · Filter 8 → 8 · Adjust 7.5 → 7.5 · Processing overlay 8 → 8 · Discard confirm 8.5 → 8.5
+- **Still needed for 10/10:**
+  1. Verify the offscreen full-resolution capture on a device (still the core open item).
+  2. Clamp `nudgeText` to the canvas (`:386-391`). Announce the new position.
+  3. The file is 924 lines. The draw colours are image content (`:42-44`); the crop chrome uses fixed `#FFFFFF` and an rgba scrim (`:917-923`).
+
+#### `app/file-preview.tsx` — **8 → 8.5**
+- **Scores now:** Function 8.5 · States 9 · UI 8 · A11y 8.5 · Security 8.5 · Code 8 (mean 8.42)
+- **Round-4 items:**
+  - ✅ 1 A HEAD request comes first, with the token for our own server only. A declared length over the limit refuses without downloading. A failed or missing HEAD falls through to the old post-download check (`app/file-preview.tsx:175-190`).
+  - ✅ 2 The gutter width scales with `fontScale` (`:263-266`). Device behaviour is not verifiable statically.
+  - ✅ 3 `catch (e: unknown)` (`:199`). The 15 code-canvas hex values are deliberate.
+- **Regressions:** none found. The early `return` still runs the `finally` cleanup (`:203-206`).
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. A server that answers HEAD with no length still costs a full download before the refusal (`:182-192`). Cap the download itself if that matters.
+  2. The code canvas is a fixed dark palette in both themes, which is deliberate (ratchet).
+
+#### `app/file-viewer.tsx` — **8 → 8.5**
+- **Scores now:** Function 9 · States 8.5 · UI 8 · A11y 8 · Security 9 · Code 8 (mean 8.42)
+- **Round-4 items:**
+  - ✅ 1 `ImagePane` resolves the token for own-server http images and shows a spinner meanwhile (`components/fileviewer/Panes.tsx:62-85`).
+  - ✅ 2 File-type icons are Ionicons (`components/fileviewer/fileTypes.ts:92-131`; `app/file-viewer.tsx:709`; `Panes.tsx:130`, `:183`). The shimmer respects Reduce Motion and stops on unmount (`Panes.tsx:28-37`).
+  - ✅ 3 The iOS URL check uses `sameFileUrl` (`components/PdfView.tsx:149`). The 7 catches are `unknown`. PdfView has no `any` left (`:223`, `:234`, `:255`). Found by the fixer: the PDF page JPEGs are memory-cached (`:117-122`), and the cover spinner uses `c.textDim` (`:278`).
+  - ❌ 4 DocView still mounts wide sheets un-virtualised. This is deferred as a redesign.
+- **Regressions:** none found. The header size line's `marginLeft: 22` (`styles.ts:79`) is now about 2 px off the 16 px icon plus 2 px margin plus 6 px gap. That is trivial.
+- **Subscreens:** Image 8 → 8.5 · PDF/PdfView 8.5 → 8.5 (device unverified) · Office/DocView 8.5 → 8.5 · Text reader 8.5 → 8.5 · Audio 7.5 → 7.5 · Hand-off card 7.5 → 8 · Unknown type 7 → 7.5 · Error+Retry 8 → 8 · Loading 7 → 7.5 · Bottom bar 8 → 8
+- **Still needed for 10/10:**
+  1. Virtualise DocView's wide sheets (deferred).
+  2. On a device, confirm the iOS PDF load, including whether WKWebView reports `/private/var/...` for a `/var/...` path. `filePathOf` does not normalise that (`lib/media/fileUrl.ts:9-18`).
+  3. The audio pane is still the weakest subscreen (7.5). Nothing new was done there.
+
+#### `app/video-player.tsx` — **7.5 → 8**
+- **Scores now:** Function 8.5 · States 8.5 · UI 7.5 · A11y 8.5 · Security 8 · Code 7.5 (mean 8.08)
+- **Round-4 items:**
+  - ✅ 1 With a screen reader on, controls never auto-hide and are forced visible. There is a live listener (`app/video-player.tsx:209-235`). Device behaviour is not verifiable statically.
+  - ✅ 2 Resume is applied in any order of storage, `onLoad` and the first status update (`:97-118`, `:262`).
+  - ◐ 3 The touch handlers are typed (`:179`, `:188`). The pinch is still raw touch maths, deferred with a reason: the player's 0.5× spring-back differs from `lib/zoomPan`. The file is 880 lines.
+- **Regressions:** none found. With a screen reader on, a tap on the stage starts the hide fade and the effect at `:218-224` snaps it back. That is a brief flicker, not a loss of controls.
+- **Subscreens:** Controls overlay 8 → 8.5 · "Nothing to play" 8 → 8 · Load-error overlay 8 → 8
+- **Still needed for 10/10:**
+  1. Skip `toggleControls`' hide branch while `screenReader` is on, rather than undoing it afterwards (`:218-224`).
+  2. Size: 880 lines. 4 hex values on the black stage.
+
+#### `app/reader.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8.5 · States 9 · UI 8.5 · A11y 8.5 · Security 9 · Code 8.5 (mean 8.67 → 8.5)
+- **Round-4 items:**
+  - ✅ 1 "Not on this device yet" and "Can't show this message here" are separated from "Nothing to read". Each has honest copy, a live region and "Try again" (`app/reader.tsx:63`, `:81-82`, `:178-198`).
+  - ✅ 2 Static styles are moved into `st` (`:325-370`). Alpha suffixes are replaced by `withAlpha` (`:41-45`, `:113`, `:221`, `:225`, `:235`, `:293-294`). The reader palettes are 6-digit hex (`lib/readerSettings.ts:82-86`). The `stepLabel` override keeps the old zero bottom margin (`:346`).
+- **Regressions:** none found.
+- **Subscreens:** Reader settings sheet 8.5 → 8.5 · Pages layout 8 → 8.5 · Read-error state 8.5 → 8.5 · Unavailable state (new) — 8.5
+- **Still needed for 10/10:**
+  1. A server row the chat has already shown still cannot be read here unless it is in local SQLite. This needs the in-memory bubble hand-off (R5F Decisions), outside this file.
+  2. The settings scrim is an rgba literal (`:354`). Use `c.scrim`, or document it as reader-fixed.
+
+#### `app/shelf.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8 · States 9 · UI 8.5 · A11y 9 · Security 8 · Code 9 (mean 8.58)
+- **Round-4 items:**
+  - ✅ 1 Accent text uses `c.accentOn` (`app/shelf.tsx:296`, `:312`).
+  - ✅ 2 `KIND_ICON` is a typed glyph map (`:33`). Inline styles moved to `S.spinner` and `S.flex` (`:210`, `:250`, `:313-314`).
+- **Regressions:** none found.
+- **Subscreens:** Kind chips + sort 8.5 → 8.5 · Stale bar 8 → 8
+- **Still needed for 10/10:**
+  1. A focus reload can overwrite the live pin set while a chained pin write is pending. `load` calls `setPins` (`:79-82`), and the render syncs `pinsRef` (`:104`). The pending write then saves the reloaded set (`:120`), so the toggle is silently lost. Skip `setPins` from `load` while a write is pending, or merge.
+  2. Confirm on a device that the row's Pin/Unpin action is exposed.
+
+#### `app/archive-viewer.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 9 · States 8.5 · UI 8.5 · A11y 8.5 · Security 9 · Code 8.5 (mean 8.67 → 8.5)
+- **Round-4 items:**
+  - ✅ 1 The first download is remembered and `copyAsync`'d into the share dir. Re-download is only a fallback (`app/archive-viewer.tsx:70-72`, `:98`, `:234-247`).
+  - ✅ 2 `c.accentOn` (`:390`). Catches are `unknown` (`:137`, `:207`, `:250`). ZIP-only is documented.
+- **Regressions:** none found.
+- **Subscreens:** Directory browser 8.5 → 8.5 · Error state 8.5 → 8.5 · Unsupported-format state 8.5 → 8.5
+- **Still needed for 10/10:**
+  1. ZIP only. Other formats need a decoder, which is a product decision the screen states.
+  2. The copied share file in `vt_share_` is left for the boot sweep. This is acceptable and documented elsewhere. Nothing else concrete remains.
+
+#### `app/docscanner.tsx` — **7.5 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8.5 · A11y 8 · Security 8 · Code 8 (mean 8.25 → 8.5, tie rounded up)
+- **Round-4 items:**
+  - ✅ 1 The data-loss fix holds: changes are made against the stored list, and the screen refuses when the list is `locked` or `legacy` (`lib/media/scanRecent.ts:35-47`; `app/docscanner.tsx:135-149`, `:320`, `:425`, `:331-338`). See the key-loss section above for the residual, low-likelihood paths.
+  - ✅ 2 The picker backdrop is a sibling `Pressable`, and the sheet is `accessibilityViewIsModal` (`:664-666`). It uses `c.scrim` (`:781`).
+  - ◐ 3 Catches are `unknown` (`:230`, `:324`, `:411`). The scan key is still device-bound, not PIN-bound (`lib/scanVault.ts:13-16`, `ponytail:`), and deferred as a security-design change.
+- **Regressions:** none found.
+  - If Back is pressed during the save window, the screen still jumps to "PDF ready", because there is no stale check after `changeRecent` (`:320-323`). That is cosmetic.
+  - Found by this review: the `legacy` refusal copy points at a Retry button that is not shown in that state (`:335` vs `:146`, `:503-513`).
+- **Subscreens:** Step pick 8 → 8.5 · Step type 8 → 8 · Step processing 8 → 8 · Step preview 8 → 8 · Chat picker Modal 7.5 → 8.5 · Delete confirm 7.5 → 8.5 (list written before the file is deleted, `:423-431`) · Recent-list error card 8.5 → 8.5
+- **Still needed for 10/10:**
+  1. Do not mint a new scan key silently while a sealed list exists. Surface "key lost" instead, as R5J did for the vault (`lib/scanVault.ts:31-43`).
+  2. Serialise `changeRecent` with a promise chain (`app/docscanner.tsx:141-149`). Read `hasLegacy` before `readSealed` (`scanRecent.ts:36-44`). Guard `loadRecent` against re-entry (`:151`, `:509`).
+  3. Fix the `legacy` refusal copy, or show Retry while a migration is pending (`:335`). Add a stale check after the save (`:320`).
+  4. Bind the scan key to the PIN (`lib/scanVault.ts:13-16`), as already documented with `ponytail:`.
+
+#### `app/story-viewer.tsx` — **8 → 8.5**
+- **Scores now:** Function 8.5 · States 9 · UI 8 · A11y 8.5 · Security 8 · Code 8 (mean 8.33)
+- **Round-4 items:**
+  - ✅ 1 The viewers backdrop is an `absoluteFill` sibling, and the overlay is `accessibilityViewIsModal` (`app/story-viewer.tsx:653-695`).
+  - ✅ 2 A media story with no attachment id is marked loaded at once (`:320`).
+  - ◐ 3 `locked` and the catches are typed (`:553`, `:152`, `:448`). The 768-line file and the GateChallenge closure are left in place, which is deliberate.
+- **Regressions:** none found.
+- **Subscreens:** GateChallenge 8 → 8 · Viewers sheet 7.5 → 8.5 · Error/loading 8.5 → 8.5 · Delete confirm 8.5 → 8.5 · Reduce Motion 8 → 8 (device unverified)
+- **Still needed for 10/10:**
+  1. Check on a device that VoiceOver and TalkBack treat the viewers sheet as modal.
+  2. Size: 768 lines. Two STAGE hex values are deliberate.
+
+#### `app/whiteboard.tsx` — **8 → 8**
+- **Scores now:** Function 8 · States 8.5 · UI 7.5 · A11y 8 · Security 8 · Code 8.5 (mean 8.08)
+- **Round-4 items:**
+  - ✅ 1 The route cast and the `returnTo` param are removed (`app/whiteboard.tsx:172`).
+  - ◐ 2 The canvas is `accessible`, with a stroke-count value, and each change is announced (`:42-43`, `:127-134`, `:234-235`). It is still gesture-only, which is inherent.
+- **Regressions:** none found. Making the canvas `accessible` groups it into one element, which matches its role.
+- **Subscreens:** Toolbar 8.5 → 8.5 · Clear confirm 8 → 8 · Leave guard 8.5 → 8.5
+- **Still needed for 10/10:**
+  1. Screen-reader users still cannot draw. This is inherent.
+  2. Check on a device that the announcements are not too chatty during fast drawing.
+  3. 14 ink hex values are image content (`:22-27`).
+
+---
+
+**Regressions introduced by round 5:** none that break behaviour. Minor new-code notes:
+- image-editor: the blank probe drops a near-uniform edit to screen resolution, and `nudgeText` is unclamped.
+- docscanner: Back during the save shows "PDF ready", and the `legacy` copy points to a missing Retry.
+- video-player: the controls fade snaps back while a screen reader is on.
+
+No split regressions: no F screen was split in round 5. No token regressions: `onPrimary` sits on `accentDeep`/CTA fills in docscanner, and dark `onPrimary` is still the owner's documented open decision (`constants/theme.ts:229-235`).
+
+---
+
+### G1 — Family Circle — re-rating (round 5)
+
+| Screen | Old | New | Δ |
+|---|---|---|---|
+| `app/family.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/family-map.tsx` | 8.0 | 8.0 | 0 |
+| `app/family-add.tsx` | 8.5 | 8.5 | 0 |
+| `app/family-alerts.tsx` | 8.5 | 9.0 | +0.5 |
+| `app/family-history.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/family-items.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/family-member.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/family-places.tsx` | 8.5 | 8.5 | 0 |
+| `app/family-setup.tsx` | 8.5 | 8.5 | 0 |
+
+**Method.** Static, read-only review of `git diff 4910069 HEAD` for every G1 screen and every file it imports that changed.
+- **Baseline.** "Old" scores and open items come from `rerate4/G1.md`.
+- **Overall** = mean of the six dimensions, rounded with `Math.round(2x)/2`.
+- **Read in full or by diff:**
+  - all nine screens;
+  - `components/family/MemberSections.tsx` (new), `PlaceEditSheet`, `HubDistancePanel`, `MapRosterSheet`, `HubQuickActions`, `HubSpaceCards`, `HubTop`, `HubControls`, `NavigationLayer`, `SelectedMemberSheet`, `CheckinSheet`, `FamilyMap` (R5HO `noun` prop), `useHubPresence`;
+  - `lib/family/{presenceFold, distance}.ts`, `lib/items/{api, scanner}.ts`, `lib/tintColor.ts`, `lib/permissionDenied.ts`, `lib/location/live.ts:28-51` (`mergePresence`);
+  - the token changes in `constants/theme.ts`.
+- **Fixer log.** I checked all 23 "Fixed" rows in `fixes/R5G1.md` against the code (details per screen below).
+  - 22 hold.
+  - **Row 23 is overstated.** It says "A grep for `+ '<hex2>'` over app/family*.tsx and components/family now finds none". Two alpha concatenations remain:
+    - `components/family/HubControls.tsx:92`: `colors.danger + (scheme === 'dark' ? '1F' : '14')`.
+    - `components/family/CheckinSheet.tsx:62`: `c.color + (on ? '33' : '1e')`.
+    - The fixer's grep missed the parenthesised form. These are not regressions.
+
+**Split equivalence.**
+- **family-member → `MemberSections.tsx`.** I compared it line by line with the removed JSX in the diff.
+  - Identity card, activity list, fix row and place row are verbatim moves. The only change is that the three `+ '22'` tints now use `tint(…, 0.13)`, and 0x22/255 = 0.133.
+  - `MemberIdentityCard` recomputes `fresh = tier === 'live'` (`MemberSections.tsx:46`), which is identical to the screen's `:211`.
+  - `MemberPlaceRow` receives the screen's `fresh` (`app/family-member.tsx:535`).
+  - One visible change is a fix: `colors.textFaint` is `rgba(…)` in both palettes (`constants/theme.ts:207`, `:257`). So the old `textFaint + '22'` was an invalid colour string, and the not-here place icon disc had no valid tint. `tint()` now parses rgba (`lib/tintColor.ts:20-21`).
+- **Presence fold (hub + map) → `lib/family/presenceFold.ts`.**
+  - `foldPoint` is the removed code verbatim.
+  - `foldSealed` is the old sealed fold plus attaching `refs` when the store's fix has the same ts and coordinate (`presenceFold.ts:34-44`).
+  - This is a deliberate behaviour change, and a fix. `mergePresence` never received the sealed event's refs (`lib/location/live.ts:38-48`), so the ref lines read by `HubMemberRow.tsx:54`, `MapRosterSheet.tsx:101` and `useHubDistances.ts:62` could never appear.
+  - The selftest covers both orders, older-fix rejection, movement and stops (10 checks).
+
+**New tokens.**
+- `onPrimary`/`onDanger`/`warning` values did not change this round (`constants/theme.ts:235-237`). Only the doc comments changed (`:80-87`, `:229-234`).
+- The family-setup change moves a *disabled* label off `onPrimary` to `textDim` (`app/family-setup.tsx:100`, `:124`), the same rule family-add and AnnouncementSheet use.
+- No new `warning` use in G1.
+- `tickRead` changed, but it is chat-only (not G1).
+
+**Checks run (read-only; logs in `rerate5/`):**
+- `npx tsc --noEmit -p .` exits 0 (`G1_tsc.txt`).
+- `npx eslint app/family*.tsx components/family lib/family lib/items lib/tintColor.ts` exits 0 with no output (`G1_eslint.txt`).
+- Selftests, all exit 0 (`G1_st_*.txt`):
+  - uiDebtRatchet: "no file got worse", 5 unroled, 283 hex.
+  - a11yCoverage, themeCoverage (22 assertions + 20 exemptions), locationEgress, responsiveLayout (28), screenBackCoverage, orphanRoutes (51), permissionDeadEnd (5), androidPermissions (12), tintColor.
+  - items/crowd, family/presenceFold (10), family/roadDistance (22), traceShape, placeOptions, memberFormat, historyOwners, and the `lib/family/distance.ts` self-check.
+- **Grep over app/family*.tsx and components/family/\*.tsx:**
+  - `as any` 0 everywhere.
+  - Hex 0 in every screen. Remaining hex: CheckinSheet 4, CrashCountdown 5 (2 of them in comments), FamilyMap 12, and HubControls 1 / NavigationLayer 1 (comments only).
+  - `eslint-disable`: family-map 8, family.tsx 3, history/items/member 2 each.
+
+**Not verified:** nothing is deployed or device-verified. These all need a device:
+- the hub row accessibility actions;
+- the 40% hub roster and 35% map roster;
+- the THEN chip, slots and outlined Done;
+- the share sheet;
+- background alert taps;
+- the Android "don't ask again" Settings route;
+- create → hub and the `dismissTo` return.
+
+---
+
+#### `app/family.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 9 · States 9 · UI 8 · A11y 8.5 · Security 8.5 · Code 8 (mean 8.50)
+- **Original items:**
+  1. ✅ **Distance summary label.** `summaryBasis()` (`lib/family/distance.ts:252-256`) counts `byRoad` rows (`:242`; rows are marked at `:400`). It prints "Straight-line", "By road" or "By road (N straight-line)" before "from {origin}" (`components/family/HubDistancePanel.tsx:98`). The roadDistance selftest gained 4 checks.
+  2. ✅ **Roster from a space you have left.**
+     - `activeIdRef` holds the space on screen (`:205-206`).
+     - A late success for another id is dropped (`:212`), and so is a late failure (`:227`).
+     - A late 403/404 for a space already left still removes it, but only refreshes the switcher instead of jumping to `cs[0]` (`:222-224`).
+  3. ◐ **Alpha concatenations onto tokens.** Five of six moved to `tint()`: `HubQuickActions.tsx:32`, `HubSpaceCards.tsx:136`, `:226`, `HubTop.tsx:151`, `:188` and `HubControls.tsx:94`. The SOS button ground `colors.danger + (scheme === 'dark' ? '1F' : '14')` remains (`HubControls.tsx:92`).
+  4. ❌ **Seal the location-store upload.** Backend (fix_status §4 "Family location"). It is still disclosed.
+  5. ❌ **Device verification** is still pending.
+  - Also fixed (not an open item before): sealed-relay reference distances now reach the roster (see Method, presence fold).
+- **Regressions:** none. The roster guard keeps the base behaviour for the space on screen. The refs change is an intended fix.
+- **Subscreens:**
+  - Expanded map + roster: 8 → 8.5. Ref lines can now render (`HubMemberRow.tsx:54`).
+  - Sections grid: 8 → 8.
+  - Check-in sheet: 8.5 → 8.5. One concatenation is left (`CheckinSheet.tsx:62`).
+  - Announcement sheet: 9 → 9.
+  - Manage sheet: 8.5 → 8.5.
+  - Crash countdown: 9 → 9.
+  - Member actions: 8.5 → 8.5.
+  - SOS outcome dialog: 8 → 8.
+  - Roster error state: 8.5 → 9. It no longer flips for a space already left.
+  - Distance panel: 8 → 9. The basis is now honest.
+- **Still needed for 10/10:**
+  1. **Seal the location-store upload**, or offer an opt-out of server retention (backend; `lib/family/presence.ts:426-434`, fix_status §4).
+  2. **Move the SOS-button ground onto `tint()`** (`components/family/HubControls.tsx:92`), and the check-in tile fill too (`CheckinSheet.tsx:62`).
+  3. **Keep shrinking the 808-line screen.** It still holds all state and actions, with 3 justified `eslint-disable`s. It is listed in fix_status §6.
+  4. **Device-verify:**
+     - the row accessibility actions;
+     - the 40% roster;
+     - the one-dialog SOS flow;
+     - the ref lines now that they render.
+
+#### `app/family-map.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8.5 · States 8 · UI 8 · A11y 8.5 · Security 8.5 · Code 7.5 (mean 8.17)
+- **Original items:**
+  1. ✅ **Roster sheet grows.** `maxHeight` is `Math.max(148, round(winH × 0.35))` (`components/family/MapRosterSheet.tsx:68-69`, `:81`).
+  2. ✅ **One fold helper.** `foldSealed` at `:163`, `foldPoint` at `:171` and `:617`, all from `lib/family/presenceFold.ts`. The hub uses the same helper. The refs fix comes with it.
+  3. ◐ **Keep splitting.** The screen went from 1076 to 1065 lines. The slot model and nav wiring are still inline, and there are still 8 `eslint-disable`s.
+  4. ✅ **Member Route rounded.** Both ends go to 4 dp (`:276-279`), and the header states it (`:14-15`).
+  5. ❌ **Device verification** is still pending.
+- **Regressions:** none.
+  - The tint swaps in `NavigationLayer.tsx:103`, `:154`, `:269` and `SelectedMemberSheet.tsx:71`, `:88` keep the same alphas (0x22≈0.13, 0x18≈0.09, 0x55≈0.33, 0x33=0.2).
+  - FamilyMap's new optional `noun` keeps the family copy when omitted (`FamilyMap.tsx:721`, `:723-724`, `:805`).
+- **Subscreens:**
+  - `FamilyMap` WebView: 8 → 8. `originWhitelist={['*']}` remains (`:734`).
+  - MeetHereSheet: 9 → 9.
+  - SelectedMemberSheet: 8 → 8.
+  - NavigationLayer: 8.5 → 8.5.
+  - Trip and Leave-now bars: 8 → 8.
+  - Route, turn and follow bars: 8.5 → 8.5.
+  - Saved-place chips: 8 → 8.
+  - Roster sheet: 8 → 8.5. It is sized to the window, and its ref lines now render.
+  - Connector labels: 8 → 8.
+- **Still needed for 10/10:**
+  1. **Extract the slot model and the navigation wiring.** The screen is 1065 lines with 8 `eslint-disable`s. It is the batch's largest file and the main reason Code stays at 7.5.
+  2. **Narrow `originWhitelist={['*']}`** on the map WebView (`components/family/FamilyMap.tsx:734`) to the inline-HTML origin.
+  3. **Device-verify:**
+     - the THEN chip;
+     - the slots;
+     - the outlined Done;
+     - the 35% roster.
+
+#### `app/family-add.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8.5 · States 9 · UI 8.5 · A11y 8.5 · Security 8 · Code 8 (mean 8.42)
+- **Original items:**
+  1. ✅ **Member list failure is said.** `circleMembers(...).catch(() => null)` (`:75`). When it is null, the error bar says "Couldn't check who is already in this space…" and offers Retry (`:83-85`, `:244-254`). Contacts stay usable. The effect deps now include `isFamily` (`:105`).
+  2. ❌ **Device-verify** the share sheet and the `SpaceGround` seam.
+- **Regressions (minor):**
+  - **Empty state hidden.** When the member check fails AND the user has no DM contacts, the "No contacts yet… send them an invite code below" empty state is suppressed. The `error && people.length === 0 → null` branch (`:259-262`) was written for a failed *contacts* load. What remains is a bar saying members "may be listed as selectable" over an empty list.
+- **Subscreens:** share-code confirm: 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. **Show the empty-contacts state when only the member check failed.** Gate `:259` on a contacts-load failure, not on any `error`.
+  2. **Type the member mapper.** The `(m: any)` is still at `:80`; `circleMembers` returns `CircleMember[]`.
+  3. **Device-verify** the share sheet and the header seam.
+
+#### `app/family-alerts.tsx` — **8.5 → 9.0**
+- **Scores now:** Function 9 · States 9.5 · UI 8.5 · A11y 9 · Security 8 · Code 9 (mean 8.83)
+- **Original items:**
+  1. ✅ **Empty filter has its own copy.** When the circle has alerts but the filter is empty, it shows "No important/system alerts" and "Other alerts are under All." (`:145-155`, with `hasAny` from `:72`).
+  2. ✅ **Section headers have a header role** (`:167`).
+  3. ✅ **Critical wash on `tint()`.** It is `withAlpha(colors.danger, 0.13)` (`:185`), aliased because the screen has its own `tint` (`:24`, `:106`).
+  4. ❌ **Device-verify** background family-alert taps.
+- **Regressions:** none.
+- **Subscreens:**
+  - Filter tabs: 9 → 9.
+  - Clear-history confirm: 9 → 9.
+  - Empty-filter state (new): 9.
+- **Still needed for 10/10:**
+  1. **Device-verify** background family-alert taps, locked and unlocked. Not verifiable statically.
+  2. **Move the empty-state styles into `st`.** They are inline objects (`:149`, `:152`, `:159-160`).
+
+#### `app/family-history.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 9 · Security 8 · Code 8.5 (mean 8.42)
+- **Original items:**
+  1. ❌ **Road matching opt-in.** Not done. It is still automatic (rounded to about 11 m and disclosed), and this is not a listed fix_status §5 decision.
+  2. ✅ **Roles.**
+     - Range row: `tablist` with `tab` chips (`:216`, `:221`).
+     - Picker: a labelled `radiogroup` (`:257`) with `checked` (`:262`).
+     - Headers: "Trips", "Timeline" and the day labels (`:325`, `:360`, `:367`).
+  3. ✅ **Retry labelled.** "Retry loading history" (`:238`). The spinner is labelled "Loading history" (`:230`). A retry swaps the button for that spinner, so no busy state is needed (comment `:235-236`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Range tabs: 8 → 9.
+  - Locked view: 8 → 8.
+  - Trips list: 8 → 8.5.
+  - Member picker: 8.5 → 9.
+- **Still needed for 10/10:**
+  1. **Make road matching (`/nav/trace`) opt-in**, or a per-viewer switch (`:166-176`; `lib/family/traceShape.ts:11-13` records the gap).
+  2. **Move the state-dependent chip and text styles out of inline objects** (`:222-223`, `:239`, `:264-265`).
+
+#### `app/family-items.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8 · States 9 · UI 8 · A11y 8.5 · Security 8.5 · Code 8 (mean 8.33)
+- **Original items:**
+  1. ❌ **Background left-behind scan.** Still not wired. It needs native background BLE plus geofence exits, and it is disclosed in-screen (`:481-485`).
+  2. ✅ **Item list failure is said.** `loadLists` sets `itemsFailed` (`:111-118`). A `LoadFailed` row with a labelled Retry and a polite live region (`:64-77`) replaces the empty hint (`:408-412`).
+  3. ✅ **Settings after "don't ask again."**
+     - `bleNeverAskAgain()` records `NEVER_ASK_AGAIN` (`lib/items/scanner.ts:69-70`, `:81`, `:85`).
+     - The screen passes `!bleNeverAskAgain()` to `permissionDenied` (`:173`), which offers "Open settings" (`lib/permissionDenied.ts`).
+  4. ✅ **A11y details.**
+     - Headers: MY THINGS (`:334`), FAMILY'S THINGS (`:420`), NEARBY DEVICES (`:449`) and the pairing title (`:504`).
+     - The scan button has a busy state (`:324`).
+  - **Also fixed (older bug).** `lib/items/api.ts:39-41` now rethrows every error except 404. Before, `reportSighting` and `forgetSharedItem` never rejected:
+    - "by you" is now written only after a real success (`:240`);
+    - "Removed here only" can fire (`:389-394`);
+    - a failed shared fetch shows its own row (`:422-424`);
+    - a failed re-read after a successful share or forget is a stale list, not a failed share (`:299`, `:390`).
+    - I checked every caller: `family-items.tsx` is the only importer, and every call site catches (`:116`, `:228`, `:240`, `:299`, `:390`, `:391`).
+- **Regressions:** none in behaviour.
+  - A 404 server is unchanged: it resolves empty, and "Saved, but not shared" shows as before (`:297-304`).
+  - Doc nit: the long `ensureBlePermissions` JSDoc now sits above the new `let neverAskAgain` (`lib/items/scanner.ts:55-70`).
+- **Subscreens:**
+  - Nearby list: 8 → 8.
+  - Pairing sheet: 8.5 → 9 (header).
+  - Remove confirm: 8 → 8.5 (the forget failure is now reachable).
+  - Family's things: 8.5 → 9 (load failure surfaced; honest "by you").
+- **Still needed for 10/10:**
+  1. **Wire the background left-behind scan** (native BLE + geofence exits), or drop it from the spec (`:481-485`).
+  2. **Move the JSDoc back onto `ensureBlePermissions`** (`lib/items/scanner.ts:55-70`). Reset `neverAskAgain` in its `catch` (`:87`).
+  3. **Say when your own sighting report fails.** It is fire-and-forget (`:228`). Today a sighting the space never received is invisible to its owner.
+  4. **Device-verify** the Settings route after "don't ask again" on Android 12+.
+
+#### `app/family-member.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8 · States 8.5 · UI 8 · A11y 9 · Security 8 · Code 8 (mean 8.25)
+- **Original items:**
+  1. ❌ **Road matching opt-in.** Not done (`:235-245`). It is rounded via `traceShape` and disclosed.
+  2. ✅ **Tints on `tint()`.** `MemberSections.tsx:130`, `:165`, `:187`. This also repairs the invalid `textFaint + '22'` (see Method).
+  3. ✅ **Section headings are headers** (`:450`, `:490`, `:520`, `:529`).
+  4. ✅ **Split.** 675 → 560 lines. `MemberIdentityCard`, `MemberActivityList`, `MemberFixRow` and `MemberPlaceRow` are pure moves (`components/family/MemberSections.tsx`). The gates, fetches and headings stay in the screen, and locationEgress passes.
+- **Regressions:** none.
+- **Subscreens:**
+  - Withheld state: 8 → 8.
+  - Load-failed notice: 8.5 → 8.5.
+  - Relationship chips: 9 → 9.
+  - Route-to-stale confirm: 8 → 8.
+  - Map-matching caption: 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. **Make road matching opt-in** (`:235-245`). The track still goes to `/nav/trace` up to once a minute.
+  2. **Give the identity card one accessible summary.** Name, freshness and battery are read as separate fragments (`MemberSections.tsx:49-82`), and the battery icon has no label (`:72-76`).
+
+#### `app/family-places.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 9 · States 8.5 · UI 8.5 · A11y 9 · Security 8 · Code 8 (mean 8.50)
+- **Original items:**
+  1. ✅ **Regression fixed: the form resets on every open.** `if (!place && formFor) setFormFor(null)` (`components/family/PlaceEditSheet.tsx:75`) clears it on close, so reopening the same place re-seeds from the stored place (`:76-83`). This matches the base.
+  2. ✅ **Lock chip tint.** It is `tint(zoneColor(...), 0.13)` (`:347`).
+  3. ✅ **Headers.** "Add a safe zone" (`:256`) and "Places (n)" (`:292`) on the screen. "When it's active" and "How long it lasts" in the sheet (`PlaceEditSheet.tsx:138`, `:183`).
+- **Regressions:** none.
+- **New finding (predates round 5):** a failed places read can overwrite saved places.
+  - `getPlaces` maps any read or parse error to `[]` (`lib/family/store.ts:22-24`, `:55`), and the screen swallows the result (`:61`).
+  - The next Add writes `[g, ...places]` (`:156`), and the next toggle or edit writes `places.map(...)` (`:162-163`, `:228`). Either one overwrites the stored list with only what is on screen.
+  - The same happens if Add is tapped before the first read resolves.
+  - The probability is low (AsyncStorage is local), but it is silent data loss.
+- **Subscreens:**
+  - Edit-place sheet: 8.5 → 9.
+  - Lock/unlock confirms: 8.5 → 8.5.
+  - Delete confirm: 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. **Do not save over places that were never read.**
+     - Track a `loaded`/`readFailed` state at `:61`.
+     - Disable Add, toggle and edit until the read succeeds.
+     - Show a load-failed row with Retry instead of "Places (0)".
+  2. **Device-verify** the edit sheet, keyboard and lock flow.
+
+#### `app/family-setup.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8.5 · States 8 · UI 8.5 · A11y 9 · Security 7.5 · Code 8.5 (mean 8.33)
+- **Original items:**
+  1. ❌ **Seal the location-store upload.** Backend (fix_status §4). It is disclosed in the copy.
+  2. ✅ **Disabled labels.** When the field is empty, the icon and label use `textDim` (`:100`, `:124`). `onPrimary` is used only on the `primary` fill. The spinners show only while busy, which needs the fill.
+  3. ❌ **Device-verify** create → hub and the `dismissTo` return.
+- **Regressions:** none.
+- **Subscreens:** none (Alerts only).
+- **Still needed for 10/10:**
+  1. **Seal the location-store upload**, or offer an opt-out of server retention (`lib/family/presence.ts:426-434`).
+  2. **Device-verify** create → hub and the `dismissTo` return (`:38`).
+
+---
+
+#### Regressions introduced in round 5 (G1)
+1. **family-add, minor.** A failed member check with zero DM contacts hides the "No contacts yet… invite code below" empty state (`app/family-add.tsx:259-262`). The new member-check message reuses `error`, which that branch treats as a failed contacts load.
+2. **lib/items/scanner.ts, doc only.** The `ensureBlePermissions` JSDoc is now attached to `let neverAskAgain` (`:55-70`).
+3. **No split or token regressions.**
+   - The MemberSections and presenceFold moves are equivalent, apart from the intended refs fix and the `textFaint` tint repair.
+   - The `onPrimary`/`onDanger`/`warning` values are unchanged.
+   - Fixer row 23's "none remain" claim is inaccurate (`HubControls.tsx:92`, `CheckinSheet.tsx:62`), but that is unfinished work, not a regression.
+
+---
+
+### G2 — Location, Navigation & Safety — re-rating (round 5)
+
+This is a static, read-only review from `4910069` to HEAD (`2a05e46`), using the same rubric (`RUBRIC.md`) and format (`RERATE.md`, `RERATE5.md`).
+
+- **Baselines.** "Old" is the round-4 score in `rerate4/G2.md`. The open items are that file's "Still needed for 10/10" lists and its five regressions.
+- **What I read.**
+  - All 9 screens in full at HEAD, each with its `git diff 4910069 HEAD`.
+  - The new split parts in full: `components/lock/LockActiveFace.tsx`, `components/lock/LockChip.tsx`, `components/sos/SosContacts.tsx`, `SosHistory.tsx` and `sosStyles.ts`.
+  - The changed helpers, read in full or by diff: `components/nav/NavBanner.tsx`, `components/ui/KeyboardSafe.tsx`, `lib/lock/lockService.ts:362-416`, `lib/lock/alarmChannels.ts`, `lib/lock/alarmController.ts:75-160`, `lib/sosReachCopy.ts`, `lib/useReducedMotion.ts`, `lib/nav/navSettings.ts`, `services/security/deviceSecurity/riskEngine.ts` and `viewModel.ts` (plus its selftest), and the `constants/theme.ts` diff.
+- **Commits.** Round 5 touches this batch in three commits:
+  - `300183d` holds all of R5G2's work.
+  - `5492453` and `2a05e46` change only `constants/theme.ts`.
+
+**Fix claims (`fixes/R5G2.md`).** All 32 "Fixed" rows match the code. Small differences:
+- **Line counts.** The logged counts are off by 1–2 lines: `emergency-sos.tsx` is 420 lines (claimed 422) and `location-lock.tsx` is 424 (claimed 423).
+- **The `onPrimary` handoff landed** (R5HO #3). The Palette doc now says "Both schemes are white (#FFFFFF) today… dark does NOT [pass AA]" (`constants/theme.ts:82-87`).
+- **Deferred rows.** All three are honest:
+  - The live share still ends when you leave. The copy says so, but the decision is **not** recorded in fix_status §5 (`2026-10-04_fix_status.md:183-197`).
+  - The SOS reach count needs a backend deploy.
+  - The rest needs device checks (📱).
+
+**Evidence I ran.** Logs are in `rerate5/G2_*.txt`. Nothing was device-tested. The backend `contactsReached` is still not deployed.
+- `npx tsc --noEmit -p .` → exit 0.
+- `npx eslint` on the 9 screens and the 13 helpers and components → exit 0, no output.
+- `npx tsx` selftests, all exit 0:
+  - a11yCoverage
+  - themeCoverage (22 passed, 20 exemptions)
+  - screenBackCoverage
+  - responsiveCoverage
+  - keyboardAvoidance (4)
+  - silentFailure
+  - permissionDeadEnd (5)
+  - uiDebtRatchet ("no file got worse", 5 unroled, 283 hex)
+  - locationEgress
+  - rowOverflow (6)
+  - orphanRoutes (51)
+  - nav/typedCoords
+  - lock/lockHistoryUnits
+  - sosReachCopy (8 groups)
+  - nav/navE2E (1540 assertions)
+  - deviceSecurity/viewModel (now with AA contrast checks for both schemes)
+  - the `lib/lock/alarmController.ts` self-check
+- **Hex literals and casts.** The 9 screens and their new parts hold one hex literal: the deliberate SOS gradient (`emergency-sos.tsx:375`). There is no `as any`.
+
+**Entry points.** None were lost.
+- `/location`: `chat.tsx:1982`.
+- `/location-lock`: `navigate.tsx:221`, `family-places.tsx:376`, `lock-alert.tsx:114,161` and `lockService.ts:497`.
+- `/lock-settings` and `/lock-history`: `location-lock.tsx:375,398` and `LockActiveFace.tsx:212,216`.
+- `/emergency-sos`: `family.tsx:442`, `HubQuickActions.tsx:101`, `HubManageSheet.tsx:158` and `lib/spaces/layout.ts:94`.
+- `/trusted-contacts`: `emergency-sos.tsx:214`, `SosContacts.tsx:28,56`, `notifications.tsx:180,361` and `privacyChecklist.ts:56`.
+- `/aiguardian`: `mini.tsx:59`.
+
+**Splits: is the behaviour identical?**
+- **`emergency-sos`.** `diff` of the old `makeStyles` against `components/sos/sosStyles.ts` shows they are identical.
+  - The contacts and history markup are the same element for element (old `4910069:app/emergency-sos.tsx` against `SosContacts.tsx:23-89` and `SosHistory.tsx:24-62`). Props replace the closures.
+  - The Sent face's text is now built by `sosSentLine()` (`lib/sosReachCopy.ts:277-282`). It returns the same three strings and the same "… Call or text them too." suffix as the old inline code.
+  - The only intended change is that each history row is one accessible element (`SosHistory.tsx:52`).
+- **`location-lock`.** The active face moved verbatim into `LockActiveFace.tsx:99-223`: same bars, map, Stats, Ticking, Navigate-back chips, buttons and styles.
+  - Its hooks run before its `if (!lock.center) return null` (`:62-96`). The screen's hooks all run before its `return <LockActiveFace/>` (`location-lock.tsx:210-218`).
+  - Two changes are intended: every button and chip is now 44 tall (`LockActiveFace.tsx:247`, `LockChip.tsx:28`), and `askKillSafe` takes the new keyed refusal (`:40-44`).
+
+**New tokens.** `onPrimary`, `onDanger` and `warning` keep their values (`theme.ts:235, 279`). Round 5 changed only comments, `tickRead` and `APPS_DISC_INK`, none of which this batch uses, so there is no token regression. White on the dark primary and danger stays below AA. That is still the owner's open decision, so it is not scored.
+
+**Rounding.** As before, the overall score is the mean rounded to the nearest 0.5, and an exact .25 or .75 rounds up.
+
+| Screen | Old | New | Δ |
+|---|---|---|---|
+| `app/location.tsx` | 8.0 | 8.0 | 0 |
+| `app/navigate.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/location-lock.tsx` | 8.0 | 8.0 | 0 |
+| `app/lock-alert.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/lock-history.tsx` | 8.0 | 8.0 | 0 |
+| `app/lock-settings.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/emergency-sos.tsx` | 8.0 | 8.0 | 0 |
+| `app/trusted-contacts.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/aiguardian.tsx` | 8.0 | 8.5 | +0.5 |
+
+**Round-4 regressions.** All five are fixed:
+1. AI Guardian's iOS announcement and contrast: `aiguardian.tsx:92`, `viewModel.ts:23-34`.
+2. The bare ETA in NavBanner: `NavBanner.tsx:64-71`.
+3. The danger-bordered "Refreshing…" banner on every filter tap: `lock-history.tsx:271-272`.
+4. Trusted contacts' lost bottom padding: `trusted-contacts.tsx:128-129, 260`.
+5. The two doc comments: `lockService.ts:365-394` and `lock-settings.tsx:40-43`.
+
+**Regressions from round 5.** There is one, and it is cosmetic. Neither split changed behaviour, and the tokens changed nothing.
+1. **`lock-history.tsx:276-277` with `:298-299`: two spinners during a Retry.**
+   - While a Retry runs with sessions listed, the header banner shows "Refreshing" and the new list footer shows "Loading sessions" at the same time.
+   - Before this round, the footer spinner showed only once the list held a full page (`sessions.length >= limit`).
+   - Show the footer spinner only when `!retrying`.
+
+Several items below were present before round 5 and are newly recorded. They are not regressions:
+- The active face's action row overflows while the alarm sounds.
+- Some tap targets are tiny: Export / Delete all, "View full security log", and the SOS Test / ON-OFF buttons.
+- Trusted contacts can double-submit from the keyboard.
+
+---
+
+#### `app/location.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8 · States 9 · UI 8 · A11y 8.5 · Security 7.5 · Code 8 (mean 8.17)
+- **Original items (rerate4/G2.md):**
+  1. ◐ **Live session ends on leave.**
+     - It is kept as is (`:175-176`). The live card now says so on its own line, "Keep this screen open: leaving it stops sharing." (`:336`). The start announcement (`:221-222`) and the header (`:12-14`) say it too.
+     - It is still **not** recorded in fix_status §5, so it stays partial.
+  2. ✅ **Live start and end announced.**
+     - Start: `:221-222`.
+     - End at zero: `:181-185`. Stop button: `stopByUser` (`:187-190`, `:337`). There is no double announce, because stopping sets `live=false` with `timeLeft=0` in one batch (`:170-171`).
+  3. ✅ **Cache read guarded.** `.then(c => { if (c && mountedRef.current) … }).catch(() => {})` (`:134`).
+  - Extra: the permission-denied title has the header role (`:262`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Permission-denied state: 7.5 → 8
+  - GPS-failure state: 8.5 → 8.5
+  - Live-sharing mode: 7 → 7.5 (start and end are spoken; it still dies on leave)
+  - LocationMap: 9 → 9
+- **Still needed for 10/10:**
+  1. **Live session.** Record "live share ends on leaving" as a fix_status §5 decision, or move the watcher into a service (`:175-176, 236-254`).
+  2. **Tap targets below 44.**
+     - "Navigate here" and "Try again" are about 36 dp: `mapsBtn` has `paddingVertical: 9` and a 13 sp label (`:402`).
+     - The duration radios are about 40 dp (`durBtn`, `:411`).
+     - Add `minHeight: 44` to both.
+  3. **Alpha suffixes.** The live card builds `c.danger + '12'` / `'4D'` (`:416`). Use the shared `tint()` helper (`lib/tintColor.ts`).
+  4. **Unguarded state after await.** `reverseGeocode` sets state after its await without `mountedRef` (`:98-105`). Minor.
+
+#### `app/navigate.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8 · States 8.5 · UI 8.5 · A11y 9 · Security 7.5 · Code 8 (mean 8.25, rounded up)
+- **Original items:**
+  1. ✅ **Banner labels.** NavBanner's right column is one element: "300 m to the next turn, ETA 3:45 PM", or "Finding a new route" (`NavBanner.tsx:64-67`). The visible text reads "ETA …" (`:71`), and `dim` is `textDim` (`:43`).
+  2. ✅ **Alpha text colours.** They are now `textDim` / `textFaint` (`:236, 242, 249, 253, 274, 354`).
+  3. ✅ **Chips at 44.** `st.chip` has `minHeight: 44` (`:392`).
+  4. ✅ **`eslint-disable` gone.** The deps are `[dest, s.costing, s.routeOpts]` (`:101`).
+     - Re-tapping a checked option returns early (`:167`), and checkboxes always differ, so they proceed.
+     - The store replaces `routeOpts` only on patch (`lib/nav/navSettings.ts:38-41`).
+     - Nit: the first `loadNavSettings` builds a new object (`:32`), which can cause one extra preview fetch. That is harmless, because the cancel guard covers it (`:70, 89`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Setup mode: 8 → 8.5
+  - Active navigation: 8 → 8
+  - Route alternative chips: 7.5 → 8
+  - NavBanner: 8 → 9
+  - NavMap: 8 → 8
+- **Still needed for 10/10:**
+  1. **Bottom safe area (📱).** The active sheet's `paddingBottom: 22` (`:395`) has no safe-area inset. `/navigate` uses a native header, so it gets no `SCREEN_BOTTOM` (`app/_layout.tsx:222-225, 709-716`). The End button can sit inside the iOS home-indicator zone. Add `insets.bottom`.
+  2. **Suggestion rows.** They are about 40 dp (`sugRow`, `:386`). Add `minHeight: 44`.
+  3. **Background tints.** They are still alpha suffixes: `colors.primary + '14'` / `'1a'` (`:228, 271, 369`). Use `tint()`.
+  4. **`start()` unmount guard.** It sets `starting` after its await with no guard (`:151-163`). Minor.
+
+#### `app/location-lock.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8.5 · States 8.5 · UI 7.5 · A11y 9 · Security 7.5 · Code 8 (mean 8.17)
+- **Original items:**
+  1. ✅ **File split.**
+     - The screen is 424 lines. The active face is `components/lock/LockActiveFace.tsx` (249 lines), and the shared chip is `LockChip.tsx` (29).
+     - The behaviour is identical (see "Splits" above).
+  2. ✅ **Refusal copy by reason.**
+     - `enableKillSafe(): Promise<KillSafeResult>` returns `'no_lock' | 'denied' | 'service_failed'` (`lockService.ts:366, 387-394`).
+     - The copy is keyed by reason (`:371-385`), and the JSDoc is back on its function (`:386`).
+     - Both callers branch on it (`LockActiveFace.tsx:40-44`, `lock-settings.tsx:115-116`).
+  3. ✅ **44 dp buttons.** `srcBtn` (`:416`) and the active face's `btn` (`LockActiveFace.tsx:247`) are 44, and the comment is now true (`:413-415`).
+  4. ✅ **Selected-state controls.**
+     - Saved places are radios in a "Saved places" radiogroup, matched by name **and** coordinates (`:282-293`).
+     - The pin toggle is a `switch` with `checked`, a fixed label and a hint (`:249-250`).
+     - "SAVED PLACES" has the header role (`:281`).
+  - Extra: Test now reports a sound failure (`testAlarmAndSay`, `:46-50`).
+    - `testAlarm()` resolves false through `lastToneStart()` (`lockService.ts:408-416`, `alarmChannels.ts:37-62, 73`).
+    - It is valid because `controller.test()` starts the tone synchronously (`alarmController.ts:149-152, 84-87`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Active face (LockActiveFace): 8.5 → 8. It is unchanged by the split, but its action row overflows; see item 1.
+  - Setup face: 8 → 8.5
+  - Background-protection Alert: 8 → 8.5 (reason-specific)
+  - Battery Alert: 7 → 7
+  - Unlock confirm: 8.5 → 8.5
+  - NavMap: 8 → 8
+- **Still needed for 10/10:**
+  1. **Action row overflows while the alarm sounds** (pre-existing; newly recorded).
+     - The row holds Unlock, Stop alarm, Alerts and History in a non-wrapping row (`LockActiveFace.tsx:200-220`). Each `btn` is 24 of padding + a 16 icon + a 6 gap + a 13.5 sp bold label (`:247-248`).
+     - By my estimate that is about 420 dp against 343 dp available on a 375 dp phone (card padding 16, `:243`). History and part of Alerts are pushed off-screen. Without the alarm, the three buttons fit.
+     - Add `flexWrap: 'wrap'`, as `lock-alert.tsx:207` does. The Navigate-back row (`:191`) needs the same at 320 dp. Exact widths are 📱.
+  2. **Bottom safe area (📱).** The card's `paddingBottom: 22` (`LockActiveFace.tsx:243`) has no inset, because the screen uses a native header and so gets no `SCREEN_BOTTOM`.
+  3. **Background protection target.** It is about 35 dp (`bgBanner` `padding: 9`, `:246`), and the stop-alarm bar is about 38 dp (`alarmBar`, `:241`). Add `minHeight: 44`.
+  4. **Alerts summary.** It leaves out "Continuous beep" (`location-lock.tsx:378-380`).
+
+#### `app/lock-alert.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8 · States 8.5 · UI 8 · A11y 9 · Security 7.5 · Code 8.5 (mean 8.25, rounded up)
+- **Original items:**
+  1. ✅ **iOS phase changes.**
+     - `phaseLine` is computed once (`:63-69`) and still feeds the Android assertive region (`:142-144`).
+     - On iOS each later change is announced (`:74-83`). The intro is spoken once on both platforms (`:77-78`).
+     - Not device-verified.
+  2. ❌ **Device checks** (📱). Not verifiable statically.
+  3. ✅ **Listener guarded by `alive`.** `lib/useReducedMotion.ts:34`.
+- **Regressions:** none.
+- **Subscreens:**
+  - Alarm mode: 8.5 → 9
+  - Safe mode: 8 → 8
+- **Still needed for 10/10:**
+  1. **Device checks (📱).** Confirm that the strobe stays off before the Reduce Motion setting resolves (`:51`), and that the iOS phase announcements are spoken.
+  2. **Second exit is not introduced.** `announcedLine` is never reset when the face hides (`:74-83`). A second exit in the same mount gets no intro on Android, where the remounted region does not announce. This is pre-existing (the old ref was one-shot too). Reset the ref when `alarmFace` turns false.
+  3. **No header role.** "NAVIGATE BACK" is a section label without the header role (`:154`). Minor.
+
+#### `app/lock-history.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8 · States 9 · UI 8 · A11y 8.5 · Security 7 · Code 8 (mean 8.08)
+- **Original items:**
+  1. ✅ **Banner.**
+     - It shows only for an error, or while its own Retry runs (`retrying`, `:111, 142, 271`).
+     - The loading border is neutral `glassStroke` (`:272`). The comment matches (`:267-270`).
+     - Filter, range and "Show more" reloads use a labelled footer spinner (`:298-299`).
+  2. ✅ **Reload race.** `reload` returns its data (`:116-126`). `refresh` applies it only if `req === reqRef.current`, on both success and error (`:129-139`).
+  3. ✅ **Timeline Retry.** The shared `loadEvents` (`:144-150`) is used by `toggle` (`:159`) and by a labelled Retry. The failure line is a polite region (`:361-370`).
+  4. ✅ **One element per event row.** For example, "Exited zone, 42 m, at 10:31:05" (`:379-380`).
+  - Extra: the chips are at 44 (`:443`).
+- **Regressions:** two spinners during a Retry (`:276-277` + `:298-299`; regression 1). Cosmetic.
+- **Subscreens:**
+  - Export Alert: 7.5 → 7.5
+  - Delete-all confirm: 8.5 → 8.5
+  - Per-session delete: 8.5 → 8.5
+  - Timeline and note editor: 8.5 → 8.5. It gains a Retry, but there is no progress while events load (`:156, 159`), and the note field is about 26 dp tall (`:395`).
+  - "Show more" footer: 8 → 8.5
+- **Still needed for 10/10:**
+  1. **Tiny targets.** "Export" and "Delete all" are about 18 dp tall, with no hitSlop or minHeight (`:258-265`; `linkRow` `:452`). Delete all is destructive. Add `minHeight: 44` or `hitSlop`.
+  2. **Double spinner.** Hide the footer spinner while `retrying` (`:298`).
+  3. **No timeline progress.** Opening a session or tapping Retry shows an empty timeline until `getEvents` returns (`:144-159`). Show a spinner, and ignore Retry taps while one is in flight.
+  4. **Note field.** It is about 26 dp tall (`paddingVertical: 5`, `fontSize: 12`, `:395`). There is no keyboard avoidance on this FlatList, so a lower session's note can sit under the keyboard (📱).
+  5. **No unmount guard.** `refresh` sets state after unmount. `reqRef` does not cover unmount (`:129-139`). Minor.
+
+#### `app/lock-settings.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 9 · UI 7.5 · A11y 9 · Security 8 · Code 8 (mean 8.33)
+- **Original items:**
+  1. ✅ **Test Alarm reports failure.** It reports `testFailed('Alarm sound')` when the tone could not play (`:265`; `lockService.ts:408-416`).
+  2. ✅ **Vibration.** The catch is kept for a real throw, with a comment (`:275-276`). The footnote tells the user to check system settings when nothing is heard or felt (`:281-284`).
+  3. ✅ **Chips at 44** (`:317-318`).
+  4. ✅ **One doc block on `save()`** (`:40-43`).
+  - Extra: the kill-safe refusal copy is reason-specific (`:112-116`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Custom sensitivity panel: 8 → 8.5
+  - Repeat-interval chips: 8 → 8.5
+  - Battery-exemption row: 8 → 8
+  - Background-tracking switch: 8 → 8.5
+- **Still needed for 10/10:**
+  1. **Partial detection.** Test Alarm detects only a tone that failed to load. A muted media volume plays "successfully" (`alarmChannels.ts:56-61`). The footnote covers it (`:281-283`). 📱 to confirm.
+  2. **Alpha suffix.** The Switch track colours use `colors.primary + '88'` (`:74, 184, 255`). Use `tint()` or a track token.
+  3. **Save order.** Rapid taps start overlapping `save()` calls with no ordering (`:104-105`). The last write wins in the store, but alerts can arrive out of order. Minor.
+
+#### `app/emergency-sos.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8 · States 9 · UI 7.5 · A11y 8.5 · Security 7.5 · Code 8 (mean 8.08)
+- **Original items:**
+  1. ◐ **Reach count.** The backend is still not deployed. The client is honest against today's server (`sosReachCopy.ts:265, 278`).
+  2. ❌ **Device checks** (📱): the route, shake and Reduce Motion.
+  3. ✅ **Result announced.**
+     - "Sending SOS." / "Sending test SOS." (`:253`).
+     - Afterwards, `sosSentAnnouncement()` speaks everything the Sent face shows: the result line, the warning and the no-location note (`:272`; `sosReachCopy.ts:285-293`).
+     - The face renders the same `sosSentLine()` (`:286, 343-344`), and the selftest covers it (8 groups).
+  4. ✅ **Contacts unmount guard.** `loadTrustedContacts` returns after the await when unmounted, on both paths (`:133, 143`).
+  5. ✅ **File split.** 420 lines plus `SosContacts.tsx` (91), `SosHistory.tsx` (65) and `sosStyles.ts` (88). Behaviour is identical. The one intended change: each history row is one element (`SosHistory.tsx:52`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Default / SOS button: 8.5 → 8.5
+  - Countdown: 8 → 8
+  - Sending: 6.5 → 8 (announced)
+  - Sent: 8 → 8.5 (announced; the same copy on screen)
+  - Shake detection: 7.5 → 7.5 (📱)
+  - Contacts selector (SosContacts): 8.5 → 8.5
+  - History (SosHistory): 8 → 8.5
+- **Still needed for 10/10:**
+  1. **Deploy the reach count.** Deploy R4BE C13 and migration 144 (backend).
+  2. **Device-verify (📱)** the route, shake, Reduce Motion and the two announcements back to back on iOS (`:253, 272`).
+  3. **Small targets.** These are below 44 dp, by `sosStyles.ts` paddings:
+     - "Send Test SOS", about 37 dp (`:185`)
+     - the shake ON/OFF switch, about 33 dp (`:213`)
+     - "OK", about 38 dp (`:206`)
+     - "Set Up" / "Retry", about 37 dp (`:233`)
+  4. **Alpha suffixes.** These style colours use them: `c.warning + '4D'/'14'`, `c.danger + '26'/'80'` and `c.accent + '4D'/'0A'/'33'` (`sosStyles.ts:183, 185, 193, 224, 226`). Use `tint()`.
+  5. **Shake setting not persisted.** Shake detection resets to ON on every visit (`:96`). Persist it, or say it is per-visit.
+
+#### `app/trusted-contacts.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8 · States 8.5 · UI 8 · A11y 9 · Security 8 · Code 8 (mean 8.25, rounded up)
+- **Original items:**
+  1. ✅ **Cards make room for the form.** The info card and the "What trusted contacts receive" card are hidden while `adding` (`:132, 236`). 📱 on small screens.
+  2. ✅ **Resting padding restored.** The 16 pt body padding is on an inner View (`:128-129`, `s.body` `:260`), so KeyboardSafe's inset adds below it (`KeyboardSafe.tsx:38-40`).
+  3. ✅ **One element per row.** Avatar, name, VaultID and status form one element, for example "Asha, @asha, online" (`:167-168`). Remove stays a labelled button (`:178-179`).
+  4. ✅ **Remove guarded after leaving.** The `mounted` guard sits before the rollback and the alert (`:103`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Add-by-VaultID form: 8 → 8.5 (📱)
+  - Remove confirm: 8.5 → 8.5
+  - Stale-cache line: 8 → 8
+- **Still needed for 10/10:**
+  1. **Double submit from the keyboard.** `addByVaultId` has no in-flight guard (`:74-79`). The Add button is disabled while `searching` (`:223`), but `onSubmitEditing` (`:216`) can start a second `addTrustedContact`. Return early when `searching`.
+  2. **Device check (📱).** The form above the keyboard on a small phone.
+  3. **Alpha suffixes.** The remove button uses `c.danger + '1A'/'4D'` (`:272`). Use `tint()`.
+  4. **Remove uses a stale list.** `removeTrusted` captures `trusted` at render (`:98-99`), so two overlapping removals can resurrect a contact on rollback. Use the functional `setTrusted`. Minor.
+
+#### `app/aiguardian.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8.5 · States 9 · UI 8.5 · A11y 8.5 · Security 8 · Code 8.5 (mean 8.5)
+- **Original items:**
+  1. ✅ **Theme-aware status colours.**
+     - `BAND_META` and `STATUS_META` gain `lightColor` (`riskEngine.ts:140-145`, `viewModel.ts:23-29`), chosen by `schemeColor()` (`viewModel.ts:32-34, 77-117`).
+     - The screen derives the view model per `scheme` (`aiguardian.tsx:40-46`), and actions carry their colour (`:160`).
+     - The selftest asserts every text colour is at least 4.5:1 on each theme's composited card (`viewModel.selftest.ts`: "Scheme colours"). The aurora behind the card is not modelled (📱).
+  2. ✅ **iOS announcement.** `announceForAccessibility` runs on iOS only, so Android is not read twice (`:91-92`).
+  3. ✅ **Stale result card.** `load()` clears the card first (`:55-59`). It runs on a focus return or after a failed scan (`:67, 95`).
+- **Regressions:** none. The scan path builds a dark-scheme view model only for the label and count (`:78`), which have no colour, so nothing renders wrong.
+- **Subscreens:**
+  - Scan result: 8 → 9
+  - Checks list: 8.5 → 9
+- **Still needed for 10/10:**
+  1. **Tiny link target.** "View full security log" is about 19 dp tall, with no hitSlop or minHeight (`:209`; `alertsLink` `:258`). Add `minHeight: 44`.
+  2. **Device check (📱).** Light-theme band and status colours over the aurora blooms, which the contrast test does not model.
+  3. **Dark-mode contrast.** The scan button's `onPrimary` on `primary` is 4.11:1 in dark mode (`theme.ts:82-87`). That is an open design decision, not scored here.
+
+---
+
+### H — Spaces — round-5 re-rating
+
+Base `4910069` → HEAD (`2a05e46`). The round-5 Spaces work is `67cee05` (fix log `fixes/R5H.md`). Two other commits also touch this batch:
+- `2a05e46` (R5HO): FamilyMap `noun`, used by space-run and space-ops-map. It also adds the visitor-pass revoke route on the backend only.
+- `5492453`: a comment-only change to `constants/theme.ts`.
+
+This is a static, read-only review. Nothing here is deployed or device-verified.
+
+**Scope.** "Old" is the round-4 score in `rerate4/H.md`. The open items are that file's "Still needed for 10/10" lists and its four regressions.
+
+**What I read.** Every screen in full, plus the parts it now depends on:
+- `components/spaces/useRunBroadcast.ts` (new) and `DeviceDetailSheet.tsx`
+- `NewRunModal.tsx` and `StopFormModal.tsx`
+- `components/ui/useDatePicker.tsx` (new `inModal` option)
+- `lib/spaces/api.ts` (`getRunsWithManifest` `previous`)
+- `lib/spaces/runPlan.ts` (`reusableManifest`, `stopWhenText`)
+- `lib/spaces/attendance.ts` (`calendarDaysAgo`, `crossingsForDay`)
+- `lib/spaces/layout.ts`
+- `components/family/FamilyMap.tsx` (`noun`)
+
+I also read the whole diff (`rerate5/H_diff.txt`).
+
+**How today's server is handled.**
+- **Runs with riders.** C11 (`include=`) is still not deployed, so `getRunsWithManifest` takes the per-run path (`lib/spaces/api.ts:123-138`). On a **timer** re-read, a run that is not on the road and has not changed status now keeps its last manifest (`lib/spaces/runPlan.ts:110-115`). Started runs are still read once each per tick.
+- **Shift.** C12 is not deployed, and `loadShift` still falls back to the device copy.
+- **Visitor-pass revoke.** The revoke route exists only in the undeployed backend (`fixes/R5HO.md` #12). No client calls it.
+
+**Rounding:** overall = the mean of the six scores, rounded to the nearest 0.5, with ties rounded up (as in earlier rounds).
+
+**Checks I ran (read-only). All exit 0:**
+- `npx tsc --noEmit -p .`: 0 errors (`rerate5/H_tsc.txt`). R5E's log reported an error at `app/space-run-driver.tsx:108`; that error is gone at HEAD.
+- `npx eslint app/space-*.tsx components/spaces/ lib/spaces/ components/ui/useDatePicker.tsx components/family/FamilyMap.tsx`: clean (`rerate5/H_eslint.txt`).
+- `npx tsx` selftests (outputs in `rerate5/H_st_*.txt`):
+  - `lib/spaces/` runPlan, shift, leave, attendanceDays (new), runHeartbeat (now reads `useRunBroadcast.ts`) and deviceCommands, plus `npx tsx lib/spaces/attendance.ts`
+  - `uiDebtRatchet`: "no file got worse (5 unroled touchables, 283 hex literals remain)"
+  - `themeCoverage` (22 + 20 exemptions), `a11yCoverage`, `screenBackCoverage`, `orphanRoutes` (51), `keyboardAvoidance` (4) and `constants/spaceTheme`
+- I did not run `npm test`. The coordinator's `r5-test.txt` shows 413/417, with 4 pre-existing non-Spaces failures (minimize, layoutMetrics, securityEmulatorFlag, moneySeam).
+- Remaining `any` in Spaces is almost all `catch (e: any)`. There are 24 such catches across checkin, incidents, visitors, transport, tasks, roster, people and leave, plus others in run/run-driver/runs-admin. Three other casts remain: `(e: any)` at `app/space-roster.tsx:80`, `(me as any)` at `app/space-run.tsx:156`, and `p as any` at `components/spaces/PermissionMatrix.tsx:154`.
+
+| Screen | Old | New | Δ |
+|---|---|---|---|
+| app/space-admin.tsx | 7.5 | 8.0 | +0.5 |
+| app/space-attendance.tsx | 7.5 | 8.0 | +0.5 |
+| app/space-checkin.tsx | 8.0 | 8.0 | 0 |
+| app/space-devices.tsx | 7.5 | 7.5 | 0 |
+| app/space-incidents.tsx | 8.0 | 8.0 | 0 |
+| app/space-leave.tsx | 7.5 | 8.0 | +0.5 |
+| app/space-ops-map.tsx | 7.5 | 8.0 | +0.5 |
+| app/space-overview.tsx | 7.5 | 8.0 | +0.5 |
+| app/space-pending.tsx | 8.0 | 8.0 | 0 |
+| app/space-people.tsx | 8.0 | 8.0 | 0 |
+| app/space-roster.tsx | 8.0 | 8.0 | 0 |
+| app/space-run-driver.tsx | 7.0 | 7.5 | +0.5 |
+| app/space-run.tsx | 7.5 | 8.0 | +0.5 |
+| app/space-runs-admin.tsx | 7.5 | 8.0 | +0.5 |
+| app/space-tasks.tsx | 7.5 | 8.0 | +0.5 |
+| app/space-transport.tsx | 7.5 | 8.0 | +0.5 |
+| app/space-visitors.tsx | 8.0 | 8.0 | 0 |
+
+**Round-4 regressions, re-checked:**
+1. ✅ **Picker inside Modals.** `useDatePicker(skin, { inModal: true })` draws the iOS sheet as an `absoluteFill` overlay inside the host Modal, not as a second Modal (`components/ui/useDatePicker.tsx:32-33`, `:79`, `:100-102`).
+   - It sets `accessibilityViewIsModal` (`:79`) and dismisses the keyboard on open (`:61`). It exposes `close` (`:73`, `:105`).
+   - All four Space callers use it, render `picker.element` last, and pass `onDismiss={picker.close}`:
+     - `app/space-leave.tsx:68`, `:374`, `:445`
+     - `app/space-tasks.tsx:107`, `:302`, `:409`
+     - `NewRunModal.tsx:41`
+     - `StopFormModal.tsx:47`
+   - The comment now matches the callers (`useDatePicker.tsx:12-15`, `:74-77`). Android still uses the native dialog. The presentation is 📱.
+2. ✅ **Check-in naming.** The school shortcut now reads "Check in" (`app/space-overview.tsx:56-58`). The business link reads "View check-ins" (`:296`). The OFFICE layout label is "Check in" (`lib/spaces/layout.ts:116`).
+3. ◐ **Polling cost.**
+   - Timer re-reads pass `previous` (`app/space-ops-map.tsx:71`, `:94`; `app/space-transport.tsx:154`, `:182`), so runs that are not started keep their manifest.
+   - Transport now fetches `circleMembers` once per focus (`app/space-transport.tsx:165-174`).
+   - Started runs are still one `getRun` each per tick until C11 is deployed.
+4. ✅ **Stop day.** `stopWhenText` shows the clock alone on the run's day, and otherwise the weekday and date. It is used in the row and its label (`app/space-runs-admin.tsx:461-471`; `lib/spaces/runPlan.ts:123-128`; selftest passes).
+
+**Splits and tokens.**
+- `useRunBroadcast` matches the removed effects line for line (diff against `4910069`). The heartbeat, broadcast/detection and background hand-off are unchanged. The only addition is `myId`, a stable ref, in the broadcast effect's deps (`components/spaces/useRunBroadcast.ts:134`).
+- `space-run-driver` still imports and uses `endRunBroadcast` and `setBackgroundRun` for Finish (`app/space-run-driver.tsx:250-253`).
+- The values of `onPrimary`, `onDanger` and `warning` are unchanged; only comments changed (`constants/theme.ts:80-87`, `:229-236`).
+- Spaces read `SpacePalette`, whose `warning` and `onBrand` are untouched (`lib/spaces/theme.ts:53-54`).
+- No token regression in this batch.
+
+**New regressions and risks from round 5 (all minor):**
+1. **Stale manifests for runs not on the road.** A timer re-read now keeps the manifest of a run that is not started for as long as the screen stays focused (`lib/spaces/runPlan.ts:110-115`). On ops-map, whose 60 s timer runs whenever it is focused (`app/space-ops-map.tsx:92-96`), riders added to or removed from a *scheduled* run elsewhere stay stale in the tiles until a focus or pull. This trade-off is documented in the code and is not wrong behaviour, but nothing on screen says so.
+2. **iOS window announcements may be frequent.** RiderCard announces on every change of `windowText` (`app/space-run.tsx:439-446`). Vehicle pings re-render the card (`:156-162`), and the window is minute-granular, so a parent with two children could hear an announcement per child about every minute. **Not verifiable statically** (📱).
+3. **The people catalog error reaches plain viewers.** The error box ("roles cannot be changed right now") renders for every viewer, including people who could never change roles (`app/space-people.tsx:211-221`; `loadMeta` runs for everyone at `:103`). The copy is minor.
+
+---
+
+#### `app/space-admin.tsx` — **7.5 → 8.0** (mean 7.75)
+- **Scores now:** Function 8 · States 8 · UI 7.5 · A11y 8 · Security 7 · Code 8
+- **Round-4 items:**
+  - ◐ 1. **C11 deploy.** Still per run against today's server (`app/space-admin.tsx:117-118`). Admin reads only on focus (`:150`), so no polling cost is added.
+  - ❌ 2. **Duty-state editing.** This is a product decision and has not been made (R5H Partial #2).
+  - ✅ 3. **Typing.** `Entry` is now a discriminated union (`:43-54`), so `pathname: e.route` needs no cast (`:253`). The links catch is typed (`:142`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Links sheet — 8 → 8.
+  - Shift sheet — 7.5 → 7.5 (C12).
+  - Emergency banner — 7.5 → 7.5.
+  - Run tiles — 7.5 → 7.5.
+  - Chat door — 8 → 8.
+- **Still needed for 10/10:**
+  1. Deploy C11 (`lib/spaces/api.ts:123-138`).
+  2. Decide where duty state is edited (product).
+  3. A failed refresh keeps the old tiles under the LoadError with no stale note (`:204-224`). Other screens now add one.
+
+#### `app/space-attendance.tsx` — **7.5 → 8.0** (mean 7.75)
+- **Scores now:** Function 7.5 · States 8 · UI 7.5 · A11y 8 · Security 7.5 · Code 8
+- **Round-4 items:**
+  - ✅ 1. **Summary tiles.** Each tile is one element, "Present, 12" (`app/space-attendance.tsx:231`).
+  - ✅ 2. **Daylight-saving days.**
+    - The week and day labels use `calendarDaysAgo` (`:122`, `:319`; `lib/spaces/attendance.ts`).
+    - `crossingsForDay` now ends at the next local midnight.
+    - The new `attendanceDays.selftest.ts` covers the 23 h and 25 h Europe/London days and passes.
+  - ❌ 3. **Shift for plain members.** They still get the device copy (C12, `:88`).
+  - ✅ 4. **Typed catch** (`:128-130`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Per-member week disclosure — 7.5 → 8.
+  - Workplace zone picker — 7.5 → 7.5.
+- **Still needed for 10/10:**
+  1. Deploy C12.
+  2. The data is device-local by design (`:4-14`). Its completeness depends on samples the device received, so it is **not verifiable statically**.
+  3. The sample window is still `Date.now() - DAYS*24h` (`:108`), while the oldest column starts at a calendar midnight (`:122`). This is harmless today because 7×24 h ≥ 6 calendar days plus one hour, but it is no longer the same unit. Derive it from `calendarDaysAgo(now, DAYS-1)` at midnight.
+
+#### `app/space-checkin.tsx` — **8.0 → 8.0** (mean 8.08)
+- **Scores now:** Function 8 · States 8.5 · UI 8 · A11y 8 · Security 8 · Code 8
+- **Round-4 items:**
+  - ✅ 1. **Check-out confirmation.** "Check out for today?" with a destructive "Check out" button (`app/space-checkin.tsx:107-115`). The call itself is `checkOutNow` (`:98-106`).
+  - ✅ 2. **Stale note.** The note sits inside the Today card when `loadError` is set (`:212-214`).
+  - ✅ 3. **Team rows.** Each row is one element via `teamRowLabel`: "Asha, in 09:02, out 17:40", "…, still in" or "…, not checked in" (`:216-220`, `:248-254`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Leave door row — 8 → 8.
+  - Check-out confirmation (Alert) — new — 8.
+- **Still needed for 10/10:**
+  1. Type the three `catch (e: any)` (`:75`, `:94`, `:101`).
+  2. The manager's Today list is a `records.map` inside a ScrollView (`:215-232`). For a large workplace, use a virtualised list or cap it with "show all".
+  3. Check In is also a one-tap action that fixes the arrival time (`:169`), and there is no undo window. This is minor because check-in is the expected tap.
+
+#### `app/space-devices.tsx` — **7.5 → 7.5** (mean 7.58)
+- **Scores now:** Function 7 · States 8 · UI 7.5 · A11y 8 · Security 7 · Code 8
+- **Round-4 items:**
+  - ❌ 1. **Ring and message, and the nested dialog.**
+    - Ring and message still work only in the foreground. Device verification and background command collection are not done (R5H Partial #4).
+    - The nested dialog on iOS is 📱 (`DeviceDetailSheet.tsx:262`).
+  - ✅ 2. **History rows.** Each row's label is severity + text + time: "Alert: …, 5 min ago" (`DeviceDetailSheet.tsx:62-69`, `:244-248`).
+  - ✅ 3. **Typing.** `u` is typed (`app/space-devices.tsx:93`). The catches use `errorText(e)` (`:56`, `:87`, `:130`, `:139`, `:153`, `:176`, `:194`).
+- **Regressions:** none. The handlers are otherwise unchanged.
+- **Subscreens:**
+  - Device detail — 8 → 8.
+  - Add-device modal — 7.5 → 7.5.
+  - Show-a-message dialog — 8 → 8 (📱).
+  - Rename dialog — 7.5 → 7.5 (📱).
+- **Still needed for 10/10:**
+  1. Background command collection and a device check of ring, message and the nested dialog.
+  2. A failed refresh keeps the device list under the LoadError with no stale note (`:255-269`).
+  3. The device row's label omits battery and last-reported (`:275` vs `:283-288`). The Add dialog title has no header role (`:334`).
+
+#### `app/space-incidents.tsx` — **8.0 → 8.0** (mean 7.92)
+- **Scores now:** Function 7.5 · States 8.5 · UI 8 · A11y 8 · Security 7.5 · Code 8
+- **Round-4 items:**
+  - ❌ 1. **Specific photo.** The row still opens the space's gallery (`app/space-incidents.tsx:203-213`), because no client writes `mediaRef`.
+  - ✅ 2. **Stale note** (`:146-148`).
+  - ✅ 3. **Card summary.**
+    - The summary row is one element: "Breakdown, Bus 01, 5 min ago, acknowledged" (`:171-174`).
+    - A resolved card fades only its icon (`:177`, `doneIcon` `:277`).
+    - Acknowledge has `busy` (`:225`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Photo row — 6.5 → 6.5.
+  - Resolve confirmation — 8 → 8.
+- **Still needed for 10/10:**
+  1. Open the specific photo once a client writes `mediaRef` (`:203-213`).
+  2. Type the `catch (e: any)` (`:72`, `:104`).
+  3. Add "note attached" to the summary label (`:173`). The note footnote (`:193-198`) is read as a separate element after the summary.
+
+#### `app/space-leave.tsx` — **7.5 → 8.0** (mean 7.92)
+- **Scores now:** Function 8 · States 8.5 · UI 8 · A11y 8 · Security 7.5 · Code 7.5
+- **Round-4 items:**
+  - ✅ 1. **Failed refresh.** The previous rows are kept (`app/space-leave.tsx:110-111`), with a stale note (`:347-349`).
+  - ✅ 2. **Identity.**
+    - Identity is read inside `load`, and a missing id throws "Could not tell who is signed in" (`:93-104`).
+    - Decide buttons also require `meId` (`:245`).
+    - The mount-only effect is gone.
+  - ✅ 3. **Withdrawn and Decline.**
+    - A withdrawn request uses `textDim` with `arrow-undo-outline` and reads "withdrawn" (`:193-198`, `:223`).
+    - Decline has `busy` (`:252`).
+  - ✅ (regression 1) **Picker.** It uses `inModal` (`:68`, `:374`, `:445`). 📱.
+- **Regressions:** none.
+- **Subscreens:**
+  - Tabs — 8 → 8.
+  - Request-leave sheet — 8 → 8.5 (📱 overlay).
+  - Allowance sheet — 7.5 → 7.5.
+- **Still needed for 10/10:**
+  1. Type the four `catch (e: any)` (`:108`, `:127`, `:164`, `:183`).
+  2. Give the sheet titles "Request leave" (`:378`) and "Leave allowance" (`:453`) a header role.
+  3. Device-check the inline picker overlay on iOS (`:445`).
+
+#### `app/space-ops-map.tsx` — **7.5 → 8.0** (mean 7.83)
+- **Scores now:** Function 8 · States 8.5 · UI 7.5 · A11y 8 · Security 7.5 · Code 7.5
+- **Round-4 items:**
+  - ◐ 1. **C11.** Not deployed. Timer reads now skip runs that are not started (`app/space-ops-map.tsx:63-72`, `:94`). Started runs are still read per run.
+  - ❌ 2. **Keyboard with the 46% map.** 📱 (`:267`, `:472`).
+  - ✅ 3. **Focus cleared.** `focus` is cleared when the run leaves the list (`:76`).
+  - ✅ 4. **LoadError position.** The LoadError is at the top of the list, with a stale note when rows remain (`:288-294`).
+  - Extra: FamilyMap labels count "vehicles" (`:42`, `:271`; `components/family/FamilyMap.tsx:721-725`, `:805`).
+- **Regressions:** summary risk 1 (a scheduled run's manifest is kept on timer reads).
+- **Subscreens:**
+  - FamilyMap — 6 → 6.5 (📱; the label now names vehicles).
+  - Emergency mode — 7.5 → 7.5.
+  - Instruction composer — 8 → 8.5 (it no longer addresses a vanished run).
+- **Still needed for 10/10:**
+  1. Deploy C11.
+  2. Device-check the composer above the keyboard (`:472`).
+  3. Re-read a scheduled run's manifest at a slower cadence (or say the figures are from the last full read), so a long-open board catches roster edits (`lib/spaces/runPlan.ts:110-115`).
+  4. Type the `catch (e: any)` (`:80`).
+
+#### `app/space-overview.tsx` — **7.5 → 8.0** (mean 7.75)
+- **Scores now:** Function 8 · States 8 · UI 7.5 · A11y 8.5 · Security 7.5 · Code 7
+- **Round-4 items:**
+  - ✅ 1. **Naming.** "Check in" (`app/space-overview.tsx:56-58`) and "View check-ins" (`:296`).
+  - ✅ 2. **Stale note.** It shows when `error && sum` (`:168-170`). The not-permitted path clears `sum`, so no stale figures show there (`:88`).
+  - ✅ 3. **Attendance bar.** It is one `progressbar` element, labelled "42 of 50 checked in", with `accessibilityValue` (`:280-294`).
+- **Regressions:** none.
+- **Subscreens:**
+  - School tiles — 7.5 → 7.5.
+  - Business dashboard — 8 → 8.5.
+  - Donut — 7.5 → 7.5.
+- **Still needed for 10/10:**
+  1. The fallback TASKS card reads "3" and "open" as two fragments (`:341-344`). Group it, as Metric does (`:484-487`).
+  2. Whether a member without permissions receives `sum` is server-side and **not verifiable statically** (`:82-89`).
+  3. The file is 586 lines. Split the business dashboard pieces (`:473-525`) out. Type the `catch (e: any)` (`:90`).
+
+#### `app/space-pending.tsx` — **8.0 → 8.0** (mean 7.92)
+- **Scores now:** Function 8.5 · States 8.5 · UI 7.5 · A11y 8 · Security 7 · Code 8
+- **Round-4 items:**
+  - ✅ 1. **Re-read while focused.** It re-reads every 60 s (`app/space-pending.tsx:26-27`, `:59-66`). The 30 s overdue re-render is kept (`:39-44`).
+  - ❌ 2. **Grouped sections' radius.** 📱 visual (`:140`).
+- **Regressions:** none. A failed timer read keeps the rows with the stale note (`:110-112`).
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. Device-check the grouped radius (📱).
+  2. Type the `catch (e: any)` (`:50`).
+  3. The section header's "N waiting" count changes silently on a timer read (`:128-131`). Consider a polite announcement when the total drops, for the parent-on-the-phone case.
+
+#### `app/space-people.tsx` — **8.0 → 8.0** (mean 8.08)
+- **Scores now:** Function 8 · States 8.5 · UI 7.5 · A11y 8.5 · Security 8 · Code 8
+- **Round-4 items:**
+  - ✅ 1. **Catalog error.**
+    - The error box in the list header says "Role names could not be loaded…" and has a 44pt "Try again" (`app/space-people.tsx:211-221`, `retryHit` `:461`).
+    - A successful `loadMeta` clears it (`:94`). Pull re-reads the catalog (`:200`).
+  - ✅ 2. **Radio label.** It includes ", current" and the grants summary (`:321`; `grantsSummary` `:408-415`, which is reused for the visible line `:337`).
+  - ✅ 3. **Stale note** (`:206-208`).
+- **Regressions:** summary risk 3 (the error box reaches viewers who cannot change roles).
+- **Subscreens:**
+  - Role picker sheet — 8 → 8.
+  - PermissionMatrix — 8 → 8.
+- **Still needed for 10/10:**
+  1. Wrap the role options in a `radiogroup` (`:314-349`). Give "Change role" a header role (`:283`).
+  2. Show the catalog error only to a viewer who could change a role (for example, `viewer && canChangeRole(...)` for any row) (`:211`).
+  3. Type the `catch (e: any)` (`:75`, `:96`, `:137`). Duty-state editing is still a product decision (`:255`).
+
+#### `app/space-roster.tsx` — **8.0 → 8.0** (mean 8.08)
+- **Scores now:** Function 8 · States 8.5 · UI 8 · A11y 8.5 · Security 7.5 · Code 8
+- **Round-4 items:**
+  - ✅ 1. **Rows.** Avatar, name and meta form one `s.who` element: "Asha, Child, no account, in your care[, ref]" (`app/space-roster.tsx:236-260`). Remove stays separate (`:261-271`).
+  - ✅ 2. **Stale note** (`:197-199`).
+  - ◐ 3. **Archive guard.**
+    - The `archiving` state blocks a second call while one is in flight. Remove is disabled with busy and a spinner (`:121-148`, `:262-269`).
+    - The guard runs only before the Alert opens, so two quick taps before the first confirmation can still open two dialogs (`:124-126`). Minor.
+- **Regressions:** none.
+- **Subscreens:**
+  - Links sheet — 8 → 8.
+  - Add-to-roster modal — 8 → 8.
+- **Still needed for 10/10:**
+  1. Set the guard when the Alert opens, not only when Remove is confirmed (`:124-135`).
+  2. Give "Add to the roster" a header role (`:288`).
+  3. Type `(e: any)` (`:80`) and the three `catch (e: any)` (`:91`, `:114`, `:139`).
+
+#### `app/space-run-driver.tsx` — **7.0 → 7.5** (mean 7.25, a tie rounded up)
+- **Scores now:** Function 7 · States 7.5 · UI 7.5 · A11y 7.5 · Security 7 · Code 7
+- **Round-4 items:**
+  - ❌ 1. **Guardians.** Not deployed. A driver still gets the explanatory Alert (`app/space-run-driver.tsx:171-181`).
+  - ❌ 2. **Ops-only audience.** Detection alerts still go to every member (`components/spaces/useRunBroadcast.ts:98-116`).
+  - ❌ 3. **Incident note and durable SOS.** There is still no sealed incident note or photo (`:237-245`) and no durable SOS queue. The `ponytail:` note is kept (`:221-222`).
+  - ✅ 4. **Split.** The heartbeat, broadcast/detection and background hand-off moved unchanged into `useRunBroadcast` (`:100-102`; hook `:48-58`, `:65-134`, `:141-162`). The screen went from 764 to 632 lines. The runHeartbeat selftest now reads the hook and passes.
+- **Regressions:** none. The behaviour is identical.
+- **Subscreens:**
+  - Handover code — 8 → 8.
+  - Report-a-problem sheet — 6 → 6.
+  - Panic confirmation — 7 → 7.
+  - Guardian picker Sheet — 7 → 7.
+- **Still needed for 10/10:**
+  1. Deploy `riders[].guardians`, and device-test the call path (📱).
+  2. Add a server-side ops audience for detection alerts.
+  3. Add a sealed incident note or photo, and a durable SOS queue.
+  4. Start/Finish has no in-flight guard or busy state (`:318-327` → `doStatus` `:247-262`). A double tap sends two status changes (the server answers the second with 409, which shows an error Alert).
+  5. The copy says "Location is off for VaultChat" (`:349`), while the space screens use "crazzychat" (`app/space-devices.tsx:190`). This is pre-existing.
+
+#### `app/space-run.tsx` — **7.5 → 8.0** (mean 7.83)
+- **Scores now:** Function 7.5 · States 8 · UI 7.5 · A11y 8.5 · Security 8 · Code 7.5
+- **Round-4 items:**
+  - ✅ 1. **iOS announcements.** On iOS, `announceForAccessibility` fires when the window text changes, but not on first render (`app/space-run.tsx:436-446`). Android keeps the polite live region, now on the card (`:459`). 📱.
+  - ✅ 2. **RiderCard.** It is one element: name, headline, window and place, "running behind", and the time (`:449-458`).
+  - ✅ 3. **Map label.** FamilyMap now names vehicles (`:82`, `:290`; R5HO).
+- **Regressions:** summary risk 2 (iOS announcement frequency, 📱).
+- **Subscreens:**
+  - RiderCard — 7.5 → 8.5.
+  - Timeline — 8 → 8.
+  - Live map — 7 → 7.5 (📱).
+- **Still needed for 10/10:**
+  1. Throttle the iOS announcement, for example only when the window moves by at least 2 minutes or every N minutes (`:439-446`). Device-check the verbosity (📱).
+  2. Type `(me as any)` (`:156`) and the `catch (e: any)` (`:117`, `:172`).
+  3. The manifest re-read relies on the 30 s timer while started (`:139-143`). This is fine. Device-check the live map (📱).
+
+#### `app/space-runs-admin.tsx` — **7.5 → 8.0** (mean 7.92)
+- **Scores now:** Function 8.5 · States 8 · UI 8 · A11y 8.5 · Security 7 · Code 7.5
+- **Round-4 items:**
+  - ✅ 1. **Stop day.** `stopWhenText` with `whenLabel` (`app/space-runs-admin.tsx:461-471`).
+  - ◐ 2. **Picker.** It is now an inline overlay (`StopFormModal.tsx:47`). StopFormModal itself is still a Modal inside the editor Modal (`:549-553`). Both are 📱.
+  - ✅ 3. **No cast.** `OpenTarget` is used with no cast (`:67`, `:72`, `:103`, `:127`).
+  - ✅ 4. **Radiogroups.** The rider stop picker has a `radiogroup` and a header (`:559-575`). The Driver card is a `radiogroup` too (`:430`).
+- **Regressions:** none.
+- **Subscreens:**
+  - New-run modal — 8 → 8.5.
+  - Edit-run modal — 8 → 8.
+  - Stop form — 8 → 8.5 (📱).
+  - Rider stop picker — 7.5 → 8.5.
+- **Still needed for 10/10:**
+  1. Device-check StopFormModal inside the editor Modal on iOS (`:549-553`).
+  2. A failed refresh leaves the runs list under the LoadError with no stale note (`:361-401`). The edit sheet title has no header role (`:416`).
+  3. Type the eight `catch (e: any)` (for example `:92`, `:107`, `:117`, `:156`, `:163`, `:252`, `:281`, `:309`).
+
+#### `app/space-tasks.tsx` — **7.5 → 8.0** (mean 7.92)
+- **Scores now:** Function 8 · States 8.5 · UI 8 · A11y 8.5 · Security 7 · Code 7.5
+- **Round-4 items:**
+  - ✅ 1. **Failed refresh.** The last list is kept (`app/space-tasks.tsx:124-125`), with a stale note (`:265-267`).
+  - ✅ 2. **Radiogroups.**
+    - Priority (`:317`), Due (presets plus "Another day…", `:330-357`) and Assign to (`:374-388`) are now `radiogroup`s.
+    - Wrapping Due in `s.dueGroup` (`gap: 12`) keeps the earlier spacing (styles `:448`). The visual result is 📱.
+  - ◐ 3. **Picker.** It uses `inModal` (`:107`, `:302`, `:409`). 📱.
+- **Regressions:** none.
+- **Subscreens:**
+  - Tabs — 8 → 8.
+  - New-task sheet — 8 → 8.5.
+- **Still needed for 10/10:**
+  1. Device-check the overlay picker on iOS (`:409`).
+  2. Give "New task" a header role (`:306`).
+  3. Type the `catch (e: any)` (`:119`, `:145`, `:165`).
+
+#### `app/space-transport.tsx` — **7.5 → 8.0** (mean 7.75)
+- **Scores now:** Function 7.5 · States 8 · UI 7.5 · A11y 8 · Security 8 · Code 7.5
+- **Round-4 items:**
+  - ◐ 1. **Polling cost.**
+    - C11 is not deployed.
+    - Timer reads pass `previous` (`app/space-transport.tsx:143-156`, `:182`).
+    - `circleMembers` is fetched once per focus (`:165-174`).
+  - ✅ 2. **Rider rows.** Each row is one element: "Asha, Picked up — on the bus, 07:42" (`:277-280`).
+  - ✅ 3. **Driver button.** The fallback text is "Call driver" (`:342`).
+- **Regressions:** none.
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. Deploy C11.
+  2. `load` clears `err` at the start of every 30 s read (`:149`), so while offline the LoadError and stale note vanish for the length of each request, then return. Clear it only on success.
+  3. The call button sets `busy` but not `disabled` in `accessibilityState` (`:333-336`). Type the `catch (e: any)` (`:126`, `:157`).
+
+#### `app/space-visitors.tsx` — **8.0 → 8.0** (mean 8.08)
+- **Scores now:** Function 7.5 · States 8.5 · UI 8 · A11y 8.5 · Security 8 · Code 8
+- **Round-4 items:**
+  - ❌ 1. **Cancel a pass.** An issued, unused pass still cannot be cancelled. The client API has no revoke. The server route was written in `2a05e46` but is not deployed, and no client is wired (`fixes/R5HO.md` Partial #1).
+  - ✅ 2. **Stale note** (`app/space-visitors.tsx:225-227`).
+  - ✅ 3. **Pass cards.**
+    - Icon, name and state form one element: "Name, Expected, valid until 17:00" (`:241-264`). The code and Sign out stay separate buttons (`:265-285`).
+    - An expired pass fades only its icon (`:253`, `spent` `:414`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Issue-pass modal — 8 → 8.
+  - Redeem modal — 7.5 → 7.5.
+  - Issue-result Alert — 8 → 8.
+- **Still needed for 10/10:**
+  1. Deploy the revoke route, then add "Cancel pass" on unused passes. Against today's server, a 404/405 should read as "not available yet".
+  2. Give "Issue a pass" (`:303`) and "Visitor code" (`:362`) a header role.
+  3. Type the four `catch (e: any)` (`:71`, `:128`, `:144`, `:166`).
+
+---
+
+### I1 — Finance — re-rating (round 5)
+
+This review covers the diff `4910069 → HEAD`. Three commits touch the batch:
+- `bbc81de` fix(finance)
+- `67cee05` shared `components/ui/useDatePicker`
+- `2a05e46` R5HO hand-offs, including the `utils/financeIO.ts shareTextFile` finally
+
+I read each screen together with the parts it imports. Those parts are:
+- `components/finance/{LedgerForm, ledgerFormRules, ledgerCsv, notify, ui (Segment/Radio/Field), FinanceErrorBoundary, useDatePicker}`
+- `components/finance/chitti/{MembersTab, AuctionsTab, DuesTab, chittiStyles}`
+- `lib/finance/{compounding, reminderSchedule, searchQuery}`
+- `utils/{financeRules, interest, money, financeIO}`
+- `db/{financeDb, ledger}`
+- `constants/financeTheme`
+- `components/ui/{useDatePicker, Sheet}`
+- the installed `expo-notifications` 0.32.16 trigger parser
+
+The working tree is clean, and I changed nothing in the repo. My scripts are `SP/rr5_i1_maths.ts` and `SP/rr5_i1_cal.ts`.
+
+**Not verifiable statically:**
+- OS notification firing, and how iOS and Android treat day-31 and 29 February calendar triggers
+- the announcements
+- the large-font layout of the error fallback, split bar and snackbar
+- whether the iOS Alert is non-dismissable
+- share-sheet timing
+
+No backend is involved in this batch.
+
+| Screen | Old | New | Δ |
+|---|---|---|---|
+| `app/finance/_layout.tsx` | 8.5 | 9.0 | +0.5 |
+| `app/finance/index.tsx` | 8.5 | 8.5 | 0 |
+| `app/finance/calendar.tsx` | 8.5 | 8.5 | 0 |
+| `app/finance/chitti/index.tsx` | 8.5 | 8.5 | 0 |
+| `app/finance/chitti/new.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/finance/chitti/[id].tsx` | 8.0 | 8.5 | +0.5 |
+| `app/finance/customer.tsx` | 8.5 | 8.5 | 0 |
+| `app/finance/emi.tsx` | 8.5 | 8.5 | 0 |
+| `app/finance/interest.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/finance/io.tsx` | 8.5 | 8.5 | 0 |
+| `app/finance/ledger/index.tsx` | 8.5 | 8.5 | 0 |
+| `app/finance/ledger/new.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/finance/ledger/[id].tsx` | 8.0 | 8.5 | +0.5 |
+| `app/finance/ledger/edit.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/finance/ledger/update.tsx` | 8.0 | 8.5 | +0.5 |
+| `app/finance/reminders.tsx` | 8.0 | 8.0 | 0 |
+| `app/finance/reports.tsx` | 7.5 | 8.0 | +0.5 |
+| `app/finance/saved.tsx` | 8.0 | 8.0 | 0 |
+| `app/finance/search.tsx` | 8.5 | 8.5 | 0 |
+| `app/interest-calculator.tsx` | 7.5 | 7.5 | 0 |
+| `app/split.tsx` | 8.0 | 8.5 | +0.5 |
+
+#### Independent maths verification (exact money)
+
+I wrote my own script, `SP/rr5_i1_maths.ts`. I ran it with `npx tsx` under `TZ=UTC`, `America/New_York` and `Asia/Kolkata`. Each run finished with **176 checks, 0 failed**, exit 0, money backend `ts`.
+
+**The new ledger compounding column** (`db/financeDb.ts:36-42` guarded ALTER, `:78` schema; `utils/financeRules.ts:82-101`)
+
+- **Exact reference.** I built a BigInt rational reference: P·((100·n·d + a)/(100·n·d))^(n·years), rounded half-up to paise, with the money going through `utils/money.ts` `toPaise`/`fromPaise`. `ledgerInterest` matches it to the paise in every case, and P + interest reconciles to the total to the paise:
+
+  | Case | Total (₹) |
+  |---|---|
+  | 2%/month, monthly | 1,26,824.18 |
+  | 2%/month, compounding NULL | 1,24,000 |
+  | 2%/month, n = 1 | 1,24,000 |
+  | 10%/yr, quarterly, 2 years | 1,21,840.29 |
+  | ₹50,000 at 2%/month, monthly, 3 years | 1,01,994.37 |
+  | ₹10,000 at 1%/week, weekly | 16,776.89 |
+  | ₹2,50,000 at 12%/yr, monthly, 5 years | 4,54,174.17 |
+  | 0.1%/day, daily | 1,44,025.13 |
+  | 0% | principal only |
+
+  I also checked fractional principals, a 5-year daily ₹12.3 lakh case, and the "₹ per ₹100" mode.
+- **Random sweep.** Across 3,000 random ledgers (₹0–₹50 lakh, every period, n ∈ {1, 4, 12, 52, 365}, 1–5 years), **0 were off by a paise**.
+- **Ledger and calculator agree.** `calculateInterest` with the ledger's `n` gives the same paise as `ledgerInterest` in every case (`lib/finance/compounding.ts:42-48`).
+- **Old rows keep their amounts.** `ledgerCompounding` reads NULL, undefined, 0, −4, 1.5, 400 and NaN as yearly (`financeRules.ts:82-85`), so a stored loan does not change its amount.
+- **The column is carried through:**
+  - insert (`db/ledger.ts:62-73`)
+  - undo-restore (`:141-148`)
+  - edit (`:218-221`)
+  - CSV export and import, where blank or absent means yearly (`components/finance/ledgerCsv.ts:54-55`, `:162-173`)
+  - backup restore, which picks columns from the live schema (`db/financeBackup.ts:107-123`)
+- **Labels.** `ledgerInterestTypeLabel` gives "Compound, compounded yearly" or "…monthly". `ledgerCompoundingNote` counts NULL and 1 as the same frequency. Mixed frequencies give "as set on each ledger".
+- **`ledgerInterestSoFar`.** It returns null when the ledger is completed or past its end date, and 0 before the start. One year into a 2%/month monthly loan it is exactly ₹26,824.18.
+
+**The OS reminder trigger** (`lib/finance/reminderSchedule.ts:108-133`, mapped in `components/finance/notify.ts:31-34`)
+
+- **Method.** I wrote my own model of a repeating calendar trigger, which fires on matching local days at hour:minute. I compared its fires over 6 years against the app's anchored series (`occurrence`, `utils/financeRules.ts:183-191`). I used 14 cases: past, near-future and far-future anchors; day 31; day 30; 29 February 2028; weekly; daily before and after the alarm time; and the US DST end.
+- **Every case reconciles exactly in all three time zones:**
+  - The trigger's hour, minute, day, weekday (+1) and month (0-based) come from the anchor.
+  - `firstAt` = `nextOccurrence(anchor, now+1s)`.
+  - Every fire that only the OS makes falls before the anchor, and the first of them equals `earlyAt`. For example, monthly on the 5th, two months ahead, gives early 5 Oct. Weekly, three weeks ahead, gives early Sun 4 Oct. Daily "tomorrow 09:00" created at 08:00 gives early today at 09:00.
+  - Every occurrence that only the app shows is flagged by `phoneSkips`, and every flagged one really is skipped. Day 31: 30 in 6 years. Day 30: 6. 29 February: 3.
+  - `skipsSomePeriods` is true whenever any are skipped.
+- **The round-4 example is fixed.** "Picked 5 Sep 09:00, created 4 Oct 15:30" now gives `{monthly, day 5, 09:00}`, with the first alert on 5 Oct at 09:00. The old `max(now+1s, at)` reproduces the 4th-at-15:30 drift.
+- **New finding: one-off triggers are invalid.** A one-off trigger as notify.ts passes it, `{ date }` with no `type` (`notify.ts:33`), is rejected by expo-notifications 0.32.16. `hasValidTriggerObject({date})` returns **false**, and `{type:'date', date}` returns true. See new finding N1 below.
+
+#### Checks run (all exit 0)
+
+- `npx tsc --noEmit -p .`: 0 errors (`SP/rr5_i1_tsc.txt`).
+- `npx eslint` on app/finance, split, interest-calculator, components/finance, lib/finance, db/{financeDb, ledger, reminders}, utils/{financeRules, financeIO}, constants/financeTheme and components/ui/useDatePicker: 0 problems (`SP/rr5_i1_eslint.txt`).
+- `npx tsx` selftests, all pass:
+  - lib/finance/: compounding 23, reminderSchedule 45, searchQuery 15
+  - components/finance/: ledgerCsv, ledgerFormRules 12, notifyIds
+  - utils/: financeRules 80, financeGuards 45, financeBackupSeal 14
+  - db/: financeBackup, financeBackup.sqlite, chitti
+  - lib/financeBtnLatch
+  - lib/: a11yCoverage, themeCoverage (22 checks + 20 exemptions), uiDebtRatchet ("no file got worse", 283 hex), keyboardAvoidance, orphanRoutes 51, screenBackCoverage, silentFailure, responsiveCoverage, responsiveLayout 28
+- `grep`:
+  - no hex or rgba literal in `app/finance/`
+  - no `onPrimary`, `onDanger` or `warning` token use anywhere in the batch, so the new tokens cannot have caused a regression here
+  - `as any` remains only at `components/finance/notify.ts:43` and `components/finance/ui.tsx:147`
+
+#### Regressions and new findings
+
+**N1. One-off reminders and every Snooze never schedule an OS alert, and the screen blames notification permission.**
+- **Where:** `components/finance/notify.ts:31-34`, `:43`; `app/finance/reminders.tsx:74-77`, `:108`, `:116`, `:128`, `:135`.
+- **Status:** pre-existing, newly found. The baseline `18eb6d2:components/finance/notify.ts` had the same `default: return { date: d }`. Round 5 rewrote this exact line (`notify.ts:33`) and kept the shape.
+- **Cause.** expo-notifications 0.32 requires a `type` on every trigger object (`node_modules/expo-notifications/build/hasValidTriggerObject.js`). `scheduleNotificationAsync` throws a TypeError when it is missing (`build/scheduleNotificationAsync.js:78-80`). `scheduleReminder` catches the throw and returns null (`notify.ts:45`).
+- **Effect.** Every "Once" reminder and every Snooze (`scheduleAt`, `:49-51`) gets no alert.
+- **What the user is told.** The user is told "Notifications are off … Allow notifications for this app in your phone settings" (`reminders.tsx:74-77`), and the card shows "Not scheduled: notifications are off" (`:202`). Both are false. Recurring reminders use typed calendar triggers and are unaffected.
+- **Why it went unseen.** The `as any` (`notify.ts:43`) hid this from tsc. The selftest checks only the plain-data trigger (`reminderSchedule.selftest.ts:92-93`), not the mapping.
+- **Fix:** `{ type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(t.at) }`, as `app/message-reminder.tsx:217` and `lib/groups/taskReminders.ts:153-156` already do. Also drop the `as any`.
+
+**N2. Regression (round 5), saved.tsx: the screen-reader "Delete" action now deletes with no confirmation.**
+- The Sheet became the confirmation, so `deleteCalc` no longer asks (`app/finance/saved.tsx:54-58`).
+- The interest rows' custom accessibility action still calls `deleteCalc` directly (`:80`, `:125-126`).
+- As a result, a VoiceOver or TalkBack user's "Delete" removes a calculation immediately and irreversibly. Before round 5 it went through the "Delete this calculation?" Alert (`4910069:app/finance/saved.tsx:52`).
+
+**N3. Regression (round 5, minor), calendar.tsx: a snoozed day is labelled "(no phone alert this month)".**
+- `historyOccurrences` includes a snoozed `next_at` that is not part of the series (`reminderSchedule.ts:51-53`).
+- `phoneSkips` compares only the day number with the anchor's (`:74-77`).
+- `calendar.tsx:70` labels every such day. Confirmed with `SP/rr5_i1_cal.ts`: a monthly reminder on the 5th, snoozed to the 6th, shows 5 Oct unlabelled and 6 Oct as "(no phone alert this month)".
+- Fix: apply `phoneSkips` only to series occurrences, not to the extra `next_at`.
+
+**N4. Defaults still differ (open choice, minor).**
+- The calculator defaults compounding to the rate's period (`app/finance/interest.tsx:35`). A new compound ledger defaults to Yearly (`components/finance/LedgerForm.tsx:55`).
+- Both now say how they compound (`interest.tsx:206`, `:221`; `LedgerForm.tsx:117-121`, `:147`), so the round-4 regression 1 is resolved as a disclosure.
+- The same terms entered with the defaults still give ₹26,824.18 against ₹24,000.
+
+**N5. The split refactors behave as intended.**
+- `chitti/[id]` now renders only the open tab (`:167-173`). The member and auction drafts are lifted to the screen (`:42-45`), so typing survives a tab switch, as before.
+- `DuesTab`'s only local state is its `cycling` latch ref (`DuesTab.tsx:25`). It awaits `onChanged()` (`:34`), so unmounting mid-cycle cannot strand a save.
+- The customer screen now uses a FlatList, and search uses a SectionList. Both keep the same header, states, cap notes and row labels (`customer.tsx:127-158`; `search.tsx:133-192`).
+
+**N6. The shared picker.**
+- `components/ui/useDatePicker.tsx` now calls `Keyboard.dismiss()` on iOS before the sheet (`:60-61`), and gains an `inModal` mode. Finance does not use `inModal`, which is correct: the LedgerForm sheet is not in a Modal.
+- This is not a regression. Round-4 regression 4 (the app `Button` and app-theme Sheet inside finance) is unchanged and 📱.
+
+**Round-4 regressions:**
+- ✅ 1, made consistent and disclosed: N4 and the maths above.
+- ✅ 2, fixed for recurring reminders and verified above.
+- ✅ 3, stale comment: `io.tsx:48-54` now describes the async KDF.
+- ◐ 4, unchanged: shared component, 📱.
+
+---
+
+#### `app/finance/_layout.tsx` — **8.5 → 9.0**
+- **Scores now:** Function 9 · States 9 · UI 9 · A11y 9 · Security 8 · Code 9
+- **Original items:**
+  - ✅ The Leave button is in the fallback's flow inside a ScrollView, not absolutely positioned (`components/finance/FinanceErrorBoundary.tsx:26-37`, `:43-48`). The large-font result is 📱.
+  - ◐ The finance lock is still an open product decision (fix_status §5). It is not deducted beyond Security 8.
+- **Regressions:** none.
+- **Subscreens:** error fallback, 8.5 → 9.
+- **Still needed for 10/10:**
+  1. `FALLBACK_GROUND = '#03030E'` (`constants/financeTheme.ts:121`) copies `components/ErrorBoundary.tsx:62` by hand. Export it from one place so the two cannot drift.
+  2. Resolve the finance-lock decision.
+
+#### `app/finance/index.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 9 · States 8 · UI 8 · A11y 9 · Security 8 · Code 9
+- **Original items:**
+  - ✅ The visible text now says interest: "Interest, settled loans (full term)" and "Interest, open loans (full term)" (`:150`, `:154`).
+  - ✅ Compounding is stated under the hero when any lent loan is compound (`:77`, `:157`; `ledgerCompoundingNote`, verified).
+- **Regressions:** none.
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. The hero note is 11.5 pt `HERO_INK.soft` on the gradient (`:228`). Its contrast and fit at large font are 📱. Give it `numberOfLines`/`adjustsFontSizeToFit` like the figures above it, or move it below the card.
+  2. "Full term" is a scheduled figure, not interest received. Add an accrued-to-date total (`ledgerInterestSoFar` exists) if the dashboard is meant to show earnings.
+
+#### `app/finance/calendar.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 9 · States 9 · UI 8 · A11y 9 · Security 8 · Code 8
+- **Original items:**
+  - ✅ Done reminders keep their history, labelled "(done)" (`:66-70`; `reminderSchedule.ts:63-66`).
+  - ✅ Clamped days carry "(no phone alert this month/year)" (`:70`). The flagged days were checked against my OS model.
+  - ✅ The alert time now equals the calendar time for past-start reminders (verified).
+- **Regressions:** N3, the false "(no phone alert this month)" on a snoozed day (`:70`).
+- **Subscreens:** selected-day events panel, 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. Fix N3. Flag only series occurrences.
+  2. Through N1, one-off reminders appear as due days that never alert. The fix belongs in `notify.ts:33`.
+  3. Recurring reminders created before round 5 keep their old OS trigger, built from `max(now, at)`. Nothing reschedules them, so for those rows the calendar and the alert can still differ. Offer a one-time re-schedule.
+
+#### `app/finance/chitti/index.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8 · States 9 · UI 9 · A11y 9 · Security 8 · Code 9
+- **Original items:**
+  - ✅ There is one add control, the FAB (`:57`, `:93-94`).
+  - ✅ The footer is `90 + insets.bottom` (`:91`). 📱
+- **Regressions:** none. The filter keeps tab roles through `tabs` (`:61`).
+- **Subscreens:** Active / Closed / Draft segment, 8 → 8.5.
+- **Still needed for 10/10:**
+  1. The only add action is now at the foot of the list. Add `accessibilityHint` or put it first in reading order, so screen-reader users do not have to traverse every card to reach it (`:93-94`).
+  2. Device-check FAB clearance (📱).
+
+#### `app/finance/chitti/new.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 9 · States 8 · UI 8 · A11y 9 · Security 8 · Code 8
+- **Original items:**
+  - ✅ The live region on the mismatch line is removed (`:99-101`). Create's confirm still says it.
+  - ✅ The status `Segment` is a radiogroup named "Group status" (`:110`; `components/finance/ui.tsx:196`, `:205-206`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Start-date picker: 8 → 8 (iOS 📱).
+  - Status segment: 8.5 → 9.
+- **Still needed for 10/10:**
+  1. The mismatch line is now silent until Create. Announce it once on blur of the amount fields, so screen-reader users learn it before submitting (`:101`).
+  2. Validation is still Alert-only. LedgerForm now has an inline pattern to reuse (`components/finance/LedgerForm.tsx:65-67`).
+
+#### `app/finance/chitti/[id].tsx` — **8.0 → 8.5**
+- **Scores now:** Function 8 · States 9 · UI 8 · A11y 9 · Security 8 · Code 9
+- **Original items:**
+  - ✅ Only the open tab renders. Drafts are lifted to the screen (`:42-45`, `:167-173`; `MembersTab.tsx:17-38`, `AuctionsTab.tsx:19-34`).
+  - ✅ Members and Auctions await `onChanged()` inside the latch (`MembersTab.tsx:61`, `AuctionsTab.tsx:68`).
+  - ✅ Group status is a radiogroup and the tab bar is a tablist (`:156-163`).
+- **Regressions:** none (N5).
+- **Subscreens:**
+  - Members tab: 8 → 8.5.
+  - Member form: 8 → 8.5.
+  - Dues tab: 8.5 → 8.5.
+  - Auctions tab: 8 → 8.5.
+  - History tab: 8 → 8.
+  - Delete/remove Alerts: 8 → 8.
+  - Group-status segment: 8 → 9.
+- **Still needed for 10/10:**
+  1. Members and Dues are still `members.map` inside the ScrollView (`MembersTab.tsx:95`, `DuesTab.tsx:43`). That is fine for typical groups, but it is unvirtualised.
+  2. `auctionDraft.winnerId` can refer to a member removed since it was picked. Submit passes the `!winnerId` check (`AuctionsTab.tsx:44`), finds no member (`:63`) and records "—" as the winner (`:65`). Clear the draft's winner when that member is removed.
+
+#### `app/finance/customer.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 9 · States 8 · UI 8 · A11y 9 · Security 8 · Code 9
+- **Original items:**
+  - ✅ The list is a FlatList, with the header in `ListHeaderComponent` and the states in `ListEmptyComponent` (`:123-158`). The section title gained the header role.
+  - ✅ The compounding label is on the cards and in the spoken label (`:145`, `:150`).
+  - ❌ The hero at large font scales is 📱.
+- **Regressions:** none.
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. Device-check the hero at large font (`:100-108`).
+  2. The card subtitle now carries four facts (`:150`), with no `numberOfLines`. Check wrapping at 320 dp (📱).
+
+#### `app/finance/emi.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 9 · States 8 · UI 9 · A11y 9 · Security 9 · Code 7
+- **Original items:**
+  - ✅ The spoken row includes the EMI (`:144`).
+  - ✅ There is a "Show all N months" / "Show first 24 months" toggle (`:36`, `:141`, `:151-158`).
+- **Regressions:** none behavioural.
+- **Subscreens:**
+  - Amortization schedule: 8.5 → 9.
+  - PDF share: 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. "Show all" renders up to `MAX_MONTHS` = 600 rows of four Texts each, unvirtualised, inside the screen's ScrollView (`:17`, `:141`). Use a FlatList or paginate.
+  2. `showAll` is not reset by a new calculation (`onCalc`, `:40-52`, resets only `showSchedule`).
+  3. The visible table has no EMI column, but the spoken row and the PDF do (`:135-139` vs `:144`, `:74`).
+
+#### `app/finance/interest.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 9 · States 8 · UI 8 · A11y 9 · Security 8 · Code 8
+- **Original items:**
+  - ✅ It reconciles with ledgers. The result and the PDF say how ledgers compound (`:123`, `:206`, `:221`). Ledgers can now choose their frequency (verified equal to the calculator for the same `n`).
+  - ✅ The Segments are radiogroups with names. The type and time-mode rows are radiogroups (`:138`, `:147-160`, `:165`).
+- **Regressions:** none. The default mismatch is N4.
+- **Subscreens:**
+  - Dates / Duration: 8 → 8.5.
+  - Date picker: 8 → 8.
+  - Result and Share PDF: 8.5 → 9.
+- **Still needed for 10/10:**
+  1. Align defaults with LedgerForm (N4: `:35` vs `LedgerForm.tsx:55`), or offer "Save as ledger" with the chosen compounding.
+  2. LEDGER_NOTE is shown on every compound result even when no ledger is involved (`:206`). Consider showing it only on the PDF or as a hint.
+
+#### `app/finance/io.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 8 · States 9 · UI 8 · A11y 9 · Security 9 · Code 9
+- **Original items:**
+  - ✅ The comment is fixed (`:48-54`).
+  - ✅ The busy state is announced (`:73`).
+  - ✅ The password is cleared in a `finally` (`:199-200`).
+  - ✅ (via R5HO) `shareTextFile` deletes in a `finally` (`utils/financeIO.ts:89-97`).
+- **Regressions:** none. The CSV gains a trailing `Compounding` column, and old files import as yearly (verified in the ledgerCsv selftest).
+- **Subscreens:**
+  - Spreadsheet mode: 8 → 8.5.
+  - Full Backup mode: 8.5 → 9.
+  - CSV import: 8.5 → 9.
+- **Still needed for 10/10:**
+  1. The busy `LoadingState` (`:284`) is announced but not focused, and the buttons are disabled with no stated reason. Add a "working" note next to them (minor, 📱).
+  2. Whether the async KDF keeps the UI responsive is 📱.
+
+#### `app/finance/ledger/index.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 9 · States 9 · UI 8 · A11y 9 · Security 8 · Code 9
+- **Original items:**
+  - ✅ The snackbar and the iOS announcement say that the earlier delete is now final (`:33`, `:67-76`, `:191-193`).
+  - ✅ UNDO has a 44×44 box (`:194`, `:218`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Filter: 8 → 8.
+  - Undo snackbar: 8.5 → 9.
+- **Still needed for 10/10:**
+  1. Only one delete can be pending. Queue several, or confirm the second long-press instead of committing the first (`:67`).
+  2. The snack text now wraps (`flex: 1`, `:217`). At large fonts it grows toward the FAB (📱).
+
+#### `app/finance/ledger/new.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 9 · States 9 · UI 8 · A11y 8 · Security 8 · Code 9
+- **Original items:**
+  - ✅ Validation is inline after a refused Save. The field shows the message with a polite live region and clears live. The Alert stays (`LedgerForm.tsx:58`, `:65-67`, `:79`, `:106-140`; `ledgerFormRules.ts:13-38`; `ui.tsx:150`).
+  - ✅ The compounding frequency is offered and stated, with a live interest preview (`LedgerForm.tsx:116-122`, `:145-151`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Start/End pickers: 8 → 8.
+  - "Compounded" segment (new): 8.5.
+  - Inline errors (new): 8.5.
+- **Still needed for 10/10:**
+  1. Only the first problem is marked (`checkLedgerForm` returns one problem). Mark every failing field.
+  2. The preview line (`LedgerForm.tsx:146-150`) is not announced when it changes. A screen-reader user does not hear the effect of a compounding change.
+  3. The default compounding differs from the calculator (N4).
+
+#### `app/finance/ledger/[id].tsx` — **8.0 → 8.5**
+- **Scores now:** Function 9 · States 9 · UI 9 · A11y 8 · Security 8 · Code 8
+- **Original items:**
+  - ✅ "Interest so far" is null once the ledger is completed or past its end date (`:53-54`, `:67`, `:137`; `financeRules.ts:109-112`, verified).
+  - ✅ The frequency is stated on screen and in the PDF (`:63`, `:133`).
+  - ◐ The undo Alert is `cancelable: false` (`:92`), so the snapshot is no longer dropped silently. It is still an Alert, not the list's 30-second snackbar.
+- **Regressions:** none.
+- **Subscreens:**
+  - Delete + undo Alert: 8.5 → 8.5.
+  - PDF share: 8 → 8.5.
+  - Timeline: 8 → 8.
+- **Still needed for 10/10:**
+  1. Make undo consistent with the list (a timed snackbar).
+  2. "Remaining" still excludes interest (`:68`, `:138`). Label it "Principal remaining", or show a total due.
+  3. An overdue loan shows no interest past its end date (`financeRules.ts:110`). Either state that interest stops at the end date or accrue it.
+
+#### `app/finance/ledger/edit.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 9 · States 9 · UI 8 · A11y 8 · Security 8 · Code 9
+- **Original items:**
+  - ✅ Inline validation is shared with new.
+  - ✅ The before/after interest is shown: "(was ₹Y)" (`LedgerForm.tsx:74-75`, `:149`). `initial={e}` carries `compounding` (`:50`).
+- **Regressions:** none.
+- **Subscreens:** pickers, 8 → 8.
+- **Still needed for 10/10:**
+  1. The timeline entry for an edit does not mention compounding or interest type (`db/ledger.ts:222`). Changing only the compounding logs "Terms edited · … " with nothing changed visible.
+  2. The items shared with new (1 and 2 above).
+
+#### `app/finance/ledger/update.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 9 · States 9 · UI 8 · A11y 8 · Security 8 · Code 8
+- **Original items:**
+  - ✅ There is one combined "Check the amounts and settle?" confirm (`:71-81`).
+  - ✅ "Interest so far" and "Interest to end date / 1-year projection" are shown (`:55-56`, `:106-107`).
+- **Regressions:** none.
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. The interest rows do not say the frequency. Reuse `ledgerInterestTypeLabel` (`:106-107`).
+  2. Received and remaining are still two free fields, and nothing suggests remaining = current − received (`:58-67`).
+
+#### `app/finance/reminders.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 6 · States 8 · UI 8 · A11y 9 · Security 8 · Code 8
+- **Original items:**
+  - ✅ The OS trigger is built from the anchor (`reminderSchedule.ts:108-133`; `notify.ts:31-34`). Recurring reminders were verified exact in three time zones. An early-alert warning was added (`:98-105`). The `earlyAt` value was verified against my model.
+  - ✅ The focused card is announced (`:56`). 📱
+  - ✅ There is a warning for yearly 29 February as well as monthly day > 28 (`:90-97`; `skipsSomePeriods`, verified).
+- **Regressions:** none caused by round 5. **N1 is newly found:**
+  - "Once" reminders and every Snooze never schedule (`notify.ts:33`, `:43`).
+  - The user is told "Notifications are off" (`:74-77`, `:116`, `:135`) and the card says "Not scheduled: notifications are off" (`:202`). Both are false.
+  - Function drops to 6 and States to 8.
+- **Subscreens:**
+  - Add form: 8 → 7.5. The recurring path is better, the Once path is broken.
+  - Date+time picker: 7 → 7 (📱).
+  - Permission handling: 8 → 7. A trigger rejection is reported as a permission problem.
+  - Calendar focus: 7.5 → 8.5.
+- **Still needed for 10/10:**
+  1. Fix N1. Pass `type: SchedulableTriggerInputTypes.DATE` in `notify.ts:33`, remove the `as any` at `:43`, and add a selftest over the mapped trigger.
+  2. Tell "permission denied" apart from "the OS refused the trigger" in `warnUnscheduled` (`:74-77`). `ensureNotifyPermission` already knows which one it is (`notify.ts:14-23`).
+  3. Re-schedule existing recurring rows, whose OS trigger was built from `max(now, at)`, once.
+  4. The early-alert confirm is the only remedy. Offer to start the series at its first early date instead.
+
+#### `app/finance/reports.tsx` — **7.5 → 8.0**
+- **Scores now:** Function 8 · States 8 · UI 8 · A11y 8 · Security 9 · Code 8
+- **Original items:**
+  - ✅ The wording matches the dashboard: "Interest, settled/open loans (full term)" and the tiles (`:91-92`, `:139-140`).
+  - ✅ (via R5HO) `shareTextFile` deletes in a `finally` (`utils/financeIO.ts:89-97`). This screen's own delete stays idempotent (`:114`).
+  - ✅ Compounding is stated as a note, a PDF row and an Excel "Interest type" column (`:87`, `:93`, `:108-109`, `:142`).
+  - ◐ Period is still the creation date. This is an open decision and is disclosed. Not a deduction.
+- **Regressions:** none. The period Segment correctly keeps tab roles through `tabs` (`:122`).
+- **Subscreens:**
+  - Segment: 7 → 8.5.
+  - PDF / Excel export: 8.5 → 9.
+- **Still needed for 10/10:**
+  1. The Excel export has no interest figure (`:108-109`). Add "Interest to end date" so the sheet reconciles with the tiles.
+  2. Resolve the period-basis decision.
+
+#### `app/finance/saved.tsx` — **8.0 → 8.0**
+- **Scores now:** Function 8 · States 8 · UI 8 · A11y 8 · Security 7 · Code 9
+- **Original items:**
+  - ✅ There is no Alert hop. The Sheet's red "Delete this calculation" with "cannot be undone" text is the confirmation (`:54-58`, `:149-151`). Deletion is announced.
+  - ✅ The Segment uses tab roles correctly (`:104`).
+- **Regressions:** **N2.** The rows' screen-reader "Delete" action (`:80`, `:125-126`) now deletes immediately and irreversibly.
+- **Subscreens:**
+  - Segment: 7 → 8.5.
+  - Interest details Sheet: 8 → 8.5.
+  - Row "Delete" accessibility action: 4. It is destructive with no confirmation.
+- **Still needed for 10/10:**
+  1. Fix N2. Route the accessibility action to `viewCalc(r)` (open the Sheet), or keep a confirm on that path only.
+  2. The Sheet is styled in the app theme inside finance (round-4 regression 4, shared, 📱).
+
+#### `app/finance/search.tsx` — **8.5 → 8.5**
+- **Scores now:** Function 9 · States 8 · UI 8 · A11y 9 · Security 8 · Code 9
+- **Original items:**
+  - ✅ The 3-digit minimum is applied after the prefix is stripped (`lib/finance/searchQuery.ts:18-23`, selftest 15).
+  - ✅ Results are a SectionList with the same headers and cap notes (`:96-101`, `:133-192`).
+- **Regressions:** none (N5).
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. The empty, loading and error states sit in `ListHeaderComponent` above zero sections (`:140-146`). That works, and the delayed count announcement (`:109-113`) is the only feedback while typing. Device-check the order with TalkBack (📱).
+  2. Ledger rows show the principal only. Show the remaining amount or the compounding, as the customer cards now do.
+
+#### `app/interest-calculator.tsx` — **7.5 → 7.5**
+- **Scores now:** Function 3 · States 8 · UI 8 · A11y 8 · Security 8 · Code 9
+- **Original items:** ❌ It is still **UNWIRED** and unchanged in round 5. Deleting it is an open decision.
+- **Regressions:** none.
+- **Subscreens:** none.
+- **Still needed for 10/10:**
+  1. Delete it once old links no longer matter (`:10-12`).
+
+#### `app/split.tsx` — **8.0 → 8.5**
+- **Scores now:** Function 9 · States 8 · UI 8 · A11y 9 · Security 7 · Code 9
+- **Original items:**
+  - ✅ The comment is corrected (`:54-59`).
+  - ✅ The bar has a per-pane close, "✕ Left/Right" or "✕ Top/Bottom", with full spoken names (`:97-98`, `:129-139`). The duplicate `closeSplit` is removed.
+- **Regressions:** none behavioural. The old "Close" (keep the left chat) is now "✕ Right" side by side, the same action.
+- **Subscreens:**
+  - Refusals: 8.5 → 8.5.
+  - Divider resize: 8 → 8.
+  - Control bar (new per-pane close): 8.5.
+- **Still needed for 10/10:**
+  1. `accessibilityLabel="Split view"` on the Ionicons glyph (`:119-120`) has no effect, because the icon is not an accessible element. Stacked, the "Split view" name is therefore never spoken. Make it `accessible`, or put the label on the bar.
+  2. Three buttons plus an icon at 320 dp, at large font, is 📱 (`:116-140`).
+
+---
+
+#### Fix-log claims that are not quite right
+- **R5I1 #5** says notify.ts maps to "the same shapes as before". That is true, and it is the problem: the `'once'` shape was invalid before and still is (N1). The log's "📱 OS firing" hides a defect that can be found statically.
+- **R5I1 #33** says "no Alert hop". That is correct for the Sheet, but the log missed that the rows' accessibility "Delete" action shares `deleteCalc` and lost its confirm (N2).
+- **R5I1 #7** says clamped days are marked. That is correct, but `phoneSkips` also flags snoozed days (N3).
+- **R5I1 "Partially #1"** (`shareTextFile`) was completed by the coordinator. It is present at `utils/financeIO.ts:89-97`.
+- **R5I1 Checks** reported 2 tsc errors in `app/group-admin.tsx`. Today `tsc` reports 0 errors.
+- Every other row in the R5I1 "Fixed" table matched the code at the places cited above. The maths claims (#1, #5, #6, #13) were reproduced independently.
+
+---
+
+### I2 — re-rating (round 5: Shop Book and admin web pages)
+
+Base 4910069 → HEAD 2a05e46. The relevant commits are:
+- 4d310fb (client and admin).
+- db1d68b (backend `side` tag on `order_status`). It is written and tested locally, but **not deployed**.
+
+The fixer's claims are in `fixes/R5I2.md`, and `fixes/R5HO.md` row 4 covers the shopbook `side` tags. The "Old" scores are the round-4 "→ new" values in `rerate4/I2.md`. This review is static and read-only. Nothing here is device-, browser- or server-verified by me.
+
+| Screen | Old | New | Δ |
+|---|---|---|---|
+| app/shop-book.tsx (+ components/shopbook/*) | 8.0 | 8.5 | +0.5 |
+| admin/index.html | 8.0 | 8.5 | +0.5 |
+| admin/logs.html | 8.0 | 8.5 | +0.5 |
+| admin/shopbook.html | 8.0 | 8.5 | +0.5 |
+
+#### Checks I ran (all read-only)
+
+**CSP pins, every script AND style element.** My checker (`SP/r5i2b_csp.mjs`) walks each page, skips HTML comments, and hashes the content of every real `<script>` and `<style>` element with SHA-256/base64. It then compares each hash with every `'sha256-…'` pin in the CSP meta. I also ran each page's own `:7` Python recipe: the script form for all three pages, and the same recipe with script replaced by style for index. Both methods agree.
+
+| Page | CSP line | Element | Element hash | Pinned? |
+|---|---|---|---|---|
+| `admin/index.html` | `:12` | `<script>` `:262-690` | `jmQ2vnTR…dYFY=` | ✅ script-src |
+| `admin/index.html` | `:12` | `<style>` `:16-144` | `pVEvHfam…nukQ=` | ✅ style-src (the only style element) |
+| `admin/logs.html` | `:9` | `<script>` `:139-396` | `5MKCF2uc…VYz8=` | ✅ script-src |
+| `admin/logs.html` | `:9` | `<style>` `:15-82` | `i9lkKv+R…2wI=` | n/a: style-src is still `'unsafe-inline'` |
+| `admin/shopbook.html` | `:9` | `<script>` `:144-831` | `6Dnm3V/P…Atao=` | ✅ script-src |
+| `admin/shopbook.html` | `:9` | `<style>` `:13-71` | `vvwsnomJ…AWM=` | n/a: style-src is still `'unsafe-inline'` |
+
+- Every pin matches exactly one real element, and no element is unpinned where the CSP pins hashes.
+- No page has `style=` in its markup, an `on*=` attribute, or a `javascript:` URL.
+- index.html's style hash also blocks `style="…"` attributes injected by script. I grepped its script: every `innerHTML` template uses `class=` only (`:441-492`, the stats and health builders). The only inline styling is CSSOM (`out.style.color` `:534-540`, `this.style.color` `:560`), which CSP allows. So the hashed style-src does not unstyle anything.
+- `node --check` passes for all three extracted scripts.
+- `npx tsx admin/adminPages.selftest.ts` exits 0. It now asserts the style pin, the absence of `style=`, the absence of `prompt(`, the Confirm delay, and that logs.html writes the status only on change.
+
+**Toolchain and selftests.**
+- `npx tsc --noEmit -p .` exits 0.
+- `npx eslint app/shop-book.tsx components/shopbook/ utils/shopbook.ts utils/shopbook.selftest.ts admin/adminPages.selftest.ts` exits 0.
+- These selftests all exit 0: `utils/shopbook` ("all checks passed"), `utils/shopbookInvoice`, `lib/a11yCoverage`, `lib/themeCoverage` (22), `lib/uiDebtRatchet` ("no file got worse"), `lib/silentFailure`, `lib/screenBackCoverage`, `lib/orphanRoutes` (51), `lib/keyboardAvoidance`, `lib/responsiveLayout`, `lib/rowOverflow`.
+- My own scan of the shell and all 15 split files found 0 `TouchableOpacity`/`Pressable` without `accessibilityRole`, 0 `TextInput` without `accessibilityLabel`, and 0 `as any`.
+
+**Split fidelity (behaviour must be identical).**
+- I extracted `OwnerOrderDetail` from `git show 4910069:components/shopbook/orders.tsx` (from `:530`) and `StockScreen` from the old `products.tsx` (from `:575`, comment included). I diffed them against `orderDetail.tsx:19-254` and `stock.tsx:16-188`: **byte-identical**.
+- The old files only lost those bodies and gained header lines and imports (`orders.tsx:1-2`, `:22`; `products.tsx:1-2`, `:18`).
+- All callers point at the new modules: `orders.tsx:501`, `products.tsx:234`, `app/shop-book.tsx:31`, `:337`.
+
+**New colour tokens (computed, `SP/r5i2b_contrast.mjs`).**
+- White on dark `dangerFill` #D92D20 is 4.83:1, and that badge against the dark header #0C2A1B is 3.19:1. White on light `dangerFill` #B42318 is 6.57:1.
+- `onNavySub` #93C5FD on `navyFill` is 6.38:1 (light) and 5.41:1 (dark).
+- The comment at `theme.ts:59-61, :65-66` is now accurate.
+- The badge *shape* against the light green header (#B42318 on #0B7A3B) is only 1.21:1. This was already the case in round 4. The count text itself reads at 6.57:1.
+- Shop Book uses its own `C.*` map, not the app's onPrimary/onDanger/warning tokens. I found no new-token regression here.
+- `constants/financeTheme.ts` only gained `FALLBACK_GROUND` (`:117-121`), which Shop Book does not use.
+
+---
+
+#### `app/shop-book.tsx` (+ `components/shopbook/*`) — **8.0 → 8.5** (mean 8.42)
+- **Scores now:** Function 9 · States 9 · UI 8 · A11y 8.5 · Security 8 · Code 8
+
+**Round-4 open items** ("Still needed" 1–7 and R1):
+1. ✅ **Dark badge contrast.** `dangerFill` is defined at `components/shopbook/theme.ts:62` and used by `cartBadge` (`:129-133`). That style serves the bell (`app/shop-book.tsx:124`) and the SubHeader badge (`shared.tsx:172`). The false comment is corrected (`theme.ts:59-61`).
+2. ✅ **R1, the blur-while-busy edit.**
+   - A valid blur during a patch is queued (`invoices.tsx:190-195`).
+   - When `busy` clears, an effect sends every queued line in one `patch`, re-reading each draft and skipping cleared or invalid ones (`:60-72`).
+   - The line shows "Saving after the current change…" (`:208-210`).
+   - Validation still runs first (`:185-189`). `patch` reads `busy` from the render in which it became false, so the flush is not swallowed by the `if (busy) return` at `:50`. 📱
+3. ◐ **Inbox routing edges.**
+   - ✅ An order or the returns list opened from the inbox now renders over Shop Settings. Settings stays mounted but hidden, so its draft survives (`app/shop-book.tsx:336-356`).
+   - ◐ `order_status` is now routed by role (`utils/shopbook.ts:572-580`, selftest `utils/shopbook.selftest.ts:435-446`). Untagged `completed` / `not_collected` still follow the open side (the `ponytail:` note at `:575-578`).
+   - The server tag is written (`vaultchat-backend-go/internal/routes/shopbook.go:2212`, `:2340`; `shopbook_jobs.go:145`, `:149`) but not deployed.
+4. ◐ **Deploy and verify.** Unchanged: migrations 140/141, the `/my-shop` fields (`fetchOwnerShop` still double-fetches, `app/shop-book.tsx:401-405`) and the 📱 checks.
+5. ❌ **Return-decision rows tappable.** These still need the server's `orderId` (`utils/shopbook.ts:548-550`). Backend only.
+6. ✅ **Leftover literals.** `couponCode` uses `C.greenDark` (`theme.ts:305`) and `loyaltyTier` uses `C.onNavySub` (`:317`). `onNavySub` is one value for both themes, but it measures AA on both fills.
+7. ✅ **Size.**
+   - `OwnerOrderDetail` moved to `orderDetail.tsx` (254 lines) and `StockScreen` to `stock.tsx` (188), both byte-identical.
+   - `orders.tsx` is now 734 lines and `products.tsx` 647.
+   - `customerViews.tsx` (722) and `ledger.tsx` (676) remain the largest files.
+
+**Regressions:**
+- **None from the splits** (byte-identical).
+- **None from the tokens.**
+- The new `opened` ordering (`app/shop-book.tsx:336-359`) moves `sub === 'returns'` ahead of coupons, suppliers and purchases. Those sub-screens are mutually exclusive values of one `sub` state, so this changes nothing.
+
+**New findings (not regressions):**
+- **N1.** A returns notification tapped while an inbox-opened order is showing does nothing visible. The OwnerApp effect sets `sub = 'returns'` (`app/shop-book.tsx:316`) but leaves `orderOpen` set, and `opened` checks `orderOpen` first (`:337`). This predates round 5.
+- **N2.** A quantity queued under R1 is lost without a word if the owner presses Back before the in-flight patch settles. The effect cannot run after unmount (`invoices.tsx:60-72`), and Back (`:90`) does not warn. This window is small.
+- **N3.** The "Saving after…" hint uses `accessibilityLiveRegion` (`invoices.tsx:209`), which is Android-only. iOS VoiceOver is not told.
+
+**Subscreens** (changed only; all others keep their round-4 value):
+- Owner › BillScreen: 7.5 → 8.5 (queue `invoices.tsx:60-72`, `:190-195`, `:208-210`; N2)
+- NotificationCenter: 8 → 8.5 (role routing `utils/shopbook.ts:572-580`; untagged fallback until deploy)
+- Owner › OwnerOrderDetail: 8 → 8 (moved identically; now also opens over Settings `app/shop-book.tsx:348-349`)
+- Owner › StockScreen + item detail: 8 → 8 (moved identically, `stock.tsx`)
+- Owner › ShopSettings / Create shop: 8 → 8.5 (an inbox-opened item no longer hides behind it, and its draft survives, `app/shop-book.tsx:342-356`)
+- Owner › ReturnsScreen + Decline modal: 8 → 8 (N1)
+- Customer › CustomerProfile: 7.5 → 7.5 (loyalty tier now tokenised `theme.ts:317`)
+- Customer › CartView: 8 → 8 (coupon border token `theme.ts:305`)
+
+**Still needed for 10/10:**
+1. **Deploy and verify (§4).**
+   - Deploy migrations 140/141 and the `/my-shop` fields. That retires the `entitledPlan()` double fetch (`app/shop-book.tsx:404`, `services/shopBookService.ts` ponytail).
+   - Deploy the `side` tag (`shopbook.go:2212`, `:2340`; `shopbook_jobs.go:145`, `:149`). Then remove the fallback at `utils/shopbook.ts:575-579`.
+   - Return-decision rows need `orderId` (R4BE C18).
+   - 📱 Device checks: the inbox overlay and Android back, notification navigation, the order shown over Settings, the bill queue, viewer, location, safe area and contrast.
+2. **N1.** Clear `orderOpen` when the inbox opens the returns list (`app/shop-book.tsx:316`).
+3. **N2.** Flush or warn on Back while `queuedQty` is non-empty (`invoices.tsx:33`, `:90`).
+4. **N3.** Announce the queued state on iOS too, for example with `AccessibilityInfo.announceForAccessibility` when a line is queued (`invoices.tsx:193`).
+5. **Size.** `customerViews.tsx` (722 lines), `orders.tsx` (734) and `ledger.tsx` (676) are still large. Natural next splits are NotificationCenter, ReturnsScreen and KhataDetail.
+6. **Low.** The light badge reads at 1.21:1 against the green header (`theme.ts:62` on `:71`). A 1px light ring would separate it. The count text is already 6.57:1.
+
+---
+
+#### `admin/index.html` — **8.0 → 8.5** (mean 8.33)
+- **Scores now:** Function 8.5 · States 8.5 · UI 8 · A11y 8 · Security 9 · Code 8
+
+**Round-4 open items:**
+1. ❌ **Deploy and browser-verify** the nginx headers and the fonts (`LOGS_DEPLOY.md:89-122`). These are ops tasks, and they are unchanged.
+2. ✅ **Stale page responses.**
+   - Users and Messages use latest-wins sequence numbers. A stale response, or a stale error, is dropped (`:439`, `:441`, `:447`, `:463`, `:475`, `:479`, `:492`).
+   - Next is bounded by the known total (`:471`).
+3. ✅ **`style-src 'unsafe-inline'`.**
+   - The three attributes became classes (`:74`, `:163`, `:224`, `:232`).
+   - style-src now pins the single stylesheet (`:12`). I verified the hash, and that no script-built markup uses `style=` (see Checks).
+   - The re-pin recipe is documented (`:8-11`).
+4. ✅ **SSE retries and storage.**
+   - A 401 on the event stream stops the loop and calls `signOut(reason)`. That drops the key and returns to login with "The server refused the admin key (401). Enter it again." (`:649-654`, `:328-337`).
+   - `SS` is a try/catch wrapper (`:268-272`).
+
+**Regressions:** none. Both hashes match. Disconnect still works through the shared `signOut()` (`:337`).
+
+**Subscreens:**
+- Login: 7.5 → 8 (the refused-key reason is shown, `:333-336`. But `#loginErr` (`:162`) has no `role=alert`, so the reason is not announced. Focus goes to the key field.)
+- Dashboard: 8 → 8
+- Users: 7.5 → 8.5 (`:441-471`)
+- Messages: 7.5 → 8 (`:475-492`)
+- Sessions: 8.5 → 8.5
+- Broadcast: 8 → 8 (class instead of inline style `:224`, `:232`)
+- Live Log: 8 → 8.5 (401 stops the stream `:649-654`)
+- API Explorer: 7.5 → 7.5
+
+**Still needed for 10/10:**
+1. **Deploy and browser-verify** the nginx headers (`frame-ancestors`, nosniff) and the five fonts (`LOGS_DEPLOY.md:89-122`), using the `curl -sI` checks.
+2. **Announce login errors.** Give `#loginErr` `role="alert"`, or point `aria-describedby` from `#adminKey` at it (`:162`, `:333-336`). This covers the new 401 sign-out reason too.
+3. **REST 401s.** Only the event stream signs out on 401. A revoked key leaves the dashboard poll (`:385`) throwing "401 — invalid admin key" (`:297`) into its panels every interval. Route a 401 from `api()` through `signOut(reason)` as well.
+4. **Fonts.** JetBrains Mono and Sora 500/600 are still not in the repo, so the page uses fallbacks (`:13-17`).
+
+---
+
+#### `admin/logs.html` — **8.0 → 8.5** (mean 8.5)
+- **Scores now:** Function 8.5 · States 9 · UI 7.5 · A11y 9 · Security 8 · Code 9
+
+**Round-4 open items:**
+1. ✅ **Status-region chatter.** `setConnected` writes `#statustxt` only when the text changes (`:285-290`). This matches index.html, and the selftest asserts it.
+2. ✅ **Unguarded storage.** `store()`/`recall()` wrap every localStorage and sessionStorage access (`:144-145`, used at `:147`, `:161`, `:167-168`, `:193`, `:359`, `:362`, `:373`). The selftest asserts that no raw storage calls remain.
+3. ✅ **Narrow screens.**
+   - `<meta name="color-scheme" content="dark">` (`:13`).
+   - At ≤700px the controls fold behind a "controls" button with `aria-expanded` and `aria-controls` (`:40`, `:79-80`, `:92`, `:367-369`).
+   - The page is still dark-only by design, and `#setup code` keeps a literal `#9fd0ff` (`:65`).
+4. ❌ **Deploy** the nginx headers, and check the live regions with a real screen reader. Ops and AT work, not doable here.
+
+**Regressions:** none. The script hash matches.
+
+**Subscreens:**
+- Token overlay: 8 → 8
+- Source navigator: 7.5 → 8.5 (guarded `lv_src`, `:147`, `:193`)
+- Log view: 8.5 → 8.5
+- Header controls (≤700px fold): 8 (new: `:79-80`, `:367-369`)
+
+**Still needed for 10/10:**
+1. **Pin the stylesheet.** `style-src 'unsafe-inline'` remains (`:9`). There are no `style=` attributes in the markup, but the script sets `$('empty').style.display` (`:289`). That is CSSOM and allowed under a hash, so the stylesheet hash can be pinned the way index.html does it.
+2. **Deploy the headers** (`LOGS_DEPLOY.md:99-122`). Verify the folded header and the live regions in a real browser with a real screen reader. That cannot be done statically.
+3. **Leftover literals.** Move `#9fd0ff` (`:65`) and the other hard-coded colours outside `:root` into tokens, if a light variant is ever wanted.
+
+---
+
+#### `admin/shopbook.html` — **8.0 → 8.5** (mean 8.42)
+- **Scores now:** Function 8.5 · States 9 · UI 8.5 · A11y 8.5 · Security 8 · Code 8
+
+**Round-4 open items:**
+1. ◐ **Deploy the backend.** `?shopId=`, the reject fields and `proRequestedAt` are still undeployed.
+   - The stale comment is corrected (`:740-743`).
+2. ✅ **Double-click on Confirm.**
+   - The review step stores its time (`:698`). A Confirm within `CONFIRM_DELAY_MS` (800 ms, `:614`) is ignored (`:705`).
+   - A held Enter (`ev.repeat`) is suppressed in both form kinds (`:731-733`).
+   - The ignored press gives no feedback, but it is harmless.
+3. ✅ **Remaining `prompt()`s.** One inline note form now serves reject shop, verify note, reject document and refuse move (`:506-574`).
+   - The field is labelled with the shop name, escaped (`:506-517`, `:529-531`).
+   - An empty note is refused in the form with `role=alert`, `aria-invalid` and focus (`:554-559`).
+   - A failed save keeps the note and shows the server error (`:570-573`).
+   - Cancel returns focus to the opener (`:543-547`).
+   - The action functions now take the note and throw to their caller (`:272`, `:414`, `:451`, `:488`).
+   - Grant and approve paths keep `confirm()` and toast their errors (`:800`, `:814-817`).
+   - No `prompt(` remains (grep; selftest).
+4. ✅ **A11y details.**
+   - `aria-pressed` is in the markup (`:94-95`, `:102-104`, `:112-113`), kept current by `pressFilter` (`:163-166`, called at `:237`, `:387`, `:462`), with a visible pressed style (`:47`).
+   - Focus returns after a save via `refocus` (`:176-181`; used at `:268`, `:274`, `:419`, `:454`, `:496`, `:712`).
+   - `proRequestedAt` is shown in the local format and escaped (`:172`, `:594`).
+5. ✅ **Storage.** `remember()`/`recall()` (`:169-170`, used at `:214`, `:830`).
+
+**Regressions:**
+- None in behaviour.
+- The script hash matches.
+- Approval, verification-grant and location-approve errors still reach a toast through `toastErr` (`:800`), as before.
+
+**Subscreens:**
+- Connect bar: 8 → 8.5 (guarded storage `:830`)
+- Platform stats: 7.5 → 7.5
+- Shop approvals: 8 → 8.5 (inline reject note, pressed filter, refocus)
+- Verification queue + Documents: 8 → 8.5 (inline notes `:414-420`, `:451-455`)
+- Location changes: 8 → 8.5 (inline refuse `:488-497`)
+- Subscriptions / entitlements: 8.5 → 9 (Confirm delay `:705`; refocus `:712`; local date `:594`)
+- Country tax engine: 7.5 → 7.5
+- Categories & starter catalogs: 7.5 → 7.5
+- Support windows: 7.5 → 7.5 (filter and reject fields need the deploy)
+
+**Still needed for 10/10:**
+1. **Deploy** the backend (`?shopId=` for returns, the reject fields in `sbAdminOrders`, `proRequestedAt`), plus the page and its nginx headers (`LOGS_DEPLOY.md:81-122`).
+2. **Pin the stylesheet.** `style-src 'unsafe-inline'` remains (`:9`) because nine script templates still build `style="margin-top:8px"` (`:250`, `:287`, `:298`, `:309`, `:401`, `:432`, `:439`, `:477`, `:599`). Move these to a class, then pin the `<style>` hash (`:13-71`) as index.html does.
+3. **Note-form details.**
+   - Escape does not close the note or entitlement forms.
+   - The note error `<p role=alert>` is `display:none` while empty (`:69`, `:531`). Whether every screen reader announces it when it appears is not verifiable statically. Consider an always-rendered alert container.
+   - A press ignored by the Confirm delay gives no cue (`:705`).
+4. **Size.** One 39 KB inline script (`:144-831`) is still manageable, but the note and entitlement form helpers are near-duplicates (`:519-574` vs `:640-720`).
+
+---
+
+#### Regressions introduced in round 5 (batch I2)
+- **None found.**
+  - The `OwnerOrderDetail` and `StockScreen` moves are byte-identical.
+  - The shell reorder (`app/shop-book.tsx:336-359`) keeps every sub-screen reachable.
+  - All four CSP pins (three scripts, one style) match their real elements.
+  - The tokens are accurate and AA where they carry text.
+- **New non-regression findings:** N1 returns behind an open order (`app/shop-book.tsx:316`, `:337`), N2 a queued quantity lost on Back (`invoices.tsx:60-72`), N3 an Android-only hint announcement (`invoices.tsx:209`), the index login error not announced (`admin/index.html:162`), and REST 401s not signing out (`admin/index.html:297`, `:385`).
+
+---
+
+### J — Settings, privacy & vault — round-5 re-rating
+
+Base 4910069 → HEAD 2a05e46. The round-5 batch commit is 0f92eb9 (R5J); `services/security/pinFormat.selftest.ts` was changed in the handoff commit. "Old" is the round-4 "→ new" value in `rerate4/J.md`, and the open items come from that file. I checked every claim in `fixes/R5J.md` and the J rows of `fixes/R5HO.md` against the code.
+
+This review is static and read-only. **Nothing here is deployed or device-verified.**
+- These count only for what the code shows (📱): FileHandle I/O, rename durability, the iOS app-switcher blur, the notes reminder overlay inside the editor Modal, VoiceOver, and contrast.
+- The backend `?base=1` audience is not deployed, and no screen in this batch calls it.
+
+**Checks I ran.** Outputs are in `scratchpad/rerate5/J_*`.
+- `npx tsc --noEmit -p .`: exit 0, no output (`J_tsc.txt`).
+- `npx eslint` on the 13 screens, `components/{vault,notes,settings}`, `lib/{vaultCrypto,vaultKeyStore,screenGuard,vaultBeamSettings,notesAttachments}.ts`, `lib/vaultcheck/index.ts` and `components/ui/useDatePicker.tsx`: 0 errors, 5 warnings (`J_eslint.txt`). All five are `require()` warnings: four in `vaultFileIO.selftest.ts`, where stubs load before the module, and the existing one at `lib/vaultCrypto.ts:27`.
+- `npx tsx` selftests, all exit 0:
+  - vaultCrypto, vaultKeyStore (new), vaultFileIO (new), vaultBeamSettings (new), screenGuard (new)
+  - pinFormat, uiDebtRatchet ("no file got worse", 5 unroled / 283 hex), a11yCoverage, themeCoverage (22/20), screenBackCoverage, orphanRoutes (51), silentFailure
+  - notesVault, privacyChecklist (6), statusPrivacySelection, resumeLockPolicy, vaultManifestParse
+- A scratch probe of `lib/vaultKeyStore.ts` with SecureStore stubbed in memory (`J_probe_rewrap.ts` / `.txt`; it lives outside the repo). It confirms regression R1 below.
+- Not run: full `npm test`, `npm run lint`, `openspec validate`.
+
+**Splits and tokens**
+- `app/settings.tsx` → `components/settings/SettingsParts.tsx`: every removed line reappears in the new file unchanged, apart from `export` keywords and imports. The only other edits are the five catches, now `unknown`.
+- `VaultExportSheet` matches the old inline modal and adds `accessibilityRole="header"` (`components/vault/VaultExportSheet.tsx:32`).
+- `vaultStyles.ts` is a move.
+- `onPrimary` and `onDanger` are still `#FFFFFF` in both schemes (`constants/theme.ts:235-236` and the light block). Moving to them changes nothing on screen. No file in the batch uses `onDanger` or `warning`.
+
+| Screen | Old | New | Δ |
+|---|---|---|---|
+| app/settings.tsx | 8.5 | 9.0 | +0.5 |
+| app/privacy-dashboard.tsx | 8.5 | 8.5 | 0 (mean 8.58 → 8.67) |
+| app/ghost-mode.tsx | 8.5 | 8.5 | 0 (mean 8.5 → 8.58) |
+| app/last-seen-privacy.tsx | 8.5 | 9.0 | +0.5 |
+| app/status-privacy.tsx | 8.5 | 8.5 | 0 (mean 8.5 → 8.58) |
+| app/login-history.tsx | 8.5 | 8.5 | 0 (mean 8.5 → 8.58) |
+| app/vault.tsx | 8.0 | 8.5 | +0.5 (mean 8.33) |
+| app/vault-features.tsx | 8.5 | 8.5 | 0 (mean 8.42 → 8.5) |
+| app/vaultcheck.tsx | 8.5 | 8.5 | 0 (mean 8.5 → 8.58) |
+| app/vaultbeam-settings.tsx | 7.5 | 8.0 | +0.5 (mean 7.75; Function still capped) |
+| app/filevault.tsx (redirect) | 8.5 | 8.5 | 0 (unchanged) |
+| app/encrypted-notes.tsx | 8.0 | 8.5 | +0.5 (mean 8.25) |
+| app/d2de-status.tsx | 8.0 | 8.5 | +0.5 (mean 8.25) |
+
+---
+
+#### Adversarial review: key archive and recovery, lost key, VCV4 file-id binding, `.part` writes
+
+**Sound (checked in the code):**
+
+**VCV4 binding**
+- The AAD is `header ‖ utf8(fileId)` (`lib/vaultCrypto.ts:268-276`), and the magic is part of the header in the AAD. So rewriting `VCV4` to `VCV3` to drop the id changes the AAD, and the tag fails: there is no downgrade.
+- A seal without an id throws (`:270`).
+- The seal binds `vaultFileIdOf(destUri)` (`components/vault/vaultFileIO.ts:58`, `:86`). The open binds the basename of the file it actually reads, `encUriOf(file)` (`:125`; `app/vault.tsx:87`, `:552`).
+- New entries use `id = fileId` and `encPath = VAULT_DIR + fileId + '.enc'` (`app/vault.tsx:447-448`). `VAULT_DIR` and this naming have been the same since the first version of the file (`git log -S VAULT_DIR`). So `encUriOf`'s re-rooting cannot strand an old entry.
+- Re-listed files keep their on-disk basename as the id (`:417-421`), so a recovered VCV4 file still opens.
+- Swapping or renaming two `.enc` files makes both fail with "moved from another entry" (`lib/vaultCrypto.ts:345-347`). VCV3 files from round 4 are still unbound, by design.
+
+**`.part` path**
+- The seal writes `<id>.enc.part` (`vaultFileIO.ts:76`, `:84-86`) and closes it. It then reads the length back against `v3SealedSize` (`:89`) and only then renames (`:90`).
+- The rename is `Path.moveTo` on Android O and later, or `FileManager.moveItem` on iOS. Both throw on failure (`node_modules/expo-file-system/android/.../FileSystemPath.kt:156-167`, `ios/FileSystemPath.swift:87-94`).
+- So a failed rename lands in the catch, which deletes the `.part` (`:92-95`). The manifest is never written for it: no entry is "listed but missing".
+- Android's `listAsRecords` appends `/` to every URI (`FileSystemDirectory.kt:91-100`). `File.uri` strips it again (`FileSystemFile.kt:101-102`), so the `.enc` and `.part` suffix tests in `scanVaultDir` and `sweepPartialSeals` work (`vaultFileIO.ts:164`, `:184`).
+- The sweep only matches `.part` and is skipped while a seal runs in this JS context (`:178-179`). A complete `.enc` is never swept.
+
+**Writes**
+- The writer checks that the offset moved by exactly the bytes written (`:46`).
+- The source must exist before the Android "rw" open (`:75`), and a zero-byte read is refused when the picker reported a size (`:83`). The vaultFileIO selftest covers a missing source, an emptied source, a short write and a cancel.
+
+**Lost key**
+- A missing record mints a key only when the disk scan says no file needs one. Keyed files give `'lost'`, and a scan failure gives `'storage'` (`lib/vaultKeyStore.ts:85-87`; `app/vault.tsx:262-270`).
+- The scan counts everything that is not `{"v":1` as keyed, including unreadable files (`vaultFileIO.ts:166-172`). A misclassification is therefore always on the safe side.
+- The manifest lives in the same SecureStore and is lost with the key. Files it no longer names are offered back with **List again** and are never deleted (`app/vault.tsx:409-431`, `:716-728`).
+
+**Archive and recovery**
+- `replaceVaultKeys` writes the archive copy, then the index, then the new record, and never replaces a record the PIN opens (`lib/vaultKeyStore.ts:158-173`).
+- Every unlock tries the PIN against each archive (`:99-110`), and a recovered archive opens files read-only (`lib/vaultCrypto.ts:187-205`, `:341-343`).
+- `tryOldVaultPin` re-wraps instead of replacing (`:140-148`).
+- The New-key confirm copy now matches each case (`app/vault.tsx:374-378`).
+
+**Flaws:**
+
+1. **R1 (regression, medium: key availability). A PIN change can now leave the vault key under a PIN that was never saved, while the screen says "nothing was changed."**
+   - `rewrapVaultKeys` re-wraps `KEY` first, then reads the archive index and re-wraps each archive (`lib/vaultKeyStore.ts:128-131`).
+   - `app/backup-pin.tsx:100` calls it. On failure it shows "Your PIN could not be saved, and nothing was changed" (`:109-111`). The re-wrap back to the old PIN at `:104` runs only when `savePIN` fails, not when the forward re-wrap fails partway.
+   - Before round 5 the re-wrap was a single SecureStore write, so a throw meant nothing was written. The archive loop added the partial state.
+   - Probe, case A: a failed archive write during P1→P2 left `KEY` openable only by P2, while the Device PIN stayed P1. The vault then shows `miss 'pin'` and the copy "made under the PIN you had before a reset" (`components/vault/VaultKeyPanel.tsx:31`). Recovery works only if the user thinks to enter the PIN they were just told was not saved.
+   - Probe, case B: a damaged index blocks every way out.
+     - `archiveNames()` throws a raw `SyntaxError` (`:47`). That happens after `KEY` was already re-wrapped to the rejected PIN.
+     - "Try an old PIN" (`:143`), "New key" (`:166`) and every later PIN change (`:130`) throw the same error. The `SyntaxError` text is shown to the user verbatim (`VaultKeyPanel.tsx:76`; `app/vault.tsx:387`).
+     - `openArchives` swallows the damage silently (`:101`), so there is no notice either.
+     - The key is not destroyed, but no UI path can reach it.
+   - Fix: read the index before touching `KEY`, and on any failure re-wrap back what was already done. Or have `backup-pin` call `rewrapVaultKeys(val, prev)` on any failure of the forward re-wrap. Treat a damaged index as data to keep: copy it aside and start a new index, instead of a hard stop for every path.
+2. **(Low, documentation.) "Re-lock cancels a running seal" is not what happens.**
+   - The whole add, including `encryptAndSave`, runs inside `withSystemUi` (`app/vault.tsx:484`). The AppState handler returns early while `systemUi.current > 0` (`:300`).
+   - So going to the background during a seal neither re-locks nor cancels. The vault stays open in the background until the seal finishes. This behaviour predates round 5 and is documented at `:482-483`.
+   - Only the Cancel button and unmount cancel a seal (`:256`, `:786`). The comment at `:234-236` and claim 8 in R5J overstate this. For opens the claim holds (`:301`, `:554`).
+3. **(Low.) The old-PIN limit lives only in the UI.**
+   - `OLD_PIN_TRIES` is component state and resets on every re-lock (`VaultKeyPanel.tsx:19`, `:55`, `:64`). `tryOldVaultPin` has no backoff of its own (`lib/vaultKeyStore.ts:140-148`).
+   - Whoever knows the current PIN gets 5 old-PIN guesses per re-lock cycle.
+   - Before round 5 the same guesses were possible through repeated PIN changes, so this is not a new exposure. A persistent counter would close it.
+4. **(Low.) "List again" has no in-flight guard.**
+   - A second tap that lands after `filesRef` updates but before the re-render would list the same ids twice (`app/vault.tsx:415-431`, `:723`). Deleting one of the pair then deletes the file the other still names (`:598-599`).
+   - `f.size` can be `null` for a file that vanished since the scan (`:418-421`).
+5. **(Low, 📱.) No fsync before the rename and listing** (`vaultFileIO.ts:87-90`). After a power cut, a listed `.enc` could come back short. It would then fail as "damaged" on open; nothing would be silently wrong.
+6. **(Low.) A New key that fails after the index write still says "Nothing was changed."** A duplicate archive entry stays (`lib/vaultKeyStore.ts:168-172`; `app/vault.tsx:387`). This is harmless: it only shows as one more locked archive.
+7. **(Low.) The archive name `vault_key_v2_prev_<Date.now()>` is not checked against existing names** (`:167-168`). A collision after a clock rollback to the same millisecond would overwrite an older archive. Negligible.
+8. **(Pre-existing, 📱, not verifiable statically.)**
+   - On iOS, `documentDirectory/vault/` is included in device backups unless it is excluded. Nothing in the repo excludes it; only Android is locked down (`plugins/withBackupLockdown.js:73`).
+   - The export sheet says vault files "are not backed up anywhere" (`components/vault/VaultExportSheet.tsx:59-61`).
+   - The `'lost'` copy names only Android causes (`VaultKeyPanel.tsx:29`). On iOS, a restore without the keychain item also lands in `'lost'`.
+
+---
+
+#### `app/settings.tsx` — **8.5 → 9.0** (mean 8.75)
+- **Scores now:** Function 9 · States 9 · UI 8.5 · A11y 9 · Security 8.5 · Code 8.5
+- **Original items:**
+  1. ✅ **Split and typed catches.** The file is 527 lines. The rows, the Appearance picker and the stylesheet moved unchanged to `components/settings/SettingsParts.tsx` (179 lines; import at `app/settings.tsx:52`). There are 0 `e: any` left: `:97`, `:110`, `:133` and the export and unblock catches are `unknown`.
+  2. n/a **Dark white on `primary`.** This is the open §5 design decision (`constants/theme.ts:229-236`, `:279-280`). It is not a deduction.
+- **Regressions:** none. The split is verbatim.
+- **Subscreens:**
+  - Picker Sheet — 8.5 → 8.5.
+  - Appearance — 8.5 → 8.5.
+  - Blocked users — 9 → 9.
+- **Still needed for 10/10:**
+  1. `saveLocal`'s rollback Alert (`app/settings.tsx:87-93`) and `savePref`'s Alert (`:133`) are not mount-guarded.
+  2. `savePref` drops a second pick while one is saving (`:128`) instead of queueing the newest.
+  3. Dark-theme `onPrimary` contrast (§5).
+
+#### `app/privacy-dashboard.tsx` — **8.5 → 8.5** (mean 8.67)
+- **Scores now:** Function 9 · States 9 · UI 8.5 · A11y 8.5 · Security 8.5 · Code 8.5
+- **Original items:**
+  1. ◐ **Native FLAG_SECURE read.** Still "last applied" (`lib/screenGuard.ts:153-160`). The native `isSecure` handoff stands.
+  2. ✅ **Early load.** `readSecureStateSettled()` waits for an in-flight `setSecure` (`lib/screenGuard.ts:124-130`, `:176-179`). The dashboard reads it inside its `allSettled` (`app/privacy-dashboard.tsx:72`, `:82`). The new screenGuard selftest passes.
+- **Regressions:** none. `inFlight` tracks only the latest call. If an earlier, overlapping call finishes last, its `lastApplied` wins (`lib/screenGuard.ts:150`). That race predates round 5.
+- **Subscreens:**
+  - Score ring — 8.5 → 8.5.
+  - Checks list — 9 → 9.
+  - Who can see — 8.5 → 8.5.
+  - Improve your score — 9 → 9.
+- **Still needed for 10/10:**
+  1. A native read of the window flag (`lib/screenGuard.ts:153-160`).
+  2. Use `onPrimary` contrast in dark mode (§5). A load that starts before the root layout calls `setSecure` at all still reads `'unknown'` (📱).
+
+#### `app/ghost-mode.tsx` — **8.5 → 8.5** (mean 8.58)
+- **Scores now:** Function 8.5 · States 9 · UI 8.5 · A11y 9 · Security 8 · Code 8.5
+- **Original items:**
+  1. ✅ **Busy switch.** A switch that is waiting has `accessibilityState={{ checked, disabled, busy }}` and the hint "Unavailable while another setting saves" (`app/ghost-mode.tsx:390-391`).
+  2. ❌ **Server enforcement.** Not verifiable statically (§5 offline).
+- **Regressions:** none.
+- **Subscreens:**
+  - List view — 8.5 → 8.5.
+  - Per-target editor — 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. Confirm on the server that the per-target overrides are enforced (not verifiable statically).
+
+#### `app/last-seen-privacy.tsx` — **8.5 → 9.0** (mean 8.75)
+- **Scores now:** Function 9 · States 9 · UI 8.5 · A11y 9 · Security 8 · Code 9
+- **Original items:**
+  1. ❌ **Server enforcement.** Not verifiable statically.
+  2. ✅ **Functional optimistic update.** `setSettings(cur => …)` (`app/last-seen-privacy.tsx:65`), with the per-key rollback (`:72`). The catches are `unknown` (`:59`, `:69`).
+- **Regressions:** none.
+- **Still needed for 10/10:**
+  1. Confirm on the server that the four settings are enforced (not verifiable statically).
+
+#### `app/status-privacy.tsx` — **8.5 → 8.5** (mean 8.58)
+- **Scores now:** Function 8.5 · States 9 · UI 8 · A11y 9 · Security 8.5 · Code 8.5
+- **Original items:**
+  1. ◐ **"My contacts."** The meaning is confirmed in the repo backend: `audienceBaseIDs` takes shared active chats, groups included, minus blocks (`vaultchat-backend-go/internal/routes/stories.go:44-58`). Whether the deployed server matches is not verifiable statically. The picker still lists only direct-chat peers. The new line says what that means in each mode (`app/status-privacy.tsx:195-203`). The `?base=1` client is not wired (R5HO partial 1).
+  2. ✅ **Back target.** 44×44 (`:255`).
+- **Regressions:** none.
+- **Subscreens:** Contact selector — 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. Once `?base=1` is deployed, list group-only peers. Treat a missing `people` field as "not supported", because today's server ignores the parameter (R5HO).
+  2. UI 8: the new note reuses `S.modeSub` with inline margins (`:199`). Minor.
+
+#### `app/login-history.tsx` — **8.5 → 8.5** (mean 8.58)
+- **Scores now:** Function 8 · States 9 · UI 8.5 · A11y 9 · Security 8 · Code 9
+- **Original items:**
+  1. ✅ **Revoke Alerts guarded.** Both now check `mounted.current` (`app/login-history.tsx:101`, `:126`), and the catches are `unknown`.
+  2. ❌ **Offline view and server revocation.** The offline view is a §5 decision. Server revocation is not verifiable statically.
+- **Regressions:** none.
+- **Still needed for 10/10:**
+  1. The offline cached view, pending §5 `VAULT_CACHE_ENCRYPTED`.
+  2. Confirm server-side revocation (not verifiable statically).
+
+#### `app/vault.tsx` — **8.0 → 8.5** (mean 8.33)
+- **Scores now:** Function 9 · States 8.5 · UI 8 · A11y 8.5 · Security 8.5 · Code 7.5
+- **Original items** (round-4 "Still needed"):
+  1. ✅ **Archive reachable.**
+     - An index key (`lib/vaultKeyStore.ts:32`, `:166-169`), unlock tries archives (`:99-110`), "Try an old PIN" (`:140-148`; `components/vault/VaultKeyPanel.tsx`), and per-case honest confirms (`app/vault.tsx:374-378`).
+     - The header comment is rewritten (`lib/vaultKeyStore.ts:7-22`).
+     - **But see R1:** the PIN-change partial re-wrap and the damaged-index dead end.
+  2. ✅ **Source check and write check.** The source must exist and have a plausible size (`vaultFileIO.ts:75`, `:83`). Offset check on write (`:46`) and length read-back (`:89`).
+  3. ✅ **Orphans.**
+     - `.part`, then rename, then sweep on unlock (`vaultFileIO.ts:76-90`, `:178-188`; `app/vault.tsx:261`).
+     - Unlisted `.enc` files are re-listed, never deleted (`:409-431`).
+     - A delete also drops the file from the scan (`:600-601`).
+  4. ✅ **Progress and cancel.**
+     - Chunk progress and Cancel (`app/vault.tsx:237-249`, `:779-791`).
+     - An open is cancelled on re-lock and never reaches the share sheet (`:301`, `:554`).
+     - ◐ A seal is not cancelled by going to the background, because of the bracket (flaw 2).
+  5. ✅ **File id bound** into the VCV4 AAD (`lib/vaultCrypto.ts:226-227`, `:268-276`).
+  6. ✅ **SecureStore `null` is not "no record"** while keyed files exist (`lib/vaultKeyStore.ts:85-87`).
+  7. ◐ **Size and tests.**
+     - The IO and key-store selftests are added. Export sheet, styles and key panel are split out.
+     - The PIN gate is still in the 871-line file. The pinFormat selftest now reads `VAULT_GATE_FILES` (R5HO 10), so the move is unblocked but was not done.
+     - Five `e: any` remain (`:386`, `:468`, `:567`, `:602`, `:637`).
+- **Also fixed:** `encUriOf` re-roots paths against today's `VAULT_DIR`, for iOS container moves (`:84-87`; 📱).
+- **Regressions:**
+  - **R1** (medium): a failed PIN change can strand the key under the rejected PIN while saying "nothing was changed". A damaged archive index blocks every recovery path (`lib/vaultKeyStore.ts:128-131`, `:47`; `app/backup-pin.tsx:100-111`).
+  - The comment overstates seal cancellation on re-lock (`app/vault.tsx:234-236`). Low.
+- **Subscreens:**
+  - PIN gate — 8 → 8.
+  - File tabs and list — 8.5 → 8.5.
+  - Export file list sheet — 8.5 → 8.5. Moved unchanged, plus a header role.
+  - Key notice / New key — 7 → 8. Reachable archives and honest copy, held back by R1.
+  - Try an old PIN sheet (new) — **8**. PinPad 4–8, single-flight, honest result copy. The limit is UI-only (flaw 3), and the raw `SyntaxError` can show (R1).
+  - Unlisted files row (new) — **8**. Never deletes. No in-flight guard (flaw 4).
+  - Progress / Cancel view (new) — **8.5**. Live-region percentage and a labelled Cancel.
+- **Still needed for 10/10:**
+  1. Make the PIN-change re-wrap all-or-nothing: index first, and roll back on any failure, or have `backup-pin` roll back on any re-wrap failure. Keep a damaged index aside instead of blocking New key, Try an old PIN and PIN change. Show a fixed message instead of `SyntaxError` text (`lib/vaultKeyStore.ts:44-50`, `:128-131`; `app/backup-pin.tsx:100-104`).
+  2. Guard "List again" against a double tap, and skip ids whose file is gone (`app/vault.tsx:415-431`).
+  3. Move `PinGate` and `BackButton` to `components/vault/` (now unblocked) and type the five `e: any` catches.
+  4. Fix the comment at `:234-236`. Decide whether a long seal should keep the vault open in the background (`:482-484`; ponytail at `:288-291`).
+  5. Keep the old-PIN attempt count in persistent state, or apply `pinStore`'s backoff (`VaultKeyPanel.tsx:19`, `:55`).
+  6. iOS: exclude `vault/` from backups, or correct the "not backed up anywhere" copy (`VaultExportSheet.tsx:59-61`; 📱). Make the `'lost'` copy platform-neutral (`VaultKeyPanel.tsx:29`).
+  7. JS cipher speed for large videos (📱). `unlock` runs one synchronous PBKDF2 per archive (`lib/vaultKeyStore.ts:104-107`), which is slow on the JS fallback.
+
+#### `app/vault-features.tsx` — **8.5 → 8.5** (mean 8.5)
+- **Scores now:** Function 8.5 · States 8.5 · UI 8.5 · A11y 8.5 · Security 8 · Code 9
+- **Original items:**
+  1. ✅ **Countdown isolated.** `CodeCountdown` owns the tick and calls `onExpired` at zero (`app/vault-features.tsx:77-95`, `:316`). Share computes the minutes from `Date.now()` (`:232`).
+  2. ❌ **Server single-use.** Not verifiable statically.
+- **Regressions:** none of note. The card is now gated on `codeExpiry`, not on time left (`:313`). For one render after expiry it shows the code without a countdown, until `clearLocalCode` runs. An expired stored code is still cleared on load (`:164-169`).
+- **Subscreens:** Temp Chat Code — 8.5 → 9. The rest are unchanged.
+- **Still needed for 10/10:**
+  1. Confirm that the server enforces single use (not verifiable statically).
+
+#### `app/vaultcheck.tsx` — **8.5 → 8.5** (mean 8.58)
+- **Scores now:** Function 8 · States 9 · UI 8.5 · A11y 9 · Security 8.5 · Code 8.5
+- **Original items:**
+  1. ◐ **Cancel.** `verifyMedia(uri, kind, cancelled)` stops between stages (`lib/vaultcheck/index.ts:68-111`). The screen cancels on unmount (`app/vaultcheck.tsx:53-54`, `:85`). A native stage that is already running finishes first (ponytail at `lib/vaultcheck/index.ts:79-81`).
+  2. ✅ **Progress for screen readers.** One announcement at 30 s (`:57-59`).
+- **Regressions:** none.
+- **Subscreens:**
+  - Report view — 9 → 9.
+  - Error state — 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. Cancellable native stages (rPPG and the detector) (`lib/vaultcheck/index.ts:105`, `:110`).
+
+#### `app/vaultbeam-settings.tsx` — **7.5 → 8.0** (mean 7.75)
+- **Scores now:** Function 5.5 · States 8.5 · UI 8.5 · A11y 8.5 · Security 7 · Code 8.5
+- **Original items:**
+  1. ❌ **Feature flag.** `VB_AUTODOWNLOAD = false` (`constants/flags.ts:165`). The screen discloses it (`app/vaultbeam-settings.tsx:52-57`).
+  2. ✅ **Synchronous apply.** The setting applies at once, and disk writes are serialised FIFO with a snapshot taken at call time (`lib/vaultBeamSettings.ts:101-120`). The screen calls `patchSettings` directly (`app/vaultbeam-settings.tsx:29-31`). The new selftest passes.
+- **Regressions:** none. The round-4 queued-apply delay is gone.
+- **Subscreens:** Auto-download options — 7 → 7.5.
+- **Still needed for 10/10:**
+  1. Ship the feature, or hide the screen until it ships (`constants/flags.ts:165`).
+
+#### `app/filevault.tsx` (redirect) — **8.5 → 8.5**
+- Unchanged since round 4. No diff.
+- **Still needed:** delete the alias once no external link uses it (not verifiable statically).
+
+#### `app/encrypted-notes.tsx` — **8.0 → 8.5** (mean 8.25)
+- **Scores now:** Function 8.5 · States 9 · UI 7.5 · A11y 8 · Security 9 · Code 7.5
+- **Original items:**
+  1. ◐ **iOS reminder.** `useDatePicker(undefined, { inModal: true })` draws the sheet as an absolute overlay with `accessibilityViewIsModal` (`components/notes/NoteEditorModal.tsx:38-40`, `:229`; `components/ui/useDatePicker.tsx:73-105`). It is closed when the editor hides. Needs a device check (📱).
+  2. ✅ **Single-flight PIN checks.** One `pinChecking` ref is shared by the gate and the lock challenge (`app/encrypted-notes.tsx:179-191`, `:339-350`).
+  3. ✅ **Editor cleared on re-lock.** Fields, preview, `editNote` and `edInitial` are reset after the draft is sealed (`:153-158`).
+  4. ✅ **Unopenable-draft attachments.** They are deleted when no saved or trashed note references them (`:289-295`; `lib/notesAttachments.ts:66-72`). It runs only after a successful load (`:216`, `:243`).
+  5. ❌ **Handler hook.** 747 lines; four `e: any` remain (`:372`, `:385`, `:421`, `:458`).
+  6. ❌ **Palette.** A decision, unchanged.
+- **Regressions:** none. One note on item 4:
+  - `openDraft` returns `null` on any decrypt failure (`components/notes/notesModel.ts:77-78`), including a transient key-read failure. The sweep now makes that permanent for the draft's attachments.
+  - The draft itself was already removed before the open (`app/encrypted-notes.tsx:287`), which predates round 5.
+- **Subscreens:**
+  - PIN gate — 8.5 → 9. Single-flight.
+  - Notes list — 8 → 8.
+  - Note editor — 8.5 → 8.5. The inline picker is 📱.
+  - Markdown preview — 8 → 8.
+  - Password generator — 8.5 → 8.5.
+  - Image viewer — 7 → 7.
+  - Secure Trash — 8 → 8.
+  - Locked-note challenge — 8.5 → 9.
+  - Backup & restore — 8.5 → 8.5.
+- **Still needed for 10/10:**
+  1. Remove `DRAFT_KEY` only after `openDraft` succeeds. Sweep attachments only when the draft key is truly gone (`:285-295`).
+  2. Check the inline iOS reminder overlay on a device. On Android, Back closes the editor rather than the overlay (iOS-only path).
+  3. Move the attachment and save handlers into a hook (747 lines) and type the four `e: any` catches.
+  4. Palette: tokens, or a ratchet over `.ts` (`components/notes/notesModel.ts:8-27`).
+
+#### `app/d2de-status.tsx` — **8.0 → 8.5** (mean 8.25)
+- **Scores now:** Function 7.5 · States 8.5 · UI 8 · A11y 8.5 · Security 8.5 · Code 8.5
+- **Original items:**
+  1. ✅ **Link to verify-contact.**
+     - With `E2EE_ENABLED`, "Check a contact's safety number" loads `listChats` and keeps only direct peers, de-duplicated.
+     - It shows them in the shared `Sheet`, a sibling of the ScrollView, and pushes `/verify-contact` with `peerId` and `peerName` (`app/d2de-status.tsx:44-68`, `:122-133`).
+     - Empty, failure and in-flight states are handled. `verify-contact` reads those params (`app/verify-contact.tsx:51-52`).
+  2. ◐ **Function.** Still a readout of compile-time flags, not live per-chat session state (`:1-5`).
+- **Regressions:** none.
+- **Subscreens:** Peer picker Sheet (new) — **8.5**.
+- **Still needed for 10/10:**
+  1. Show each conversation's live session or verified state, instead of build flags only.
+
+---
+
+#### Regressions introduced in round 5 (this batch)
+1. **Vault key re-wrap is no longer atomic.** A PIN change that fails partway leaves `vault_key_v2` under the rejected new PIN, while `backup-pin` says "nothing was changed". A damaged archive index then blocks Try an old PIN, New key and every later PIN change, and shows a raw `SyntaxError`. Reproduced with a stubbed SecureStore (`lib/vaultKeyStore.ts:128-131`, `:44-50`, `:101`; `app/backup-pin.tsx:100-111`; `scratchpad/rerate5/J_probe_rewrap.txt`). **Medium.**
+2. **A comment claims a background re-lock cancels a seal.** The add bracket prevents re-lock during a seal (`app/vault.tsx:234-236` vs `:484`, `:300`). Low, documentation.
+3. **Notes: the unopenable-draft sweep makes a transient `openDraft` failure permanent for that draft's attachments.** The draft text was already dropped before round 5 (`app/encrypted-notes.tsx:287-295`). Low.
+
+There are no regressions from the settings split, the vault export, style or key-panel splits, the notes `inModal` change, or the tokens: `onPrimary` and `onDanger` are still `#FFFFFF`, and no file in J uses `onDanger` or `warning`.

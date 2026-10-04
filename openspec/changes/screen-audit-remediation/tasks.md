@@ -10,7 +10,10 @@ Levels, as elsewhere in this repo:
 Per-item detail, with file:line evidence, lives in `2026-10-04_fix_status.md` and the
 updated ratings it links. Rounds 1–2 changed no backend file. Round 3 wrote the server
 changes the app was blocked on (commit `3353236`, `vaultchat-backend-go` plus migrations
-140 and 141); they are **written, not deployed**.
+140 and 141). Rounds 4–5 added contracts C1–C19, the visitor-pass revoke route,
+`GET /stories/audience?base=1` and the `order_status` side tag (commits `730e5b9`, `433030b`,
+`4910069`, `db1d68b`, `2a05e46`; migrations 142, 143 and 144). All of it is **written, not
+deployed**; the copy list and order are in `2026-10-04_fix_status.md` §4.
 
 ## 0. Baseline
 
@@ -104,8 +107,34 @@ changes the app was blocked on (commit `3353236`, `vaultchat-backend-go` plus mi
 - [x] 3.12 Fixes for regressions the round-3 re-raters found (delete-account MPIN pre-check
       restored, yearly finance reminders, status lock answer reveal, Location Lock save copy,
       reminder list reset, battery-exemption "can't tell", Khata share reachability, one status
-      history row per transition, and others listed in the fix-status §3) — **written**, not
-      re-scored
+      history row per transition, and others listed in the fix-status §3) — **written**; scored
+      by the round-4 re-raters
+- [x] 3.13 Round 4 (`0dcfb48` … `4910069`, 19 packages): the round-3 open items and every
+      remaining "Still needed for 10/10" item that can be done in this repo — palette tokens
+      `onPrimary`/`onDanger`/`warning`/`caution`/`scrim` and an app-themed `useDatePicker`;
+      splits of `app/_layout.tsx`, Chats, `MessageBubble`, live-view, file-viewer, the family
+      hub and map, encrypted notes, import chats and the Rummy, Chess and Ludo boards; GIF and
+      Forward through the outbox; a screen-reader pass on the games boards; client wiring with
+      honest fallbacks for every new server contract — **written**; items marked 📱
+      **device-verified: no**
+- [x] 3.14 OTP-first sign-in: the app sends the SMS code before any MPIN sign-in or recovery
+      and carries the phone ticket (`app/phone-verify.tsx`, renamed from `email-verify`,
+      `lib/otpFirstRoute.ts`). Server enforcement (`AUTH_REQUIRE_PHONE_TICKET`, C15) is
+      **written, not deployed**, and stays off until this client is the minimum version —
+      **written**; **device-verified: no**
+- [x] 3.15 Round 5 (`5492453` … `2a05e46`, 14 packages): fixes for the round-4 regressions
+      (blocked "Check again" dead-end, identical read ticks, backup key-mode collision, vault
+      "New key" archive, calculator vs ledger compounding, and others in fix-status §3), plus
+      privacy fixes for protected and locked text in global search and chat previews, a
+      verification bound to the safety number, a Doc Scanner list that cannot drop keys, and
+      view-once images kept out of the disk cache — **written**; scored by the round-5
+      re-raters
+- [x] 3.16 Fixes after the round-5 re-rating (`bf68b93` and round 6, `076e098` … `166d207`,
+      7 packages): finance one-off and snoozed reminders schedule; all-or-nothing vault PIN
+      re-wrap; scan key never replaced silently; hidden and locked chats masked in search and
+      every cross-chat list; a new phone cannot overwrite the online backup and E2EE restores
+      stay E2EE; saved family places never overwritten after a failed read; per-mount launch
+      gate — **written**, **not re-scored**; items marked 📱 **device-verified: no**
 
 ## 4. Phase 3–4 — partially in scope
 
@@ -114,30 +143,40 @@ changes the app was blocked on (commit `3353236`, `vaultchat-backend-go` plus mi
 - [ ] 4.2 App-wide accessibility ratchet over every touchable. `lib/uiDebtRatchet.selftest.ts`
       exists and runs in `npm test`: for each `.tsx` under `app/` and `components/` it counts
       touchables with no `accessibilityRole` and hex colour literals, and fails when a file's
-      count goes up against `lib/uiDebtRatchet.baseline.json` (now 37 and 954). It only stops
-      new debt; it does not require roles everywhere. The app-wide pass is not complete (37
-      unroled touchables remain, and the games boards have had no full screen-reader pass), so
-      this stays open for `interaction-integrity` — ratchet **written**
+      count goes up against `lib/uiDebtRatchet.baseline.json`. It only stops new debt; it does
+      not require roles everywhere. The totals went from 45 / 955 when it was added to 5 / 281
+      at `166d207`. The games boards had a screen-reader pass in round 4, still 📱. The
+      app-wide pass is not complete (5 unroled touchables remain, in
+      `components/WritingAssistant.tsx`, `components/ChainLinkIcon.tsx` and
+      `app/videocall.tsx`), so this stays open for `interaction-integrity` — ratchet **written**
 - [x] 4.3 Split `app/chat.tsx` and `app/shop-book.tsx`. `app/chat.tsx` went from 4,674 to 2,500
       lines, with the moved parts in `components/chat/` (header, search bar, banners, rows,
       composer, modals, lock gate and six hooks). `app/shop-book.tsx` went from about 5,800 lines
       to a 344-line shell plus 12 files in `components/shopbook/`. The round-3 re-raters found
-      no behaviour lost in either split — **written**
+      no behaviour lost in either split. Rounds 4–6 split more files (see 3.13); `app/chat.tsx`
+      is now 2,576 lines, with its socket effect kept in place because four selftests read it
+      there — **written**
 - [ ] 4.4 Remove the legacy call bodies behind `CALL_ENGINE_V2` — deferred: `constants/flags.ts`
       keeps them as the rollback until the hardware test pass in `CALLS_README.md`
 - [x] 4.5 https intent filter for `vaultchat.app/add` and `/join` (`autoVerify: false`) — **written**;
-      `assetlinks.json` hosting is ops work
+      `assetlinks.json` / `apple-app-site-association` hosting is ops work; templates are in
+      `deploy/well-known/`, but the Play app-signing SHA-256 and Apple Team ID are not in the
+      repo
 
 ## 5. Validation
 
-- [x] 5.1 At `a72296b`: `tsc` 0 errors; `expo lint` 0 errors / 55 warnings; `npm test` 413/417,
+- [x] 5.1 At `166d207`: `tsc` 0 errors; `expo lint` 0 errors / 27 warnings; `npm test` 471/475,
       where the four failures are the environmental baseline (`lib/call/minimize`,
-      `lib/layoutMetrics`, `services/securityEmulatorFlag`, `utils/moneySeam`). After round 2 it
-      was 158 warnings and 386/390 — **written**
-- [x] 5.2 Independent re-rating, in three rounds: 147 screens, then 36, then all 174 remaining
-      screens in 13 batches. Mean of the 174 remaining screens: 6.2 → 7.1 after round 2 →
-      7.8 after round 3. Against the baseline: 173 up, 1 unchanged, 0 down; 98 screens at 8 or
-      above; none below 5. Fixes made after the round-3 re-rating are not re-scored. Results in
-      `2026-10-04_fix_status.md` — **written**
+      `lib/layoutMetrics`, `services/securityEmulatorFlag`, `utils/moneySeam`); `openspec
+      validate --all --strict` 49/51 (the same two no-delta changes). Earlier: 158 warnings and
+      386/390 after round 2; 55 and 413/417 after round 3 (`a72296b`); 26 and 441/445 at
+      `4910069`; 30 and 460/464 at `2a05e46` — **written**
+- [x] 5.2 Independent re-rating, in five rounds: 147 screens, then 36, then all 174 remaining
+      screens in 13 batches three times (rounds 3, 4 and 5; round 5 scored `2a05e46`). Mean of
+      the 174 remaining screens: 6.2 → 7.1 after round 2 → 7.8 after round 3 → 8.2 after
+      round 4 → 8.4 after round 5. Against the baseline: 174 up, 0 unchanged, 0 down; against
+      round 3: 150 up, 24 unchanged, 0 down; 169 screens at 8 or above, 12 at 9 or above; none
+      below 5; highest real screen 9 (10 screens). The fixes after `2a05e46` (133 screens) are
+      not re-scored. Results in `2026-10-04_fix_status.md` — **written**
 - [ ] 5.3 Device pass on Android and iOS for the items marked above
 - [ ] 5.4 Ship in an app release; sync `screen-integrity` to `openspec/specs` only after 5.3
