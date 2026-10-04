@@ -2209,7 +2209,7 @@ func sbOwnerSetStatus(w http.ResponseWriter, r *http.Request) {
 			"not_collected": "The shop marked your order as not collected: " + b.Reason,
 		}[b.Status]
 		sbNotify(ctx, custID, "Order update", msg,
-			map[string]any{"event": "order_status", "orderId": orderID, "status": finalStatus})
+			map[string]any{"event": "order_status", "orderId": orderID, "status": finalStatus, "side": "customer"})
 	}
 	out := map[string]any{"ok": true, "status": finalStatus}
 	if creditWarning != nil {
@@ -2337,7 +2337,7 @@ func sbCustomerCollect(w http.ResponseWriter, r *http.Request) {
 	var ownerID string
 	if db.Pool.QueryRow(ctx, `SELECT owner_user_id FROM shopbook_shop WHERE id=$1`, shopID).Scan(&ownerID) == nil && ownerID != "" {
 		sbNotify(ctx, ownerID, "Order collected ✅", "The customer confirmed pickup — the khata is settled.",
-			map[string]any{"event": "order_status", "orderId": orderID, "status": "completed"})
+			map[string]any{"event": "order_status", "orderId": orderID, "status": "completed", "side": "owner"})
 	}
 	httpx.JSON(w, 200, map[string]any{"ok": true, "status": "completed"})
 }

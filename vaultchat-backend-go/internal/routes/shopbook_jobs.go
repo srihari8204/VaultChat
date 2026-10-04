@@ -142,11 +142,11 @@ func sbSweepUncollectedOrders(ctx context.Context) {
 		body := "An order was never collected and has been closed."
 		if x.custID != "" {
 			sbNotify(ctx, x.custID, "Order not collected", body,
-				map[string]any{"event": "order_status", "orderId": x.orderID, "status": "not_collected"})
+				map[string]any{"event": "order_status", "orderId": x.orderID, "status": "not_collected", "side": "customer"})
 		}
 		if x.ownerID != "" {
 			sbNotify(ctx, x.ownerID, "Order not collected", body,
-				map[string]any{"event": "order_status", "orderId": x.orderID, "status": "not_collected"})
+				map[string]any{"event": "order_status", "orderId": x.orderID, "status": "not_collected", "side": "owner"})
 		}
 	}
 	if len(all) > 0 {
