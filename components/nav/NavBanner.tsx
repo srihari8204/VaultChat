@@ -3,8 +3,8 @@
 // icon, next maneuver, distance, a shrinking progress line, and ETA — so the
 // driver rarely needs the full map. Renders nothing when navigation is inactive.
 
-import React from 'react';
-import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import React, { useEffect } from 'react';
+import { View, Text, StyleSheet, ActivityIndicator, AccessibilityInfo, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../lib/theme';
 import { useNavBanner } from '../../lib/nav/navigationService';
@@ -30,6 +30,13 @@ function fmtEta(epochMs: number): string {
 export default function NavBanner() {
   const { colors } = useTheme();
   const b = useNavBanner();
+  const line = b.rerouting ? 'Rerouting…' : (b.instruction || (b.event === 'destination' ? 'Arriving' : 'Continue'));
+  // Each new instruction is announced: Android through the live region below,
+  // iOS (no live regions) through an explicit announcement. Keyed on the text,
+  // so distance ticks do not repeat it.
+  useEffect(() => {
+    if (b.active && Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(line);
+  }, [b.active, line]);
   if (!b.active) return null;
 
   const dim = colors.text + '99';
@@ -42,8 +49,8 @@ export default function NavBanner() {
           <Ionicons name={iconFor(b.event)} size={26} color={colors.primary} />
         </View>
         <View style={styles.mid}>
-          <Text numberOfLines={1} style={[styles.instruction, { color: colors.text }]}>
-            {b.rerouting ? 'Rerouting…' : (b.instruction || (b.event === 'destination' ? 'Arriving' : 'Continue'))}
+          <Text numberOfLines={1} accessibilityLiveRegion="polite" style={[styles.instruction, { color: colors.text }]}>
+            {line}
           </Text>
           <Text numberOfLines={1} style={[styles.sub, { color: dim }]}>
             {b.roadName ? `${b.roadName} · ` : ''}{fmtDist(b.remainingM)} left

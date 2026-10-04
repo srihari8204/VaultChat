@@ -9,6 +9,9 @@ import { View, TouchableOpacity, StyleSheet, FlatList, Alert, Share, TextInput, 
 import { Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
+import type { Palette } from '../constants/theme';
+import { zoneColor } from '../lib/lock/zoneMachine';
+import { ALARM } from '../lib/lock/alarmPalette';
 import {
   getSessions, getEvents, statsForRange, distancePerDay, deleteSession, clearAllHistory,
   exportHistoryJSON, exportHistoryCSV, setSessionNotes,
@@ -34,15 +37,36 @@ const fmtMs = (ms: number) => {
 };
 const fmtT = (t: number) => new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
-const EVENT_META: Record<string, { icon: any; color: string; label: string }> = {
-  armed:       { icon: 'lock-closed',   color: '#4A9FFF', label: 'Locked' },
-  warning:     { icon: 'alert',         color: '#EAB308', label: 'Near boundary' },
-  exit:        { icon: 'exit',          color: '#EF4444', label: 'Exited zone' },
-  alarm_start: { icon: 'volume-high',   color: '#DC2626', label: 'Alarm started' },
-  alarm_stop:  { icon: 'volume-mute',   color: '#F97316', label: 'Alarm stopped' },
-  return:      { icon: 'enter',         color: '#22C55E', label: 'Returned to safe zone' },
-  unlocked:    { icon: 'lock-open',     color: '#9CA3AF', label: 'Unlocked' },
+/** Sessions per page. lockStore.getSessions caps every read; "Show more"
+ *  raises the cap instead of silently stopping at the first page. */
+const PAGE = 100;
+
+type EventMeta = { icon: keyof typeof Ionicons.glyphMap; color: string; label: string };
+/** Event glyphs. Colours come from the theme, the zone colours and the alarm
+ *  palette, so the timeline matches the lock screens in either theme. */
+const eventMeta = (type: string, c: Palette): EventMeta => {
+  switch (type) {
+    case 'warning':     return { icon: 'alert',       color: zoneColor('warning'), label: 'Near boundary' };
+    case 'exit':        return { icon: 'exit',        color: c.danger,         label: 'Exited zone' };
+    case 'alarm_start': return { icon: 'volume-high', color: ALARM.sounding,   label: 'Alarm started' };
+    case 'alarm_stop':  return { icon: 'volume-mute', color: ALARM.grace,      label: 'Alarm stopped' };
+    case 'return':      return { icon: 'enter',       color: c.success,        label: 'Returned to safe zone' };
+    case 'unlocked':    return { icon: 'lock-open',   color: c.textDim,        label: 'Unlocked' };
+    default:            return { icon: 'lock-closed', color: c.primary,        label: 'Locked' };
+  }
 };
+
+/** Filter / range chip. Hoisted: defined inside the screen it was a new
+ *  component type on every render. */
+function Chip({ on, label, onPress, colors }: { on: boolean; label: string; onPress: () => void; colors: Palette }) {
+  return (
+    <TouchableOpacity onPress={onPress}
+      accessibilityRole="button" accessibilityState={{ selected: on }}
+      style={[st.chip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? colors.primary + '1a' : 'transparent' }]}>
+      <Text style={{ color: on ? colors.primary : colors.text, fontWeight: on ? '700' : '500', fontSize: 12.5 }}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
 
 export default function LockHistoryScreen() {
   const { colors } = useTheme();
@@ -54,13 +78,18 @@ export default function LockHistoryScreen() {
   const [trend, setTrend] = useState<{ day: string; meters: number }[]>([]);
   const [open, setOpen] = useState<number | null>(null);
   const [events, setEvents] = useState<LockEventRow[]>([]);
+  /** The open session's timeline could not be read (not "no events"). */
+  const [eventsFailed, setEventsFailed] = useState(false);
+  const [limit, setLimit] = useState(PAGE);
+  const [savingNote, setSavingNote] = useState(false);
+  const [noteSaved, setNoteSaved] = useState(false);
   const [noteDraft, setNoteDraft] = useState('');
   // 'loading' and 'error' are not "No lock sessions yet" — the empty copy used
   // to show while loading and after a failed read alike.
   const [load, setLoad] = useState<'loading' | 'ok' | 'error'>('loading');
 
   const reload = useCallback(async () => {
-    setSessions(await getSessions(filter));
+    setSessions(await getSessions(filter, limit));
     const days = RANGES.find((r) => r.key === range)!.days;
     const now = new Date();
     const from = days === 1
@@ -68,7 +97,7 @@ export default function LockHistoryScreen() {
       : Date.now() - days * 86_400_000;
     setStats(await statsForRange(from, Date.now() + 1));
     setTrend(await distancePerDay(7));
-  }, [filter, range]);
+  }, [filter, range, limit]);
 
   /** Every reload reports into `load`, so a failure is never silent. */
   const refresh = useCallback(
@@ -80,15 +109,22 @@ export default function LockHistoryScreen() {
     if (open === id) { setOpen(null); return; }
     setOpen(id);
     setEvents([]);   // never show the previous session's events under this one
+    setEventsFailed(false);
+    setNoteSaved(false);
     setNoteDraft(sessions.find((s) => s.id === id)?.notes ?? '');
-    setEvents(await getEvents(id).catch(() => []));
+    try { setEvents(await getEvents(id)); } catch { setEventsFailed(true); }
+  };
+
+  const share = async (make: () => Promise<string>, title: string) => {
+    try { await Share.share({ message: await make(), title }); }
+    catch { Alert.alert('Export failed', 'Lock history could not be exported. Try again.'); }
   };
 
   const doExport = () => {
     Alert.alert('Export history', 'Choose a format', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'CSV', onPress: async () => { try { await Share.share({ message: await exportHistoryCSV(), title: 'location-lock-history.csv' }); } catch {} } },
-      { text: 'JSON', onPress: async () => { try { await Share.share({ message: await exportHistoryJSON(), title: 'location-lock-history.json' }); } catch {} } },
+      { text: 'CSV', onPress: () => share(exportHistoryCSV, 'location-lock-history.csv') },
+      { text: 'JSON', onPress: () => share(exportHistoryJSON, 'location-lock-history.json') },
     ]);
   };
 
@@ -113,19 +149,23 @@ export default function LockHistoryScreen() {
     ]);
   };
 
-  const Chip = ({ on, label, onPress }: { on: boolean; label: string; onPress: () => void }) => (
-    <TouchableOpacity onPress={onPress}
-      accessibilityRole="button" accessibilityState={{ selected: on }}
-      style={[st.chip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? colors.primary + '1a' : 'transparent' }]}>
-      <Text style={{ color: on ? colors.primary : colors.text, fontWeight: on ? '700' : '500', fontSize: 12.5 }}>{label}</Text>
-    </TouchableOpacity>
-  );
+  const saveNote = async (id: number) => {
+    if (savingNote) return;
+    setSavingNote(true);
+    try { await setSessionNotes(id, noteDraft); }
+    catch { Alert.alert('Not saved', 'The note could not be saved. Try again.'); return; }
+    finally { setSavingNote(false); }
+    setNoteSaved(true);
+    refresh();
+  };
+
+  const trendMax = Math.max(...trend.map((x) => x.meters), 1);
 
   const header = (
     <View>
       {/* statistics */}
       <View style={[st.chips, { marginTop: 4 }]}>
-        {RANGES.map((r) => <Chip key={r.key} on={range === r.key} label={r.label} onPress={() => setRange(r.key)} />)}
+        {RANGES.map((r) => <Chip key={r.key} on={range === r.key} label={r.label} onPress={() => setRange(r.key)} colors={colors} />)}
       </View>
       {stats && (
         <View style={[st.statsCard, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
@@ -148,12 +188,12 @@ export default function LockHistoryScreen() {
             DISTANCE WHILE LOCKED — LAST 7 DAYS
           </Text>
           <View style={st.trendRow}>
-            {trend.map((t, i) => {
-              const max = Math.max(...trend.map((x) => x.meters), 1);
+            {trend.map((t) => {
               return (
-                <View key={i} style={st.trendCol}>
+                <View key={t.day} style={st.trendCol}
+                  accessible accessibilityLabel={`${t.day}: ${fmtDistance(t.meters, settings.units)}`}>
                   <View style={[st.trendBar, {
-                    height: Math.max(3, (t.meters / max) * 56),
+                    height: Math.max(3, (t.meters / trendMax) * 56),
                     backgroundColor: t.meters > 0 ? colors.primary : colors.border,
                   }]} />
                   <Text style={{ color: colors.textDim, fontSize: 10, marginTop: 4 }}>{t.day}</Text>
@@ -167,7 +207,7 @@ export default function LockHistoryScreen() {
       {/* filters + actions */}
       <View style={[st.rowBetween, { marginTop: 16 }]}>
         <View style={st.chips}>
-          {FILTERS.map((f) => <Chip key={f.key} on={filter === f.key} label={f.label} onPress={() => setFilter(f.key)} />)}
+          {FILTERS.map((f) => <Chip key={f.key} on={filter === f.key} label={f.label} onPress={() => setFilter(f.key)} colors={colors} />)}
         </View>
       </View>
       <View style={[st.rowBetween, { marginTop: 10, marginBottom: 6 }]}>
@@ -182,12 +222,20 @@ export default function LockHistoryScreen() {
       </View>
       {/* The empty-list error below cannot show while sessions are listed, so a
           failed reload (after a filter change, delete or note save) gets this. */}
-      {load === 'error' && sessions.length > 0 && (
+      {/* 'loading' with sessions listed only happens after Retry: keep the
+          banner and show progress instead of letting it vanish silently. */}
+      {load !== 'ok' && sessions.length > 0 && (
         <View accessibilityLiveRegion="polite" style={[st.rowBetween, st.errBanner, { borderColor: colors.danger, backgroundColor: colors.glass }]}>
-          <Text style={{ color: colors.text, fontSize: 13, flex: 1 }}>Couldn&apos;t refresh lock history. The list may be out of date.</Text>
-          <TouchableOpacity onPress={retry} accessibilityRole="button" accessibilityLabel="Retry loading lock history" hitSlop={12}>
-            <Text style={{ color: colors.primary, fontWeight: '700' }}>Retry</Text>
-          </TouchableOpacity>
+          <Text style={{ color: colors.text, fontSize: 13, flex: 1 }}>
+            {load === 'loading' ? 'Refreshing lock history…' : 'Couldn\u2019t refresh lock history. The list may be out of date.'}
+          </Text>
+          {load === 'loading'
+            ? <ActivityIndicator size="small" color={colors.primary} accessibilityLabel="Refreshing" />
+            : (
+              <TouchableOpacity onPress={retry} accessibilityRole="button" accessibilityLabel="Retry loading lock history" hitSlop={12}>
+                <Text style={{ color: colors.primary, fontWeight: '700' }}>Retry</Text>
+              </TouchableOpacity>
+            )}
         </View>
       )}
     </View>
@@ -201,6 +249,13 @@ export default function LockHistoryScreen() {
         data={sessions}
         keyExtractor={(s) => String(s.id)}
         ListHeaderComponent={header}
+        ListFooterComponent={sessions.length >= limit ? (
+          <TouchableOpacity onPress={() => setLimit((l) => l + PAGE)} accessibilityRole="button"
+            accessibilityLabel={`Showing the latest ${sessions.length} sessions. Show more`}
+            hitSlop={12} style={{ alignSelf: 'center', marginTop: 16, minHeight: 44, justifyContent: 'center' }}>
+            <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 13 }}>Showing the latest {sessions.length} · Show more</Text>
+          </TouchableOpacity>
+        ) : null}
         contentContainerStyle={st.body}
         ListEmptyComponent={
           load === 'loading' ? (
@@ -208,7 +263,7 @@ export default function LockHistoryScreen() {
           ) : load === 'error' ? (
             <View style={{ alignItems: 'center', marginTop: 40, gap: 10 }}>
               <Text style={{ color: colors.textDim, fontSize: 13.5 }}>Couldn&apos;t read lock history on this phone.</Text>
-              <TouchableOpacity onPress={retry} accessibilityRole="button" hitSlop={12}>
+              <TouchableOpacity onPress={retry} accessibilityRole="button" accessibilityLabel="Retry loading lock history" hitSlop={12}>
                 <Text style={{ color: colors.primary, fontWeight: '700' }}>Retry</Text>
               </TouchableOpacity>
             </View>
@@ -219,37 +274,46 @@ export default function LockHistoryScreen() {
           )
         }
         renderItem={({ item: s }) => (
-          <TouchableOpacity onPress={() => toggle(s.id)} onLongPress={() => removeOne(s.id)}
-            accessibilityRole="button"
-            accessibilityLabel={`Lock session ${fmtT(s.started_at)}`}
-            accessibilityState={{ expanded: open === s.id }}
-            accessibilityHint="Shows the event timeline"
-            // Long-press stays as a shortcut; screen readers get a named action.
-            accessibilityActions={[{ name: 'delete', label: 'Delete session' }]}
-            onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'delete') removeOne(s.id); }}
-            style={[st.session, { backgroundColor: colors.glass, borderColor: colors.glassStroke }]}>
-            <View style={st.rowBetween}>
-              <Text style={{ color: colors.text, fontWeight: '800', fontSize: 14 }}>{fmtT(s.started_at)}</Text>
-              <Text style={{ color: colors.textDim, fontSize: 12.5 }}>
-                {fmtDistance(s.radius, settings.units)} · {s.ended_at ? fmtMs(s.ended_at - s.started_at) : 'active'}
-              </Text>
-            </View>
-            <View style={[st.rowBetween, { marginTop: 6 }]}>
-              <Text style={{ color: s.exits ? colors.danger : colors.success, fontSize: 12.5, fontWeight: '600' }}>
-                {s.exits ? `${s.exits} exit${s.exits > 1 ? 's' : ''} · max ${fmtDistance(s.max_distance, settings.units)}` : 'Stayed inside'}
-              </Text>
-              <Text style={{ color: colors.textDim, fontSize: 12.5 }}>
-                {s.alarm_ms > 0 ? `alarm ${fmtMs(s.alarm_ms)} · ` : ''}outside {fmtMs(s.time_outside_ms)}
-              </Text>
-            </View>
-            {!!s.notes && open !== s.id && (
-              <Text numberOfLines={1} style={{ color: colors.textFaint, fontSize: 12, marginTop: 4 }}>📝 {s.notes}</Text>
-            )}
+          // Only the summary is the toggle. The note input, Save and Delete
+          // used to sit INSIDE the accessible card, which iOS groups into one
+          // element, so VoiceOver could not reach them.
+          <View style={[st.session, { backgroundColor: colors.glass, borderColor: colors.glassStroke }]}>
+            <TouchableOpacity onPress={() => toggle(s.id)} onLongPress={() => removeOne(s.id)}
+              accessibilityRole="button"
+              accessibilityLabel={`Lock session ${fmtT(s.started_at)}, ${s.exits ? `${s.exits} exit${s.exits > 1 ? 's' : ''}` : 'stayed inside'}`}
+              accessibilityState={{ expanded: open === s.id }}
+              accessibilityHint="Shows the event timeline"
+              // Long-press stays as a shortcut; screen readers get a named action.
+              accessibilityActions={[{ name: 'delete', label: 'Delete session' }]}
+              onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'delete') removeOne(s.id); }}>
+              <View style={st.rowBetween}>
+                <Text style={{ color: colors.text, fontWeight: '800', fontSize: 14 }}>{fmtT(s.started_at)}</Text>
+                <Text style={{ color: colors.textDim, fontSize: 12.5 }}>
+                  {fmtDistance(s.radius, settings.units)} · {s.ended_at ? fmtMs(s.ended_at - s.started_at) : 'active'}
+                </Text>
+              </View>
+              <View style={[st.rowBetween, { marginTop: 6 }]}>
+                <Text style={{ color: s.exits ? colors.danger : colors.success, fontSize: 12.5, fontWeight: '600' }}>
+                  {s.exits ? `${s.exits} exit${s.exits > 1 ? 's' : ''} · max ${fmtDistance(s.max_distance, settings.units)}` : 'Stayed inside'}
+                </Text>
+                <Text style={{ color: colors.textDim, fontSize: 12.5 }}>
+                  {s.alarm_ms > 0 ? `alarm ${fmtMs(s.alarm_ms)} · ` : ''}outside {fmtMs(s.time_outside_ms)}
+                </Text>
+              </View>
+              {!!s.notes && open !== s.id && (
+                <Text numberOfLines={1} style={{ color: colors.textFaint, fontSize: 12, marginTop: 4 }}>📝 {s.notes}</Text>
+              )}
+            </TouchableOpacity>
 
             {open === s.id && (
               <View style={[st.timeline, { borderColor: colors.glassStroke }]}>
+                {eventsFailed && (
+                  <Text style={{ color: colors.textDim, fontSize: 12.5, paddingVertical: 4 }}>
+                    Couldn’t read this session’s events. Close and reopen it to try again.
+                  </Text>
+                )}
                 {events.map((e) => {
-                  const meta = EVENT_META[e.type] ?? EVENT_META.armed;
+                  const meta = eventMeta(e.type, colors);
                   return (
                     <View key={e.id} style={st.eventRow}>
                       <Ionicons name={meta.icon} size={14} color={meta.color} />
@@ -264,21 +328,25 @@ export default function LockHistoryScreen() {
                 {/* optional note (v2.1) */}
                 <View style={{ flexDirection: 'row', gap: 6, marginTop: 8, alignItems: 'center' }}>
                   <TextInput
-                    value={noteDraft} onChangeText={setNoteDraft}
+                    value={noteDraft} onChangeText={(t) => { setNoteDraft(t); setNoteSaved(false); }}
                     placeholder="Add a note (e.g. “parked at north gate”)…"
                     placeholderTextColor={colors.textFaint}
+                    accessibilityLabel="Note for this session"
                     style={{ flex: 1, borderWidth: 1, borderColor: colors.glassStroke, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5, color: colors.text, fontSize: 12, backgroundColor: colors.glass }}
                   />
                   <TouchableOpacity
                     accessibilityRole="button" accessibilityLabel="Save note"
-                    onPress={async () => {
-                      try { await setSessionNotes(s.id, noteDraft); }
-                      catch { Alert.alert('Not saved', 'The note could not be saved. Try again.'); return; }
-                      refresh();
-                    }}>
-                    <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 12 }}>Save</Text>
+                    accessibilityState={{ busy: savingNote, disabled: savingNote }} disabled={savingNote}
+                    hitSlop={12}
+                    onPress={() => saveNote(s.id)}>
+                    {savingNote
+                      ? <ActivityIndicator size="small" color={colors.primary} />
+                      : <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 12 }}>Save</Text>}
                   </TouchableOpacity>
                 </View>
+                {noteSaved && (
+                  <Text accessibilityLiveRegion="polite" style={{ color: colors.success, fontSize: 12, marginTop: 4 }}>Note saved</Text>
+                )}
                 <View style={[st.rowBetween, { marginTop: 6 }]}>
                   <Text style={{ color: colors.textFaint, fontSize: 11 }}>
                     {s.center_lat.toFixed(5)}, {s.center_lng.toFixed(5)}
@@ -292,14 +360,14 @@ export default function LockHistoryScreen() {
                 </View>
               </View>
             )}
-          </TouchableOpacity>
+          </View>
         )}
       />
     </View>
   );
 }
 
-function StatCell({ label, value, colors }: { label: string; value: string; colors: any }) {
+function StatCell({ label, value, colors }: { label: string; value: string; colors: Palette }) {
   return (
     <View style={st.statCell}>
       <Text style={{ color: colors.text, fontSize: 16, fontWeight: '800' }}>{value}</Text>

@@ -17,6 +17,25 @@ function finite(lat: number, lng: number) {
   return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
 }
 
+/**
+ * A destination TYPED as "lat, lng". The whole input must be the pair: an
+ * unanchored match read "Plot 45, 12th Cross" as 45°N 12°E. Returns null when
+ * the text is not a coordinate pair (geocode it instead), and 'out-of-range'
+ * when it is one but no place on Earth has it — such a pair used to become a
+ * destination the router could never reach.
+ */
+export function typedCoords(q: string): { lat: number; lng: number } | 'out-of-range' | null {
+  const m = q.match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
+  if (!m) return null;
+  const lat = +m[1], lng = +m[2];
+  return Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : 'out-of-range';
+}
+
+/** Whether a pair (e.g. from a deep link) is a real position on Earth. */
+export function inLatLngRange(lat: number, lng: number): boolean {
+  return Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+}
+
 // self-check
 if (require.main === module) {
   const ok = (u: string, lat: number, lng: number) => {

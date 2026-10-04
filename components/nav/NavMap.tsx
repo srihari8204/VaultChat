@@ -19,7 +19,7 @@
 //                      setup flow.
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { WebView } from 'react-native-webview';
 import { useTheme } from '../../lib/theme';
@@ -305,7 +305,7 @@ export default function NavMap({
    *  that fails to init WebGL/worker auto-falls-back to the Leaflet 2D map. */
   camera3D?: boolean;
 }) {
-  const { colors } = useTheme();
+  const { colors, scheme } = useTheme();
   const storeGeo = useNavGeo();
   const geo = data ?? storeGeo;
   const ref = useRef<WebView>(null);
@@ -384,8 +384,12 @@ export default function NavMap({
     const next: CameraMode = cam === 'follow' ? 'north' : cam === 'north' ? 'overview' : 'follow';
     setCam(next);
   };
-  const camIcon = cam === 'follow' ? 'cube' : cam === 'north' ? 'navigate' : 'scan';
-  const mapScheme = 'light' as const;
+  const camIcon: keyof typeof Ionicons.glyphMap = cam === 'follow' ? 'cube' : cam === 'north' ? 'navigate' : 'scan';
+  // The scheme goes to tileProvider, the one place that picks a style. It
+  // deliberately serves the full-colour `liberty` style for BOTH themes (its
+  // dark style hides road detail), so the basemap itself stays light; only the
+  // chrome around it follows the theme.
+  const mapScheme = scheme === 'light' ? 'light' : 'dark';
   // Memoized — same reasoning as FamilyMap's identical fix: mlHtml
   // concatenates the ~1.1MB embedded MapLibre bundle into a fresh string on
   // every call, and this component re-renders on every GPS fix. The WebView
@@ -426,25 +430,38 @@ export default function NavMap({
         style={{ backgroundColor: colors.bg }}
         androidLayerType="hardware"
       />
+      {/* The Leaflet fallback has no basemap (tileProvider: RASTER_FALLBACK_URL
+          is empty by decision). Say so instead of drawing the route over a
+          blank rectangle as if that were the map. */}
+      {engine === 'leaflet' && !RASTER_FALLBACK_URL && (
+        <View pointerEvents="none" accessibilityLiveRegion="polite"
+          style={[styles.notice, { backgroundColor: colors.glass, borderColor: colors.glassStroke }]}>
+          <Ionicons name="map-outline" size={14} color={colors.textDim} />
+          <Text style={[styles.noticeTxt, { color: colors.text }]}>
+            Street map unavailable on this device. Route and markers only.
+          </Text>
+        </View>
+      )}
       {zoomControls && (
         <View style={[styles.zoomBox, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
-          <TouchableOpacity onPress={() => ref.current?.injectJavaScript('zoomBy(1);true;')} accessibilityLabel="Zoom in" style={styles.zoomBtn}>
+          <TouchableOpacity onPress={() => ref.current?.injectJavaScript('zoomBy(1);true;')} accessibilityRole="button" accessibilityLabel="Zoom in" style={styles.zoomBtn}>
             <Ionicons name="add" size={20} color={colors.text} />
           </TouchableOpacity>
           <View style={[styles.zoomSep, { backgroundColor: colors.border }]} />
-          <TouchableOpacity onPress={() => ref.current?.injectJavaScript('zoomBy(-1);true;')} accessibilityLabel="Zoom out" style={styles.zoomBtn}>
+          <TouchableOpacity onPress={() => ref.current?.injectJavaScript('zoomBy(-1);true;')} accessibilityRole="button" accessibilityLabel="Zoom out" style={styles.zoomBtn}>
             <Ionicons name="remove" size={20} color={colors.text} />
           </TouchableOpacity>
         </View>
       )}
       {/* 3D camera toggle — MapLibre only; uncontrolled (hidden when a parent drives cameraMode). */}
       {engine === 'maplibre' && !cameraMode && (
-        <TouchableOpacity onPress={cycleCam} accessibilityLabel="Change map view" style={[styles.fab, { bottom: zoomControls ? 120 : 66, backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
-          <Ionicons name={camIcon as any} size={19} color={colors.primary} />
+        <TouchableOpacity onPress={cycleCam} accessibilityRole="button" accessibilityLabel="Change map view"
+          accessibilityValue={{ text: cam === 'follow' ? 'Follow, heading up' : cam === 'north' ? 'North up' : 'Route overview' }} style={[styles.fab, { bottom: zoomControls ? 120 : 66, backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
+          <Ionicons name={camIcon} size={19} color={colors.primary} />
         </TouchableOpacity>
       )}
       {(geo.pos || geo.dest || lock) && (
-        <TouchableOpacity onPress={recenter} accessibilityLabel="Recentre the map on your location" style={[styles.fab, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
+        <TouchableOpacity onPress={recenter} accessibilityRole="button" accessibilityLabel="Recentre the map on your location" style={[styles.fab, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
           <Ionicons name="locate" size={20} color={colors.primary} />
         </TouchableOpacity>
       )}
@@ -465,4 +482,8 @@ const styles = StyleSheet.create({
     height: 40, alignItems: 'center', justifyContent: 'center',
   },
   zoomSep: { height: StyleSheet.hairlineWidth, marginHorizontal: 8 },
+  // layout-exempt: absolute overlay sized by its edges; the text wraps and
+  // grows with font scale instead of clipping.
+  notice: { position: 'absolute', left: 10, right: 66, top: 10, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, borderWidth: 1 },
+  noticeTxt: { flex: 1, fontSize: 12, fontWeight: '600' },
 });

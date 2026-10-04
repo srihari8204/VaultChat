@@ -20,6 +20,7 @@ import NavMap from '../components/nav/NavMap';
 import { type NavProfile } from '../lib/nav/hapticLanguage';
 import { type DisplayMode } from '../lib/nav/hapticPlayer';
 import { type LatLng } from '../lib/nav/geo';
+import { typedCoords, inLatLngRange } from '../lib/nav/urlCoords';
 
 const PROFILES: { key: NavProfile; label: string }[] = [
   { key: 'standard', label: 'Standard' }, { key: 'strong', label: 'Strong' },
@@ -53,6 +54,8 @@ export default function NavigateScreen() {
   // chips render only when the engine actually returned more than one).
   const [routes, setRoutes] = useState<Route[]>([]);
   const [routeSel, setRouteSel] = useState(0);
+  /** Why there is no route preview, when there should be one. Null = fine. */
+  const [previewNote, setPreviewNote] = useState<string | null>(null);
 
   useEffect(() => { loadNavSettings(); }, []);
   // A 'custom' profile saved by an earlier build has an empty pattern map, i.e.
@@ -63,19 +66,28 @@ export default function NavigateScreen() {
   // your current position and a preview of the route (best-effort; the pin shows
   // instantly even before location/route resolve).
   useEffect(() => {
-    if (!dest) { setPreview(null); return; }
+    if (!dest) { setPreview(null); setPreviewNote(null); return; }
     let cancel = false;
     (async () => {
       let pos: LatLng | null = null;
+      let note: string | null = null;
       try {
         const cur = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
         pos = { lat: cur.coords.latitude, lng: cur.coords.longitude };
-      } catch { /* no permission/fix yet — still show the destination pin */ }
+      } catch {
+        // No permission/fix yet — still show the destination pin, and say why
+        // there is no route rather than leaving the map to look finished.
+        note = 'Your position isn’t available yet, so there’s no route preview. Check location permission and GPS.';
+      }
       let rts: Route[] = [];
-      if (pos) { try { rts = await fetchRoutes(pos, dest.coords, s.costing, s.routeOpts); } catch { /* route preview optional */ } }
+      if (pos) {
+        try { rts = await fetchRoutes(pos, dest.coords, s.costing, s.routeOpts); }
+        catch { note = 'Couldn’t preview a route right now. You can still start; the route is fetched again then.'; }
+      }
       if (!cancel) {
         setRoutes(rts);
         setRouteSel(0);
+        setPreviewNote(note);
         setPreview({ shape: rts[0]?.shape ?? [], pos, dest: dest.coords, heading: 0 });
       }
     })();
@@ -87,9 +99,9 @@ export default function NavigateScreen() {
   useEffect(() => {
     if (params.lat && params.lng) {
       const c = { lat: Number(params.lat), lng: Number(params.lng) };
-      if (Number.isFinite(c.lat) && Number.isFinite(c.lng)) setDest({ name: params.name || 'Destination', coords: c });
+      if (inLatLngRange(c.lat, c.lng)) setDest({ name: params.name || 'Destination', coords: c });
     }
-  }, [params.lat, params.lng]);
+  }, [params.lat, params.lng, params.name]);
 
   // Type-ahead: debounced /nav/geocode suggestions (server-proxied Photon/OSM —
   // works on no-GMS where Location.geocodeAsync is dead). Coordinates still parse
@@ -97,7 +109,7 @@ export default function NavigateScreen() {
   const [sugs, setSugs] = useState<GeoHit[]>([]);
   useEffect(() => {
     const q = query.trim();
-    if (q.length < 3 || /(-?\d+(\.\d+)?)\s*,/.test(q)) { setSugs([]); return; }
+    if (q.length < 3 || /^\s*-?\d+(\.\d+)?\s*,/.test(q)) { setSugs([]); return; }
     let stale = false;   // a slow answer to an older query must not overwrite a newer one
     const t = setTimeout(async () => {
       try {
@@ -114,8 +126,12 @@ export default function NavigateScreen() {
     const q = query.trim();
     if (!q) return;
     // "lat, lng" works everywhere (no geocoder needed) — try it first.
-    const m = q.match(/(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/);
-    if (m) { setDest({ name: q, coords: { lat: +m[1], lng: +m[2] } }); return; }
+    const typed = typedCoords(q);
+    if (typed === 'out-of-range') {
+      Alert.alert('Not a valid position', 'Latitude must be between -90 and 90, longitude between -180 and 180.');
+      return;
+    }
+    if (typed) { setDest({ name: q, coords: typed }); return; }
     setSearching(true);
     try {
       const hits = await geocodeSearch(q).catch(() => [] as GeoHit[]);
@@ -137,8 +153,8 @@ export default function NavigateScreen() {
       // fix, exactly as before.
       const chosen = routeSel > 0 ? routes[routeSel] : undefined;
       await startNavigation({ to: dest.coords, profile: s.profile, mode: s.mode, timing: s.timing, costing: s.costing, custom: s.custom, routeOpts: s.routeOpts, route: chosen });
-    } catch (e: any) {
-      Alert.alert('Could not start', e?.message ?? 'Check location permission and that the routing engine is up.');
+    } catch (e: unknown) {
+      Alert.alert('Could not start', (e instanceof Error && e.message) || 'Check location permission and that the routing engine is up.');
     } finally { setStarting(false); }
   };
 
@@ -147,14 +163,6 @@ export default function NavigateScreen() {
     setNavSettings({ routeOpts });
     if (banner.active) forceReroute(routeOpts);   // live change → recalc now
   };
-
-  const Chip = ({ active, label, onPress }: { active: boolean; label: string; onPress: () => void }) => (
-    <TouchableOpacity onPress={onPress}
-      accessibilityRole="button" accessibilityState={{ selected: active }}
-      style={[st.chip, { borderColor: active ? colors.primary : colors.border, backgroundColor: active ? colors.primary + '1a' : 'transparent' }]}>
-      <Text style={{ color: active ? colors.primary : colors.text, fontWeight: active ? '700' : '500', fontSize: 13.5 }}>{label}</Text>
-    </TouchableOpacity>
-  );
 
   return (
     <View style={[st.screen, { backgroundColor: colors.bg }]}>
@@ -178,12 +186,14 @@ export default function NavigateScreen() {
           )}
           <View style={[st.sheet, { backgroundColor: colors.glassSoft, borderTopColor: colors.glassStroke }]}>
             <View style={{ flex: 1 }}>
+              {/* The next instruction and road live in NavBanner (with its live
+                  region); repeating them here made screen readers read each
+                  turn twice. The sheet carries the trip summary. */}
               <Text numberOfLines={1} style={[st.sheetInstr, { color: colors.text }]}>
-                {banner.rerouting ? 'Rerouting…' : (banner.instruction || 'Continue')}
-              </Text>
-              <Text numberOfLines={1} style={{ color: colors.text + '88', fontSize: 12.5, marginTop: 2 }}>
-                {banner.roadName ? banner.roadName + ' · ' : ''}
                 {banner.remainingM >= 1000 ? `${(banner.remainingM / 1000).toFixed(1)} km` : `${Math.round(banner.remainingM)} m`} to go
+              </Text>
+              <Text numberOfLines={1} style={{ color: colors.textDim, fontSize: 12.5, marginTop: 2 }}>
+                {dest ? dest.name : 'Navigating'}
                 {banner.etaEpochMs > 0 ? ` · ETA ${new Date(banner.etaEpochMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
               </Text>
             </View>
@@ -202,10 +212,15 @@ export default function NavigateScreen() {
           {/* Location Lock — geofence utility (openspec: location-lock) */}
           {LOCATION_LOCK && (
             <TouchableOpacity onPress={() => router.push('/location-lock')}
-              style={[st.lockEntry, { borderColor: lock.active ? '#22C55E' : colors.border, backgroundColor: colors.glassSoft }]}>
-              <View style={[st.lockEntryIcon, { backgroundColor: (lock.active ? '#22C55E' : colors.primary) + '1a' }]}>
+              accessibilityRole="button"
+              accessibilityLabel={lock.active
+                ? `Location Locked, ${Math.round(lock.distance)} of ${Math.round(lock.radius)} metres, ${(lock.state ?? 'safe')}`
+                : 'Location Lock'}
+              accessibilityHint={lock.active ? 'Opens the active lock' : 'Lock a spot and get alarmed if you leave it'}
+              style={[st.lockEntry, { borderColor: lock.active ? colors.success : colors.border, backgroundColor: colors.glassSoft }]}>
+              <View style={[st.lockEntryIcon, { backgroundColor: (lock.active ? colors.success : colors.primary) + '1a' }]}>
                 <Ionicons name={lock.active ? 'lock-closed' : 'radio-button-on'} size={20}
-                  color={lock.active ? '#22C55E' : colors.primary} />
+                  color={lock.active ? colors.success : colors.primary} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={{ color: colors.text, fontWeight: '800', fontSize: 14.5 }}>
@@ -236,7 +251,7 @@ export default function NavigateScreen() {
           {sugs.length > 0 && (
             <View style={[st.sugBox, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
               {sugs.map((h, i) => (
-                <TouchableOpacity key={i} onPress={() => pickSug(h)} accessibilityRole="button"
+                <TouchableOpacity key={`${h.lat},${h.lng},${h.label}`} onPress={() => pickSug(h)} accessibilityRole="button"
                   style={[st.sugRow, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.glassStroke }]}>
                   <Ionicons name="location-outline" size={16} color={colors.primary} />
                   <Text numberOfLines={1} style={{ color: colors.text, flex: 1, fontSize: 14 }}>{h.label}</Text>
@@ -257,6 +272,9 @@ export default function NavigateScreen() {
               follow={false}
               style={[st.previewMap, { borderColor: colors.glassStroke }]}
             />
+          )}
+          {dest && previewNote && (
+            <Text accessibilityLiveRegion="polite" style={{ color: colors.textDim, fontSize: 12.5, marginTop: 8 }}>{previewNote}</Text>
           )}
 
           {/* Route summary + alternatives (Google-style). Chips appear only
@@ -326,6 +344,19 @@ export default function NavigateScreen() {
         </ScrollView>
       )}
     </View>
+  );
+}
+
+// Hoisted: defined inside the screen it was a new component type every render,
+// so React remounted every chip on each GPS/banner update.
+function Chip({ active, label, onPress }: { active: boolean; label: string; onPress: () => void }) {
+  const { colors } = useTheme();
+  return (
+    <TouchableOpacity onPress={onPress}
+      accessibilityRole="button" accessibilityState={{ selected: active }}
+      style={[st.chip, { borderColor: active ? colors.primary : colors.border, backgroundColor: active ? colors.primary + '1a' : 'transparent' }]}>
+      <Text style={{ color: active ? colors.primary : colors.text, fontWeight: active ? '700' : '500', fontSize: 13.5 }}>{label}</Text>
+    </TouchableOpacity>
   );
 }
 

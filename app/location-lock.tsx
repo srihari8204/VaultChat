@@ -9,16 +9,20 @@
 //             Navigate back / Unlock, and the kill-safe upgrade banner.
 
 import { geocodeSearch } from '../lib/nav/geocode';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, TextInput, TouchableOpacity, ScrollView, StyleSheet,
-  Alert, ActivityIndicator, Platform,
+  Alert, ActivityIndicator, Platform, AppState, Linking,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import notifee from '@notifee/react-native';
 import { useTheme } from '../lib/theme';
+import type { Palette } from '../constants/theme';
+import { permissionDenied } from '../lib/permissionDenied';
+import { ALARM } from '../lib/lock/alarmPalette';
+import { typedCoords } from '../lib/nav/urlCoords';
 import { type LatLng } from '../lib/nav/geo';
 import { type Costing } from '../lib/nav/routing';
 import NavMap from '../components/nav/NavMap';
@@ -33,7 +37,7 @@ import { listCircles, getPlaces } from '../lib/family/store';
 import { AppText as Text, AuroraBackground } from '../components/ui';
 
 const RADII = [10, 20, 30, 50, 100, 200, 500, 1000];
-const MODES: { key: LockMode; label: string; icon: any }[] = [
+const MODES: { key: LockMode; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { key: 'walking', label: 'Walking', icon: 'walk' },
   { key: 'cycling', label: 'Cycling', icon: 'bicycle' },
   { key: 'driving', label: 'Driving', icon: 'car' },
@@ -49,6 +53,35 @@ const fmtDur = (ms: number) => {
 const STATE_LABEL: Record<string, string> = {
   safe: 'SAFE', warning: 'NEAR BOUNDARY', atLimit: 'AT LIMIT', outside: 'OUTSIDE',
 };
+
+const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message) || fallback;
+
+/** Re-renders itself every second; the screen around it does not. The 1 s
+ *  ticker used to live in the screen and re-render the map, card and every
+ *  chip just to move "Locked" and "GPS updated" on. */
+function Ticking({ render }: { render: () => React.ReactNode }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const h = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(h);
+  }, []);
+  return <>{render()}</>;
+}
+
+/** Radius / navigate-back chip. `busy` is for an action in flight: a chip that
+ *  is PLANNING is not "selected", and announcing it so was wrong. */
+function Chip({ active: on, busy = false, disabled = false, label, onPress, colors }: {
+  active: boolean; busy?: boolean; disabled?: boolean; label: string; onPress: () => void; colors: Palette;
+}) {
+  const lit = on || busy;
+  return (
+    <TouchableOpacity onPress={onPress} disabled={disabled}
+      accessibilityRole="button" accessibilityState={{ selected: on, busy, disabled }}
+      style={[st.chip, { borderColor: lit ? colors.primary : colors.border, backgroundColor: lit ? colors.primary + '1a' : 'transparent', opacity: disabled && !busy ? 0.5 : 1 }]}>
+      <Text style={{ color: lit ? colors.primary : colors.text, fontWeight: lit ? '700' : '500', fontSize: 13.5 }}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
 
 export default function LocationLockScreen() {
   const { colors } = useTheme();
@@ -69,13 +102,35 @@ export default function LocationLockScreen() {
   /** The mode whose route back is being planned; Navigate opens only once it exists. */
   const [planning, setPlanning] = useState<Costing | null>(null);
   const [saved, setSaved] = useState<{ name: string; coords: LatLng; radiusM: number }[]>([]);
-  const [, tick] = useState(0);
+  /** Saved places could not be read. Shown as a line, not as "no places". */
+  const [savedFailed, setSavedFailed] = useState(false);
+  /** Location permission is refused: the screen says so and offers Settings
+   *  instead of showing a map with no "you" and no explanation. */
+  const [locDenied, setLocDenied] = useState(false);
+  const [locating, setLocating] = useState(false);
+
+  // First fix for the setup map. `ask` is false when re-checking on return
+  // from Settings, so coming back never throws a prompt at the user.
+  const firstFix = useCallback(async (ask: boolean) => {
+    try {
+      const p = ask ? await Location.requestForegroundPermissionsAsync() : await Location.getForegroundPermissionsAsync();
+      if (p.status !== 'granted') { setLocDenied(true); return; }
+      setLocDenied(false);
+      const cur = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      setMyPos({ lat: cur.coords.latitude, lng: cur.coords.longitude });
+      setAccuracy(cur.coords.accuracy ?? null);
+    } catch { /* no fix yet: "Current location" retries and says why */ }
+  }, []);
 
   // Resume an armed lock after relaunch + take a first fix for the setup map,
   // and load Family Space places — a saved place is a one-tap lock (point AND
   // radius come from the place).
   useEffect(() => {
-    restoreLock().catch(() => {});
+    restoreLock().catch((e: unknown) => {
+      // Silence here meant a lock that might not be monitoring while the
+      // screen looked normal. Say so; the background service may still run.
+      Alert.alert('Location Lock', `Couldn’t resume monitoring: ${errText(e, 'unknown error')}. Check location permission and GPS.`);
+    });
     (async () => {
       try {
         const circles = await listCircles();
@@ -86,28 +141,29 @@ export default function LocationLockScreen() {
           }
         }
         setSaved(all.slice(0, 12));
-      } catch {}
+      } catch { setSavedFailed(true); }
     })();
-    (async () => {
-      try {
-        const p = await Location.requestForegroundPermissionsAsync();
-        if (p.status !== 'granted') return;
-        const cur = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-        setMyPos({ lat: cur.coords.latitude, lng: cur.coords.longitude });
-        setAccuracy(cur.coords.accuracy ?? null);
-      } catch {}
-    })();
-  }, []);
+    firstFix(true);
+  }, [firstFix]);
 
-  // Time-locked ticker while armed.
+  // Denied: the only way forward is Settings, so re-check on return.
   useEffect(() => {
-    if (!lock.active) return;
-    const h = setInterval(() => tick((n) => n + 1), 1000);
-    return () => clearInterval(h);
-  }, [lock.active]);
+    if (!locDenied) return;
+    const sub = AppState.addEventListener('change', (s) => { if (s === 'active') firstFix(false); });
+    return () => sub.remove();
+  }, [locDenied, firstFix]);
 
   const useCurrent = async () => {
+    if (locating) return;
+    setLocating(true);
     try {
+      const perm = await Location.requestForegroundPermissionsAsync();
+      if (perm.status !== 'granted') {
+        setLocDenied(true);
+        permissionDenied('Location permission needed', 'Location Lock needs your position to lock the spot you are standing on.', perm.canAskAgain);
+        return;
+      }
+      setLocDenied(false);
       const cur = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
       const c = { lat: cur.coords.latitude, lng: cur.coords.longitude };
       setMyPos(c);
@@ -115,15 +171,25 @@ export default function LocationLockScreen() {
       setPoint({ name: 'Current location', coords: c });
       setPinMode(false);
     } catch {
-      Alert.alert('No fix', 'Could not read your position. Check location permission and GPS.');
-    }
+      Alert.alert('No fix', 'Could not read your position. Check that GPS is on and try again.');
+    } finally { setLocating(false); }
+  };
+
+  const setMode = (mode: LockMode) => {
+    setLockSettings({ mode }).then(() => applyAlertSettings()).catch((e: unknown) => {
+      Alert.alert('Mode not saved', `${errText(e, 'Could not save the lock mode')}. The previous mode is still in use.`);
+    });
   };
 
   const search = async () => {
     const q = query.trim();
     if (!q) return;
-    const m = q.match(/(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/);
-    if (m) { setPoint({ name: q, coords: { lat: +m[1], lng: +m[2] } }); setPinMode(false); return; }
+    const typed = typedCoords(q);
+    if (typed === 'out-of-range') {
+      Alert.alert('Not a valid position', 'Latitude must be between -90 and 90, longitude between -180 and 180.');
+      return;
+    }
+    if (typed) { setPoint({ name: q, coords: typed }); setPinMode(false); return; }
     setSearching(true);
     try {
       // Server-proxied geocoder first (works on no-GMS), platform fallback second.
@@ -143,6 +209,7 @@ export default function LocationLockScreen() {
     try {
       const r = await armLock(point.coords, clampRadius(radius));
       if (!r.ok) { Alert.alert('Could not lock', r.reason ?? 'Unknown error'); return; }
+      // Only pre-fills the radius next time; the lock itself is armed.
       setLockSettings({ lastRadius: clampRadius(radius) }).catch(() => {});
       if (!r.killSafe) {
         Alert.alert(
@@ -163,17 +230,19 @@ export default function LocationLockScreen() {
           }
         } catch {}
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       // armLock can reject (e.g. no GPS fix in time) — that used to vanish,
       // leaving the user believing the spot was locked.
-      Alert.alert('Could not lock', e?.message ?? 'Could not read your position. Check GPS and try again.');
+      Alert.alert('Could not lock', errText(e, 'Could not read your position. Check GPS and try again.'));
     } finally { setArming(false); }
   };
 
   const unlock = () => {
     Alert.alert('Unlock location?', 'Monitoring stops and this session is saved to history.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Unlock', style: 'destructive', onPress: () => { unlockLock().catch(() => {}); } },
+      { text: 'Unlock', style: 'destructive', onPress: () => {
+        unlockLock().catch((e: unknown) => Alert.alert('Could not unlock', `${errText(e, 'Unknown error')}. Monitoring is still on; try again.`));
+      } },
     ]);
   };
 
@@ -185,8 +254,8 @@ export default function LocationLockScreen() {
     try {
       await navigateBackToLock(costing);
       router.push('/navigate');
-    } catch (e: any) {
-      Alert.alert('Navigate back', e?.message ?? 'Could not plan a route back to the locked spot.');
+    } catch (e: unknown) {
+      Alert.alert('Navigate back', errText(e, 'Could not plan a route back to the locked spot.'));
     } finally { setPlanning(null); }
   };
 
@@ -199,17 +268,10 @@ export default function LocationLockScreen() {
     [lock.pos, myPos, lock.heading],
   );
   const previewLock = useMemo(
-    () => (point ? { center: point.coords, radius: clampRadius(radius), color: '#22C55E' } : null),
+    () => (point ? { center: point.coords, radius: clampRadius(radius), color: zoneColor('safe') } : null),
     [point, radius],
   );
-
-  const Chip = ({ active: on, label, onPress }: { active: boolean; label: string; onPress: () => void }) => (
-    <TouchableOpacity onPress={onPress}
-      accessibilityRole="button" accessibilityState={{ selected: on }}
-      style={[st.chip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? colors.primary + '1a' : 'transparent' }]}>
-      <Text style={{ color: on ? colors.primary : colors.text, fontWeight: on ? '700' : '500', fontSize: 13.5 }}>{label}</Text>
-    </TouchableOpacity>
-  );
+  const setupMapData = useMemo(() => ({ shape: [], pos: myPos, dest: null, heading: 0 }), [myPos]);
 
   // ═══ ACTIVE ═══
   if (lock.active && lock.center) {
@@ -225,23 +287,23 @@ export default function LocationLockScreen() {
           <TouchableOpacity
             accessibilityRole="button" accessibilityLabel="Stop alarm"
             onPress={() => stopLockAlarm()}
-            style={[st.alarmBar, { backgroundColor: '#DC2626' }]}>
-            <Ionicons name="alert-circle" size={18} color="#fff" />
+            style={[st.alarmBar, { backgroundColor: ALARM.sounding }]}>
+            <Ionicons name="alert-circle" size={18} color={ALARM.ink} />
             <Text style={st.alarmBarTxt}>ALARM — you left the locked area. Tap to stop.</Text>
           </TouchableOpacity>
         )}
         {/* Grace: a status, not a control — there is nothing to stop yet. It
             used to be announced as a "Stop alarm" button that did nothing. */}
         {lock.alarmPhase === 'grace' && (
-          <View accessibilityLiveRegion="assertive" style={[st.alarmBar, { backgroundColor: '#F97316' }]}>
-            <Ionicons name="time" size={18} color="#fff" />
+          <View accessibilityLiveRegion="assertive" style={[st.alarmBar, { backgroundColor: ALARM.grace }]}>
+            <Ionicons name="time" size={18} color={ALARM.ink} />
             <Text style={st.alarmBarTxt}>Outside the radius — alarm imminent. Head back now.</Text>
           </View>
         )}
         {/* boundary prediction (v2.1): how much room is left before the edge */}
         {lock.alarmPhase === 'idle' && (lock.state === 'warning' || lock.state === 'atLimit') && (
-          <View style={[st.alarmBar, { backgroundColor: lock.state === 'warning' ? '#A16207' : '#C2410C' }]}>
-            <Ionicons name="warning" size={16} color="#fff" />
+          <View accessibilityLiveRegion="polite" style={[st.alarmBar, { backgroundColor: lock.state === 'warning' ? ALARM.nearEdge : ALARM.atLimit }]}>
+            <Ionicons name="warning" size={16} color={ALARM.ink} />
             <Text style={st.alarmBarTxt}>
               {fmtDistance(Math.max(0, lock.radius - lock.distance), settings.units)} remaining to the boundary
             </Text>
@@ -249,8 +311,10 @@ export default function LocationLockScreen() {
         )}
         {lock.gpsDegraded && (
           <View style={[st.alarmBar, { backgroundColor: colors.surfaceSolid }]}>
-            <Ionicons name="cellular" size={15} color="#F97316" />
-            <Text style={[st.alarmBarTxt, { fontWeight: '600' }]}>
+            <Ionicons name="cellular" size={15} color={ALARM.grace} />
+            {/* Theme text: this bar sits on surfaceSolid, where the alarm
+                bars' white text vanished in light mode. */}
+            <Text style={[st.alarmBarTxt, { fontWeight: '600', color: colors.text }]}>
               Weak GPS — possibly indoors. Monitoring continues with drift protection.
             </Text>
           </View>
@@ -280,18 +344,22 @@ export default function LocationLockScreen() {
             <Stat label="Distance" value={fmtDistance(lock.distance, settings.units)} colors={colors} />
             <Stat label="Radius" value={fmtDistance(lock.radius, settings.units)} colors={colors} />
             <Stat label="GPS ±" value={fmtDistance(lock.accuracy, settings.units)} colors={colors} />
-            <Stat label="Locked" value={fmtDur(Date.now() - lock.armedAt)} colors={colors} />
+            <Ticking render={() => <Stat label="Locked" value={fmtDur(Date.now() - lock.armedAt)} colors={colors} />} />
             <Stat label="Speed" value={fmtSpeed(lock.speedKmh, settings.units)} colors={colors} />
             <Stat label="Heading" value={fmtHeading(lock.heading)} colors={colors} />
             <Stat label="Battery" value={lock.battery != null ? `${lock.battery}%${lock.charging ? ' ⚡' : ''}` : '—'} colors={colors} />
             <Stat label="Confidence" value={`${QUALITY_LABEL[lock.quality]} · ${gpsConfidence(lock.accuracy)}%`} colors={colors} valueColor={QUALITY_COLOR[lock.quality]} />
           </View>
-          <Text style={{ color: colors.textFaint, fontSize: 11 }}>
-            GPS updated {lock.lastFixAt ? fmtAgo(Date.now() - lock.lastFixAt) : '—'}
-          </Text>
+          <Ticking render={() => (
+            <Text style={{ color: colors.textFaint, fontSize: 11 }}>
+              GPS updated {lock.lastFixAt ? fmtAgo(Date.now() - lock.lastFixAt) : '—'}
+            </Text>
+          )} />
 
           {!lock.killSafe && (
-            <TouchableOpacity onPress={() => enableKillSafe()} style={[st.bgBanner, { borderColor: colors.glassStroke }]}>
+            <TouchableOpacity onPress={() => enableKillSafe()} accessibilityRole="button"
+              accessibilityHint="Asks for location access all the time so the lock keeps working after the app is closed"
+              style={[st.bgBanner, { borderColor: colors.glassStroke }]}>
               <Ionicons name="shield-half" size={15} color={colors.primary} />
               <Text style={{ color: colors.text, fontSize: 12.5, flex: 1 }}>
                 Enable background protection (location “all the time”)
@@ -302,23 +370,23 @@ export default function LocationLockScreen() {
           {lock.state === 'outside' && !lock.navBack && (
             <View style={[st.row, { marginTop: 12, gap: 8 }]}>
               <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>Navigate back:</Text>
-              <Chip active={planning === 'pedestrian'} label="Walk" onPress={() => navBack('pedestrian')} />
-              <Chip active={planning === 'bicycle'} label="Cycle" onPress={() => navBack('bicycle')} />
-              <Chip active={planning === 'auto'} label="Drive" onPress={() => navBack('auto')} />
+              <Chip active={false} busy={planning === 'pedestrian'} disabled={planning !== null} label="Walk" onPress={() => navBack('pedestrian')} colors={colors} />
+              <Chip active={false} busy={planning === 'bicycle'} disabled={planning !== null} label="Cycle" onPress={() => navBack('bicycle')} colors={colors} />
+              <Chip active={false} busy={planning === 'auto'} disabled={planning !== null} label="Drive" onPress={() => navBack('auto')} colors={colors} />
               {planning && <ActivityIndicator size="small" color={colors.primary} accessibilityLabel="Planning route back" />}
             </View>
           )}
 
           <View style={[st.row, { marginTop: 14, gap: 10 }]}>
             <TouchableOpacity onPress={unlock} accessibilityRole="button" accessibilityLabel="Unlock and stop monitoring"
-              style={[st.btn, { borderColor: '#EF4444', borderWidth: 1.5 }]}>
-              <Ionicons name="lock-open" size={16} color="#EF4444" />
-              <Text style={[st.btnTxt, { color: '#EF4444' }]}>Unlock</Text>
+              style={[st.btn, { borderColor: colors.danger, borderWidth: 1.5 }]}>
+              <Ionicons name="lock-open" size={16} color={colors.danger} />
+              <Text style={[st.btnTxt, { color: colors.danger }]}>Unlock</Text>
             </TouchableOpacity>
             {alarming && (
-              <TouchableOpacity onPress={() => stopLockAlarm()} accessibilityRole="button" style={[st.btn, { backgroundColor: '#DC2626' }]}>
-                <Ionicons name="volume-mute" size={16} color="#fff" />
-                <Text style={[st.btnTxt, { color: '#fff' }]}>Stop alarm</Text>
+              <TouchableOpacity onPress={() => stopLockAlarm()} accessibilityRole="button" style={[st.btn, { backgroundColor: ALARM.sounding }]}>
+                <Ionicons name="volume-mute" size={16} color={ALARM.ink} />
+                <Text style={[st.btnTxt, { color: ALARM.ink }]}>Stop alarm</Text>
               </TouchableOpacity>
             )}
             <TouchableOpacity onPress={() => router.push('/lock-settings')} accessibilityRole="button" accessibilityLabel="Alert settings" style={[st.btn, { borderColor: colors.glassStroke, borderWidth: 1 }]}>
@@ -344,10 +412,26 @@ export default function LocationLockScreen() {
           sat under the status bar. */}
       <Stack.Screen options={{ headerShown: true, title: 'Location Lock', headerTitleAlign: 'center' }} />
       <ScrollView contentContainerStyle={st.setup} keyboardShouldPersistTaps="handled">
-        <Text style={[st.h, { color: colors.text }]}>Lock point</Text>
+        <Text style={[st.h, { color: colors.text }]} accessibilityRole="header">Lock point</Text>
+        {locDenied && (
+          <View style={[st.warn, { backgroundColor: colors.glass, borderWidth: 1, borderColor: colors.glassStroke, marginTop: 0, marginBottom: 10 }]}>
+            <Ionicons name="location-outline" size={16} color={colors.danger} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }}>Location permission needed</Text>
+              <Text style={{ color: colors.textDim, fontSize: 12.5, marginTop: 2 }}>
+                Location Lock can’t monitor a spot without your position. You can still pick one by search or pin.
+              </Text>
+            </View>
+            <TouchableOpacity onPress={() => { Linking.openSettings().catch(() => {}); }} accessibilityRole="button"
+              accessibilityLabel="Open settings to allow location" hitSlop={12}>
+              <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 13 }}>Settings</Text>
+            </TouchableOpacity>
+          </View>
+        )}
         <View style={[st.row, { gap: 8 }]}>
-          <TouchableOpacity onPress={useCurrent} accessibilityRole="button" style={[st.srcBtn, { borderColor: colors.glassStroke }]}>
-            <Ionicons name="locate" size={16} color={colors.primary} />
+          <TouchableOpacity onPress={useCurrent} disabled={locating} accessibilityRole="button"
+            accessibilityState={{ busy: locating, disabled: locating }} style={[st.srcBtn, { borderColor: colors.glassStroke }]}>
+            {locating ? <ActivityIndicator size="small" color={colors.primary} /> : <Ionicons name="locate" size={16} color={colors.primary} />}
             <Text style={{ color: colors.text, fontSize: 13 }}>Current location</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setPinMode((v) => !v)} accessibilityRole="button" accessibilityState={{ selected: pinMode }}
@@ -364,6 +448,7 @@ export default function LocationLockScreen() {
           <TextInput
             value={query} onChangeText={setQuery} onSubmitEditing={search} returnKeyType="search"
             placeholder='Address or "lat, lng"' placeholderTextColor={colors.textFaint}
+            accessibilityLabel="Search for a lock point by address or lat, lng"
             style={[st.input, { color: colors.text }]}
           />
           {searching ? <ActivityIndicator size="small" color={colors.primary} />
@@ -372,12 +457,17 @@ export default function LocationLockScreen() {
 
         {/* Saved places (lock type: saved location) — one tap sets both point
             and radius. Sourced read-only from the user's saved place list. */}
+        {savedFailed && (
+          <Text style={{ color: colors.textDim, fontSize: 12.5, marginTop: 10 }} accessibilityLiveRegion="polite">
+            Couldn’t load your saved places. Search, use your location or drop a pin instead.
+          </Text>
+        )}
         {saved.length > 0 && (
           <View style={{ marginTop: 12 }}>
             <Text style={{ color: colors.textDim, fontSize: 12, fontWeight: '700', marginBottom: 6 }}>SAVED PLACES</Text>
             <View style={st.chips}>
-              {saved.map((p, i) => (
-                <TouchableOpacity key={`${p.name}-${i}`}
+              {saved.map((p) => (
+                <TouchableOpacity key={`${p.name}@${p.coords.lat},${p.coords.lng}`}
                   onPress={() => { setPoint({ name: p.name, coords: p.coords }); setRadius(clampRadius(p.radiusM)); setCustomR(''); setPinMode(false); }}
                   accessibilityRole="button" accessibilityState={{ selected: point?.name === p.name }}
                   style={[st.chip, { borderColor: point?.name === p.name ? colors.primary : colors.border, flexDirection: 'row', alignItems: 'center', gap: 5 }]}>
@@ -400,7 +490,7 @@ export default function LocationLockScreen() {
         )}
 
         <NavMap
-          data={{ shape: [], pos: myPos, dest: null, heading: 0 }}
+          data={setupMapData}
           follow={false}
           lock={previewLock}
           accuracyM={accuracy ?? 0}
@@ -412,11 +502,11 @@ export default function LocationLockScreen() {
           style={[st.previewMap, { borderColor: colors.glassStroke }]}
         />
 
-        <Text style={[st.h, { color: colors.text, marginTop: 22 }]}>Mode</Text>
+        <Text style={[st.h, { color: colors.text, marginTop: 22 }]} accessibilityRole="header">Mode</Text>
         <View style={st.chips}>
           {MODES.map((m) => (
             <TouchableOpacity key={m.key}
-              onPress={() => { setLockSettings({ mode: m.key }).then(() => applyAlertSettings()).catch(() => {}); }}
+              onPress={() => setMode(m.key)}
               accessibilityRole="button" accessibilityState={{ selected: settings.mode === m.key }}
               style={[st.chip, {
                 flexDirection: 'row', alignItems: 'center', gap: 5,
@@ -429,11 +519,11 @@ export default function LocationLockScreen() {
           ))}
         </View>
 
-        <Text style={[st.h, { color: colors.text, marginTop: 22 }]}>Radius</Text>
+        <Text style={[st.h, { color: colors.text, marginTop: 22 }]} accessibilityRole="header">Radius</Text>
         <View style={st.chips}>
           {RADII.map((r) => (
             <Chip key={r} active={radius === r} label={r >= 1000 ? '1 km' : `${r} m`}
-              onPress={() => { setRadius(r); setCustomR(''); }} />
+              onPress={() => { setRadius(r); setCustomR(''); }} colors={colors} />
           ))}
         </View>
         <View style={[st.row, { marginTop: 10, gap: 8 }]}>
@@ -446,13 +536,14 @@ export default function LocationLockScreen() {
             }}
             keyboardType="number-pad" placeholder="Custom (10–1000 m)"
             placeholderTextColor={colors.textFaint}
+            accessibilityLabel="Custom radius in metres, 10 to 1000"
             style={[st.customInput, { color: colors.text, borderColor: colors.glassStroke, backgroundColor: colors.glass }]}
           />
           <Text style={{ color: colors.textDim, fontSize: 13 }}>→ {clampRadius(radius)} m</Text>
         </View>
         {accWarn && (
-          <View style={[st.warn, { backgroundColor: '#F9731622' }]}>
-            <Ionicons name="warning" size={15} color="#F97316" />
+          <View style={[st.warn, { backgroundColor: ALARM.grace + '22' }]}>
+            <Ionicons name="warning" size={15} color={ALARM.grace} />
             <Text style={{ color: colors.text, fontSize: 12.5, flex: 1 }}>
               GPS accuracy is ±{Math.round(accuracy!)} m — a {clampRadius(radius)} m radius may false-alarm.
               Consider {clampRadius(Math.ceil((accuracy! * 2) / 10) * 10)} m or more.
@@ -460,7 +551,7 @@ export default function LocationLockScreen() {
           </View>
         )}
 
-        <Text style={[st.h, { color: colors.text, marginTop: 22 }]}>Alerts</Text>
+        <Text style={[st.h, { color: colors.text, marginTop: 22 }]} accessibilityRole="header">Alerts</Text>
         <View style={[st.row, { gap: 8 }]}>
           <TouchableOpacity onPress={() => router.push('/lock-settings')} accessibilityRole="button" accessibilityHint="Opens alarm and alert settings" style={[st.srcBtn, { borderColor: colors.glassStroke }]}>
             <Ionicons name="options" size={16} color={colors.primary} />
@@ -478,6 +569,8 @@ export default function LocationLockScreen() {
 
         <TouchableOpacity disabled={!point || arming} onPress={arm}
           accessibilityRole="button" accessibilityLabel="Lock this location and start monitoring"
+          accessibilityState={{ disabled: !point || arming, busy: arming }}
+          accessibilityHint={point ? undefined : 'Pick a lock point first'}
           style={[st.lockBtn, { backgroundColor: point ? colors.primary : colors.border }]}>
           {arming ? <ActivityIndicator color="#fff" />
             : <><Ionicons name="lock-closed" size={18} color="#fff" /><Text style={st.lockTxt}>Lock Location</Text></>}
@@ -491,7 +584,7 @@ export default function LocationLockScreen() {
   );
 }
 
-function Stat({ label, value, colors, valueColor }: { label: string; value: string; colors: any; valueColor?: string }) {
+function Stat({ label, value, colors, valueColor }: { label: string; value: string; colors: Palette; valueColor?: string }) {
   return (
     <View>
       <Text style={{ color: colors.textDim, fontSize: 11, fontWeight: '600', textTransform: 'uppercase' }}>{label}</Text>
@@ -520,7 +613,7 @@ const st = StyleSheet.create({
   lockBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 52, paddingVertical: 10, borderRadius: 14, marginTop: 28 },
   lockTxt: { color: '#fff', fontSize: 16, fontWeight: '800' },
   alarmBar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 10 },
-  alarmBarTxt: { color: '#fff', fontWeight: '800', fontSize: 13.5, flex: 1 },
+  alarmBarTxt: { color: ALARM.ink, fontWeight: '800', fontSize: 13.5, flex: 1 },
   card: { borderTopWidth: 3, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 22 },
   stateDot: { width: 10, height: 10, borderRadius: 5, marginRight: 8 },
   stateTxt: { fontWeight: '900', fontSize: 15, letterSpacing: 0.4 },

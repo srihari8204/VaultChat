@@ -41,14 +41,17 @@ export default function SecurityHubScreen() {
   const router = useRouter();
   const [vm, setVm] = useState<DashboardVM>(() => buildDashboardViewModel(null, Date.now()));
   const [scanning, setScanning] = useState(false);
+  /** The stored scan could not be read: the view on screen may be stale. */
+  const [readFailed, setReadFailed] = useState(false);
 
   // Never rejects: a secure-store read failure used to surface as an unhandled
-  // rejection. The last rendered view stays (the scan path alerts on its own).
+  // rejection. The last rendered view stays, and a notice says it may be stale.
   const load = useCallback(async () => {
     try {
       const snap = await getCurrentSnapshot();
       setVm(buildDashboardViewModel(snap, Date.now()));
-    } catch { /* keep the current view */ }
+      setReadFailed(false);
+    } catch { setReadFailed(true); }
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -85,7 +88,7 @@ export default function SecurityHubScreen() {
           <Ionicons name="chevron-back" size={26} color={colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
-          <Text style={S.headerTitle}>Security Hub</Text>
+          <Text style={S.headerTitle} accessibilityRole="header">Security Hub</Text>
           <Text style={S.headerSub}>Live checks on this device</Text>
         </View>
       </View>
@@ -104,6 +107,11 @@ export default function SecurityHubScreen() {
           <Text style={[S.bandLabel, { color: vm.bandColor }]}>{vm.bandLabel}</Text>
           <Text style={S.heroSub}>{vm.hasScanned ? vm.bandBlurb : 'Run a device scan to evaluate this device.'}</Text>
           {vm.hasScanned && <Text style={S.lastScan}>Last scan {vm.lastScanText} · lower risk is safer</Text>}
+          {readFailed && (
+            <Text style={[S.lastScan, { color: colors.danger }]} accessibilityLiveRegion="polite">
+              Couldn’t read the last scan on this device. What’s shown may be out of date; run a scan to refresh it.
+            </Text>
+          )}
         </View>
 
         <TouchableOpacity style={S.scanBtn} onPress={onScan} disabled={scanning} activeOpacity={0.85}
@@ -115,7 +123,7 @@ export default function SecurityHubScreen() {
         {/* Recommended actions (only when there are any). */}
         {vm.actions.length > 0 && (
           <>
-            <Text style={S.sectionTitle}>RECOMMENDED ACTIONS</Text>
+            <Text style={S.sectionTitle} accessibilityRole="header">RECOMMENDED ACTIONS</Text>
             <View style={S.card}>
               {vm.actions.map((a, i) => (
                 <View key={a.key + i}>
@@ -123,6 +131,8 @@ export default function SecurityHubScreen() {
                     <Ionicons
                       name={a.severity === 'critical' ? 'alert-circle' : 'warning'}
                       size={20}
+                      // ponytail: same hexes as viewModel's STATUS_META (critical/warning),
+                      // which is not exported; move to an action `color` field there.
                       color={a.severity === 'critical' ? '#EF4444' : '#F59E0B'}
                     />
                     <Text style={S.actionText}>{a.text}</Text>
@@ -135,7 +145,7 @@ export default function SecurityHubScreen() {
         )}
 
         {/* Checks — every dashboard factor row. */}
-        <Text style={S.sectionTitle}>CHECKS</Text>
+        <Text style={S.sectionTitle} accessibilityRole="header">CHECKS</Text>
         {vm.factors.length === 0 ? (
           <View style={[S.card, S.emptyCard]}>
             <Text style={S.emptyText}>Run a device scan to see per-check results.</Text>
@@ -144,7 +154,10 @@ export default function SecurityHubScreen() {
           <View style={S.card}>
             {vm.factors.map((f, i) => (
               <View key={f.key}>
-                <View style={S.checkRow}>
+                {/* One element per check: the status pill was read as a
+                    separate, context-free fragment ("Clear"). */}
+                <View style={S.checkRow} accessible
+                  accessibilityLabel={`${f.label}: ${f.statusLabel}${f.detail ? `. ${f.detail}` : ''}`}>
                   <Ionicons name={STATUS_ICON[f.status] ?? 'help-circle'} size={22} color={f.statusColor} />
                   <View style={{ flex: 1 }}>
                     <Text style={S.checkLabel}>{f.label}</Text>
@@ -159,7 +172,7 @@ export default function SecurityHubScreen() {
         )}
 
         {/* Permanent honesty disclosure. */}
-        <Text style={S.sectionTitle}>WHAT THIS CAN &amp; CAN’T DETECT</Text>
+        <Text style={S.sectionTitle} accessibilityRole="header">WHAT THIS CAN &amp; CAN’T DETECT</Text>
         <View style={[S.card, S.discCard]}>
           <Text style={S.discText}>
             This checks for indicators a phone app can see — root/jailbreak, instrumentation, debuggers,

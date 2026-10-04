@@ -18,6 +18,7 @@ import * as Location from 'expo-location';
 import { Accelerometer } from 'expo-sensors';
 import { listTrustedContacts, sendSOS, listSOSHistory, type SOSHistoryItem } from '../lib/chatService';
 import { AuroraBackground } from '../components/ui';
+import { useReducedMotion } from '../lib/useReducedMotion';
 
 type SosContact = { uid: string; name: string; vaultId: string };
 
@@ -90,11 +91,14 @@ export default function EmergencySOSScreen() {
   /** Recipients fixed at countdown start: undefined = all trusted contacts. */
   const [sendTo, setSendTo] = useState<string[] | undefined>(undefined);
   const [history, setHistory] = useState<SOSHistoryItem[]>([]);
+  /** History could not be read: not the same as "No SOS activations yet". */
+  const [historyFailed, setHistoryFailed] = useState(false);
   const [shakeEnabled, setShakeEnabled] = useState(true);
 
   // Animations
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const countdownTimer = useRef<any>(null);
+  const countdownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const reduceMotion = useReducedMotion();
   const shakeRef = useRef({ count: 0, lastShake: 0 });
 
   // P1.4 (leak fix): the countdown interval was only cleared on natural
@@ -105,7 +109,9 @@ export default function EmergencySOSScreen() {
   }, []);
 
   // Pulse animation for SOS button
+  // Reduce Motion: the button stays still at rest size; nothing else changes.
   useEffect(() => {
+    if (reduceMotion) { pulseAnim.setValue(1); return; }
     const pulse = Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, { toValue: 1.08, duration: 800, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
@@ -114,7 +120,7 @@ export default function EmergencySOSScreen() {
     );
     pulse.start();
     return () => pulse.stop();
-  }, [pulseAnim]);
+  }, [pulseAnim, reduceMotion]);
 
   // Load data
   const loadTrustedContacts = useCallback(async () => {
@@ -138,7 +144,12 @@ export default function EmergencySOSScreen() {
   // On focus, not mount: the "Edit" link pushes /trusted-contacts, and the list
   // must reflect what the user changed there when they come back.
   useFocusEffect(useCallback(() => { loadTrustedContacts(); }, [loadTrustedContacts]));
-  useEffect(() => { listSOSHistory().then(setHistory).catch(() => {}); }, []);
+  const loadHistory = useCallback(() => {
+    listSOSHistory()
+      .then((h) => { setHistory(h); setHistoryFailed(false); })
+      .catch(() => setHistoryFailed(true));
+  }, []);
+  useEffect(() => { loadHistory(); }, [loadHistory]);
 
   // The shake listener reads the latest state through refs, so it subscribes
   // once per focus instead of on every countdown tick, and it shares the button
@@ -244,7 +255,7 @@ export default function EmergencySOSScreen() {
       setSent(true);
       setSentNoLoc(lat == null);
       Vibration.vibrate([0, 500, 200, 500]);
-      try { setHistory(await listSOSHistory()); } catch {}
+      loadHistory();
     } catch {
       Alert.alert('Error', 'Failed to send SOS. Please try again.');
     }
@@ -268,7 +279,7 @@ export default function EmergencySOSScreen() {
 
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={8} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={20} color={colors.accent} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Emergency SOS</Text>
@@ -405,6 +416,11 @@ export default function EmergencySOSScreen() {
             </View>
           ) : trustedContacts.length === 0 ? (
             <View style={styles.emptyCard}>
+              {loadError && (
+                <Text style={styles.refreshWarn} accessibilityLiveRegion="polite">
+                  Couldn&apos;t refresh this list. It was empty when it last loaded.
+                </Text>
+              )}
               <Text style={styles.emptyText}>No trusted contacts set up</Text>
               <TouchableOpacity onPress={() => router.push('/trusted-contacts')} style={styles.setupBtn} accessibilityRole="button">
                 <Text style={styles.setupBtnText}>Set Up Trusted Contacts</Text>
@@ -443,8 +459,18 @@ export default function EmergencySOSScreen() {
 
         {/* SOS History */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>History</Text>
-          {history.length === 0 ? (
+          <Text style={styles.sectionTitle} accessibilityRole="header">History</Text>
+          {historyFailed && (
+            <View style={[styles.sectionHead, { marginTop: 8 }]}>
+              <Text style={[styles.refreshWarn, { flex: 1, marginBottom: 0 }]} accessibilityLiveRegion="polite">
+                Couldn&apos;t load your SOS history.
+              </Text>
+              <TouchableOpacity onPress={loadHistory} accessibilityRole="button" accessibilityLabel="Retry loading SOS history" hitSlop={12}>
+                <Text style={styles.editLink}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          {historyFailed && history.length === 0 ? null : history.length === 0 ? (
             <Text style={styles.noHistory}>No SOS activations yet</Text>
           ) : (
             history.map(item => (
@@ -469,10 +495,13 @@ export default function EmergencySOSScreen() {
 }
 
 const SOS_SIZE = 160;
+/** Amber for test-mode and warning text: no theme token carries it. Dark
+ *  enough on light ground (#B45309, 4.9:1 on white), bright on dark. */
+const amber = (light: boolean) => (light ? '#B45309' : '#FBBF24');
 const makeStyles = (c: Palette, light: boolean) => StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 8, paddingHorizontal: 16, paddingBottom: 14 },
-  backBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(74,159,255,0.08)', justifyContent: 'center', alignItems: 'center' },
+  backBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: brandAlpha(0.08), justifyContent: 'center', alignItems: 'center' },
   headerTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
   scroll: { flex: 1 },
   scrollContent: { paddingHorizontal: 16 },
@@ -481,17 +510,17 @@ const makeStyles = (c: Palette, light: boolean) => StyleSheet.create({
   sosSection: { alignItems: 'center', marginVertical: 30 },
   sosHint: { color: c.textDim, fontSize: 14, marginBottom: 20, textAlign: 'center' },
   sosButton: { width: SOS_SIZE, height: SOS_SIZE, borderRadius: SOS_SIZE / 2, overflow: 'hidden', elevation: 10, shadowColor: c.danger, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.5, shadowRadius: 20 },
-  sosGradient: { flex: 1, justifyContent: 'center', alignItems: 'center', borderRadius: SOS_SIZE / 2, borderWidth: 4, borderColor: 'rgba(255,45,45,0.5)' },
+  sosGradient: { flex: 1, justifyContent: 'center', alignItems: 'center', borderRadius: SOS_SIZE / 2, borderWidth: 4, borderColor: c.danger + '80' },
   sosText: { color: '#FFF', fontSize: 48, fontWeight: '900', letterSpacing: 6 },
-  testBtn: { marginTop: 20, paddingHorizontal: 24, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(251,191,36,0.3)', backgroundColor: 'rgba(251,191,36,0.08)' },
-  testBtnText: { color: light ? '#B45309' : '#FBBF24', fontSize: 14, fontWeight: '600' },
+  testBtn: { marginTop: 20, paddingHorizontal: 24, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: amber(light) + '4D', backgroundColor: amber(light) + '14' },
+  testBtnText: { color: amber(light), fontSize: 14, fontWeight: '600' },
 
   // Countdown
   countdownContainer: { alignItems: 'center' },
   countdownLabel: { color: c.danger, fontSize: 18, fontWeight: '600', marginBottom: 10 },
   countdownNumber: { color: c.text, fontSize: 72, fontWeight: '900' },
   countdownTo: { color: c.textDim, fontSize: 14, marginTop: 4, textAlign: 'center' },
-  cancelBtn: { marginTop: 20, backgroundColor: 'rgba(255,60,110,0.15)', paddingHorizontal: 40, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: c.danger },
+  cancelBtn: { marginTop: 20, backgroundColor: c.danger + '26', paddingHorizontal: 40, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: c.danger },
   cancelBtnText: { color: c.danger, fontSize: 18, fontWeight: '800', letterSpacing: 2 },
 
   // Sending/Sent
@@ -503,12 +532,12 @@ const makeStyles = (c: Palette, light: boolean) => StyleSheet.create({
   sentSub: { color: c.textDim, fontSize: 14, marginTop: 4 },
   // Wraps and grows: this line is longer than the others and must stay
   // readable at any width or OS font scale.
-  sentWarn: { color: light ? '#B45309' : '#FBBF24', fontSize: 13, marginTop: 8, textAlign: 'center', paddingHorizontal: 20 },
+  sentWarn: { color: amber(light), fontSize: 13, marginTop: 8, textAlign: 'center', paddingHorizontal: 20 },
   resetBtn: { marginTop: 20, backgroundColor: c.accent, paddingHorizontal: 40, paddingVertical: 10, borderRadius: 8 },
   resetBtnText: { color: '#FFF', fontSize: 15, fontWeight: '700' },
 
   // Shake
-  shakeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 14, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: 'rgba(74,159,255,0.08)' },
+  shakeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 14, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: c.hairline },
   shakeTitle: { color: c.text, fontSize: 15, fontWeight: '600' },
   shakeSub: { color: c.textDim, fontSize: 12, marginTop: 2 },
   toggleBtn: { paddingHorizontal: 18, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: c.border },
@@ -521,14 +550,14 @@ const makeStyles = (c: Palette, light: boolean) => StyleSheet.create({
   sectionTitle: { color: c.text, fontSize: 16, fontWeight: '700' },
   sectionHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   editLink: { color: c.accentOn, fontSize: 14, fontWeight: '600' },
-  contactRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(74,159,255,0.06)' },
-  contactSelected: { borderColor: 'rgba(0,229,255,0.3)', backgroundColor: 'rgba(0,229,255,0.04)' },
+  contactRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: c.hairline },
+  contactSelected: { borderColor: c.accent + '4D', backgroundColor: c.accent + '0A' },
   contactCheck: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: c.border, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  contactCheckActive: { borderColor: c.accent, backgroundColor: 'rgba(0,229,255,0.2)' },
+  contactCheckActive: { borderColor: c.accent, backgroundColor: c.accent + '33' },
   contactInfo: { flex: 1 },
   contactName: { color: c.text, fontSize: 15, fontWeight: '600' },
   contactId: { color: c.textDim, fontSize: 12, marginTop: 2 },
-  emptyCard: { alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 14, padding: 24, borderWidth: 1, borderColor: 'rgba(74,159,255,0.08)' },
+  emptyCard: { alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 14, padding: 24, borderWidth: 1, borderColor: c.hairline },
   emptyText: { color: c.textDim, fontSize: 14, marginBottom: 14, textAlign: 'center' },
   refreshWarn: { color: c.textDim, fontSize: 12, marginBottom: 8 },
   setupBtn: { backgroundColor: c.accent, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 },
@@ -536,7 +565,7 @@ const makeStyles = (c: Palette, light: boolean) => StyleSheet.create({
 
   // History
   noHistory: { color: c.textDim, fontSize: 13, textAlign: 'center', marginTop: 8 },
-  historyRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(74,159,255,0.06)' },
+  historyRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: c.hairline },
   historyDot: { width: 10, height: 10, borderRadius: 5, marginRight: 12 },
   historyInfo: { flex: 1 },
   historyType: { color: c.text, fontSize: 14, fontWeight: '600' },

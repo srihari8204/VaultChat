@@ -35,7 +35,7 @@ export interface MapPoint { lat: number; lng: number }
 /** What the SCREEN knows about the fix. The map cannot tell "permission was
  *  refused" from "the fix has not arrived yet" — only the screen that asked
  *  can, so it says which, and the two get different honest copy. */
-export type LocationMapStatus = 'ok' | 'locating' | 'denied';
+export type LocationMapStatus = 'ok' | 'locating' | 'denied' | 'nofix';
 
 /** The page. Same shape as NavMap's mlHtml: one JS function per thing that can
  *  change, driven by injectJavaScript once 'ready' has been posted. */
@@ -194,6 +194,18 @@ export default function LocationMap({
     );
   }
 
+  if (!coord && state === 'nofix') {
+    // The fix attempt FAILED: a spinner here would wait for something that is
+    // not coming. The screen that asked owns the retry.
+    return (
+      <View style={shell}>
+        <Ionicons name="navigate-circle-outline" size={26} color={colors.textDim} />
+        <Text style={[S.title, { color: colors.text }]}>No GPS fix</Text>
+        <Text style={[S.sub, { color: colors.textDim }]}>Your location couldn’t be read.</Text>
+      </View>
+    );
+  }
+
   if (!coord) {
     return (
       <View style={shell}>
@@ -260,16 +272,19 @@ export default function LocationMap({
         </View>
       )}
       {/* A pin from the last known fix is not "you are here" yet. */}
-      {state === 'locating' && (
+      {(state === 'locating' || state === 'nofix') && (
         <View style={[S.badge, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]} pointerEvents="none">
-          <ActivityIndicator size="small" color={colors.primary} />
-          <Text style={[S.badgeTxt, { color: colors.textDim }]}>Last known · getting a fix…</Text>
+          {state === 'locating' && <ActivityIndicator size="small" color={colors.primary} />}
+          <Text style={[S.badgeTxt, { color: colors.textDim }]}>
+            {state === 'locating' ? 'Last known · getting a fix…' : 'Last known · no current fix'}
+          </Text>
         </View>
       )}
       <TouchableOpacity
         onPress={() => ref.current?.injectJavaScript('recenter();true;')}
         accessibilityRole="button"
         accessibilityLabel="Recentre the map on the pin"
+        hitSlop={6}
         style={[S.fab, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}
       >
         <Ionicons name="locate" size={18} color={colors.primary} />

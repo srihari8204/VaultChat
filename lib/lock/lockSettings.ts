@@ -76,7 +76,10 @@ export async function setLockSettings(patch: Partial<LockSettings>): Promise<voi
     alerts: patch.alerts ? { ...settings.alerts, ...patch.alerts } : settings.alerts,
   };
   emit();
-  try { await AsyncStorage.setItem(KEY, JSON.stringify(settings)); } catch {}
+  // The change is live in memory either way. A failed write is RETHROWN so the
+  // screen can say the setting will not survive a restart: an alarm setting
+  // that silently resets is a safety gap. Every caller catches.
+  await AsyncStorage.setItem(KEY, JSON.stringify(settings));
 }
 
 export async function setLockAlerts(patch: Partial<LockAlertSettings>): Promise<void> {

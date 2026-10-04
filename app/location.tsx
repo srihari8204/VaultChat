@@ -18,7 +18,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import React, { useCallback, useEffect, useRef, useState , useMemo} from 'react';
 import {
-  ActivityIndicator, Alert, Linking, ScrollView,
+  ActivityIndicator, Alert, AppState, Linking, ScrollView,
   StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import { useTheme } from '../lib/theme';
@@ -45,6 +45,8 @@ function fmtClock(s: number): string {
   return `${m}:${String(sec).padStart(2, '0')}`;
 }
 
+const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message) || fallback;
+
 function useS() {
   const { colors } = useTheme();
   return useMemo(() => makeStyles(colors), [colors]);
@@ -62,6 +64,9 @@ export default function LocationScreen() {
   const [address, setAddress] = useState('Getting your location…');
   const [loading, setLoading] = useState(true);
   const [permDenied, setPermDenied] = useState(false);
+  /** The last fix attempt failed (GPS off, timeout). Offers a retry instead of
+   *  leaving "Getting your location…" up forever. */
+  const [gpsError, setGpsError] = useState(false);
   const [sending, setSending] = useState(false);
 
   const [selDuration, setSelDuration] = useState(0);
@@ -95,26 +100,43 @@ export default function LocationScreen() {
     }
   }, []);
 
+  // One fix attempt: the mount, "Try again" after a GPS failure, and the return
+  // from Settings all run this. `ask` is false on that return so coming back
+  // re-checks the grant without throwing a prompt at the user.
+  const locate = useCallback(async (ask: boolean) => {
+    setLoading(true);
+    setGpsError(false);
+    try {
+      const { status } = ask
+        ? await Location.requestForegroundPermissionsAsync()
+        : await Location.getForegroundPermissionsAsync();
+      if (status !== 'granted') { setPermDenied(true); return; }
+      setPermDenied(false);
+      setAddress('Getting your location…');
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      if (!mountedRef.current) return;
+      setLoc(pos);
+      writeCache(LAST_FIX, { lat: pos.coords.latitude, lng: pos.coords.longitude });
+      reverseGeocode(pos.coords.latitude, pos.coords.longitude);
+    } catch {
+      if (mountedRef.current) setGpsError(true);
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
+  }, [reverseGeocode]);
+
   useEffect(() => {
-    (async () => {
-      setLoading(true);
-      readCache<MapPoint>(LAST_FIX).then((c) => { if (c) setLastFix(c); });
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') { setPermDenied(true); setLoading(false); return; }
-      try {
-        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        setLoc(pos);
-        writeCache(LAST_FIX, { lat: pos.coords.latitude, lng: pos.coords.longitude });
-        reverseGeocode(pos.coords.latitude, pos.coords.longitude);
-      } catch {
-        Alert.alert('GPS error', 'Could not get your location. Check that GPS is enabled.');
-      } finally {
-        setLoading(false);
-      }
-    })();
-    return () => stopLive();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    readCache<MapPoint>(LAST_FIX).then((c) => { if (c) setLastFix(c); });
+    locate(true);
+  }, [locate]);
+
+  // Denied face: the only way forward is Settings, so re-check the grant when
+  // the app comes back to the foreground instead of keeping a stale "denied".
+  useEffect(() => {
+    if (!permDenied) return;
+    const sub = AppState.addEventListener('change', (s) => { if (s === 'active') locate(false); });
+    return () => sub.remove();
+  }, [permDenied, locate]);
 
   const sendCurrent = useCallback(async () => {
     if (!loc) { Alert.alert('Please wait', 'Still getting your location…'); return; }
@@ -126,8 +148,8 @@ export default function LocationScreen() {
       });
       await sendMessage(chatId, payload, 'location');
       router.back();
-    } catch (e: any) {
-      Alert.alert('Could not send', e?.message ?? 'Try again');
+    } catch (e: unknown) {
+      Alert.alert('Could not send', errText(e, 'Try again'));
     } finally {
       setSending(false);
     }
@@ -142,74 +164,73 @@ export default function LocationScreen() {
     setTrail([]);
   }, [chatId]);
 
+  // Leaving the screen ends the live session (the copy says so).
+  useEffect(() => stopLive, [stopLive]);
+
   const startLive = useCallback(async () => {
     if (startingRef.current || watchRef.current) return;
     if (!loc) { Alert.alert('Please wait', 'Still getting your location…'); return; }
     if (!chatId) { Alert.alert('No chat', 'Open this from a chat to share live location.'); return; }
     startingRef.current = true;
     setStartingLive(true);
-    try { await beginLive(); } finally { startingRef.current = false; if (mountedRef.current) setStartingLive(false); }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    try {
+      const dur = DURATIONS[selDuration];
+      const until = Date.now() + dur.seconds * 1000;
+
+      // Per-session key. Delivered to the peer ONCE inside the initial E2E
+      // 'location' message (content.lk), then used to encrypt every relayed update
+      // so the server only ever sees opaque blobs.
+      const liveKey = newLiveKey();
+      try {
+        await sendMessage(chatId, JSON.stringify({
+          lat: loc.coords.latitude, lng: loc.coords.longitude, address, live: true, lk: liveKey, until,
+        }), 'location');
+      } catch (e: unknown) {
+        Alert.alert('Could not start', errText(e, 'Try again'));
+        return;
+      }
+
+      setLive(true);
+      setTimeLeft(dur.seconds);
+      setTrail([{ lat: loc.coords.latitude, lng: loc.coords.longitude }]);
+
+      // Encrypt each position with the session key and relay the opaque blob.
+      // Only the FIRST update carries the address — it was looked up for that
+      // position. Re-sending it with every later fix labelled a moving person
+      // with where they started; the peer's banner shows coordinates instead.
+      const pushUpdate = (latitude: number, longitude: number, addr?: string) => {
+        const blob = encryptPosition(liveKey, { lat: latitude, lng: longitude, ...(addr ? { address: addr } : {}) });
+        if (blob) emit('live_location_update', { chatId, blob, until }).catch(() => {});
+      };
+      pushUpdate(loc.coords.latitude, loc.coords.longitude, address);
+
+      try {
+        const sub = await Location.watchPositionAsync(
+          { accuracy: Location.Accuracy.Balanced, timeInterval: 5000, distanceInterval: 10 },
+          (newPos) => {
+            setLoc(newPos);
+            setTrail((t) => [...t, { lat: newPos.coords.latitude, lng: newPos.coords.longitude }]);
+            pushUpdate(newPos.coords.latitude, newPos.coords.longitude);
+          },
+        );
+        // Left the screen while the watcher was starting: the unmount cleanup
+        // already ran, so this one would stream with nothing to stop it.
+        if (!mountedRef.current) { sub.remove(); emit('live_location_stop', { chatId }).catch(() => {}); return; }
+        watchRef.current = sub;
+      } catch (e: unknown) {
+        Alert.alert('Could not start', errText(e, 'Try again'));
+        stopLive();
+        return;
+      }
+
+      timerRef.current = setInterval(() => {
+        setTimeLeft((t) => {
+          if (t <= 1) { stopLive(); return 0; }
+          return t - 1;
+        });
+      }, 1000);
+    } finally { startingRef.current = false; if (mountedRef.current) setStartingLive(false); }
   }, [loc, chatId, selDuration, address, stopLive]);
-
-  const beginLive = async () => {
-    if (!loc) return;
-    const dur = DURATIONS[selDuration];
-    const until = Date.now() + dur.seconds * 1000;
-
-    // Per-session key. Delivered to the peer ONCE inside the initial E2E
-    // 'location' message (content.lk), then used to encrypt every relayed update
-    // so the server only ever sees opaque blobs.
-    const liveKey = newLiveKey();
-    try {
-      await sendMessage(chatId, JSON.stringify({
-        lat: loc.coords.latitude, lng: loc.coords.longitude, address, live: true, lk: liveKey, until,
-      }), 'location');
-    } catch (e: any) {
-      Alert.alert('Could not start', e?.message ?? 'Try again');
-      return;
-    }
-
-    setLive(true);
-    setTimeLeft(dur.seconds);
-    setTrail([{ lat: loc.coords.latitude, lng: loc.coords.longitude }]);
-
-    // Encrypt each position with the session key and relay the opaque blob.
-    // Only the FIRST update carries the address — it was looked up for that
-    // position. Re-sending it with every later fix labelled a moving person
-    // with where they started; the peer's banner shows coordinates instead.
-    const pushUpdate = (latitude: number, longitude: number, addr?: string) => {
-      const blob = encryptPosition(liveKey, { lat: latitude, lng: longitude, ...(addr ? { address: addr } : {}) });
-      if (blob) emit('live_location_update', { chatId, blob, until }).catch(() => {});
-    };
-    pushUpdate(loc.coords.latitude, loc.coords.longitude, address);
-
-    try {
-      const sub = await Location.watchPositionAsync(
-        { accuracy: Location.Accuracy.Balanced, timeInterval: 5000, distanceInterval: 10 },
-        (newPos) => {
-          setLoc(newPos);
-          setTrail((t) => [...t, { lat: newPos.coords.latitude, lng: newPos.coords.longitude }]);
-          pushUpdate(newPos.coords.latitude, newPos.coords.longitude);
-        },
-      );
-      // Left the screen while the watcher was starting: the unmount cleanup
-      // already ran, so this one would stream with nothing to stop it.
-      if (!mountedRef.current) { sub.remove(); emit('live_location_stop', { chatId }).catch(() => {}); return; }
-      watchRef.current = sub;
-    } catch (e: any) {
-      Alert.alert('Could not start', e?.message ?? 'Try again');
-      stopLive();
-      return;
-    }
-
-    timerRef.current = setInterval(() => {
-      setTimeLeft((t) => {
-        if (t <= 1) { stopLive(); return 0; }
-        return t - 1;
-      });
-    }, 1000);
-  };
 
   if (permDenied) {
     return (
@@ -217,10 +238,11 @@ export default function LocationScreen() {
       <AuroraBackground />
         <Text style={S.permTitle}>Location permission needed</Text>
         <Text style={S.permSub}>Allow location access to share your position.</Text>
-        <TouchableOpacity style={S.primaryBtn} onPress={() => Linking.openSettings()}>
+        <TouchableOpacity style={S.primaryBtn} onPress={() => { Linking.openSettings().catch(() => {}); }}
+          accessibilityRole="button" accessibilityHint="Opens this app's settings to allow location access">
           <Text style={S.primaryBtnText}>Open settings</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 14 }}>
+        <TouchableOpacity onPress={() => router.back()} accessibilityRole="button" hitSlop={12} style={{ marginTop: 14 }}>
           <Text style={S.link}>Back</Text>
         </TouchableOpacity>
       </View>
@@ -232,6 +254,7 @@ export default function LocationScreen() {
 
   return (
     <View style={S.container}>
+      <AuroraBackground />
       <View style={S.header}>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
@@ -245,7 +268,7 @@ export default function LocationScreen() {
             travelled so far, from the fixes the watcher already delivers. */}
         <LocationMap
           coord={lat != null && lng != null ? { lat, lng } : lastFix}
-          status={lat != null && lng != null ? 'ok' : 'locating'}
+          status={lat != null && lng != null ? 'ok' : gpsError ? 'nofix' : 'locating'}
           trail={live ? trail : null}
           height={220}
           style={{ marginBottom: 12 }}
@@ -254,7 +277,16 @@ export default function LocationScreen() {
         {/* Address / coordinates */}
         <View style={S.mapCard}>
           {loading ? (
-            <ActivityIndicator color={colors.primary} style={{ marginTop: 8 }} />
+            <ActivityIndicator color={colors.primary} style={{ marginTop: 8 }} accessibilityLabel="Getting your location" />
+          ) : gpsError && !loc ? (
+            <>
+              <Text style={S.address}>Couldn’t get your location</Text>
+              <Text style={[S.coords, { textAlign: 'center' }]}>Check that location services (GPS) are on, then try again.</Text>
+              <TouchableOpacity style={S.mapsBtn} onPress={() => locate(true)} accessibilityRole="button" accessibilityLabel="Try getting your location again">
+                <Ionicons name="refresh" size={15} color={colors.primary} />
+                <Text style={S.mapsBtnText}>Try again</Text>
+              </TouchableOpacity>
+            </>
           ) : (
             <>
               <Text style={S.address} numberOfLines={2}>{address}</Text>
@@ -301,8 +333,9 @@ export default function LocationScreen() {
                   key={d.label}
                   style={[S.durBtn, selDuration === i && S.durBtnActive]}
                   onPress={() => setSelDuration(i)}
+                  disabled={startingLive}
                   accessibilityRole="radio"
-                  accessibilityState={{ selected: selDuration === i }}
+                  accessibilityState={{ checked: selDuration === i, selected: selDuration === i, disabled: startingLive }}
                 >
                   <Text style={[S.durText, selDuration === i && S.durTextActive]}>{d.label}</Text>
                 </TouchableOpacity>
@@ -334,7 +367,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
   center: { justifyContent: 'center', alignItems: 'center', padding: 32 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingBottom: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: c.glassStroke },
-  back: { color: c.text, fontSize: 32, fontWeight: '300', marginTop: -4 },
   title: { color: c.text, fontSize: 17, fontWeight: '800' },
 
   mapCard: { backgroundColor: c.glassSoft, borderRadius: 18, borderWidth: 1, borderColor: c.glassStroke, alignItems: 'center', padding: 22, gap: 6 },
@@ -354,7 +386,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   durText: { color: c.textDim, fontSize: 13, fontWeight: '600' },
   durTextActive: { color: c.primary, fontWeight: '800' },
 
-  liveCard: { marginTop: 16, backgroundColor: 'rgba(239,68,68,0.07)', borderRadius: 16, borderWidth: 1, borderColor: 'rgba(239,68,68,0.3)', padding: 16 },
+  liveCard: { marginTop: 16, backgroundColor: c.danger + '12', borderRadius: 16, borderWidth: 1, borderColor: c.danger + '4D', padding: 16 },
   liveDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: c.danger },
   liveTitle: { color: c.text, fontSize: 15, fontWeight: '800' },
   liveSub: { color: c.textDim, fontSize: 12.5, marginTop: 4 },

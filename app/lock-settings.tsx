@@ -22,6 +22,7 @@ import {
 } from '../lib/lock/lockService';
 import { AppText as Text, AuroraBackground } from '../components/ui';
 import { currentVersionName } from '../lib/appVersion';
+import type { Palette } from '../constants/theme';
 
 const VOLUMES = [0.2, 0.4, 0.6, 0.8, 1];
 const GRACES = [0, 5, 10, 30, 60];
@@ -33,40 +34,97 @@ const MODES: { key: LockMode; label: string }[] = [
 const BANDS = [3, 5, 10, 15, 25];
 const HYSTS = [2, 3, 5, 10];
 
+/** The on/off channels: the only LockAlertSettings keys a Switch row may own. */
+type ChannelKey = { [K in keyof LockAlertSettings]: LockAlertSettings[K] extends boolean ? K : never }[keyof LockAlertSettings];
+
+/** Persist, then hand the change to an armed lock, and SAY when either fails.
+ *  Both used to end in .catch(() => {}): an alarm setting that silently did
+ *  not stick, or did not reach the running lock, is a safety gap. */
+function save(write: Promise<void>): void {
+  write
+    .catch(() => {
+      Alert.alert('Setting not saved', 'This change applies now, but it could not be saved and will reset when the app restarts. Try again.');
+    })
+    .then(() => applyAlertSettings())
+    .catch(() => {
+      Alert.alert('Not applied to the active lock', 'The running lock could not pick up this change. Unlock and lock again to apply it.');
+    });
+}
+
+// Hoisted out of the screen: defined inside it, each was a new component type
+// on every render, so React remounted every row and chip on each change.
+function Row({ icon, label, keyName, on, onChange, colors }: {
+  icon: keyof typeof Ionicons.glyphMap; label: string; keyName: ChannelKey;
+  on: boolean; onChange: (patch: Partial<LockAlertSettings>) => void; colors: Palette;
+}) {
+  return (
+    <View style={[st.row, { borderColor: colors.glassStroke }]}>
+      <Ionicons name={icon} size={19} color={colors.primary} />
+      <Text style={[st.rowTxt, { color: colors.text }]}>{label}</Text>
+      <Switch
+        value={on}
+        accessibilityLabel={label}
+        onValueChange={(v) => { const patch: Partial<LockAlertSettings> = {}; patch[keyName] = v; onChange(patch); }}
+        trackColor={{ true: colors.primary + '88', false: colors.border }}
+        // Off: the platform's own thumb, which is visible on both themes.
+        thumbColor={on ? colors.primary : undefined}
+      />
+    </View>
+  );
+}
+
+/** A choice chip when `on` is given; a plain action (no selected state) when
+ *  it is not — "Test voice" is a button, not an option that can be selected. */
+function Chip({ on, label, a11yLabel, onPress, colors }: {
+  on?: boolean; label: string; a11yLabel?: string; onPress: () => void; colors: Palette;
+}) {
+  const lit = !!on;
+  return (
+    <TouchableOpacity onPress={onPress}
+      accessibilityRole="button" accessibilityLabel={a11yLabel}
+      accessibilityState={on === undefined ? undefined : { selected: on }}
+      style={[st.chip, { borderColor: lit ? colors.primary : colors.glassStroke, backgroundColor: lit ? colors.glass : colors.glassSoft }]}>
+      <Text style={{ color: lit ? colors.primary : colors.text, fontWeight: lit ? '700' : '500', fontSize: 13 }}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
 export default function LockSettingsScreen() {
   const { colors } = useTheme();
   const s = useLockSettings();
   const lock = useLockView();
   const a = s.alerts;
 
-  const set = (patch: Partial<LockAlertSettings>) => {
-    setLockAlerts(patch).then(() => applyAlertSettings()).catch(() => {});
-  };
-  const setGeneral = (patch: Parameters<typeof setLockSettings>[0]) => {
-    setLockSettings(patch).then(() => applyAlertSettings()).catch(() => {});
+  const set = (patch: Partial<LockAlertSettings>) => save(setLockAlerts(patch));
+  const setGeneral = (patch: Parameters<typeof setLockSettings>[0]) => save(setLockSettings(patch));
+  const [killBusy, setKillBusy] = React.useState(false);
+
+  const toggleKillSafe = async (v: boolean) => {
+    if (killBusy) return;
+    setKillBusy(true);
+    try {
+      if (v) {
+        // false = the "Allow all the time" grant was refused or the background
+        // service would not start; the switch stays off, and now says why.
+        if (!await enableKillSafe()) {
+          Alert.alert('Background tracking is off', 'It needs location access set to “Allow all the time”. Without it the lock only works while the app is open.');
+        }
+      } else {
+        await disableKillSafe();
+      }
+    } catch (e: unknown) {
+      Alert.alert('Background tracking', (e instanceof Error && e.message) || 'Could not change background tracking. Try again.');
+    } finally { setKillBusy(false); }
   };
 
-  const Row = ({ icon, label, keyName }: { icon: any; label: string; keyName: keyof LockAlertSettings }) => (
-    <View style={[st.row, { borderColor: colors.glassStroke }]}>
-      <Ionicons name={icon} size={19} color={colors.primary} />
-      <Text style={[st.rowTxt, { color: colors.text }]}>{label}</Text>
-      <Switch
-        value={!!a[keyName]}
-        accessibilityLabel={label}
-        onValueChange={(v) => set({ [keyName]: v } as any)}
-        trackColor={{ true: colors.primary + '88', false: colors.border }}
-        thumbColor={a[keyName] ? colors.primary : '#999'}
-      />
-    </View>
-  );
-
-  const Chip = ({ on, label, onPress }: { on: boolean; label: string; onPress: () => void }) => (
-    <TouchableOpacity onPress={onPress}
-      accessibilityRole="button" accessibilityState={{ selected: on }}
-      style={[st.chip, { borderColor: on ? colors.primary : colors.glassStroke, backgroundColor: on ? colors.glass : colors.glassSoft }]}>
-      <Text style={{ color: on ? colors.primary : colors.text, fontWeight: on ? '700' : '500', fontSize: 13 }}>{label}</Text>
-    </TouchableOpacity>
-  );
+  const openBattery = async () => {
+    try {
+      if (await notifee.isBatteryOptimizationEnabled()) await notifee.openBatteryOptimizationSettings();
+      else Alert.alert('All good', 'crazzychat is already exempt from battery optimization.');
+    } catch {
+      Alert.alert('Battery settings', 'Could not open battery optimization settings. Open the system Settings app and exempt crazzychat there.');
+    }
+  };
 
   return (
     <View style={st.screen}>
@@ -75,27 +133,27 @@ export default function LockSettingsScreen() {
         headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */  title: 'Alarm & Alert Settings', headerTitleAlign: 'center' }} />
       <ScrollView contentContainerStyle={st.body}>
         {/* ── General ── */}
-        <Text style={[st.h, { color: colors.text }]}>General · Units</Text>
+        <Text style={[st.h, { color: colors.text }]} accessibilityRole="header">General · Units</Text>
         <View style={st.chips}>
-          <Chip on={s.units === 'metric'} label="Metric (m, km)" onPress={() => setGeneral({ units: 'metric' })} />
-          <Chip on={s.units === 'imperial'} label="Imperial (ft, mi)" onPress={() => setGeneral({ units: 'imperial' })} />
+          <Chip on={s.units === 'metric'} label="Metric (m, km)" colors={colors} onPress={() => setGeneral({ units: 'metric' })} />
+          <Chip on={s.units === 'imperial'} label="Imperial (ft, mi)" colors={colors} onPress={() => setGeneral({ units: 'imperial' })} />
         </View>
 
-        <Text style={[st.h, { color: colors.text, marginTop: 20 }]}>General · Monitoring mode</Text>
+        <Text style={[st.h, { color: colors.text, marginTop: 20 }]} accessibilityRole="header">General · Monitoring mode</Text>
         <View style={st.chips}>
-          {MODES.map((m) => <Chip key={m.key} on={s.mode === m.key} label={m.label} onPress={() => setGeneral({ mode: m.key })} />)}
+          {MODES.map((m) => <Chip key={m.key} on={s.mode === m.key} label={m.label} colors={colors} onPress={() => setGeneral({ mode: m.key })} />)}
         </View>
         {s.mode === 'custom' && (
           <View style={{ marginTop: 10 }}>
             <Text style={{ color: colors.textDim, fontSize: 12.5, marginBottom: 6 }}>Warning band (m inside the boundary)</Text>
             <View style={st.chips}>
               {BANDS.map((b) => <Chip key={b} on={s.customSensitivity.warningBand === b} label={`${b} m`}
-                onPress={() => setGeneral({ customSensitivity: { ...s.customSensitivity, warningBand: b } })} />)}
+                colors={colors} onPress={() => setGeneral({ customSensitivity: { ...s.customSensitivity, warningBand: b } })} />)}
             </View>
             <Text style={{ color: colors.textDim, fontSize: 12.5, marginVertical: 6 }}>Hysteresis (m past the boundary before alarm)</Text>
             <View style={st.chips}>
               {HYSTS.map((h) => <Chip key={h} on={s.customSensitivity.hysteresis === h} label={`${h} m`}
-                onPress={() => setGeneral({ customSensitivity: { ...s.customSensitivity, hysteresis: h } })} />)}
+                colors={colors} onPress={() => setGeneral({ customSensitivity: { ...s.customSensitivity, hysteresis: h } })} />)}
             </View>
           </View>
         )}
@@ -114,47 +172,46 @@ export default function LockSettingsScreen() {
             // protection (killSafe false), so a pre-checked "on" was a promise.
             value={lock.active ? lock.killSafe : false}
             accessibilityLabel="Background tracking"
-            disabled={!lock.active}
-            onValueChange={(v) => { (v ? enableKillSafe() : disableKillSafe()).catch(() => {}); }}
+            accessibilityHint={lock.active ? undefined : 'Available while a lock is active'}
+            accessibilityState={{ busy: killBusy, disabled: !lock.active || killBusy }}
+            disabled={!lock.active || killBusy}
+            onValueChange={toggleKillSafe}
             trackColor={{ true: colors.primary + '88', false: colors.border }}
-            thumbColor={lock.killSafe ? colors.primary : '#999'}
+            thumbColor={lock.active && lock.killSafe ? colors.primary : undefined}
           />
         </View>
         {Platform.OS === 'android' && (
           <TouchableOpacity
-            onPress={async () => {
-              try {
-                if (await notifee.isBatteryOptimizationEnabled()) await notifee.openBatteryOptimizationSettings();
-                else Alert.alert('All good', 'crazzychat is already exempt from battery optimization.');
-              } catch {}
-            }}
+            onPress={openBattery}
+            accessibilityRole="button" accessibilityLabel="Battery optimization exemption"
+            accessibilityHint="Opens the system setting that keeps the lock running in the background"
             style={[st.row, { borderColor: colors.glassStroke }]}>
             <Ionicons name="battery-charging" size={19} color={colors.primary} />
             <Text style={[st.rowTxt, { color: colors.text }]}>Battery optimization exemption</Text>
             <Ionicons name="chevron-forward" size={16} color={colors.textFaint} />
           </TouchableOpacity>
         )}
-        <Text style={[st.h, { color: colors.text, marginTop: 20 }]}>Tracking frequency</Text>
+        <Text style={[st.h, { color: colors.text, marginTop: 20 }]} accessibilityRole="header">Tracking frequency</Text>
         <View style={st.chips}>
-          <Chip on={s.cadence === 'auto'} label="Adaptive (recommended)" onPress={() => setGeneral({ cadence: 'auto' })} />
-          <Chip on={s.cadence === 'saver'} label="Battery saver" onPress={() => setGeneral({ cadence: 'saver' })} />
-          <Chip on={s.cadence === 'high'} label="High precision" onPress={() => setGeneral({ cadence: 'high' })} />
+          <Chip on={s.cadence === 'auto'} label="Adaptive (recommended)" colors={colors} onPress={() => setGeneral({ cadence: 'auto' })} />
+          <Chip on={s.cadence === 'saver'} label="Battery saver" colors={colors} onPress={() => setGeneral({ cadence: 'saver' })} />
+          <Chip on={s.cadence === 'high'} label="High precision" colors={colors} onPress={() => setGeneral({ cadence: 'high' })} />
         </View>
         <Text style={{ color: colors.textDim, fontSize: 12, marginTop: 6 }}>
           Adaptive speeds up GPS only near the boundary or while moving; saver stays slow while safe; high precision always runs at navigation cadence.
         </Text>
 
         {/* ── Sound & Vibration ── */}
-        <Text style={[st.h, { color: colors.text, marginTop: 24 }]}>Channels</Text>
-        <Row icon="volume-high" label="Loud siren" keyName="siren" />
-        <Row icon="pulse" label="Continuous beep" keyName="continuousBeep" />
-        <Row icon="phone-portrait" label="Vibration" keyName="vibration" />
-        <Row icon="chatbubble-ellipses" label='Voice warning ("You are leaving the locked area")' keyName="voice" />
-        <Row icon="flashlight" label="Flash screen + full-screen alert" keyName="flash" />
+        <Text style={[st.h, { color: colors.text, marginTop: 24 }]} accessibilityRole="header">Channels</Text>
+        <Row icon="volume-high" label="Loud siren" keyName="siren" on={a.siren} onChange={set} colors={colors} />
+        <Row icon="pulse" label="Continuous beep" keyName="continuousBeep" on={a.continuousBeep} onChange={set} colors={colors} />
+        <Row icon="phone-portrait" label="Vibration" keyName="vibration" on={a.vibration} onChange={set} colors={colors} />
+        <Row icon="chatbubble-ellipses" label='Voice warning ("You are leaving the locked area")' keyName="voice" on={a.voice} onChange={set} colors={colors} />
+        <Row icon="flashlight" label="Flash screen + full-screen alert" keyName="flash" on={a.flash} onChange={set} colors={colors} />
 
-        <Text style={[st.h, { color: colors.text, marginTop: 24 }]}>Alarm volume</Text>
+        <Text style={[st.h, { color: colors.text, marginTop: 24 }]} accessibilityRole="header">Alarm volume</Text>
         <View style={st.chips}>
-          {VOLUMES.map((v) => <Chip key={v} on={Math.abs(a.volume - v) < 0.01} label={`${Math.round(v * 100)}%`} onPress={() => set({ volume: v })} />)}
+          {VOLUMES.map((v) => <Chip key={v} on={Math.abs(a.volume - v) < 0.01} label={`${Math.round(v * 100)}%`} colors={colors} onPress={() => set({ volume: v })} />)}
         </View>
         {Platform.OS === 'ios' && (
           <Text style={{ color: colors.textDim, fontSize: 12, marginTop: 8 }}>
@@ -162,22 +219,22 @@ export default function LockSettingsScreen() {
           </Text>
         )}
 
-        <Text style={[st.h, { color: colors.text, marginTop: 24 }]}>Tone</Text>
+        <Text style={[st.h, { color: colors.text, marginTop: 24 }]} accessibilityRole="header">Tone</Text>
         <View style={st.chips}>
-          <Chip on={a.tone === 'siren'} label="Siren" onPress={() => set({ tone: 'siren' })} />
-          <Chip on={a.tone === 'beep'} label="Beep" onPress={() => set({ tone: 'beep' })} />
+          <Chip on={a.tone === 'siren'} label="Siren" colors={colors} onPress={() => set({ tone: 'siren' })} />
+          <Chip on={a.tone === 'beep'} label="Beep" colors={colors} onPress={() => set({ tone: 'beep' })} />
         </View>
 
-        <Text style={[st.h, { color: colors.text, marginTop: 24 }]}>Vibration pattern</Text>
+        <Text style={[st.h, { color: colors.text, marginTop: 24 }]} accessibilityRole="header">Vibration pattern</Text>
         <View style={st.chips}>
-          <Chip on={a.vibePattern === 'strong'} label="Strong" onPress={() => set({ vibePattern: 'strong' })} />
-          <Chip on={a.vibePattern === 'medium'} label="Medium" onPress={() => set({ vibePattern: 'medium' })} />
-          <Chip on={a.vibePattern === 'pulse'} label="Pulse" onPress={() => set({ vibePattern: 'pulse' })} />
+          <Chip on={a.vibePattern === 'strong'} label="Strong" colors={colors} onPress={() => set({ vibePattern: 'strong' })} />
+          <Chip on={a.vibePattern === 'medium'} label="Medium" colors={colors} onPress={() => set({ vibePattern: 'medium' })} />
+          <Chip on={a.vibePattern === 'pulse'} label="Pulse" colors={colors} onPress={() => set({ vibePattern: 'pulse' })} />
         </View>
 
-        <Text style={[st.h, { color: colors.text, marginTop: 24 }]}>Start alarm after</Text>
+        <Text style={[st.h, { color: colors.text, marginTop: 24 }]} accessibilityRole="header">Start alarm after</Text>
         <View style={st.chips}>
-          {GRACES.map((g) => <Chip key={g} on={a.graceS === g} label={g === 0 ? 'Instantly' : `${g} s`} onPress={() => set({ graceS: g })} />)}
+          {GRACES.map((g) => <Chip key={g} on={a.graceS === g} label={g === 0 ? 'Instantly' : `${g} s`} colors={colors} onPress={() => set({ graceS: g })} />)}
         </View>
         <Text style={{ color: colors.textDim, fontSize: 12, marginTop: 6 }}>
           Returning inside the radius within this window cancels the alarm silently.
@@ -191,12 +248,12 @@ export default function LockSettingsScreen() {
             accessibilityLabel="Repeat alarm until back inside"
             onValueChange={(v) => set({ repeat: v })}
             trackColor={{ true: colors.primary + '88', false: colors.border }}
-            thumbColor={a.repeat ? colors.primary : '#999'}
+            thumbColor={a.repeat ? colors.primary : undefined}
           />
         </View>
         {a.repeat && (
           <View style={[st.chips, { marginTop: 10 }]}>
-            {REPEAT_GAPS.map((g) => <Chip key={g} on={a.repeatIntervalS === g} label={`every ${g} s`} onPress={() => set({ repeatIntervalS: g })} />)}
+            {REPEAT_GAPS.map((g) => <Chip key={g} on={a.repeatIntervalS === g} label={`every ${g} s`} colors={colors} onPress={() => set({ repeatIntervalS: g })} />)}
           </View>
         )}
 
@@ -206,15 +263,15 @@ export default function LockSettingsScreen() {
           <Text style={st.testTxt}>Test Alarm</Text>
         </TouchableOpacity>
         <View style={[st.chips, { marginTop: 8, justifyContent: 'center' }]}>
-          <Chip on={false} label="🗣 Test voice" onPress={() => { try { Speech.stop(); Speech.speak(VOICE.outside, { rate: 1.0 }); } catch {} }} />
-          <Chip on={false} label="〰 Test vibration" onPress={() => { try { Vibration.vibrate(VIBE_PATTERN[a.vibePattern], false); } catch {} }} />
+          <Chip label="🗣 Test voice" a11yLabel="Test voice" colors={colors} onPress={() => { try { Speech.stop(); Speech.speak(VOICE.outside, { rate: 1.0 }); } catch {} }} />
+          <Chip label="〰 Test vibration" a11yLabel="Test vibration" colors={colors} onPress={() => { try { Vibration.vibrate(VIBE_PATTERN[a.vibePattern], false); } catch {} }} />
         </View>
         <Text style={{ color: colors.textDim, fontSize: 12, textAlign: 'center', marginTop: 8 }}>
           Plays the enabled channels for a few seconds. Nothing is written to history.
         </Text>
 
         {/* ── About ── */}
-        <Text style={[st.h, { color: colors.text, marginTop: 28 }]}>About Location Lock</Text>
+        <Text style={[st.h, { color: colors.text, marginTop: 28 }]} accessibilityRole="header">About Location Lock</Text>
         <View style={[st.about, { borderColor: colors.glassStroke, backgroundColor: colors.glass }]}>
           <Text style={{ color: colors.text, fontSize: 13.5, fontWeight: '700' }}>
             Location Lock · Navigate mini-app{currentVersionName() ? ` · v${currentVersionName()}` : ''}
