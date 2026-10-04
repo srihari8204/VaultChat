@@ -20,11 +20,11 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Platform, ScrollView, Share,
+  ActivityIndicator, Alert, ScrollView, Share,
   StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as Clipboard from 'expo-clipboard';
+import { copyAndAutoClear } from '../lib/clipboardSafe';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import {
@@ -86,11 +86,15 @@ export default function ChatCodeScreen() {
   // A live code is readable back from the server, so coming back to this screen
   // inside the two minutes shows the same one instead of quietly minting
   // another and invalidating the code already read out.
+  // A failed read is shown, not swallowed: silently showing "no code" invites
+  // minting a new one, which kills a code that may already have been read out.
+  const [loadErr, setLoadErr] = useState(false);
   const refresh = useCallback(async () => {
     try {
       const c = await getChatCode();
       setLive(c.active ? c : null);
-    } catch {}
+      setLoadErr(false);
+    } catch { setLoadErr(true); }
   }, []);
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -163,7 +167,9 @@ export default function ChatCodeScreen() {
             key={m}
             style={[S.tab, mode === m && S.tabOn]}
             onPress={() => setMode(m)}
-            activeOpacity={0.8}>
+            activeOpacity={0.8}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: mode === m }}>
             <Text style={[S.tabTxt, mode === m && S.tabTxtOn]}>
               {m === 'share' ? 'Share a code' : 'Enter a code'}
             </Text>
@@ -180,10 +186,17 @@ export default function ChatCodeScreen() {
               {' '}<Text style={S.strong}>two minutes</Text>, so make it while they are with you.
             </Text>
 
+            {loadErr && !live && (
+              <TouchableOpacity onPress={refresh} accessibilityRole="button" style={{ paddingVertical: 8 }}>
+                <Text style={[S.hint, { color: colors.danger }]}>
+                  Could not check for a live code. Tap to try again.
+                </Text>
+              </TouchableOpacity>
+            )}
             {live?.code ? (
               <View style={S.codeBox}>
                 <Text style={S.code} selectable>{live.code}</Text>
-                <View style={S.timerRow}>
+                <View style={S.timerRow} accessibilityLiveRegion="polite">
                   <Ionicons name="time-outline" size={15} color={left <= 30 ? colors.danger : colors.textDim} />
                   <Text style={[S.timer, left <= 30 && S.timerLow]}>{mmss(left)} left</Text>
                 </View>
@@ -195,9 +208,13 @@ export default function ChatCodeScreen() {
                   <TouchableOpacity
                     style={S.codeAction}
                     activeOpacity={0.7}
+                    accessibilityRole="button"
+                    accessibilityLabel="Copy code"
                     onPress={async () => {
-                      await Clipboard.setStringAsync(live.code!);
-                      Alert.alert('Copied', 'The code is on your clipboard.');
+                      try {
+                        await copyAndAutoClear(live.code!);
+                        Alert.alert('Copied', 'The code is on your clipboard for 30 seconds.');
+                      } catch (e: any) { Alert.alert('Could not copy', e?.message ?? 'Try again.'); }
                     }}>
                     <Ionicons name="copy-outline" size={20} color={colors.primary} />
                     <Text style={S.codeActionTxt}>Copy</Text>
@@ -205,6 +222,8 @@ export default function ChatCodeScreen() {
                   <TouchableOpacity
                     style={S.codeAction}
                     activeOpacity={0.7}
+                    accessibilityRole="button"
+                    accessibilityLabel="Share code"
                     onPress={() => Share.share({ message: `Chat with me on crazzychat. Code: ${live.code} (expires in 2 minutes)` })}>
                     <Ionicons name="share-outline" size={20} color={colors.primary} />
                     <Text style={S.codeActionTxt}>Share</Text>
@@ -219,7 +238,10 @@ export default function ChatCodeScreen() {
                     key={o.key}
                     style={[S.opt, pick.key === o.key && S.optOn]}
                     onPress={() => setPick(o)}
-                    activeOpacity={0.8}>
+                    activeOpacity={0.8}
+                    accessibilityRole="radio"
+                    accessibilityLabel={`${o.label}. ${o.sub}`}
+                    accessibilityState={{ checked: pick.key === o.key }}>
                     <Ionicons
                       name={pick.key === o.key ? 'radio-button-on' : 'radio-button-off'}
                       size={20}
@@ -238,13 +260,15 @@ export default function ChatCodeScreen() {
               style={[S.cta, busy && S.ctaOff]}
               onPress={generate}
               disabled={busy}
-              activeOpacity={0.85}>
-              {busy ? <ActivityIndicator color="#fff" />
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: busy, busy }}>
+              {busy ? <ActivityIndicator color={colors.bubbleOutText} />
                     : <Text style={S.ctaTxt}>{live ? 'New code' : 'Generate code'}</Text>}
             </TouchableOpacity>
 
             {live && (
-              <TouchableOpacity style={S.stop} onPress={stop} disabled={busy} activeOpacity={0.7}>
+              <TouchableOpacity style={S.stop} onPress={stop} disabled={busy} activeOpacity={0.7} accessibilityRole="button">
                 <Ionicons name="close-circle-outline" size={18} color={colors.danger} />
                 <Text style={S.stopTxt}>Stop — nobody can use it</Text>
               </TouchableOpacity>
@@ -267,6 +291,7 @@ export default function ChatCodeScreen() {
               autoFocus
               maxLength={6}
               returnKeyType="go"
+              accessibilityLabel="Six-digit chat code"
               onSubmitEditing={join}
             />
             <Text style={S.hint}>
@@ -277,8 +302,10 @@ export default function ChatCodeScreen() {
               style={[S.cta, (typed.length !== 6 || joining) && S.ctaOff]}
               onPress={join}
               disabled={typed.length !== 6 || joining}
-              activeOpacity={0.85}>
-              {joining ? <ActivityIndicator color="#fff" /> : <Text style={S.ctaTxt}>Open chat</Text>}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: typed.length !== 6 || joining, busy: joining }}>
+              {joining ? <ActivityIndicator color={colors.bubbleOutText} /> : <Text style={S.ctaTxt}>Open chat</Text>}
             </TouchableOpacity>
           </>
         )}
@@ -302,7 +329,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   tab: { flex: 1, minHeight: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: c.glassSoft },
   tabOn: { backgroundColor: c.primary },
   tabTxt: { color: c.textDim, fontSize: 14, fontWeight: '700' },
-  tabTxtOn: { color: '#fff' },
+  tabTxtOn: { color: c.bubbleOutText },
 
   body: { paddingHorizontal: 18, paddingBottom: 40 },
   lede: { color: c.textDim, fontSize: 13.5, lineHeight: 20, marginTop: 10 },
@@ -332,7 +359,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   cta: { marginTop: 22, minHeight: 50, paddingVertical: 10, borderRadius: 14, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
   ctaOff: { opacity: 0.4 },
-  ctaTxt: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  ctaTxt: { color: c.bubbleOutText, fontSize: 16, fontWeight: '800' },
 
   stop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 16 },
   stopTxt: { color: c.danger, fontSize: 13.5, fontWeight: '700' },

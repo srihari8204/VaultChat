@@ -264,7 +264,7 @@ export const makeStyles = (
   // Composer banner when Invisible Ink is armed (matches vanishBar shape).
   inkBar:        { paddingHorizontal: 16, paddingVertical: 8, backgroundColor: 'rgba(180,160,255,0.12)', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(180,160,255,0.45)' },
   inkBarTxt:     { color: '#C4B5FD', fontSize: 12, fontWeight: '600' },
-  editTxt:       { color: c.primary, fontSize: 12, fontWeight: '600' },
+  editTxt:       { flex: 1, color: c.primary, fontSize: 12, fontWeight: '600' },
   editCancelTxt: { color: c.textDim, fontSize: 12 },
 
   composer:      { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 14, paddingVertical: 12 * v.spacingScale, gap: 10, backgroundColor: 'transparent' },
@@ -464,9 +464,6 @@ export const makeStyles = (
 
   // Day 8 — quick-react picker
   modalBackdrop:       { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  reactSheet:          { flexDirection: 'row', gap: 4, padding: 8, backgroundColor: c.surfaceSolid, borderRadius: 32 },
-  reactSheetBtn:       { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
-  reactSheetEmoji:     { fontSize: 26 },
 
   // Day 8 — forward chat picker
   forwardSheet:        { width: '100%', maxHeight: '70%', backgroundColor: c.card, borderRadius: 16, padding: 16, gap: 8 },

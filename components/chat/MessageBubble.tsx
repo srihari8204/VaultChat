@@ -1378,6 +1378,10 @@ function MessageBubble({
         onLongPress={() => onLongPress(msg, plain)}
         delayLongPress={250}
         activeOpacity={0.85}
+        // Screen readers cannot long-press reliably; expose the same action
+        // menu (reply, react, forward, delete…) as a named action.
+        accessibilityActions={[{ name: 'longpress', label: 'Message actions' }]}
+        onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'longpress') onLongPress(msg, plain); }}
       >
         {!isMine && member && !isSticker && !grouped && (
           <Text numberOfLines={1} style={S.senderTag}>{member.name || member.email || msg.senderId.slice(0, 8)}</Text>

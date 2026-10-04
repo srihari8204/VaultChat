@@ -1,9 +1,12 @@
 // app/bookmarks.tsx — Saved messages (Postgres).
 //
-// Lists every bookmark across all chats, newest first. Tap a row to jump
-// to that chat (we don't auto-scroll to the bookmarked message yet — the
-// chat thread loads from newest). Long-press to remove. Each row shows
-// chat name + sender + the message preview + relative time.
+// Lists every bookmark across all chats, newest first. Tap a row to open the
+// chat scrolled to that message (setPendingJump). Long-press, or the screen
+// reader "Remove bookmark" action, removes it. Each row shows chat name, the
+// message preview and relative time.
+//
+// Bodies come from the sealed local snapshot (lib/bookmarkBodies.ts); the
+// plain AsyncStorage list cache holds rows WITHOUT bodies.
 
 import { HEADER_TOP, SCREEN_BOTTOM } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,12 +27,26 @@ import { useTheme } from '../lib/theme';
 import {
   getBookmarkPlaintext,
   listBookmarks,
+  looksEncrypted,
   removeBookmark,
   type BookmarkRow,
 } from '../lib/chatService';
 import { readCache, writeCache } from '../lib/localCache';
+import { bookmarkBody, hasBodies, withoutBodies } from '../lib/bookmarkBodies';
+import { setPendingJump } from '../lib/chatJump';
 import { AuroraBackground } from '../components/ui';
 import { AppText as Text } from '../components/ui/Text';
+
+// Fill each row's body from the sealed local snapshot (or a non-ciphertext
+// server body). Rows whose body is unreadable show their type label instead.
+async function withBodies(rows: BookmarkRow[]): Promise<BookmarkRow[]> {
+  return Promise.all(rows.map(async (b) => {
+    const id = Number(b.message?.id ?? 0);
+    if (!b.message || !id) return b;
+    const local = await getBookmarkPlaintext(id);
+    return { ...b, message: { ...b.message, content: bookmarkBody(b.message.content, local, looksEncrypted) } };
+  }));
+}
 
 function useS() {
   const { colors } = useTheme();
@@ -48,25 +65,22 @@ export default function BookmarksScreen() {
   const load = useCallback(async () => {
     // Local-first: paint cached bookmarks instantly, then fetch fresh.
     const cached = await readCache<BookmarkRow[]>('bookmarks');
-    if (cached) { setRows(cached); setLoading(false); }
+    if (cached) {
+      // Older builds cached decrypted bodies here; scrub them on first read.
+      if (hasBodies(cached)) writeCache('bookmarks', withoutBodies(cached));
+      setRows(await withBodies(withoutBodies(cached)));
+      setLoading(false);
+    }
     try {
       const fresh = await listBookmarks();
-      // Fill in bodies the server no longer has.
-      //
       // A bookmarked message's ciphertext is reclaimed on delivery like every
       // other message — bookmarks are deliberately NOT a server-side archive —
-      // so the server returns the message row with a null content. The local
-      // snapshot taken at bookmark time is the readable copy, and preferring it
-      // is what keeps a saved message saved.
-      const hydrated = await Promise.all(fresh.map(async (b) => {
-        const id = Number(b.message?.id ?? 0);
-        if (!b.message || !id) return b;
-        if (b.message.content) return b;                 // server still has it
-        const local = await getBookmarkPlaintext(id);
-        return local ? { ...b, message: { ...b.message, content: local } } : b;
-      }));
+      // and while it exists it is ciphertext. The local snapshot taken at
+      // bookmark time is the readable copy, and preferring it is what keeps a
+      // saved message saved.
+      const hydrated = await withBodies(fresh);
       setRows(hydrated);
-      writeCache('bookmarks', hydrated);
+      writeCache('bookmarks', withoutBodies(hydrated));
       setError(null);
     } catch (e: any) {
       // Keep cached rows for offline read; only surface if nothing painted.
@@ -89,6 +103,8 @@ export default function BookmarksScreen() {
       Alert.alert('Unavailable', 'The original message is no longer available.');
       return;
     }
+    // chat.tsx consumes this on focus and scrolls to the message.
+    if (Number(b.message.id) > 0) setPendingJump(b.message.chatId, Number(b.message.id));
     router.push({ pathname: '/chat', params: { id: b.message.chatId } } as any);
   }, [router]);
 
@@ -103,7 +119,7 @@ export default function BookmarksScreen() {
               await removeBookmark(b.id);
               setRows(prev => {
                 const next = prev.filter(r => r.id !== b.id);
-                writeCache('bookmarks', next); // keep instant-paint cache consistent
+                writeCache('bookmarks', withoutBodies(next)); // keep instant-paint cache consistent
                 return next;
               });
             } catch (e: any) {
@@ -124,7 +140,7 @@ export default function BookmarksScreen() {
     <View style={S.screen}>
       <AuroraBackground />
       <View style={S.header}>
-        <TouchableOpacity accessibilityLabel="Go back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title}>Bookmarks</Text>
@@ -137,7 +153,7 @@ export default function BookmarksScreen() {
           <Ionicons name="bookmark-outline" size={48} color={colors.primary} />
           <Text style={S.emptyTitle}>No bookmarks yet</Text>
           <Text style={S.emptySub}>
-            Long-press any message in a chat and choose Bookmark to save it here.
+            Long-press any message in a chat and choose Star to save it here.
           </Text>
         </ScrollView>
       ) : (
@@ -153,6 +169,10 @@ export default function BookmarksScreen() {
               onLongPress={() => onLongPress(b)}
               delayLongPress={300}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityHint="Opens the chat at this message"
+              accessibilityActions={[{ name: 'remove', label: 'Remove bookmark' }]}
+              onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'remove') onLongPress(b); }}
             >
               <View style={S.iconBox}><Ionicons name="bookmark-outline" size={22} color={colors.primary} /></View>
               <View style={{ flex: 1 }}>

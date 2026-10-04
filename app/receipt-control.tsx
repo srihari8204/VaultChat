@@ -79,21 +79,24 @@ export default function ReceiptControlScreen() {
     const cur = shownFor(userId);
     const nextShown = !cur[field];           // user is toggling visibility
     const hideKey = field === 'read' ? 'hideRead' : field === 'typing' ? 'hideTyping' : 'hideLastSeen';
-    const prev = rules;
-    // Optimistic local patch.
-    setRules(r => {
+    // Optimistic patch of this ONE flag. The rollback below restores only this
+    // flag too: restoring a whole snapshot also reverted any other toggle the
+    // user changed while this request was in flight.
+    const patchFlag = (hidden: boolean) => setRules(r => {
       const base = r[userId] ?? {
         targetId: userId, hideOnline: false, hideTyping: false, hideRead: false, hideLastSeen: false,
       };
-      return { ...r, [userId]: { ...base, [hideKey]: !nextShown } };
+      return { ...r, [userId]: { ...base, [hideKey]: hidden } };
     });
+    patchFlag(!nextShown);
     try {
-      await setGhostMode(userId, { [hideKey]: !nextShown } as any);
+      await setGhostMode(userId, { [hideKey]: !nextShown } as Partial<Record<typeof hideKey, boolean>>);
+      setError(null);
     } catch (e: any) {
-      setRules(prev);
+      patchFlag(nextShown);
       setError(e?.message ?? 'Failed to update');
     }
-  }, [rules, shownFor]);
+  }, [shownFor]);
 
   const filtered = useMemo(
     () => contacts.filter(c => !search || c.name.toLowerCase().includes(search.toLowerCase())),
@@ -107,7 +110,7 @@ export default function ReceiptControlScreen() {
     <TouchableOpacity
       style={[s.toggleBtn, on && s.toggleBtnOn]}
       onPress={onPress}
-      hitSlop={4}
+      hitSlop={5}
       accessibilityRole="switch"
       accessibilityLabel={label}
       accessibilityState={{ checked: on }}
@@ -168,9 +171,9 @@ export default function ReceiptControlScreen() {
                   <View style={s.avatar}><Text style={s.avatarTxt}>{initialOf(item.name, '#')}</Text></View>
                   <Text style={s.contactName} numberOfLines={1}>{item.name}</Text>
                   <View style={s.toggleGroup}>
-                    <Toggle label="Read receipts" on={r.read} icon="checkmark-done" onPress={() => toggleRule(item.userId, 'read')} />
-                    <Toggle label="Typing indicator" on={r.typing} icon="create-outline" onPress={() => toggleRule(item.userId, 'typing')} />
-                    <Toggle label="Last seen" on={r.lastSeen} icon="time-outline" onPress={() => toggleRule(item.userId, 'lastSeen')} />
+                    <Toggle label={`Read receipts for ${item.name}`} on={r.read} icon="checkmark-done" onPress={() => toggleRule(item.userId, 'read')} />
+                    <Toggle label={`Typing indicator for ${item.name}`} on={r.typing} icon="create-outline" onPress={() => toggleRule(item.userId, 'typing')} />
+                    <Toggle label={`Last seen for ${item.name}`} on={r.lastSeen} icon="time-outline" onPress={() => toggleRule(item.userId, 'lastSeen')} />
                   </View>
                 </View>
               );

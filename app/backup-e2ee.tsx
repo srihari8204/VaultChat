@@ -10,12 +10,12 @@
 // the worst possible moment. Every confirmation below states it.
 
 import { HEADER_TOP } from '../constants/layout';
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator,
-  TextInput, Platform,
+  TextInput, Platform, BackHandler,
 } from 'react-native';
-import * as Clipboard from 'expo-clipboard';
+import { copyAndAutoClear } from '../lib/clipboardSafe';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
@@ -24,7 +24,7 @@ import { getBackupMode, enableE2EEBackup, disableE2EEBackup } from '../lib/cloud
 import { formatRecoveryKey, passwordProblem } from '../lib/backupCrypto';
 import { AuroraBackground } from '../components/ui';
 
-type Stage = 'loading' | 'off' | 'on' | 'password' | 'keyshown';
+type Stage = 'loading' | 'error' | 'off' | 'on' | 'password' | 'keyshown';
 
 export default function BackupE2EEScreen() {
   const router = useRouter();
@@ -38,10 +38,33 @@ export default function BackupE2EEScreen() {
   const [recoveryKey, setRecoveryKey] = useState('');
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
+  // A failed read is NOT "off": a user whose backup is already end-to-end
+  // encrypted would be told it is not, and invited to set it up again.
+  const loadMode = useCallback(() => {
+    setStage('loading');
     getBackupMode().then(m => { setMode(m); setStage(m === 'account' ? 'off' : 'on'); })
-      .catch(() => setStage('off'));
+      .catch(() => setStage('error'));
   }, []);
+  useEffect(() => { loadMode(); }, [loadMode]);
+
+  // Leaving the show-once key screen loses the key for good, so every exit —
+  // header back, Android back, the iOS swipe (disabled below) — asks first.
+  const confirmLeaveKey = useCallback((leave: () => void) => Alert.alert(
+    'Saved it?',
+    'Once you leave this screen the key cannot be shown again.',
+    [
+      { text: 'Go back', style: 'cancel' },
+      { text: "I've saved it", onPress: leave },
+    ],
+  ), []);
+  useEffect(() => {
+    if (stage !== 'keyshown') return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      confirmLeaveKey(() => router.back());
+      return true;
+    });
+    return () => sub.remove();
+  }, [stage, confirmLeaveKey, router]);
 
   const fail = (e: any) => Alert.alert('Could not turn this on', e?.message ?? 'Please try again.');
 
@@ -104,17 +127,43 @@ export default function BackupE2EEScreen() {
   );
 
   const header = (
-    <View style={s.header}>
-      <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.iconBtn} hitSlop={8}>
-        <Ionicons name="arrow-back" size={24} color={colors.text} />
-      </TouchableOpacity>
-      <Text style={s.headerTitle}>End-to-end encrypted backup</Text>
-    </View>
+    <>
+      <AuroraBackground />
+      <Stack.Screen options={{ headerShown: false, gestureEnabled: stage !== 'keyshown' }} />
+      <View style={s.header}>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+          onPress={() => (stage === 'keyshown' ? confirmLeaveKey(() => router.back()) : router.back())}
+          style={s.iconBtn}
+          hitSlop={8}
+        >
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
+        </TouchableOpacity>
+        <Text style={s.headerTitle}>End-to-end encrypted backup</Text>
+      </View>
+    </>
   );
 
   if (stage === 'loading') {
     return <View style={s.root}>
-      <AuroraBackground /><Stack.Screen options={{ headerShown: false }} />{header}</View>;
+      {header}
+      <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} accessibilityLabel="Loading backup settings" />
+    </View>;
+  }
+
+  if (stage === 'error') {
+    return (
+      <View style={s.root}>
+        {header}
+        <View style={{ padding: 20 }}>
+          <Text style={s.body}>Your backup settings could not be loaded. Check your connection and try again.</Text>
+          <TouchableOpacity style={s.primaryBtn} onPress={loadMode} accessibilityRole="button">
+            <Text style={s.primaryTxt}>TRY AGAIN</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
   }
 
   // The key is shown ONCE. There is no "show it again" anywhere, because we do
@@ -122,7 +171,6 @@ export default function BackupE2EEScreen() {
   if (stage === 'keyshown') {
     return (
       <View style={s.root}>
-        <Stack.Screen options={{ headerShown: false }} />
         {header}
         <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
           <Text style={s.h1}>Save your 64-digit key</Text>
@@ -133,23 +181,22 @@ export default function BackupE2EEScreen() {
           <View style={s.keyBox}><Text style={s.keyTxt}>{formatRecoveryKey(recoveryKey)}</Text></View>
           <TouchableOpacity
             style={s.secondaryBtn}
+            accessibilityRole="button"
             onPress={async () => {
-              await Clipboard.setStringAsync(recoveryKey);
-              Alert.alert('Copied', 'Paste it somewhere safe before you leave this screen.');
+              try {
+                await copyAndAutoClear(recoveryKey);
+                Alert.alert('Copied', 'Paste it somewhere safe now — the clipboard is cleared in 30 seconds.');
+              } catch (e: any) {
+                Alert.alert('Could not copy', e?.message ?? 'Write the key down instead.');
+              }
             }}>
             <Ionicons name="copy-outline" size={18} color={colors.primary} />
             <Text style={s.secondaryTxt}>Copy key</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={s.primaryBtn}
-            onPress={() => Alert.alert(
-              'Saved it?',
-              'Once you leave this screen the key cannot be shown again.',
-              [
-                { text: 'Go back', style: 'cancel' },
-                { text: "I've saved it", onPress: () => setStage('on') },
-              ],
-            )}>
+            accessibilityRole="button"
+            onPress={() => confirmLeaveKey(() => setStage('on'))}>
             <Text style={s.primaryTxt}>{"I'VE SAVED IT"}</Text>
           </TouchableOpacity>
         </ScrollView>
@@ -160,7 +207,6 @@ export default function BackupE2EEScreen() {
   if (stage === 'password') {
     return (
       <View style={s.root}>
-        <Stack.Screen options={{ headerShown: false }} />
         {header}
         <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
           <Text style={s.h1}>Create a password</Text>
@@ -170,22 +216,24 @@ export default function BackupE2EEScreen() {
           </Text>
           <TextInput
             style={s.input} value={pw} onChangeText={setPw} secureTextEntry autoFocus
-            placeholder="Password" placeholderTextColor={colors.textFaint}
+            placeholder="Password" placeholderTextColor={colors.textFaint} accessibilityLabel="Backup password"
             autoCapitalize="none" autoCorrect={false}
           />
           <TextInput
             style={s.input} value={pw2} onChangeText={setPw2} secureTextEntry
-            placeholder="Confirm password" placeholderTextColor={colors.textFaint}
+            placeholder="Confirm password" placeholderTextColor={colors.textFaint} accessibilityLabel="Confirm backup password"
             autoCapitalize="none" autoCorrect={false}
           />
           <Text style={s.hint}>At least 8 characters, with a letter and a number.</Text>
           <TouchableOpacity
             style={[s.primaryBtn, (busy || !pw || !pw2) && s.btnOff]}
             disabled={busy || !pw || !pw2}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: busy || !pw || !pw2, busy }}
             onPress={enablePassword}>
             {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.primaryTxt}>TURN ON</Text>}
           </TouchableOpacity>
-          <TouchableOpacity style={s.linkRow} onPress={() => { setPw(''); setPw2(''); setStage('off'); }}>
+          <TouchableOpacity style={s.linkRow} accessibilityRole="button" onPress={() => { setPw(''); setPw2(''); setStage('off'); }}>
             <Text style={s.link}>Cancel</Text>
           </TouchableOpacity>
         </ScrollView>
@@ -196,7 +244,6 @@ export default function BackupE2EEScreen() {
   if (stage === 'on') {
     return (
       <View style={s.root}>
-        <Stack.Screen options={{ headerShown: false }} />
         {header}
         <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
           <View style={s.onBadge}>
@@ -212,7 +259,7 @@ export default function BackupE2EEScreen() {
           <Text style={s.warn}>
             If you lose it, your backup cannot be recovered. Not by you, and not by us.
           </Text>
-          <TouchableOpacity style={[s.dangerBtn, busy && s.btnOff]} disabled={busy} onPress={turnOff}>
+          <TouchableOpacity style={[s.dangerBtn, busy && s.btnOff]} disabled={busy} onPress={turnOff} accessibilityRole="button" accessibilityLabel="Turn off encrypted backup" accessibilityState={{ disabled: busy, busy }}>
             {busy ? <ActivityIndicator color={colors.danger ?? '#e5484d'} />
                   : <Text style={s.dangerTxt}>TURN OFF</Text>}
           </TouchableOpacity>
@@ -224,7 +271,6 @@ export default function BackupE2EEScreen() {
   // stage === 'off'
   return (
     <View style={s.root}>
-      <Stack.Screen options={{ headerShown: false }} />
       {header}
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
         <Ionicons name="lock-closed-outline" size={44} color={colors.primary} style={{ alignSelf: 'center', marginBottom: 14 }} />
@@ -240,10 +286,10 @@ export default function BackupE2EEScreen() {
           permanently.
         </Text>
 
-        <TouchableOpacity style={[s.primaryBtn, busy && s.btnOff]} disabled={busy} onPress={() => setStage('password')}>
+        <TouchableOpacity style={[s.primaryBtn, busy && s.btnOff]} disabled={busy} onPress={() => setStage('password')} accessibilityRole="button" accessibilityState={{ disabled: busy }}>
           <Text style={s.primaryTxt}>USE A PASSWORD</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[s.secondaryBtn, busy && s.btnOff]} disabled={busy} onPress={enableKey}>
+        <TouchableOpacity style={[s.secondaryBtn, busy && s.btnOff]} disabled={busy} onPress={enableKey} accessibilityRole="button" accessibilityLabel="Use a 64-digit key instead" accessibilityState={{ disabled: busy, busy }}>
           {busy ? <ActivityIndicator color={colors.primary} /> : <>
             <Ionicons name="key-outline" size={18} color={colors.primary} />
             <Text style={s.secondaryTxt}>Use a 64-digit key instead</Text>

@@ -1,16 +1,16 @@
 // app/chat-backup.tsx — Chat backup (WhatsApp-style, single simple screen).
 //
 // One BACK UP button (no passphrase — the key is account-managed), Last Backup
-// times, and a few settings: frequency, network, include videos. Restore happens
+// times, and a few settings: frequency and network. Restore happens
 // automatically on reinstall (prompted at sign-in) but is also available here.
 
 import { HEADER_TOP } from '../constants/layout';
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator, Switch,
+  View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator,
   Modal, TextInput, Platform,
 } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
@@ -62,8 +62,11 @@ export default function ChatBackupScreen() {
   const [secretInput, setSecretInput] = useState('');
   const [busy, setBusy] = useState<'backup' | 'restore' | 'signin' | null>(null);
 
+  const [loadErr, setLoadErr] = useState(false);
+
   const refresh = async () => {
-    setSettings(await getBackupSettings());
+    try { setSettings(await getBackupSettings()); setLoadErr(false); }
+    catch { setLoadErr(true); }
     driveBackupMeta().then(setDrive).catch(() => {});
     getDriveEmail().then(setGEmail).catch(() => {});
     listLocalBackups().then(setLocal).catch(() => {});
@@ -81,12 +84,18 @@ export default function ChatBackupScreen() {
       Alert.alert('Google sign-in failed', e?.message ?? 'Please try again.');
     } finally { setBusy(null); }
   };
-  useEffect(() => { refresh(); }, []);
+  // On focus, not just mount: returning from /backup-e2ee must refresh `mode`.
+  useFocusEffect(useCallback(() => { refresh(); }, []));
 
   const patch = async (p: Partial<BackupSettings>) => {
-    const next = { ...(settings as BackupSettings), ...p };
+    const prev = settings as BackupSettings;
+    const next = { ...prev, ...p };
     setSettings(next);
-    await saveBackupSettings(next);
+    try { await saveBackupSettings(next); }
+    catch (e: any) {
+      setSettings(prev);
+      Alert.alert('Could not save', e?.message ?? 'Try again');
+    }
   };
 
   const onBackUp = async () => {
@@ -183,10 +192,8 @@ export default function ChatBackupScreen() {
     );
   };
 
-  if (!settings) return <View style={s.root} />;
-
-  return (
-    <View style={s.root}>
+  const header = (
+    <>
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <View style={s.header}>
@@ -195,6 +202,30 @@ export default function ChatBackupScreen() {
         </TouchableOpacity>
         <Text style={s.headerTitle}>Chat backup</Text>
       </View>
+    </>
+  );
+
+  if (!settings) {
+    return (
+      <View style={s.root}>
+        {header}
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 }}>
+          {loadErr ? (
+            <>
+              <Text style={s.topDesc}>Backup settings could not be loaded.</Text>
+              <TouchableOpacity onPress={refresh} accessibilityRole="button" style={{ padding: 10 }}>
+                <Text style={s.restoreLink}>Try again</Text>
+              </TouchableOpacity>
+            </>
+          ) : <ActivityIndicator color={colors.primary} accessibilityLabel="Loading backup settings" />}
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={s.root}>
+      {header}
 
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
         {/* Last backup + BACK UP */}
@@ -221,12 +252,12 @@ export default function ChatBackupScreen() {
             <Text style={s.timeVal}>{drive.modifiedTime ? fmt(new Date(drive.modifiedTime).getTime()) : 'Never'}</Text>
           </View>
 
-          <TouchableOpacity style={[s.backupBtn, busy && s.btnOff]} onPress={onBackUp} disabled={!!busy} activeOpacity={0.85}>
+          <TouchableOpacity style={[s.backupBtn, busy && s.btnOff]} onPress={onBackUp} disabled={!!busy} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel="Back up now" accessibilityState={{ disabled: !!busy, busy: busy === 'backup' }}>
             {busy === 'backup'
               ? <ActivityIndicator color="#fff" />
               : <Text style={s.backupTxt}>BACK UP</Text>}
           </TouchableOpacity>
-          <TouchableOpacity onPress={onRestore} disabled={!!busy} style={{ paddingVertical: 10 }}>
+          <TouchableOpacity onPress={onRestore} disabled={!!busy} style={{ paddingVertical: 10 }} accessibilityRole="button" accessibilityState={{ disabled: !!busy }}>
             <Text style={s.restoreLink}>{busy === 'restore' ? 'Restoring…' : 'Restore'}</Text>
           </TouchableOpacity>
         </View>
@@ -236,7 +267,7 @@ export default function ChatBackupScreen() {
         {/* Auto backup */}
         <Text style={s.section}>AUTO BACKUP</Text>
         {FREQ.map(f => (
-          <TouchableOpacity key={f.id} style={s.optRow} onPress={() => patch({ frequency: f.id })} activeOpacity={0.7}>
+          <TouchableOpacity key={f.id} style={s.optRow} onPress={() => patch({ frequency: f.id })} activeOpacity={0.7} accessibilityRole="radio" accessibilityLabel={`Auto backup: ${f.label}`} accessibilityState={{ checked: settings.frequency === f.id }}>
             <Ionicons name={settings.frequency === f.id ? 'radio-button-on' : 'radio-button-off'} size={22} color={settings.frequency === f.id ? colors.primary : colors.textDim} />
             <Text style={s.optLabel}>{f.label}</Text>
           </TouchableOpacity>
@@ -273,23 +304,14 @@ export default function ChatBackupScreen() {
         <View style={s.divider} />
         <Text style={s.section}>BACK UP USING</Text>
         {NET.map(n => (
-          <TouchableOpacity key={n.id} style={s.optRow} onPress={() => patch({ network: n.id })} activeOpacity={0.7}>
+          <TouchableOpacity key={n.id} style={s.optRow} onPress={() => patch({ network: n.id })} activeOpacity={0.7} accessibilityRole="radio" accessibilityLabel={`Back up using ${n.label}`} accessibilityState={{ checked: settings.network === n.id }}>
             <Ionicons name={settings.network === n.id ? 'radio-button-on' : 'radio-button-off'} size={22} color={settings.network === n.id ? colors.primary : colors.textDim} />
             <Text style={s.optLabel}>{n.label}</Text>
           </TouchableOpacity>
         ))}
 
-        <View style={s.divider} />
-        <View style={[s.optRow, { paddingRight: 18 }]}>
-          <Ionicons name="videocam-outline" size={22} color={colors.text} />
-          <Text style={[s.optLabel, { flex: 1 }]}>Include videos</Text>
-          <Switch
-            value={settings.includeVideos}
-            onValueChange={(v) => patch({ includeVideos: v })}
-            trackColor={{ true: colors.primary, false: colors.border }}
-            thumbColor="#fff"
-          />
-        </View>
+        {/* No "Include videos" switch: the backup bundle carries messages
+            only, no media (lib/cloudBackup.ts), so the setting changed nothing. */}
 
         <Text style={s.note}>
           {mode === 'account'
@@ -325,14 +347,18 @@ export default function ChatBackupScreen() {
               placeholderTextColor={colors.textFaint}
               autoCapitalize="none"
               autoCorrect={false}
+              accessibilityLabel={askSecret === 'key' ? '64-digit backup key' : 'Backup password'}
             />
             <View style={s.modalBtns}>
-              <TouchableOpacity onPress={() => { setAskSecret(null); setSecretInput(''); }} disabled={!!busy}>
+              <TouchableOpacity onPress={() => { setAskSecret(null); setSecretInput(''); }} disabled={!!busy} accessibilityRole="button">
                 <Text style={s.modalCancel}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => doRestore(secretInput)}
-                disabled={!!busy || !secretInput.trim()}>
+                disabled={!!busy || !secretInput.trim()}
+                accessibilityRole="button"
+                accessibilityLabel="Unlock backup"
+                accessibilityState={{ disabled: !!busy || !secretInput.trim() }}>
                 {busy === 'restore'
                   ? <ActivityIndicator color={colors.primary} />
                   : <Text style={[s.modalOk, !secretInput.trim() && s.btnOff]}>UNLOCK</Text>}

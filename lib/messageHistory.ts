@@ -35,12 +35,14 @@ import type { Message } from './chatService';
  * with the tombstone the server kept.
  *
  * `localLimit` bounds the local read; pass something generous for exports and
- * something modest for a preview strip.
+ * something modest for a preview strip. Pass `isCipher` to also prefer our
+ * readable copy over a server body that is still an E2EE envelope (exports).
  */
 export async function unionWithLocalHistory(
   chatId: string,
   serverMsgs: Message[],
   localLimit = 1000,
+  isCipher?: (s: string) => boolean,
 ): Promise<Message[]> {
   if (!chatId) return [...serverMsgs].sort((a, b) => b.id - a.id);
 
@@ -49,7 +51,12 @@ export async function unionWithLocalHistory(
   for (const m of local) byId.set(m.id, m);
   for (const m of serverMsgs) {
     const mine = byId.get(m.id);
-    byId.set(m.id, (mine && mine.content && !m.content && !m.deletedAt) ? mine : m);
+    const reclaimed = !!(mine && mine.content && !m.content && !m.deletedAt);
+    // Exports pass isCipher: our readable copy also beats a server body that is
+    // still an E2EE envelope (not reclaimed yet), or the export printed ciphertext.
+    const stillSealed = !!(mine && mine.content && m.content && !m.deletedAt
+      && isCipher && isCipher(m.content) && !isCipher(mine.content));
+    byId.set(m.id, (reclaimed || stillSealed) ? mine! : m);
   }
   // Newest first — the order every list surface in the app renders in.
   return [...byId.values()].sort((a, b) => b.id - a.id);
@@ -60,8 +67,9 @@ export async function unionWithLocalHistoryAsc(
   chatId: string,
   serverMsgs: Message[],
   localLimit = 100000,
+  isCipher?: (s: string) => boolean,
 ): Promise<Message[]> {
-  const merged = await unionWithLocalHistory(chatId, serverMsgs, localLimit);
+  const merged = await unionWithLocalHistory(chatId, serverMsgs, localLimit, isCipher);
   return merged.sort((a, b) => a.id - b.id);
 }
 

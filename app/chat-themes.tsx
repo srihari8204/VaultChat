@@ -10,6 +10,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert,
 } from 'react-native';
+import { resolveScoped, SCOPED_DEFAULT } from '../lib/scopedChoice';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
@@ -57,15 +58,24 @@ export default function ChatThemesScreen() {
 
   useEffect(() => {
     (async () => {
-      const saved = await AsyncStorage.getItem(key);
-      if (saved) setSelected(saved);
+      try {
+        const saved = await AsyncStorage.getItem(key);
+        if (saved) setSelected(saved);
+      } catch { /* keep the Default selection */ }
     })();
   }, [key]);
 
+  // Saves on tap. Per-chat "Default" is stored explicitly (see lib/scopedChoice).
   const apply = async (id: string) => {
+    const prev = selected;
     setSelected(id);
-    if (id === 'default') await AsyncStorage.removeItem(key);
-    else await AsyncStorage.setItem(key, id);
+    try {
+      if (id === SCOPED_DEFAULT && isGlobal) await AsyncStorage.removeItem(key);
+      else await AsyncStorage.setItem(key, id);
+    } catch {
+      setSelected(prev);
+      Alert.alert('Could not save', 'Your bubble colour was not changed. Try again.');
+    }
   };
 
   const current = BUBBLE_THEMES.find(t => t.id === selected) || BUBBLE_THEMES[0];
@@ -82,8 +92,8 @@ export default function ChatThemesScreen() {
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.iconBtn} hitSlop={8}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={s.headerTitle}>{isGlobal ? 'Bubble theme' : 'Bubble theme'}</Text>
-        <TouchableOpacity onPress={() => apply('default')} hitSlop={8}><Text style={s.resetText}>Reset</Text></TouchableOpacity>
+        <Text style={s.headerTitle}>{isGlobal ? 'Bubble theme · all chats' : 'Bubble theme · this chat'}</Text>
+        <TouchableOpacity onPress={() => apply(SCOPED_DEFAULT)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Reset to default bubble colour"><Text style={s.resetText}>Reset</Text></TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
@@ -109,7 +119,7 @@ export default function ChatThemesScreen() {
             const swatch = t.color ?? colors.bubbleOut;
             const on = selected === t.id;
             return (
-              <TouchableOpacity key={t.id} style={s.cell} onPress={() => apply(t.id)} activeOpacity={0.8}>
+              <TouchableOpacity key={t.id} style={s.cell} onPress={() => apply(t.id)} activeOpacity={0.8} accessibilityRole="radio" accessibilityLabel={`${t.name} bubble colour`} accessibilityState={{ checked: on }}>
                 <View style={[s.swatch, { backgroundColor: swatch }, on && s.swatchOn]}>
                   {on && <Ionicons name="checkmark" size={20} color={idealText(swatch)} />}
                 </View>
@@ -130,8 +140,10 @@ export default function ChatThemesScreen() {
 // bubbles always follow the theme — but kept for the existing call shape.)
 export async function getBubbleColors(chatId: string): Promise<{ mine: string; peer: string } | null> {
   try {
-    const id = (await AsyncStorage.getItem(BUBBLE_KEY + chatId))
-      || (await AsyncStorage.getItem(GLOBAL_BUBBLE));
+    const id = resolveScoped(
+      await AsyncStorage.getItem(BUBBLE_KEY + chatId),
+      await AsyncStorage.getItem(GLOBAL_BUBBLE),
+    );
     const found = BUBBLE_THEMES.find(b => b.id === id);
     if (!found || !found.color) return null;
     return { mine: found.color, peer: found.color };

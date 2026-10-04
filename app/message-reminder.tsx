@@ -4,10 +4,14 @@
 //   With ?chatId + ?messageId + ?preview   → composer: pick a time, save.
 //   Without params                         → list: pending reminders + cancel.
 //
-// Storage: AsyncStorage list of { id, chatId, messageId, preview, when }.
+// Storage: AsyncStorage list of { id, chatId, messageId, when } — NO message
+// text. The list re-reads each message's text from the local message cache
+// (sealed SQLite) when it is shown, so no decrypted body sits in plain storage.
 // Schedule: expo-notifications scheduleNotificationAsync with
 //   data: { chatId, messageId } so the existing root tap handler routes
-//   back into the chat when the user taps the notification.
+//   back into the chat when the user taps the notification. The notification
+//   never carries message text: it follows the tray-privacy setting
+//   (lib/privacyPrefs.ts), which deliberately has no "full text" mode.
 
 import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,6 +24,11 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { AuroraBackground } from '../components/ui';
 import { permissionDenied } from '../lib/permissionDenied';
+import { getNotifPreview, notifContent } from '../lib/privacyPrefs';
+import { getCachedMessagesByIds } from '../lib/localDb';
+import { looksEncrypted } from '../lib/chatService';
+
+type Router = ReturnType<typeof useRouter>;
 
 const STORAGE_KEY = 'vc_message_reminders_v1';
 
@@ -27,7 +36,8 @@ interface ReminderRow {
   id:        string;     // expo-notifications identifier
   chatId:    string;
   messageId: string;
-  preview:   string;
+  /** Legacy rows only; never written now. Display text is read at list time. */
+  preview?:  string;
   when:      string;     // ISO timestamp
   createdAt: string;
 }
@@ -60,10 +70,28 @@ async function loadReminders(): Promise<ReminderRow[]> {
     if (!raw) return [];
     const list = JSON.parse(raw) as ReminderRow[];
     // Drop any rows whose scheduled time has already passed (the notification
-    // either fired or was cancelled; we don't need to keep them around).
+    // either fired or was cancelled; we don't need to keep them around), and
+    // the plaintext preview older builds stored. Persist when either changed,
+    // so expired rows and old plaintext do not accumulate.
     const now = Date.now();
-    return list.filter(r => new Date(r.when).getTime() > now - 60_000);
+    const kept = list
+      .filter(r => new Date(r.when).getTime() > now - 60_000)
+      .map(({ preview: _drop, ...r }) => r);
+    if (kept.length !== list.length || list.some(r => r.preview)) {
+      await saveReminders(kept).catch(() => {});
+    }
+    return kept;
   } catch { return []; }
+}
+
+// The message text for display, from the local message cache. Null when the
+// message is not cached or not readable.
+async function cachedText(r: ReminderRow): Promise<string | null> {
+  try {
+    const [m] = await getCachedMessagesByIds(r.chatId, [Number(r.messageId)]);
+    const t = m?.type === 'text' ? m.content : null;
+    return t && !looksEncrypted(t) ? t : null;
+  } catch { return null; }
 }
 
 async function saveReminders(list: ReminderRow[]): Promise<void> {
@@ -76,8 +104,6 @@ function useS() {
 }
 
 export default function MessageReminderScreen() {
-  const { colors } = useTheme();
-  const S = useS();
   const router = useRouter();
   const { chatId, messageId, preview } = useLocalSearchParams<{
     chatId?: string; messageId?: string; preview?: string;
@@ -92,7 +118,7 @@ export default function MessageReminderScreen() {
 function Composer({
   chatId, messageId, preview, router,
 }: {
-  chatId: string; messageId: string; preview: string; router: any;
+  chatId: string; messageId: string; preview: string; router: Router;
 }) {
   const S = useS();
   const { colors } = useTheme();
@@ -105,21 +131,31 @@ function Composer({
       Alert.alert('Pick a future time', 'That preset has already passed today.');
       return;
     }
-    const perm = await Notifications.getPermissionsAsync();
-    if (!perm.granted) {
-      const req = await Notifications.requestPermissionsAsync();
-      if (!req.granted) {
-        permissionDenied('Permission needed', 'Allow notifications so we can remind you on time.', req.canAskAgain);
-        return;
-      }
-    }
-
+    // Busy BEFORE the permission awaits, so a double tap cannot schedule twice.
     setBusy(true);
     try {
+      const perm = await Notifications.getPermissionsAsync();
+      if (!perm.granted) {
+        const req = await Notifications.requestPermissionsAsync();
+        if (!req.granted) {
+          permissionDenied('Permission needed', 'Allow notifications so we can remind you on time.', req.canAskAgain);
+          return;
+        }
+      }
+      // Tray privacy: the user's notification-preview choice decides what may
+      // appear; no choice shows message text.
+      const tray = notifContent(await getNotifPreview(), '🔖 Message reminder');
+      if (!tray) {
+        Alert.alert(
+          'Notifications are hidden',
+          'Your privacy setting shows nothing in the notification tray, so a reminder could not appear. Change it in Settings → Privacy to use reminders.',
+        );
+        return;
+      }
       const id = await Notifications.scheduleNotificationAsync({
         content: {
-          title: '🔖 Message reminder',
-          body:  preview ? `"${preview.slice(0, 140)}"` : 'You wanted a reminder about this message.',
+          title: tray.title,
+          body:  'You asked to be reminded about a message.',
           // Root layout's attachTapHandler reads data.chatId and routes
           // to /chat?id=<chatId> when the user taps the notification.
           data:  { chatId, messageId },
@@ -129,7 +165,7 @@ function Composer({
 
       const list = await loadReminders();
       list.push({
-        id, chatId, messageId, preview, when: when.toISOString(),
+        id, chatId, messageId, when: when.toISOString(),
         createdAt: new Date().toISOString(),
       });
       await saveReminders(list);
@@ -142,7 +178,7 @@ function Composer({
     } finally {
       setBusy(false);
     }
-  }, [busy, chatId, messageId, preview, router]);
+  }, [busy, chatId, messageId, router]);
 
   return (
     <View style={S.screen}>
@@ -171,6 +207,9 @@ function Composer({
                 onPress={() => schedule(p.mins)}
                 disabled={busy}
                 activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel={`Remind me ${p.label.toLowerCase()}`}
+                accessibilityState={{ disabled: busy }}
               >
                 <Text style={S.presetLabel}>{p.label}</Text>
                 <Text style={S.presetSub}>{when.toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</Text>
@@ -188,22 +227,26 @@ function Composer({
 
         <Text style={S.note}>
           Reminders are device-only — they fire as a local notification at the
-          chosen time and tap-open the chat. See all pending at <Text style={{ color: colors.primary }}>/message-reminder</Text>.
+          chosen time and tap-open the chat. See all pending in Settings → Reminders.
         </Text>
       </ScrollView>
     </View>
   );
 }
 
-function RemindersList({ router }: { router: any }) {
+function RemindersList({ router }: { router: Router }) {
   const S = useS();
   const { colors } = useTheme();
   const [rows,    setRows]    = useState<ReminderRow[]>([]);
+  // Display-only message text, keyed by reminder id (never persisted).
+  const [texts,   setTexts]   = useState<Record<string, string | null>>({});
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     const list = await loadReminders();
     setRows(list.sort((a, b) => new Date(a.when).getTime() - new Date(b.when).getTime()));
+    const pairs = await Promise.all(list.map(async r => [r.id, await cachedText(r)] as const));
+    setTexts(Object.fromEntries(pairs));
   }, []);
 
   useEffect(() => {
@@ -211,7 +254,7 @@ function RemindersList({ router }: { router: any }) {
   }, [load]);
 
   const cancel = useCallback((r: ReminderRow) => {
-    Alert.alert('Cancel reminder?', r.preview || 'You won\'t be notified at the chosen time.', [
+    Alert.alert('Cancel reminder?', 'You won\'t be notified at the chosen time.', [
       { text: 'Keep', style: 'cancel' },
       { text: 'Cancel', style: 'destructive', onPress: async () => {
           // DELETE THE ROW ONLY IF THE OS ACTUALLY CANCELLED.
@@ -236,11 +279,12 @@ function RemindersList({ router }: { router: any }) {
   }, []);
 
   if (loading) {
-    return <View style={[S.screen, S.center]}><ActivityIndicator color={colors.primary} size="large" /></View>;
+    return <View style={[S.screen, S.center]}><AuroraBackground /><ActivityIndicator color={colors.primary} size="large" /></View>;
   }
 
   return (
     <View style={S.screen}>
+      <AuroraBackground />
       <View style={S.header}>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
@@ -261,14 +305,21 @@ function RemindersList({ router }: { router: any }) {
           keyExtractor={(r) => r.id}
           contentContainerStyle={{ paddingBottom: 32 }}
           renderItem={({ item: r }) => (
-            <TouchableOpacity style={S.row} onPress={() => cancel(r)} activeOpacity={0.7}>
+            <TouchableOpacity
+              style={S.row}
+              onPress={() => cancel(r)}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={`Reminder for ${new Date(r.when).toLocaleString()}`}
+              accessibilityHint="Cancels this reminder"
+            >
               <View style={S.iconBox}><Text style={S.iconTxt}>⏰</Text></View>
               <View style={{ flex: 1 }}>
                 <Text style={S.rowWhen} numberOfLines={1}>
                   Fires {new Date(r.when).toLocaleString()}
                 </Text>
                 <Text style={S.rowPreview} numberOfLines={2}>
-                  {r.preview || '(no preview)'}
+                  {texts[r.id] || 'Message reminder'}
                 </Text>
                 <Text style={S.rowSub}>Tap to cancel</Text>
               </View>

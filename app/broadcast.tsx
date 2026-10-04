@@ -3,12 +3,17 @@
 // Admin posts, subscribers read. Backed by /channels (list/create/join) and
 // /channels/:id/posts (read/post). No Firestore. The iOS-only Alert.prompt
 // join flow is replaced with a cross-platform modal.
+//
+// Invite links are vaultchat://broadcast?code=<code>: this screen reads
+// `code` and opens the Join modal pre-filled (lib/pendingLink.ts replays the
+// link after sign-in). There is no web route behind vaultchat.app/channel/.
+// Channel posts are NOT end-to-end encrypted, and the screen says so.
 
 import { HEADER_TOP } from '../constants/layout';
 import { brandAlpha, type Palette } from '../constants/theme';
 import React, { useState, useEffect, useCallback , useMemo} from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, FlatList, Alert, TextInput, Modal, Share, ActivityIndicator } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
+import { View, Text, TouchableOpacity, StyleSheet, FlatList, Alert, TextInput, Modal, Share, ActivityIndicator, BackHandler } from 'react-native';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { getSocket } from '../lib/socket';
@@ -31,6 +36,7 @@ export default function BroadcastScreen() {
   const { colors } = useTheme();
   const s = useS();
   const router = useRouter();
+  const { code: linkCode } = useLocalSearchParams<{ code?: string }>();
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -44,6 +50,22 @@ export default function BroadcastScreen() {
   const [posts, setPosts] = useState<ChannelPost[]>([]);
   const [postText, setPostText] = useState('');
   const [posting, setPosting] = useState(false);
+
+  // An invite link (vaultchat://broadcast?code=…) lands here: offer to join.
+  useEffect(() => {
+    if (typeof linkCode === 'string' && linkCode.trim()) { setJoinCode(linkCode.trim()); setShowJoin(true); }
+  }, [linkCode]);
+
+  // The channel view is an in-screen mode, so Android back must close it
+  // rather than leave the whole screen.
+  useEffect(() => {
+    if (!selected) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      setSelected(null); setPosts([]);
+      return true;
+    });
+    return () => sub.remove();
+  }, [selected]);
 
   const load = useCallback(async (hasCache: boolean) => {
     try {
@@ -129,7 +151,7 @@ export default function BroadcastScreen() {
   };
 
   const shareInvite = (ch: Channel) =>
-    Share.share({ message: `Join my crazzychat channel "${ch.name}"!\nCode: ${ch.inviteCode}\nhttps://vaultchat.app/channel/${ch.inviteCode}` });
+    Share.share({ message: `Join my crazzychat channel "${ch.name}"!\nOpen crazzychat → Broadcast Channels → Join Channel and enter: ${ch.inviteCode}\nOr open: vaultchat://broadcast?code=${encodeURIComponent(ch.inviteCode)}` });
 
   // ── Channel detail view ──
   if (selected) {
@@ -142,7 +164,7 @@ export default function BroadcastScreen() {
             <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={s.title} numberOfLines={1}>{selected.name}</Text>
-          <TouchableOpacity onPress={() => shareInvite(selected)} hitSlop={10}>
+          <TouchableOpacity onPress={() => shareInvite(selected)} hitSlop={10} accessibilityRole="button" accessibilityLabel="Share invite code">
             <Text style={s.shareLink}>Share</Text>
           </TouchableOpacity>
         </View>
@@ -152,6 +174,7 @@ export default function BroadcastScreen() {
             {(selected.subscriberCount ?? 1)} subscribers{selected.isAdmin ? ' • You are admin' : ''}
           </Text>
           {!!selected.description && <Text style={s.channelDesc}>{selected.description}</Text>}
+          <Text style={s.channelMeta}>Channel posts are not end-to-end encrypted.</Text>
         </View>
 
         <FlatList
@@ -170,6 +193,7 @@ export default function BroadcastScreen() {
         />
 
         {selected.isAdmin ? (
+          <KeyboardSafe keyboardOnly style={{ flex: 0 }}>
           <View style={s.postBar}>
             <TextInput
               style={s.postInput}
@@ -177,12 +201,14 @@ export default function BroadcastScreen() {
               onChangeText={setPostText}
               placeholder="Write a broadcast…"
               placeholderTextColor={colors.textFaint}
+              accessibilityLabel="Broadcast message"
               multiline
             />
-            <TouchableOpacity style={[s.postBtn, !postText.trim() && { opacity: 0.4 }]} onPress={sendPost} disabled={!postText.trim() || posting}>
+            <TouchableOpacity style={[s.postBtn, !postText.trim() && { opacity: 0.4 }]} onPress={sendPost} disabled={!postText.trim() || posting} accessibilityRole="button" accessibilityLabel="Post broadcast" accessibilityState={{ disabled: !postText.trim() || posting, busy: posting }}>
               {posting ? <ActivityIndicator color={colors.bubbleOutText} size="small" /> : <Text style={s.postBtnTxt}>POST</Text>}
             </TouchableOpacity>
           </View>
+          </KeyboardSafe>
         ) : (
           <View style={s.readOnly}><Text style={s.readOnlyTxt}>Only the admin can post in this channel</Text></View>
         )}
@@ -193,6 +219,7 @@ export default function BroadcastScreen() {
   // ── Channel list view ──
   return (
     <View style={s.container}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={s.header}>
@@ -204,11 +231,11 @@ export default function BroadcastScreen() {
       </View>
 
       <View style={s.topBtns}>
-        <TouchableOpacity style={s.createBtn} onPress={() => setShowCreate(true)}>
+        <TouchableOpacity style={s.createBtn} onPress={() => setShowCreate(true)} accessibilityRole="button">
           <Ionicons name="add" size={16} color={colors.accent} />
           <Text style={s.createTxt}>  Create Channel</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[s.createBtn, s.joinBtn]} onPress={() => setShowJoin(true)}>
+        <TouchableOpacity style={[s.createBtn, s.joinBtn]} onPress={() => setShowJoin(true)} accessibilityRole="button">
           <Ionicons name="link" size={16} color={colors.primary} />
           <Text style={[s.createTxt, { color: colors.primary }]}>  Join Channel</Text>
         </TouchableOpacity>
@@ -221,7 +248,7 @@ export default function BroadcastScreen() {
           data={channels}
           keyExtractor={c => c.id}
           renderItem={({ item }) => (
-            <TouchableOpacity style={s.chRow} onPress={() => openChannel(item)} activeOpacity={0.7}>
+            <TouchableOpacity style={s.chRow} onPress={() => openChannel(item)} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`${item.name}, ${item.subscriberCount ?? 1} subscribers${item.isAdmin ? ', admin' : ''}`}>
               <View style={s.chAvatar}><Ionicons name="megaphone-outline" size={22} color={colors.textDim} /></View>
               <View style={{ flex: 1 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
@@ -248,12 +275,12 @@ export default function BroadcastScreen() {
         <View style={s.modalBg}>
           <View style={s.modal}>
             <Text style={s.modalTitle}>Create Broadcast Channel</Text>
-            <TextInput style={s.modalInput} value={name} onChangeText={setName} placeholder="Channel name" placeholderTextColor={colors.textFaint} />
-            <TextInput style={[s.modalInput, { height: 80, textAlignVertical: 'top' }]} value={desc} onChangeText={setDesc} placeholder="Description (optional)" placeholderTextColor={colors.textFaint} multiline />
-            <TouchableOpacity style={[s.modalBtn, (!name.trim() || busy) && { opacity: 0.5 }]} onPress={create} disabled={!name.trim() || busy}>
+            <TextInput style={s.modalInput} value={name} onChangeText={setName} placeholder="Channel name" placeholderTextColor={colors.textFaint} maxLength={80} accessibilityLabel="Channel name" />
+            <TextInput style={[s.modalInput, { height: 80, textAlignVertical: 'top' }]} value={desc} onChangeText={setDesc} placeholder="Description (optional)" placeholderTextColor={colors.textFaint} multiline maxLength={500} accessibilityLabel="Channel description" />
+            <TouchableOpacity style={[s.modalBtn, (!name.trim() || busy) && { opacity: 0.5 }]} onPress={create} disabled={!name.trim() || busy} accessibilityRole="button" accessibilityLabel="Create channel" accessibilityState={{ disabled: !name.trim() || busy, busy }}>
               {busy ? <ActivityIndicator color={colors.bubbleOutText} /> : <Text style={s.modalBtnTxt}>Create</Text>}
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => setShowCreate(false)}><Text style={s.modalCancel}>Cancel</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => setShowCreate(false)} accessibilityRole="button"><Text style={s.modalCancel}>Cancel</Text></TouchableOpacity>
           </View>
         </View>
         </KeyboardSafe>
@@ -273,11 +300,12 @@ export default function BroadcastScreen() {
               placeholderTextColor={colors.textFaint}
               autoCapitalize="characters"
               autoCorrect={false}
+              accessibilityLabel="Invite code"
             />
-            <TouchableOpacity style={[s.modalBtn, (!joinCode.trim() || busy) && { opacity: 0.5 }]} onPress={join} disabled={!joinCode.trim() || busy}>
+            <TouchableOpacity style={[s.modalBtn, (!joinCode.trim() || busy) && { opacity: 0.5 }]} onPress={join} disabled={!joinCode.trim() || busy} accessibilityRole="button" accessibilityLabel="Join channel" accessibilityState={{ disabled: !joinCode.trim() || busy, busy }}>
               {busy ? <ActivityIndicator color={colors.bubbleOutText} /> : <Text style={s.modalBtnTxt}>Join</Text>}
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => setShowJoin(false)}><Text style={s.modalCancel}>Cancel</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => setShowJoin(false)} accessibilityRole="button"><Text style={s.modalCancel}>Cancel</Text></TouchableOpacity>
           </View>
         </View>
         </KeyboardSafe>

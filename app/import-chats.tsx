@@ -120,6 +120,11 @@ export default function ImportChatsScreen() {
   const [dateOrderAnswered, setDateOrderAnswered] = useState(true);
 
   const [progress, setProgress] = useState({ done: 0, total: 0 });
+  // The live count for the cancel/error outcome. Reading `progress.done` from
+  // a useCallback closure reported the value from when the callback was made.
+  const doneRef = useRef(0);
+  // Bumped to abandon an in-flight parse (Cancel while reading/matching).
+  const parseGen = useRef(0);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [resumable, setResumable] = useState<{ total: number } | null>(null);
 
@@ -129,19 +134,22 @@ export default function ImportChatsScreen() {
   useEffect(() => () => { cancelRef.current.cancelled = true; }, []);
 
   // ── target chat ──
-  useEffect(() => {
-    if (!chatId) return;
-    getChat(chatId)
-      .then(async (c) => {
-        setChat(c);
-        const me = await getCurrentUserAsync();
-        const peer = c.members.find(m => m.userId !== me?.id && !m.leftAt);
-        setPeerName(peer?.name || peer?.email || c.name || 'this contact');
-        const raw = await getMeta(SESSION_KEY(chatId));
-        if (raw) { try { const j = JSON.parse(raw); if (j?.state === 'running') setResumable({ total: j.total ?? 0 }); } catch {} }
-      })
-      .catch(() => {});
+  // Returns whether it loaded, so the Import button can say why it cannot run
+  // instead of silently doing nothing.
+  const loadChat = useCallback(async (): Promise<boolean> => {
+    if (!chatId) return false;
+    try {
+      const c = await getChat(chatId);
+      setChat(c);
+      const me = await getCurrentUserAsync();
+      const peer = c.members.find(m => m.userId !== me?.id && !m.leftAt);
+      setPeerName(peer?.name || peer?.email || c.name || 'this contact');
+      const raw = await getMeta(SESSION_KEY(chatId));
+      if (raw) { try { const j = JSON.parse(raw); if (j?.state === 'running') setResumable({ total: j.total ?? 0 }); } catch {} }
+      return true;
+    } catch { return false; }
   }, [chatId]);
+  useEffect(() => { loadChat(); }, [loadChat]);
 
   // ── the contact picker: single selection, by construction ──
   useEffect(() => {
@@ -176,6 +184,8 @@ export default function ImportChatsScreen() {
   }, [chatId, peerName]);
 
   const runParse = useCallback(async (path: string, size: number, forceOrder?: 'DMY' | 'MDY') => {
+    const gen = ++parseGen.current;
+    const stale = () => gen !== parseGen.current;
     setStage('reading');
     setBusyNote(forceOrder ? 'Re-reading dates…' : 'Finding conversation…');
     setFailure(null);
@@ -191,12 +201,14 @@ export default function ImportChatsScreen() {
     };
 
     const r = await readExport(src, forceOrder ? { forceOrder } : undefined);
+    if (stale()) return;
     if (parsedFail(r)) { setFailure({ reason: r.reason, detail: r.detail }); setStage('failed'); return; }
 
     setStage('matching');
     setBusyNote('Matching contact…');
 
     const me = await getCurrentUserAsync();
+    if (stale()) return;
     const myName = String(me?.displayName ?? me?.name ?? '').trim();
 
     // Which participant is the user? Prefer their own display name; otherwise the
@@ -218,18 +230,37 @@ export default function ImportChatsScreen() {
     });
     setDateOrder(r.format.order === 'MDY' ? 'MDY' : 'DMY');
     setDateOrderAnswered(!r.format.ambiguous);
-    setMatch(await verifyContact(chatId, peerName, counterpart));
+    const verdict = await verifyContact(chatId, peerName, counterpart);
+    if (stale()) return;
+    setMatch(verdict);
     setAckMismatch(false);
     setStage('preview');
   }, [chatId, peerName]);
 
+  // Reading has no abort hook in the parser, so Cancel abandons the result:
+  // the in-flight parse sees a newer generation and drops what it read.
+  const cancelParse = useCallback(() => {
+    parseGen.current++;
+    setStage('pick-file');
+  }, []);
+
   // ── writing ───────────────────────────────────────────────────────
   const runImport = useCallback(async () => {
-    if (!parsed || !chat) return;
+    if (!parsed) return;
+    if (!chat) {
+      Alert.alert('Chat not loaded', 'This chat could not be loaded, so nothing can be imported into it yet.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Retry', onPress: async () => {
+            if (!(await loadChat())) Alert.alert('Still unavailable', 'Check your connection and try again.');
+          } },
+      ]);
+      return;
+    }
     const file = fileRef.current;
     cancelRef.current = { cancelled: false };
     setStage('importing');
     setProgress({ done: 0, total: parsed.messages.length });
+    doneRef.current = 0;
 
     const me = await getCurrentUserAsync();
     const myId = String(me?.id ?? '');
@@ -301,7 +332,7 @@ export default function ImportChatsScreen() {
       });
 
       const { inserted, skipped } = await importMessages(chatId, rows, {
-        onProgress: (done, total) => setProgress({ done, total }),
+        onProgress: (done, total) => { doneRef.current = done; setProgress({ done, total }); },
         signal: cancelRef.current,
       });
 
@@ -329,20 +360,20 @@ export default function ImportChatsScreen() {
         low ? 'Free some space and try again. Messages already imported are safe, and retrying will not duplicate them.'
             : 'Messages already imported are safe. Retrying will not duplicate them.',
       );
-      setOutcome({ imported: progress.done, duplicates: 0, unsupported: parsed.unsupported,
+      setOutcome({ imported: doneRef.current, duplicates: 0, unsupported: parsed.unsupported,
                    mediaCopied, mediaSkipped, partial: true });
       setStage('done');
     }
-  }, [parsed, chat, chatId, peerName, source, progress.done]);
+  }, [parsed, chat, chatId, peerName, source, loadChat]);
 
   const finishCancelled = useCallback(async () => {
     await setMeta(SESSION_KEY(chatId), JSON.stringify({
       state: 'partial', source, at: new Date().toISOString(),
     })).catch(() => {});
-    setOutcome({ imported: progress.done, duplicates: 0, unsupported: 0,
+    setOutcome({ imported: doneRef.current, duplicates: 0, unsupported: 0,
                  mediaCopied: 0, mediaSkipped: 0, partial: true });
     setStage('done');
-  }, [chatId, source, progress.done]);
+  }, [chatId, source]);
 
   const cancel = useCallback(() => {
     cancelRef.current.cancelled = true;
@@ -397,6 +428,9 @@ export default function ImportChatsScreen() {
                 disabled={!src.ready}
                 onPress={() => { setSource(src.origin); setStage('pick-file'); }}
                 style={[s.srcRow, !src.ready && s.srcRowOff]}
+                accessibilityRole="button"
+                accessibilityLabel={src.ready ? src.label : `${src.label}, coming next`}
+                accessibilityState={{ disabled: !src.ready }}
               >
                 <View style={[s.srcIcon, { backgroundColor: src.tint + '22' }]}>
                   <Ionicons name={src.icon} size={22} color={src.ready ? src.tint : colors.textFaint} />
@@ -435,6 +469,7 @@ export default function ImportChatsScreen() {
             <ActivityIndicator size="large" color={colors.primary} />
             <Text style={s.busySrc}>WhatsApp export</Text>
             <Text style={s.busyNote}>{busyNote}</Text>
+            <Button title="Cancel" variant="ghost" style={s.gap} onPress={cancelParse} />
           </View>
         )}
 
@@ -459,7 +494,13 @@ export default function ImportChatsScreen() {
             <Text style={s.busyNote}>{busyNote}</Text>
             {progress.total > 0 && (
               <>
-                <View style={s.bar}>
+                <View
+                  style={s.bar}
+                  accessible
+                  accessibilityRole="progressbar"
+                  accessibilityLabel="Import progress"
+                  accessibilityValue={{ min: 0, max: progress.total, now: progress.done }}
+                >
                   <View style={[s.barFill, { width: `${Math.round((progress.done / progress.total) * 100)}%` }]} />
                 </View>
                 <Text style={s.busyCount}>
@@ -597,7 +638,7 @@ function PickChat({ s, colors, chats, onPick }: {
         const who = peerLabel(c);
         return (
           <TouchableOpacity key={c.id} style={s.srcRow} activeOpacity={0.7}
-            onPress={() => onPick(c.id, who)}>
+            onPress={() => onPick(c.id, who)} accessibilityRole="button" accessibilityLabel={`Import into chat with ${who}`}>
             <View style={[s.srcIcon, { backgroundColor: brandAlpha(0.15) }]}>
               <Ionicons name="person" size={20} color={colors.primary} />
             </View>
@@ -656,7 +697,7 @@ function Preview({
       )}
 
       {needsAck && (
-        <TouchableOpacity style={s.ackRow} activeOpacity={0.8} onPress={() => setAck(!ack)}>
+        <TouchableOpacity style={s.ackRow} activeOpacity={0.8} onPress={() => setAck(!ack)} accessibilityRole="checkbox" accessibilityState={{ checked: ack }}>
           <View style={[s.check, ack && s.checkOn]}>
             {ack && <Ionicons name="checkmark" size={14} color="#fff" />}
           </View>
@@ -679,7 +720,7 @@ function Preview({
             {([['DMY', 'Day first (03/04 = 3 Apr)'], ['MDY', 'Month first (03/04 = 4 Mar)']] as const).map(([o, label]) => {
               const on = answered && dateOrder === o;
               return (
-                <TouchableOpacity key={o} style={[s.pill, on && s.pillOn]} onPress={() => onPickOrder(o)}>
+                <TouchableOpacity key={o} style={[s.pill, on && s.pillOn]} onPress={() => onPickOrder(o)} accessibilityRole="radio" accessibilityState={{ checked: on }}>
                   <Text style={[s.pillTxt, on && s.pillTxtOn]}>{label}</Text>
                 </TouchableOpacity>
               );

@@ -1,8 +1,11 @@
 // app/chat-export.tsx — Export Chat as Text/HTML (Postgres-backed).
 //
 // Pulls the full message history via GET /chats/:id/messages (keyset
-// pagination), formats it on-device, and shares via the system sheet.
-// Nothing leaves the device except through the user-initiated share.
+// pagination), unions it with the device's own history, decrypts it through
+// the same hydrateMessages funnel the chat screen uses, formats it on-device,
+// and shares via the system sheet. The file is written to the cache directory
+// and deleted once the share sheet returns. Nothing leaves the device except
+// through the user-initiated share.
 
 import { HEADER_TOP } from '../constants/layout';
 import React, { useState , useMemo, useRef} from 'react';
@@ -13,14 +16,16 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { type Palette, BRAND_ACCENT } from '../constants/theme';
 import { useTheme } from '../lib/theme';
-import { getMessages, type Message } from '../lib/chatService';
+import { getChat, getMessages, hydrateMessages, looksEncrypted, type Message } from '../lib/chatService';
 import { unionWithLocalHistoryAsc } from '../lib/messageHistory';
+import { exportBody } from '../lib/chatExportFormat';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { getLock, verifyBiometric, verifyPin, type LockedChat } from '../lib/chatLock';
 import { AuroraBackground } from '../components/ui';
 import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 
 const PAGE = 200;
+const MAX_PAGES = 500;
 
 function useS() {
   const { colors } = useTheme();
@@ -38,6 +43,9 @@ export default function ChatExportScreen() {
   const [exporting, setExporting] = useState(false);
   const [progress, setProgress] = useState('');
   const [msgCount, setMsgCount] = useState(0);
+  // Synchronous re-entry guard: `exporting` state is only set after the
+  // (async) lock/confirm gate, so a double tap could start two exports.
+  const busyRef = useRef(false);
 
   // Fetch every message (oldest→newest) by walking the keyset cursor, then
   // UNION the device's own cache.
@@ -47,48 +55,54 @@ export default function ChatExportScreen() {
   // alone silently omits everything past the retention window — and an export
   // is exactly where a silent omission is worst, because the user believes
   // they now hold a complete archive. The local cache still has those bodies.
-  const fetchAll = async (): Promise<Message[]> => {
+  //
+  // Server rows are E2EE envelopes. The union prefers our readable local copy
+  // over an envelope (isCipher), and whatever is still an envelope afterwards
+  // goes through hydrateMessages — the chat screen's decrypt path — so the
+  // export never contains ciphertext (exportBody also refuses to print it).
+  const fetchAll = async (): Promise<{ msgs: Message[]; truncated: boolean }> => {
     const all: Message[] = [];
     let before: number | undefined;
-    for (let i = 0; i < 500; i++) {
+    let truncated = true;
+    for (let i = 0; i < MAX_PAGES; i++) {
       const page = await getMessages(chatId, { before, limit: PAGE });
       all.push(...page);
       setMsgCount(all.length);
-      if (page.length < PAGE) break;
+      if (page.length < PAGE) { truncated = false; break; }
       before = page[page.length - 1].id; // oldest id in this (desc) page
     }
-    const merged = await unionWithLocalHistoryAsc(chatId, all);
-    setMsgCount(merged.length);
-    return merged;
+    const merged = await unionWithLocalHistoryAsc(chatId, all, undefined, looksEncrypted);
+    setProgress('Decrypting messages…');
+    // hydrateMessages expects newest-first.
+    const hydrated = (await hydrateMessages(chatId, [...merged].reverse())).reverse();
+    setMsgCount(hydrated.length);
+    return { msgs: hydrated, truncated };
   };
 
   const fmtTime = (iso: string) => { try { return new Date(iso).toLocaleString(); } catch { return ''; } };
 
-  const senderLabel = (m: Message, myId: string) => (m.senderId === myId ? 'You' : peerName);
+  // Group exports name each sender; filled per export from the chat's members.
+  const namesRef = useRef<Map<string, string>>(new Map());
+  const senderLabel = (m: Message, myId: string) =>
+    (m.senderId === myId ? 'You' : namesRef.current.get(m.senderId) || peerName);
 
-  const bodyOf = (m: Message): string => {
-    if (m.deletedAt) return '[deleted]';
-    switch (m.type) {
-      case 'text': return m.content || '';
-      case 'image': return '[Image]' + (m.content ? ' ' + m.content : '');
-      case 'video': return '[Video]' + (m.content ? ' ' + m.content : '');
-      case 'audio': return '[Voice message]';
-      case 'file': return '[File]' + (m.content ? ' ' + m.content : '');
-      case 'location': return '[Location]';
-      case 'sticker': return '[Sticker ' + (m.content || '') + ']';
-      case 'poll': return '[Poll] ' + (m.content || '');
-      default: return '[' + m.type + ']';
-    }
-  };
+  const bodyOf = (m: Message): string => exportBody(m, looksEncrypted);
 
+  // The plaintext file is a temporary hand-off to the share sheet, not an
+  // archive: written to the cache directory and deleted once the sheet returns
+  // (shareAsync resolves after the receiving app has taken its copy).
   const shareFile = async (filePath: string, mime: string, fallback: string) => {
-    if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(filePath, { mimeType: mime });
-    else await Share.share({ message: fallback });
+    try {
+      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(filePath, { mimeType: mime });
+      else await Share.share({ message: fallback });
+    } finally {
+      await FileSystem.deleteAsync(filePath, { idempotent: true }).catch(() => {});
+    }
   };
 
   const writeFile = async (ext: string, content: string) => {
     const name = 'crazzychat_' + peerName.replace(/[^a-zA-Z0-9]/g, '_') + '_' + Date.now() + '.' + ext;
-    const filePath = FileSystem.documentDirectory + name;
+    const filePath = FileSystem.cacheDirectory + name;
     await FileSystem.writeAsStringAsync(filePath, content, { encoding: FileSystem.EncodingType.UTF8 });
     return filePath;
   };
@@ -175,19 +189,29 @@ export default function ChatExportScreen() {
 
   const guard = async (fn: (msgs: Message[], myId: string) => Promise<void>) => {
     if (!chatId) { Alert.alert('Export failed', 'Missing chat id.'); return; }
-    if (!(await authorizeExport())) return;
-    setExporting(true);
-    setProgress('Fetching messages…');
-    setMsgCount(0);
+    if (busyRef.current) return;
+    busyRef.current = true;
     try {
+      if (!(await authorizeExport())) return;
+      setExporting(true);
+      setProgress('Fetching messages…');
+      setMsgCount(0);
       const me = await getCurrentUserAsync();
-      const msgs = await fetchAll();
+      try {
+        const detail = await getChat(chatId);
+        namesRef.current = new Map(detail.members.map(mm => [mm.userId, mm.name || mm.email || '']));
+      } catch { namesRef.current = new Map(); }   // names are cosmetic; peerName is the fallback
+      const { msgs, truncated } = await fetchAll();
       setProgress('Formatting ' + msgs.length + ' messages…');
       await fn(msgs, me?.id ?? '');
       setProgress('');
+      if (truncated) {
+        Alert.alert('Export incomplete', `Only the newest ${MAX_PAGES * PAGE} messages from the server were included.`);
+      }
     } catch (e: any) {
       Alert.alert('Export failed', e?.message ?? 'Something went wrong');
     } finally {
+      busyRef.current = false;
       setExporting(false);
     }
   };
@@ -258,7 +282,7 @@ export default function ChatExportScreen() {
           </View>
         </View>
 
-        <TouchableOpacity style={s.exportBtn} onPress={exportAsText} disabled={exporting} activeOpacity={0.8}>
+        <TouchableOpacity style={s.exportBtn} onPress={exportAsText} disabled={exporting} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Export as text" accessibilityState={{ disabled: exporting }}>
           <View style={s.exportIcon}><Ionicons name="document-text-outline" size={22} color={colors.accent} /></View>
           <View style={{ flex: 1 }}>
             <Text style={s.exportTitle}>Export as Text</Text>
@@ -266,7 +290,7 @@ export default function ChatExportScreen() {
           </View>
         </TouchableOpacity>
 
-        <TouchableOpacity style={s.exportBtn} onPress={exportAsHTML} disabled={exporting} activeOpacity={0.8}>
+        <TouchableOpacity style={s.exportBtn} onPress={exportAsHTML} disabled={exporting} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Export as HTML" accessibilityState={{ disabled: exporting }}>
           <View style={s.exportIcon}><Ionicons name="globe-outline" size={22} color={colors.accent} /></View>
           <View style={{ flex: 1 }}>
             <Text style={s.exportTitle}>Export as HTML</Text>

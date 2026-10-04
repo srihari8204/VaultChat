@@ -8,12 +8,12 @@
 import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useState , useMemo} from 'react';
+import { useCallback, useRef, useState , useMemo} from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Switch, TextInput, TouchableOpacity, View } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { createPoll } from '../lib/chatService';
-import { AppText as Text, AuroraBackground } from '../components/ui';
+import { AppText as Text, AuroraBackground, KeyboardSafe } from '../components/ui';
 
 const MIN_OPTIONS = 2;
 const MAX_OPTIONS = 12;
@@ -30,20 +30,23 @@ export default function CreatePollScreen() {
   const { chatId, peerName } = useLocalSearchParams<{ chatId?: string; peerName?: string }>();
 
   const [question,      setQuestion]      = useState('');
-  const [options,       setOptions]       = useState<string[]>(['', '']);
+  // Each option carries a stable id for its row key: keyed by index, removing
+  // a middle option shifted every later input's focus and IME state.
+  const nextId = useRef(2);
+  const [options,       setOptions]       = useState<{ id: number; text: string }[]>([{ id: 0, text: '' }, { id: 1, text: '' }]);
   const [allowMultiple, setAllowMultiple] = useState(false);
   const [posting,       setPosting]       = useState(false);
 
-  const updateOption = useCallback((i: number, value: string) => {
-    setOptions(prev => prev.map((o, idx) => idx === i ? value : o));
+  const updateOption = useCallback((id: number, value: string) => {
+    setOptions(prev => prev.map(o => o.id === id ? { ...o, text: value } : o));
   }, []);
 
   const addOption = useCallback(() => {
-    setOptions(prev => prev.length >= MAX_OPTIONS ? prev : [...prev, '']);
+    setOptions(prev => prev.length >= MAX_OPTIONS ? prev : [...prev, { id: nextId.current++, text: '' }]);
   }, []);
 
-  const removeOption = useCallback((i: number) => {
-    setOptions(prev => prev.length <= MIN_OPTIONS ? prev : prev.filter((_, idx) => idx !== i));
+  const removeOption = useCallback((id: number) => {
+    setOptions(prev => prev.length <= MIN_OPTIONS ? prev : prev.filter(o => o.id !== id));
   }, []);
 
   const submit = useCallback(async () => {
@@ -52,9 +55,14 @@ export default function CreatePollScreen() {
     if (!q) { Alert.alert('Question required', 'Type the poll question first.'); return; }
     if (q.length > 200) { Alert.alert('Too long', 'Question is over 200 characters.'); return; }
 
-    const cleaned = options.map(o => o.trim()).filter(o => o.length > 0);
+    const cleaned = options.map(o => o.text.trim()).filter(o => o.length > 0);
     if (cleaned.length < MIN_OPTIONS) {
       Alert.alert('Need more options', `Add at least ${MIN_OPTIONS} non-empty options.`);
+      return;
+    }
+    // Two identical options split one answer's votes in two.
+    if (new Set(cleaned.map(o => o.toLowerCase())).size !== cleaned.length) {
+      Alert.alert('Duplicate options', 'Each option must be different.');
       return;
     }
 
@@ -70,7 +78,7 @@ export default function CreatePollScreen() {
   }, [chatId, question, options, allowMultiple, router]);
 
   return (
-    <View style={S.screen}>
+    <KeyboardSafe style={S.screen}>
       <AuroraBackground />
       <View style={S.header}>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
@@ -85,6 +93,9 @@ export default function CreatePollScreen() {
           disabled={posting}
           style={[S.sendBtn, posting && S.sendBtnOff]}
           activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Send poll"
+          accessibilityState={{ disabled: posting, busy: posting }}
         >
           {posting ? <ActivityIndicator color={colors.bubbleOutText} /> : <Text style={S.sendBtnTxt}>Send</Text>}
         </TouchableOpacity>
@@ -98,6 +109,7 @@ export default function CreatePollScreen() {
           onChangeText={setQuestion}
           placeholder="What should we ask?"
           placeholderTextColor={colors.textDim}
+          accessibilityLabel="Poll question"
           maxLength={200}
           multiline
         />
@@ -105,18 +117,19 @@ export default function CreatePollScreen() {
 
         <Text style={[S.label, { marginTop: 20 }]}>OPTIONS</Text>
         {options.map((o, i) => (
-          <View key={i} style={S.optionRow}>
+          <View key={o.id} style={S.optionRow}>
             <TextInput
               style={S.optionInput}
-              value={o}
-              onChangeText={(v) => updateOption(i, v)}
+              value={o.text}
+              onChangeText={(v) => updateOption(o.id, v)}
               placeholder={`Option ${i + 1}`}
               placeholderTextColor={colors.textDim}
               maxLength={100}
+              accessibilityLabel={`Option ${i + 1}`}
             />
             {options.length > MIN_OPTIONS && (
-              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Remove this option"
-                onPress={() => removeOption(i)}
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Remove option ${i + 1}`}
+                onPress={() => removeOption(o.id)}
                 hitSlop={8}
                 style={S.removeBtn}
               >
@@ -126,7 +139,7 @@ export default function CreatePollScreen() {
           </View>
         ))}
         {options.length < MAX_OPTIONS && (
-          <TouchableOpacity onPress={addOption} style={S.addBtn} activeOpacity={0.7}>
+          <TouchableOpacity onPress={addOption} style={S.addBtn} activeOpacity={0.7} accessibilityRole="button">
             <Ionicons name="add" size={16} color={colors.primary} />
             <Text style={[S.addBtnTxt, { marginLeft: 6 }]}>Add option</Text>
           </TouchableOpacity>
@@ -143,12 +156,13 @@ export default function CreatePollScreen() {
           <Switch
             value={allowMultiple}
             onValueChange={setAllowMultiple}
+            accessibilityLabel="Allow multiple answers"
             trackColor={{ true: colors.primary, false: colors.border }}
             thumbColor={colors.card}
           />
         </View>
       </ScrollView>
-    </View>
+    </KeyboardSafe>
   );
 }
 

@@ -2,11 +2,15 @@
 //
 // Lists all of my pending scheduled messages + recently-delivered ones
 // (last 7 days). Tap a pending row to cancel it. Recently-sent rows are
-// read-only confirmation that delivery fired.
+// read-only confirmation that delivery fired. Reloads on focus, so a message
+// scheduled from a chat shows up on return.
+//
+// The plain AsyncStorage list cache holds rows WITHOUT bodies; previews are
+// re-read from the sender's local copy (lib/scheduledLocalCopy.ts) on paint.
 
 import { HEADER_TOP, SCREEN_BOTTOM } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState , useMemo} from 'react';
 import {
   ActivityIndicator,
@@ -24,6 +28,7 @@ import { readCache, writeCache } from '../lib/localCache';
 import {
   cancelScheduledMessage,
   listScheduledMessages,
+  looksEncrypted,
   type ScheduledMessageRow,
 } from '../lib/chatService';
 import { SCHEDULED_LOCAL } from '../constants/flags';
@@ -34,6 +39,19 @@ import { AuroraBackground } from '../components/ui';
 import { AppText as Text } from '../components/ui/Text';
 
 const CACHE_KEY = 'scheduled';
+
+const withoutContent = (rows: ScheduledMessageRow[]) => rows.map(r => ({ ...r, content: null }));
+
+// The server holds E2E ciphertext; show the sender's own local plaintext copy,
+// and never the ciphertext itself.
+async function withLocalCopies(rows: ScheduledMessageRow[]): Promise<ScheduledMessageRow[]> {
+  return Promise.all(rows.map(async r => {
+    if (r.type !== 'text') return r;
+    const plain = await getScheduledCopy(String(r.id));
+    if (plain != null) return { ...r, content: plain };
+    return r.content && !looksEncrypted(r.content) ? r : { ...r, content: '🔒 Encrypted scheduled message' };
+  }));
+}
 
 function useS() {
   const { colors } = useTheme();
@@ -60,20 +78,11 @@ export default function ScheduledScreen() {
           sendAt: new Date(it.sendAt).toISOString(), sentAt: null,
         } as any));
       } else {
-        list = await listScheduledMessages();
-        // Server holds E2E-ciphertext; show the sender's own local plaintext copy.
-        list = await Promise.all(list.map(async r => {
-          if (r.type === 'text') {
-            const plain = await getScheduledCopy(String(r.id));
-            if (plain != null) return { ...r, content: plain };
-            if (!r.sentAt) return { ...r, content: '🔒 Encrypted scheduled message' };
-          }
-          return r;
-        }));
+        list = await withLocalCopies(await listScheduledMessages());
       }
       setRows(list);
       setError(null);
-      writeCache(CACHE_KEY, list);
+      writeCache(CACHE_KEY, withoutContent(list));
     } catch (e: any) {
       // Keep cached rows if we have them; only surface the error on a cold load.
       setRows(prev => {
@@ -86,11 +95,20 @@ export default function ScheduledScreen() {
   useEffect(() => {
     (async () => {
       const cached = await readCache<ScheduledMessageRow[]>(CACHE_KEY);
-      if (cached) { setRows(cached); setLoading(false); }
+      if (cached) {
+        // Older builds cached decrypted previews here; scrub them.
+        if (cached.some(r => r.content != null)) writeCache(CACHE_KEY, withoutContent(cached));
+        setRows(await withLocalCopies(withoutContent(cached)));
+        setLoading(false);
+      }
       await load();
       setLoading(false);
     })();
   }, [load]);
+
+  // Refresh on return (e.g. after scheduling from a chat). The first focus
+  // overlaps the mount load above, which is harmless: both write the same rows.
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -151,7 +169,7 @@ export default function ScheduledScreen() {
           <Ionicons name="time-outline" size={48} color={colors.primary} />
           <Text style={S.emptyTitle}>No scheduled messages</Text>
           <Text style={S.emptySub}>
-            Open any chat, long-press the Send button, and pick a future time to schedule a message.
+            Open any chat, tap ⋮ and choose “Schedule a message” to send one later.
           </Text>
         </ScrollView>
       ) : (
@@ -173,6 +191,9 @@ export default function ScheduledScreen() {
               onPress={() => r.sentAt ? null : onCancel(r)}
               disabled={!!r.sentAt}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !!r.sentAt }}
+              accessibilityHint={r.sentAt ? undefined : `Cancel the message scheduled to ${r.chatName || 'this chat'}`}
             >
               <View style={{ flex: 1 }}>
                 <Text style={S.rowChatName} numberOfLines={1}>

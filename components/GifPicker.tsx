@@ -163,6 +163,8 @@ export default function GifPicker({ visible, onClose, onSelect, initialTab = 'gi
               style={[s.tab, tab === t.type && s.tabOn]}
               onPress={() => setTab(t.type)}
               activeOpacity={0.8}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: tab === t.type }}
             >
               <Text style={[s.tabTxt, tab === t.type && s.tabTxtOn]}>{t.label}</Text>
             </TouchableOpacity>
@@ -178,10 +180,13 @@ export default function GifPicker({ visible, onClose, onSelect, initialTab = 'gi
           keyExtractor={g => g.id}
           contentContainerStyle={s.grid}
           keyboardShouldPersistTaps="handled"
-          renderItem={({ item }) => (
+          renderItem={({ item, index }) => (
             <TouchableOpacity
               style={s.gifCell}
               onPress={() => setPreview(item)}
+              accessibilityRole="button"
+              accessibilityLabel={`${TABS.find(t => t.type === tab)?.label.replace(/s$/, '') ?? 'Item'} ${index + 1}`}
+              accessibilityHint="Opens a preview before sending"
             >
               {/* contain, not cover: stickers and emojis are transparent and
                   non-square, and cropping them cuts the subject off. */}

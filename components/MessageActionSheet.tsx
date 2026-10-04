@@ -8,7 +8,7 @@
  */
 import { useEffect, useMemo, useRef } from 'react';
 import {
-  Animated, Dimensions, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+  Animated, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
@@ -33,11 +33,7 @@ export function MessageActionSheet({
   onReact?: (emoji: string) => void;
   reactions?: string[];
 }) {
-  // Reactive size. The module-level Dimensions.get above is captured ONCE at
-  // import and never updates, so it froze the layout at the size the app
-  // launched with. Shadowing it here makes every use in this component follow
-  // rotation; StyleSheet.create keeps the initial value, which is fine for
-  // static rules.
+  // Reactive size, so the slide-in distance follows rotation.
   const { height: SCREEN_H } = useWindowDimensions();
 
   const { colors } = useTheme();
@@ -70,17 +66,17 @@ export function MessageActionSheet({
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={close}>
       <Animated.View style={[s.backdrop, { opacity: backdrop }]}>
-        <Pressable style={{ flex: 1 }} onPress={close} />
+        <Pressable style={{ flex: 1 }} onPress={close} accessibilityRole="button" accessibilityLabel="Close message actions" />
       </Animated.View>
 
-      <Animated.View style={[s.sheet, { transform: [{ translateY: slide }] }]}>
+      <Animated.View style={[s.sheet, { transform: [{ translateY: slide }] }]} accessibilityViewIsModal>
         <View style={s.handle} />
 
         {/* Quick reactions */}
         {onReact && (
           <View style={s.reactionRow}>
             {reactions.map(e => (
-              <TouchableOpacity key={e} style={s.reaction} onPress={() => fire(() => onReact(e))} activeOpacity={0.6}>
+              <TouchableOpacity key={e} style={s.reaction} onPress={() => fire(() => onReact(e))} activeOpacity={0.6} accessibilityRole="button" accessibilityLabel={`React with ${e}`}>
                 <Text style={s.reactionEmoji}>{e}</Text>
               </TouchableOpacity>
             ))}
@@ -92,7 +88,7 @@ export function MessageActionSheet({
           {rows.map((row, ri) => (
             <View key={ri} style={s.gridRow}>
               {row.map(a => (
-                <TouchableOpacity key={a.key} style={s.tile} onPress={() => fire(a.onPress)} activeOpacity={0.7}>
+                <TouchableOpacity key={a.key} style={s.tile} onPress={() => fire(a.onPress)} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={a.label}>
                   <Ionicons name={a.icon as any} size={23} color={a.danger ? colors.danger : colors.text} />
                   <Text style={[s.tileLabel, a.danger && { color: colors.danger }]} numberOfLines={1}>{a.label}</Text>
                 </TouchableOpacity>

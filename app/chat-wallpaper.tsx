@@ -9,16 +9,18 @@ import { HEADER_TOP } from '../constants/layout';
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Image,
-  ScrollView, Dimensions, Alert, useWindowDimensions } from 'react-native';
+  ScrollView, Alert, useWindowDimensions } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
 import { AuroraBackground } from '../components/ui';
 import { permissionDenied } from '../lib/permissionDenied';
+import { resolveScoped, SCOPED_DEFAULT } from '../lib/scopedChoice';
 
 
 // WhatsApp-style solid wallpapers — a bright row then a dark row.
@@ -51,8 +53,12 @@ export interface WallpaperConfig {
 // Returns null = "default", so app/chat.tsx paints the theme's chat background.
 export async function getWallpaper(chatId: string): Promise<WallpaperConfig | null> {
   try {
-    const raw = (await AsyncStorage.getItem(`vc_wallpaper_${chatId}`))
-      || (await AsyncStorage.getItem('vc_wallpaper_default'));
+    // A per-chat SCOPED_DEFAULT means "app default" even when a global
+    // wallpaper is set (lib/scopedChoice.ts).
+    const raw = resolveScoped(
+      await AsyncStorage.getItem(`vc_wallpaper_${chatId}`),
+      await AsyncStorage.getItem('vc_wallpaper_default'),
+    );
     return raw ? JSON.parse(raw) as WallpaperConfig : null;
   } catch { return null; }
 }
@@ -60,11 +66,7 @@ export async function getWallpaper(chatId: string): Promise<WallpaperConfig | nu
 type Tab = 'solid' | 'gradient' | 'custom';
 
 export default function ChatWallpaperScreen() {
-  // Reactive size. The module-level Dimensions.get above is captured ONCE at
-  // import and never updates, so it froze the layout at the size the app
-  // launched with. Shadowing it here makes every use in this component follow
-  // rotation; StyleSheet.create keeps the initial value, which is fine for
-  // static rules.
+  // Reactive size, so the tile grid follows rotation.
   const {width: SW} = useWindowDimensions();
 
   const router = useRouter();
@@ -81,14 +83,26 @@ export default function ChatWallpaperScreen() {
     (async () => {
       try {
         const raw = await AsyncStorage.getItem(storageKey);
-        setSelected(raw ? JSON.parse(raw) : null);
+        setSelected(raw && raw !== SCOPED_DEFAULT ? JSON.parse(raw) : null);
       } catch { /* keep default */ }
     })();
   }, [storageKey]);
 
   const save = async () => {
     try {
-      if (selected) await AsyncStorage.setItem(storageKey, JSON.stringify(selected));
+      let toSave = selected;
+      // The picker returns a cache URI the OS may evict; keep our own copy.
+      if (toSave?.type === 'image' && FileSystem.documentDirectory
+          && !toSave.value.startsWith(FileSystem.documentDirectory)) {
+        const dir = FileSystem.documentDirectory + 'wallpapers/';
+        await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
+        const dest = `${dir}${chatId || 'default'}_${Date.now()}.jpg`;
+        await FileSystem.copyAsync({ from: toSave.value, to: dest });
+        toSave = { ...toSave, value: dest };
+      }
+      if (toSave) await AsyncStorage.setItem(storageKey, JSON.stringify(toSave));
+      // Per-chat Default must beat a global wallpaper, so it is stored, not removed.
+      else if (chatId) await AsyncStorage.setItem(storageKey, SCOPED_DEFAULT);
       else await AsyncStorage.removeItem(storageKey);
       router.back();
     } catch { Alert.alert('Error', 'Failed to save wallpaper.'); }
@@ -139,8 +153,8 @@ export default function ChatWallpaperScreen() {
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.iconBtn} hitSlop={8}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={s.headerTitle}>Wallpaper</Text>
-        <TouchableOpacity onPress={reset} hitSlop={8}><Text style={s.resetText}>Reset</Text></TouchableOpacity>
+        <Text style={s.headerTitle}>{chatId ? 'Wallpaper · this chat' : 'Wallpaper · all chats'}</Text>
+        <TouchableOpacity onPress={reset} hitSlop={8} accessibilityRole="button" accessibilityLabel="Reset to default wallpaper"><Text style={s.resetText}>Reset</Text></TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
@@ -161,7 +175,7 @@ export default function ChatWallpaperScreen() {
         {/* Tabs */}
         <View style={s.tabs}>
           {(['solid', 'gradient', 'custom'] as const).map(t => (
-            <TouchableOpacity key={t} style={[s.tab, tab === t && s.tabActive]} onPress={() => setTab(t)} activeOpacity={0.8}>
+            <TouchableOpacity key={t} style={[s.tab, tab === t && s.tabActive]} onPress={() => setTab(t)} activeOpacity={0.8} accessibilityRole="tab" accessibilityState={{ selected: tab === t }}>
               <Text style={[s.tabText, tab === t && s.tabTextActive]}>
                 {t === 'solid' ? 'Colors' : t === 'gradient' ? 'Gradients' : 'My photo'}
               </Text>
@@ -175,6 +189,9 @@ export default function ChatWallpaperScreen() {
             <TouchableOpacity
               onPress={reset}
               style={[s.colorTile, { backgroundColor: colors.chatBg }, isDefault && s.tileSelected]}
+              accessibilityRole="radio"
+              accessibilityLabel="Default wallpaper"
+              accessibilityState={{ checked: isDefault }}
             >
               {isDefault
                 ? <Ionicons name="checkmark" size={18} color={colors.primary} />
@@ -183,7 +200,7 @@ export default function ChatWallpaperScreen() {
             {SOLID_COLORS.map((color, i) => {
               const on = selected?.type === 'solid' && selected.value === color;
               return (
-                <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Wallpaper colour ${color}`}
+                <TouchableOpacity accessibilityRole="radio" accessibilityLabel={`Wallpaper colour ${color}`} accessibilityState={{ checked: on }}
                   key={i}
                   onPress={() => setSelected({ type: 'solid', value: color })}
                   style={[s.colorTile, { backgroundColor: color }, on && s.tileSelected]}
@@ -200,7 +217,7 @@ export default function ChatWallpaperScreen() {
             {GRADIENT_PRESETS.map(g => {
               const on = selected?.type === 'gradient' && selected.value === g.id;
               return (
-                <TouchableOpacity key={g.id} onPress={() => setSelected({ type: 'gradient', value: g.id, colors: g.colors })} activeOpacity={0.8}>
+                <TouchableOpacity key={g.id} onPress={() => setSelected({ type: 'gradient', value: g.id, colors: g.colors })} activeOpacity={0.8} accessibilityRole="radio" accessibilityLabel={`${g.name} gradient`} accessibilityState={{ checked: on }}>
                   <LinearGradient colors={g.colors as [string, string, ...string[]]} style={[s.gradientTile, on && s.tileSelected]}>
                     {on && <Ionicons name="checkmark-circle" size={22} color={colors.primary} />}
                   </LinearGradient>
@@ -213,7 +230,7 @@ export default function ChatWallpaperScreen() {
 
         {tab === 'custom' && (
           <View>
-            <TouchableOpacity style={s.customPickBtn} activeOpacity={0.8} onPress={pickImage}>
+            <TouchableOpacity style={s.customPickBtn} activeOpacity={0.8} onPress={pickImage} accessibilityRole="button">
               <Ionicons name="image-outline" size={28} color={colors.primary} />
               <Text style={s.customPickText}>Choose from gallery</Text>
               <Text style={s.customPickSub}>Pick a photo to use as the chat wallpaper</Text>
@@ -230,7 +247,7 @@ export default function ChatWallpaperScreen() {
           </View>
         )}
 
-        <TouchableOpacity activeOpacity={0.85} onPress={save} style={s.setBtn}>
+        <TouchableOpacity activeOpacity={0.85} onPress={save} style={s.setBtn} accessibilityRole="button">
           <Text style={s.setBtnText}>Set wallpaper</Text>
         </TouchableOpacity>
       </ScrollView>
@@ -264,7 +281,7 @@ const makeStyles = (c: Palette, SW: number) => {
   tab: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 9 },
   tabActive: { backgroundColor: c.primary },
   tabText: { color: c.textDim, fontSize: 14, fontWeight: '600' },
-  tabTextActive: { color: '#fff' },
+  tabTextActive: { color: c.bubbleOutText },
 
   colorGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   colorTile: { width: COLOR_SIZE, height: COLOR_SIZE, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, justifyContent: 'center', alignItems: 'center' },
@@ -283,6 +300,6 @@ const makeStyles = (c: Palette, SW: number) => {
   customCheckText: { fontSize: 13, fontWeight: '600' },
 
   setBtn: { backgroundColor: c.primary, borderRadius: 26, paddingVertical: 15, alignItems: 'center', marginTop: 24 },
-  setBtnText: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  setBtnText: { color: c.bubbleOutText, fontSize: 16, fontWeight: '800' },
 });
 }

@@ -17,23 +17,20 @@
 // Read receipts:
 //   POST /chats/:id/read with the latest visible message id, debounced.
 
-import { BRAND_ACCENT, brandAlpha, type Palette, ELEVATION } from '../constants/theme';
+import { BRAND_ACCENT, brandAlpha } from '../constants/theme';
 import { useKeyboardInset } from '../lib/useKeyboardInset';
 import { KeyboardSafe } from '../components/ui/KeyboardSafe';
-import { Audio, ResizeMode, Video } from 'expo-av';
+import { ResizeMode, Video } from 'expo-av';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system/legacy';
-import * as IntentLauncher from 'expo-intent-launcher';
 import * as ImagePicker from 'expo-image-picker';
 import * as ScreenCapture from 'expo-screen-capture';
 import { setSecure } from '../lib/screenGuard';
 import { DeviceMotion } from 'expo-sensors';
-import * as Sharing from 'expo-sharing';
 import { recordScreenshotAttempt } from '../services/security/auditChain';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { consumePendingJump } from '../lib/chatJump';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { E2EE_ENABLED } from '../constants/flags';
 import { getCachedMessages, getPendingEncryptedMessages, getCachedMessagesBefore, getCachedMessagesAfter, getCachedMessagesAround, hasCachedOlderMessages, hasCachedNewerMessages, cacheMessages, applyMessage, markCachedDeleted, getCachedMessagesByIds, getCachedChat, clearChatMessages } from '../lib/localDb';
 import { metric } from '../lib/syncMetrics';
@@ -52,8 +49,6 @@ import {
   Image,
   InteractionManager,
   Keyboard,
-  Dimensions,
-  Linking,
   Modal,
   PanResponder,
   Platform,
@@ -64,14 +59,12 @@ import {
   View, useWindowDimensions,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { Swipeable } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
 import { Sheet, Avatar, GlassView, AuroraBackground, type SheetAction as MenuAction } from '../components/ui';
 import { useChatViewers } from '../hooks/useChatViewers';
 import { ViewerStack } from '../components/chat/ViewerStack';
 import { getShareViewing } from '../lib/viewerPrefs';
 import type { ViewerActivity } from '../lib/socket';
-import LinkPreview, { extractUrl } from '../components/LinkPreview';
 import { extractFirstUrl, fetchPreviewFromDevice, type LinkPreviewData } from '../lib/linkPreview';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import GifPicker from '../components/GifPicker';
@@ -80,8 +73,8 @@ import { getWallpaper, type WallpaperConfig } from './chat-wallpaper';
 import { getBubbleColors } from './chat-themes';
 import { getLock, verifyBiometric, verifyPin, type LockedChat } from '../lib/chatLock';
 import { permissionDenied } from '../lib/permissionDenied';
-import { preloadViewedOnce, isViewedOnce, isViewedOnceSync, markViewedOnce } from '../lib/viewOnceStore';
-import { preloadRevoked, isRevokedSync, wipeRevokedMedia } from '../lib/protectedMedia';
+import { preloadViewedOnce } from '../lib/viewOnceStore';
+import { preloadRevoked, wipeRevokedMedia } from '../lib/protectedMedia';
 
 import { useTheme } from '../lib/theme';
 import { useVisionComfort } from '../lib/visionComfort';
@@ -93,17 +86,14 @@ const haptic = (style: Haptics.ImpactFeedbackStyle = Haptics.ImpactFeedbackStyle
 };
 import { MessageActionSheet, type SheetAction } from '../components/MessageActionSheet';
 import { getAccessToken } from '../lib/api';
-import { getLiveKey, putLiveKey, clearLiveKey, decryptPosition } from '../lib/liveLocationCrypto';
-import { navigateTo, openNavigator, navigateFromUrl } from '../lib/nav/openNavigation';
+import { getLiveKey, clearLiveKey, decryptPosition } from '../lib/liveLocationCrypto';
+import { navigateTo, openNavigator } from '../lib/nav/openNavigation';
 import {
   addBookmark,
   attachmentUrl,
   getPollVotesBulk,
   type PollVoteSummary,
-  unvotePoll,
-  voteOnPoll,
   blockUser,
-  decryptFromChat,
   forwardMessage,
   getChat,
   getMessages,
@@ -130,23 +120,16 @@ import {
   type ChatSummary,
   type Message,
   type ReactionSummary,
-  groupRefOf,
   normalizeMsgIds,
 } from '../lib/chatService';
 import { forwardNotice } from '../lib/forwardPolicy';
-import { groupTypeInfo } from '../lib/groups/catalog';
 import { markReadDurable, markDeliveredDurable } from '../lib/receipts';
 import { type MediaType } from '../lib/sendMedia';
 import { enqueueMedia, cancelMedia, retryMedia, pendingForChat as mediaPendingForChat, on as onMediaOutbox } from '../lib/mediaOutbox';
-import VaultBeamBubble from '../components/VaultBeamBubble';
 import ConnectionBanner from '../components/ConnectionBanner';
 import { startSend as vbStartSend } from '../lib/vaultBeamController';
 import { isNativeStreamAvailable as vbNativeAvailable } from '../lib/vaultBeamStreamNative';
-import { getDecryptedAttachmentUri, getAttachmentLocalUri, parseMediaContent } from '../lib/mediaAttachments';
-import { shouldAutoDownloadNow } from '../lib/mediaPrefs';
-import { ProgressRing } from '../components/ProgressRing';
-import { getMedia, copyToCache } from '../lib/mediaStore';
-import { thumbDataUri, makeThumb } from '../lib/thumbnails';
+import { makeThumb } from '../lib/thumbnails';
 import { isFamEvent } from '../lib/family/alerts';
 import {
   cancel as queueCancel,
@@ -166,7 +149,6 @@ import {
   getSocket,
   joinChatRoom,
   leaveChatRoom,
-  useConnectionState,
 } from '../lib/socket';
 import {
   cancel as recCancel,
@@ -214,14 +196,15 @@ const EDIT_WINDOW_MS = 15 * 60 * 1000;
 
 
 
-import { useS, idealText, HL, makeStyles, type DisplayMessage } from '../components/chat/chatStyles';
+import { useS, type DisplayMessage } from '../components/chat/chatStyles';
 import { IMPORT_SOURCE } from '../constants/importSources';
 import {
-  MemoBubble, DateChip, UnreadDivider, ImportedDivider, SwipeToReply, FileBubble,
+  MemoBubble, DateChip, UnreadDivider, ImportedDivider, SwipeToReply,
   DISAPPEARING_PRESETS, bumpPollVote, formatDisappearing, formatLastSeen,
-  formatRecDuration, formatScreenshotMode, isSameCalendarDay, renderWithHighlight,
+  formatRecDuration, formatScreenshotMode, isSameCalendarDay,
 } from '../components/chat/MessageBubble';
 import { initialOf } from '../lib/format';
+import { countVisibleMatches } from '../lib/inChatSearchCount';
 
 /**
  * @param chatIdProp  When present, this screen is EMBEDDED (a split-view pane,
@@ -373,6 +356,8 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   const [input,     setInput]     = useState('');
   const [sending,   setSending]   = useState(false);
   const [error,     setError]     = useState<string | null>(null);
+  // Bumped by the error bar's Retry to re-run the initial load effect.
+  const [loadNonce, setLoadNonce] = useState(0);
   const [editingId, setEditingId] = useState<number | null>(null);
   // tempId → how to undo an optimistic edit the server then rejected.
   //
@@ -466,7 +451,6 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     prevReactionsRef.current = next;
     return next;
   }, [messages, meId]);
-  const [reactPicker, setReactPicker] = useState<DisplayMessage | null>(null);
   const [actionSheet, setActionSheet] = useState<{ msg: DisplayMessage; plain: string } | null>(null);
   const [overflowMenu, setOverflowMenu] = useState<{ title: string; actions: MenuAction[] } | null>(null);
   const [replyTo, setReplyTo]         = useState<DisplayMessage | null>(null);
@@ -539,6 +523,23 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     return m;
   }, [chat]);
 
+  // ── Per-chat lock state (the gate itself is further down) ──
+  // Three states, not a boolean (2026-09-17). A boolean cannot say "we do not
+  // know yet", and BOTH of its defaults are wrong: `true` painted a locked
+  // chat's messages until getLock answered — and FOREVER if getLock threw,
+  // because the overlay needed both !lockOpen AND lockInfo and a throw set
+  // neither; `false` would flash a padlock over every unlocked chat. 'checking'
+  // shows the bare veil: no messages, no padlock, and nothing opens until the
+  // lock is known.
+  const [lockState, setLockState] = useState<'checking' | 'open' | 'locked'>('checking');
+  // While the gate covers the chat the user has not seen it, so nothing may
+  // tell the other side they have: no read receipt, no "viewing" presence and
+  // no clearing of its notifications. Assigned during render (not in an
+  // effect) so the read effect's cleanup — which flushes a pending read — sees
+  // the re-veil of a refocus in the same commit that caused it.
+  const lockOpenRef = useRef(false);
+  lockOpenRef.current = lockState === 'open';
+
   // ── Live Chat Viewers (feature #58) — who's viewing this chat right now ──
   const [cvFocused, setCvFocused] = useState(false);
   const chatFocusedRef = useRef(false);
@@ -606,7 +607,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     return () => { cancel = true; sub.remove(); };
   }, [chatId]));
   const myViewerActivity: ViewerActivity = sending ? 'uploading' : (input.trim().length > 0 ? 'typing' : 'reading');
-  const chatViewers = useChatViewers({ chatId, meId, enabled: cvShareOn, focused: cvFocused, activity: myViewerActivity });
+  const chatViewers = useChatViewers({ chatId, meId, enabled: cvShareOn && lockState === 'open', focused: cvFocused, activity: myViewerActivity });
 
   // O(1) reply-target lookup — replaces a per-bubble messages.find() on every
   // render (was O(n²) across the visible page).
@@ -706,13 +707,15 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     setLiveLoc(null);
     setExtraReplies(new Map());
     setNewSinceUp(0);
+    mentionsRef.current = [];   // a mention picked in one chat must not ride a send in another
   }, [chatId]);
 
   // Clear this chat's native message notification + unread counter (F2 —
   // the content-free doorbell posts per-chat notifications tagged by chatId).
+  // Not while a chat lock still covers it (see lockOpenRef).
   useEffect(() => {
-    clearMessageNotifications(chatId);
-  }, [chatId]);
+    if (lockState === 'open') clearMessageNotifications(chatId);
+  }, [chatId, lockState]);
 
   // ── Initial load ──────────────────────────────────────────
   useEffect(() => {
@@ -946,7 +949,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       }
     })();
     return () => { cancelled = true; };
-  }, [chatId]);
+  }, [chatId, loadNonce]);
 
   // ── Queue events: replace pending bubble with real, or mark failed ──
   useEffect(() => {
@@ -1198,7 +1201,6 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           })();
         };
         const onDelete = (e: { id: number; deletedAt: string }) => {
-          const me = meIdRef.current;
           const eid = Number(e.id); // socket delivers id as string; rows hold numbers
           void persistMessageDeletion(chatId, eid, e.deletedAt);
           setMessages(prev => prev.map(x =>
@@ -1219,7 +1221,6 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           });
         };
         const onTypingStop = (e: { uid: string; chatId?: string }) => {
-          const me = meIdRef.current;
           if (!e?.uid || (e.chatId && e.chatId !== chatId)) return;
           setTypingUids(prev => {
             if (!prev.has(e.uid)) return prev;
@@ -1229,7 +1230,6 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
 
         const onPresence = (e: { userId: string; online: boolean; lastSeenAt: string | null }) => {
 
-          const me = meIdRef.current;
           if (!e?.userId) return;
           setChat(prev => prev ? {
             ...prev,
@@ -1273,7 +1273,6 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         // repaints the bubble as a tombstone. Irreversible by design — see
         // lib/protectedMedia.
         const onMediaRevoked = (e: { chatId: string; messageId: number; attachmentId: string }) => {
-          const me = meIdRef.current;
           if (!e?.attachmentId || e.chatId !== chatId) return;
           wipeRevokedMedia(e.attachmentId).catch(() => {});
           setMessages(prev => prev.map(m =>
@@ -1300,7 +1299,6 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           }
         };
         const onLiveLocationStop = (e: any) => {
-          const me = meIdRef.current;
           setLiveLoc(prev => (prev && e?.userId === prev.userId) ? null : prev);
           if (e?.userId) clearLiveKey(chatId, e.userId);
         };
@@ -1369,20 +1367,6 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       setPollVotes(prev => ({ ...prev, ...next }));
     }).catch(() => {});
     return () => { cancel = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    // meId IS A DEPENDENCY, and leaving it out was the bug behind several
-    // symptoms at once. It loads asynchronously, so without it every handler
-    // above closed over the INITIAL null for the life of the screen — and
-    // `x === null` is false for every real id, so each self-check did not fail
-    // cautious, it failed OPEN:
-    //   * screenshot_captured — the device that took the shot bannered ITSELF
-    //     instead of the other side ("I get it, they don't")
-    //   * typing_start        — your own typing shown back at you
-    //   * new_message         — own messages treated as incoming (delivery
-    //     receipts marked, unread counter bumped for things you sent)
-    //   * poll_voted          — your own vote not marked as yours
-    // With meId here the effect re-subscribes once the id resolves and every
-    // one of those comparisons starts working against a real value.
   }, [chatId, pollIdKey]);
 
   // ── Mark-as-read (debounced) ──────────────────────────────
@@ -1390,7 +1374,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     // A durable cache write earns ✓✓. Blue ✓✓ must mean the recipient was
     // actually looking at this thread, so never mark read from a backgrounded
     // or covered chat screen.
-    if (!appActive || !cvFocused || !meId || !chatId || messages.length === 0) return;
+    if (!appActive || !cvFocused || lockState !== 'open' || !meId || !chatId || messages.length === 0) return;
     // Newest REAL message, not messages[0]. The list is newest-first, but index 0
     // is an optimistic outbox bubble whenever a send is pending — and those carry
     // `id: 0`. A FAILED upload sits in the outbox indefinitely and is re-prepended
@@ -1404,7 +1388,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     readDebounce.current = setTimeout(() => {
       // Lifecycle callbacks can precede React's next effect cleanup. Recheck at
       // the point of sending so a timer due on blur cannot mark an unseen read.
-      if (AppState.currentState !== 'active' || !chatFocusedRef.current) return;
+      if (AppState.currentState !== 'active' || !chatFocusedRef.current || !lockOpenRef.current) return;
       lastReadSent.current = latestId;
       // markReadDurable confirms local persistence, not server acceptance.
       // Both local watermarks refer to a real row in this focused chat.
@@ -1434,14 +1418,15 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       readDebounce.current = null;
       // Same preconditions the timer body checks, minus chatFocusedRef: focus
       // is being torn down right now, and it having been true is the point.
-      if (!latestId || latestId <= lastReadSent.current) return;
+      // A re-veiled lock is different: that is not "leaving after reading".
+      if (!lockOpenRef.current || !latestId || latestId <= lastReadSent.current) return;
       lastReadSent.current = latestId;
       markReadDurable(chatId, latestId, meId)
         .then(() => import('../lib/messageNotifications'))
         .then(m => m.markSeen(chatId, latestId))
         .catch(() => { if (lastReadSent.current === latestId) lastReadSent.current = 0; });
     };
-  }, [appActive, cvFocused, meId, chatId, messages]);
+  }, [appActive, cvFocused, lockState, meId, chatId, messages]);
 
   // ── Unread divider (WhatsApp "N unread messages") ─────────
   // Capture the read boundary ONCE when the chat opens — before mark-as-read
@@ -1546,6 +1531,9 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     stopTypingIfActive();
     if (draftTimer.current) clearTimeout(draftTimer.current);
     clearDraft(chatId).catch(() => {});
+    // Set once the optimistic edit is applied, so the catch can undo it when
+    // enqueueEdit itself throws (the queue's 'failed' rollback never runs then).
+    let undoEdit: (() => void) | null = null;
     try {
       if (editingId != null) {
         // WhatsApp: the edit shows instantly and syncs when back online. Apply
@@ -1558,6 +1546,12 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           ? { ...x, content: text, editedAt: new Date().toISOString() } : x));
         setEditingId(null);
         setInput('');
+        undoEdit = () => {
+          if (before) setMessages(prev => prev.map(x => x.id === editId
+            ? { ...x, content: before.content, editedAt: before.editedAt } : x));
+          setEditingId(editId);
+          setInput(text);
+        };
         const q = await enqueueEdit(chatId, editId, text);
         editRollbacks.current.set(q.tempId, {
           id: editId,
@@ -1598,11 +1592,12 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         // The 'sent' / 'failed' queue events update this bubble's state.
       }
     } catch (e: any) {
+      undoEdit?.();
       Alert.alert(editingId != null ? 'Edit failed' : 'Send failed', e?.message ?? 'Try again');
     } finally {
       setSending(false);
     }
-  }, [input, sending, chatId, editingId, meId, replyTo, nextInvisibleInk, stopTypingIfActive]);
+  }, [input, sending, chatId, editingId, meId, replyTo, nextInvisibleInk, composerLp, stopTypingIfActive]);
 
   // ── Long-press menu on a message bubble ───────────────────
   const onLongPressMessage = useCallback((msg: DisplayMessage, plain: string) => {
@@ -1673,8 +1668,12 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           try { await pinMessage(chatId, next); }
           catch (e: any) { setPinnedId(prev); Alert.alert('Could not pin', e?.message ?? 'Try again'); }
         } },
-      { key: 'forward', label: 'Forward', icon: 'arrow-redo', onPress: () => openForward(msg) },
-      { key: 'copy',    label: 'Copy',    icon: 'copy-outline', onPress: () => copyAndAutoClear(plain) },
+      // View-once and Invisible Ink are meant to be seen in place only, so they
+      // are never copied out or forwarded on.
+      ...(msg.meta?.viewOnce || msg.meta?.invisibleInk ? [] : [
+        { key: 'forward', label: 'Forward', icon: 'arrow-redo', onPress: () => openForward(msg) },
+        { key: 'copy',    label: 'Copy',    icon: 'copy-outline', onPress: () => copyAndAutoClear(plain) },
+      ] as SheetAction[]),
       { key: 'star',    label: 'Star',    icon: 'star-outline', onPress: async () => {
           // Pass the decrypted body so the bookmark keeps a LOCAL copy. The
           // server reclaims a bookmarked message's ciphertext like any other —
@@ -1871,15 +1870,17 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     if (reportsCapture) {
       try {
         sub = ScreenCapture.addScreenshotListener(() => {
+          // Claim "notified" only once the report has actually landed.
           reportScreenshotCaptured(chatId)
-            .catch((e) => console.warn('[screenshot] report failed:', e?.message));
+            .then(() => { if (peerNotify) Alert.alert('Screenshot captured', 'The other side has been notified.'); })
+            .catch((e) => {
+              console.warn('[screenshot] report failed:', e?.message);
+              if (peerNotify) Alert.alert('Screenshot captured', 'The other side could not be notified right now.');
+            });
           // Record the capture in the on-device tamper-evident audit chain so it
           // surfaces in the Alerts tab (#41). Real local event — the inbound
           // "someone captured your content" alert is delivered separately (W7).
           recordScreenshotAttempt({ chatId, chatName: title }).catch(() => {});
-          if (peerNotify) {
-            Alert.alert('Screenshot captured', 'The other side has been notified.');
-          }
         });
       } catch { /* listener unsupported on some platforms — non-fatal */ }
     }
@@ -2073,6 +2074,14 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         },
       },
       {
+        // The only in-app way to create a per-chat lock (the gate below
+        // enforces it). chatId is passed so the lock screen can open this
+        // chat's settings directly.
+        label: 'Chat lock',
+        icon: 'lock-closed-outline',
+        onPress: () => router.push({ pathname: '/app-lock-chats' as any, params: { chatId } }),
+      },
+      {
         label: 'Schedule a message',
         icon: 'calendar-outline',
         onPress: () => router.push({
@@ -2222,7 +2231,6 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   // ── React / Reply / Forward handlers ──────────────────────
   const toggleReaction = useCallback(async (msg: DisplayMessage, emoji: string) => {
     haptic();
-    setReactPicker(null);
     if (!msg.id || msg.id <= 0) return;
     // WhatsApp semantics: ONE reaction per user per message. Tapping my current
     // emoji removes it; tapping a different one replaces it (latest-wins in the
@@ -2361,6 +2369,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       if (r.durationMs < 500) {
         setSending(false);
         setRecElapsedMs(0);
+        Alert.alert('Too short', 'Record for at least half a second to send a voice message.');
         return;
       }
       await enqueueMediaOptimistic('audio',
@@ -3221,14 +3230,8 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   // attempted automatically; PIN-locked chats show a keypad. Enforced on every
   // focus so backgrounding + returning re-locks.
   const [lockInfo, setLockInfo] = useState<LockedChat | null>(null);
-  // Three states, not a boolean (2026-09-17). A boolean cannot say "we do not
-  // know yet", and BOTH of its defaults are wrong: `true` painted a locked
-  // chat's messages until getLock answered — and FOREVER if getLock threw,
-  // because the overlay needed both !lockOpen AND lockInfo and a throw set
-  // neither; `false` would flash a padlock over every unlocked chat. 'checking'
-  // shows the bare veil: no messages, no padlock, and nothing opens until the
-  // lock is known.
-  const [lockState, setLockState] = useState<'checking' | 'open' | 'locked'>('checking');
+  // lockState is declared near the top of the component: the read-receipt,
+  // viewer-presence and notification-clear effects all gate on it.
   const [lockPin, setLockPin] = useState('');
   // The message, not a boolean: 'both' can now fail for a reason other than a
   // wrong PIN, and "Incorrect PIN" would be a lie the user cannot act on.
@@ -3468,7 +3471,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   if (loading) {
     return (
       <View style={[S.screen, S.center]}>
-        <ActivityIndicator color={colors.primary} size="large" />
+        <ActivityIndicator color={colors.primary} size="large" accessibilityLabel="Loading chat" />
       </View>
     );
   }
@@ -3497,10 +3500,20 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       {/* Header — glass, so the thread scrolls visibly beneath it */}
       <GlassView kind="chrome" bordered={false} style={S.headerGlass}>
       <View style={S.header}>
-        <TouchableOpacity onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7} accessibilityLabel="Back">
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
-        <TouchableOpacity style={S.headerAvatarWrap} activeOpacity={0.7} onPress={onAvatarTap}>
+        {/* An embedded split-view pane has no screen of its own to go back
+            from; router.back() there would pop the whole split screen. */}
+        {!embedded && (
+          <TouchableOpacity onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Back">
+            <Ionicons name="arrow-back" size={24} color={colors.text} />
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity
+          style={S.headerAvatarWrap}
+          activeOpacity={0.7}
+          onPress={onAvatarTap}
+          accessibilityRole="button"
+          accessibilityLabel={`${title} profile photo`}
+        >
           <Avatar
             ring
             uri={headerPhotoId && screenAuthHeader ? attachmentUrl(headerPhotoId) : null}
@@ -3512,13 +3525,19 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
-          <TouchableOpacity activeOpacity={0.6} onPress={openProfile}>
+          <TouchableOpacity
+            activeOpacity={0.6}
+            onPress={openProfile}
+            accessibilityRole="button"
+            accessibilityLabel={`${title}${headerSub ? `, ${headerSub}` : ''}, end-to-end encrypted`}
+            accessibilityHint={chat?.type === 'group' ? 'Opens group info' : 'Opens contact info'}
+          >
             <Text style={S.title} numberOfLines={fontScale * visionMetrics.textScale > 1.2 ? 2 : 1}>{title}</Text>
             {chat && (
               <Text style={S.sub}>
                 {headerSub}
                 <Text style={S.e2eBadge}>  ·  </Text>
-                <Ionicons name="lock-closed" size={11} color="#22C55E" />
+                <Ionicons name="lock-closed" size={11} color={colors.success} />
                 <Text style={S.e2eBadge}> secured</Text>
               </Text>
             )}
@@ -3548,14 +3567,14 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           return (
             <>
               <TouchableOpacity
-                style={S.headerIconBtn}
+                style={S.headerIconBtn} hitSlop={4}
                 onPress={() => router.push({ pathname: '/videocall' as any, params })} accessibilityLabel="Video call"
                 activeOpacity={0.7}
               >
                 <Ionicons name="videocam" size={23} color={colors.text} />
               </TouchableOpacity>
               <TouchableOpacity
-                style={S.headerIconBtn}
+                style={S.headerIconBtn} hitSlop={4}
                 onPress={() => router.push({ pathname: '/voicecall' as any, params })} accessibilityLabel="Voice call"
                 activeOpacity={0.7}
               >
@@ -3572,14 +3591,14 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           return (
             <>
               <TouchableOpacity
-                style={S.headerIconBtn}
+                style={S.headerIconBtn} hitSlop={4}
                 onPress={() => router.push({ pathname: '/group-calls' as any, params: { ...params, mode: 'video' } })} accessibilityLabel="Group video call"
                 activeOpacity={0.7}
               >
                 <Ionicons name="videocam" size={23} color={colors.text} />
               </TouchableOpacity>
               <TouchableOpacity
-                style={S.headerIconBtn}
+                style={S.headerIconBtn} hitSlop={4}
                 onPress={() => router.push({ pathname: '/group-calls' as any, params: { ...params, mode: 'voice' } })} accessibilityLabel="Group voice call"
                 activeOpacity={0.7}
               >
@@ -3588,7 +3607,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             </>
           );
         })()}
-        <TouchableOpacity style={S.headerIconBtn} onPress={onPressMenu} activeOpacity={0.7} accessibilityLabel="More options">
+        <TouchableOpacity style={S.headerIconBtn} hitSlop={4} onPress={onPressMenu} activeOpacity={0.7} accessibilityLabel="More options">
           <Ionicons name="ellipsis-vertical" size={20} color={colors.text} />
         </TouchableOpacity>
       </View>
@@ -3612,7 +3631,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           />
           {searchQ.length > 0 && (
             <Text style={S.inChatSearchCount} numberOfLines={1}>
-              {messages.filter(m => !m.deletedAt && (m.content || '').toLowerCase().includes(searchQ.toLowerCase())).length} matches
+              {countVisibleMatches(renderMessages, searchQ)} matches
             </Text>
           )}
           {/* The dismiss lives on the bar now that the header toggle is gone.
@@ -3630,8 +3649,16 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       )}
 
       {error && (
-        <View style={S.errorBar}>
-          <Text style={S.errorTxt}>{error}</Text>
+        <View style={[S.errorBar, { flexDirection: 'row', alignItems: 'center', gap: 10 }]}>
+          <Text style={[S.errorTxt, { flex: 1 }]}>{error}</Text>
+          <TouchableOpacity
+            onPress={() => { setError(null); setLoadNonce(n => n + 1); }}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Retry loading this chat"
+          >
+            <Text style={[S.errorTxt, { fontWeight: '700' }]}>Retry</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -3648,6 +3675,8 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           </Text>
           <View style={S.keyChangeRow}>
             <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Verify security code"
               onPress={() => router.push({ pathname: '/verify-contact' as any,
                 params: { peerId: keyChange.peerId,
                   peerName: otherMembers[0]?.name ?? chat?.name ?? '' } })}
@@ -3655,10 +3684,16 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
               <Text style={S.keyChangeVerify}>Verify</Text>
             </TouchableOpacity>
             <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss security code notice"
               onPress={async () => {
-                const { acknowledgeKeyChange } = await import('../lib/keyChange');
-                await acknowledgeKeyChange(keyChange.peerId, keyChange.currentHex);
-                setKeyChange(null);
+                try {
+                  const { acknowledgeKeyChange } = await import('../lib/keyChange');
+                  await acknowledgeKeyChange(keyChange.peerId, keyChange.currentHex);
+                  setKeyChange(null);
+                } catch (e: any) {
+                  Alert.alert('Could not dismiss', e?.message ?? 'Try again');
+                }
               }}
             >
               <Text style={S.keyChangeDismiss}>Dismiss</Text>
@@ -3668,7 +3703,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       )}
 
       {screenshotBanner && (
-        <View style={S.screenshotBanner}>
+        <View style={S.screenshotBanner} accessibilityLiveRegion="polite">
           <Text style={S.screenshotBannerTxt}>
             📸 {(() => {
               const who = membersById.get(screenshotBanner.by);
@@ -3686,6 +3721,8 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             const next = new Set(prev); next.add(memoryBubble.msg.id); return next;
           })}
           activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityHint="Dismisses this memory"
         >
           <Text style={S.memoryBubbleTitle}>
             📅 {memoryBubble.yearsAgo === 1 ? '1 year ago today' : `${memoryBubble.yearsAgo} years ago today`}
@@ -3708,6 +3745,8 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 12, marginTop: 8, padding: 10, borderRadius: 12, backgroundColor: 'rgba(255,107,53,0.12)', borderWidth: 1, borderColor: 'rgba(255,107,53,0.4)' }}
           activeOpacity={0.85}
           onPress={() => navigateTo(liveLoc.latitude, liveLoc.longitude, membersById.get(liveLoc.userId)?.name || 'Live location')}
+          accessibilityRole="button"
+          accessibilityHint="Opens navigation to their location"
         >
           <Ionicons name="navigate" size={20} color={colors.primary} />
           <View style={{ flex: 1 }}>
@@ -3715,9 +3754,11 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             {/* Falls back to raw lat/long, which at fontSize 11 ellipsised mid-
                 coordinate - and half a coordinate points somewhere else entirely.
                 Shrink the glyphs instead of cutting them (2026-09-17). */}
-            <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 11, marginTop: 1 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{liveLoc.address || `${liveLoc.latitude.toFixed(5)}, ${liveLoc.longitude.toFixed(5)}`} · Navigate</Text>
+            <Text style={{ color: colors.textDim, fontSize: 11, marginTop: 1 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{liveLoc.address || `${liveLoc.latitude.toFixed(5)}, ${liveLoc.longitude.toFixed(5)}`} · Navigate</Text>
           </View>
-          <TouchableOpacity onPress={() => setLiveLoc(null)} hitSlop={8}><Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 16 }}>✕</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => setLiveLoc(null)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Hide live location banner">
+            <Ionicons name="close" size={18} color={colors.textDim} />
+          </TouchableOpacity>
         </TouchableOpacity>
       )}
 
@@ -3729,9 +3770,18 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           : pm.type === 'audio' ? '🎙️ Voice message' : pm.type === 'file' ? '📎 File'
           : pm.type === 'vaultbeam' ? '📦 File'
           : pm.type === 'location' ? '📍 Location' : pm.type === 'poll' ? '📊 Poll'
-          : pm.type === 'game_invite' ? '🎮 Game invite' : 'Message';
+          : pm.type === 'game_invite' ? '🎮 Game invite'
+          : pm.type === 'text' && pm.content && !looksEncrypted(pm.content) ? pm.content
+          : 'Message';
         return (
-          <TouchableOpacity style={S.pinnedBar} activeOpacity={0.8} onPress={() => jumpToMessage(Number(pinnedId))}>
+          <TouchableOpacity
+            style={S.pinnedBar}
+            activeOpacity={0.8}
+            onPress={() => jumpToMessage(Number(pinnedId))}
+            accessibilityRole="button"
+            accessibilityLabel={`Pinned message: ${label}`}
+            accessibilityHint="Jumps to the pinned message"
+          >
             <Ionicons name="pin" size={15} color={colors.primary} />
             <View style={{ flex: 1 }}>
               <Text style={S.pinnedBarTitle}>Pinned message</Text>
@@ -3750,7 +3800,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
               setPinnedId(null);
               try { await pinMessage(chatId, null); }
               catch (e: any) { setPinnedId(prev); Alert.alert('Could not unpin', e?.message ?? 'Try again'); }
-            }} accessibilityLabel="Unpin message">
+            }} accessibilityRole="button" accessibilityLabel="Unpin message">
               <Ionicons name="close" size={16} color={colors.textDim} />
             </TouchableOpacity>
           </TouchableOpacity>
@@ -3916,6 +3966,8 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             try { listRef.current?.scrollToOffset({ offset: 0, animated: true }); } catch {}
             setNewSinceUp(0); setShowScrollDown(false); atBottomRef.current = true;
           }}
+          accessibilityRole="button"
+          accessibilityLabel={newSinceUp > 0 ? `Scroll to latest, ${newSinceUp} new` : 'Scroll to latest'}
         >
           <Ionicons name="chevron-down" size={24} color={colors.text} />
           {newSinceUp > 0 && (
@@ -3928,7 +3980,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       {mentionCandidates.length > 0 && (
         <View style={S.mentionBar}>
           {mentionCandidates.map(m => (
-            <TouchableOpacity key={m.userId} style={S.mentionRow} onPress={() => pickMention(m)} activeOpacity={0.7}>
+            <TouchableOpacity key={m.userId} style={S.mentionRow} onPress={() => pickMention(m)} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`Mention ${m.name || m.email || 'member'}`}>
               <Avatar
                 uri={m.photoURL && screenAuthHeader ? attachmentUrl(m.photoURL) : null}
                 headers={screenAuthHeader ? { Authorization: screenAuthHeader } : undefined}
@@ -3956,11 +4008,11 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
 
       {/* Typing indicator */}
       {typingUids.size > 0 && (
-        <View style={S.typingBar}>
+        <View style={S.typingBar} accessibilityLiveRegion="polite">
           <Text style={S.typingTxt}>
             {Array.from(typingUids).map(uid => {
               const m = membersById.get(uid);
-              return m?.name || m?.email || uid.slice(0, 8);
+              return m?.name || m?.email || 'Someone';
             }).join(', ')} {typingUids.size === 1 ? 'is' : 'are'} typing…
           </Text>
         </View>
@@ -3969,8 +4021,10 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       {/* Edit-mode banner */}
       {editingId != null && (
         <View style={S.editBar}>
-          <Text style={S.editTxt}>Editing message #{editingId}</Text>
-          <TouchableOpacity onPress={onCancelEdit} hitSlop={8}>
+          <Text style={S.editTxt} numberOfLines={1}>
+            Editing: “{messages.find(m => m.id === editingId)?.content ?? 'message'}”
+          </Text>
+          <TouchableOpacity onPress={onCancelEdit} hitSlop={8} accessibilityRole="button" accessibilityLabel="Cancel editing">
             <Text style={S.editCancelTxt}>Cancel</Text>
           </TouchableOpacity>
         </View>
@@ -3991,6 +4045,8 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           style={S.inkBar}
           onPress={() => setNextInvisibleInk(false)}
           activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityHint="Disarms Invisible Ink for the next message"
         >
           <Text style={S.inkBarTxt}>
             ✨ Next message will be Invisible Ink — recipient must tilt phone to read. Tap to disarm.
@@ -4019,7 +4075,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           <View style={S.replyBarLine} />
           <View style={{ flex: 1 }}>
             <Text style={S.replyBarTitle} numberOfLines={1}>
-              Replying to {(membersById.get(replyTo.senderId)?.name) || 'message'}
+              Replying to {replyTo.senderId === meId ? 'You' : (membersById.get(replyTo.senderId)?.name || 'message')}
             </Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
               {replyTo.type === 'image' ? <Ionicons name="image" size={13} color={colors.textDim} />
@@ -4043,15 +4099,12 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         </View>
       )}
 
-      {/* Emoji panel (tap the 😊 icon) — inserts into the message input */}
-
-
       {/* Composer — either normal or recording mode */}
       {recording ? (
         <View style={[S.composer, S.recordingComposer]}>
           <View style={S.recordingDot} />
           <Text style={S.recordingTimer}>{formatRecDuration(recElapsedMs)}</Text>
-          <Text style={S.recordingHint}>Slide to cancel · tap send</Text>
+          <Text style={S.recordingHint}>Tap the bin to discard · send to finish</Text>
           <TouchableOpacity style={S.recCancelBtn} onPress={cancelRecording} activeOpacity={0.8} accessibilityLabel="Discard voice message">
             <Ionicons name="trash-outline" size={22} color={colors.danger} />
           </TouchableOpacity>
@@ -4130,7 +4183,21 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
                       <Ionicons name="chevron-up" size={12} color={colors.textDim} />
                     </Animated.View>
                   )}
-                  <Animated.View style={[S.pillIconBtn, { transform: [{ translateY: camDragY }] }]} {...cameraPan.panHandlers}>
+                  <Animated.View
+                    style={[S.pillIconBtn, { transform: [{ translateY: camDragY }] }]}
+                    {...cameraPan.panHandlers}
+                    // The pan gesture is invisible to screen readers, so tap
+                    // (camera) and slide-up (video note) are exposed as actions.
+                    accessible
+                    accessibilityRole="button"
+                    accessibilityLabel="Camera"
+                    accessibilityHint="Slide up to record a video note"
+                    accessibilityActions={[{ name: 'activate' }, { name: 'videoNote', label: 'Record video note' }]}
+                    onAccessibilityAction={(e) => {
+                      if (e.nativeEvent.actionName === 'activate') openCameraRef.current();
+                      else if (e.nativeEvent.actionName === 'videoNote') openCameraRef.current('note');
+                    }}
+                  >
                     {/* Arming ring fades/scales in while dragging up */}
                     <Animated.View
                       pointerEvents="none"
@@ -4173,29 +4240,6 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         </GlassView>
       )}
 
-      {/* Quick-react emoji picker */}
-      <Modal
-        visible={reactPicker != null}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setReactPicker(null)}
-      >
-        <Pressable style={S.modalBackdrop} onPress={() => setReactPicker(null)}>
-          <Pressable style={S.reactSheet} onPress={(e) => e.stopPropagation()}>
-            {QUICK_REACTS.map(emoji => (
-              <TouchableOpacity
-                key={emoji}
-                style={S.reactSheetBtn}
-                onPress={() => reactPicker && toggleReaction(reactPicker, emoji)}
-                activeOpacity={0.7}
-              >
-                <Text style={S.reactSheetEmoji}>{emoji}</Text>
-              </TouchableOpacity>
-            ))}
-          </Pressable>
-        </Pressable>
-      </Modal>
-
       {/* Long-press action sheet (reactions + action grid) */}
       <MessageActionSheet
         visible={actionSheet != null}
@@ -4235,7 +4279,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
               ) : null;
               return (
                 <ScrollView style={{ maxHeight: 420 }}>
-                  {Section('Read', 'checkmark-done', '#4A9FFF', read)}
+                  {Section('Read', 'checkmark-done', colors.tickRead, read)}
                   {Section('Delivered', 'checkmark-done', colors.textDim, delivered)}
                   {Section('Sent', 'checkmark', colors.textDim, sent)}
                   {otherMembers.length === 0 && <Text style={S.infoEmpty}>No other members.</Text>}
@@ -4259,23 +4303,23 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
               <View style={S.photoNameBar}><Text style={S.photoNameTxt} numberOfLines={1}>{title}</Text></View>
             </View>
             <View style={S.photoActions}>
-              <TouchableOpacity style={S.photoActionBtn} onPress={() => setPhotoViewer(false)}>
+              <TouchableOpacity style={S.photoActionBtn} onPress={() => setPhotoViewer(false)} accessibilityRole="button" accessibilityLabel="Message">
                 <Ionicons name="chatbubble-ellipses" size={22} color={colors.primary} />
                 <Text style={S.photoActionTxt}>Message</Text>
               </TouchableOpacity>
               {chat?.type === 'direct' && (
                 <>
-                  <TouchableOpacity style={S.photoActionBtn} onPress={() => { setPhotoViewer(false); const p = directPeer(); if (p) router.push({ pathname: '/voicecall' as any, params: { chatId, peerUid: p.userId, peerName: p.name || p.email || title } }); }}>
+                  <TouchableOpacity style={S.photoActionBtn} onPress={() => { setPhotoViewer(false); const p = directPeer(); if (p) router.push({ pathname: '/voicecall' as any, params: { chatId, peerUid: p.userId, peerName: p.name || p.email || title } }); }} accessibilityRole="button" accessibilityLabel="Audio call">
                     <Ionicons name="call" size={22} color={colors.primary} />
                     <Text style={S.photoActionTxt}>Audio</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={S.photoActionBtn} onPress={() => { setPhotoViewer(false); const p = directPeer(); if (p) router.push({ pathname: '/videocall' as any, params: { chatId, peerUid: p.userId, peerName: p.name || p.email || title } }); }}>
+                  <TouchableOpacity style={S.photoActionBtn} onPress={() => { setPhotoViewer(false); const p = directPeer(); if (p) router.push({ pathname: '/videocall' as any, params: { chatId, peerUid: p.userId, peerName: p.name || p.email || title } }); }} accessibilityRole="button" accessibilityLabel="Video call">
                     <Ionicons name="videocam" size={22} color={colors.primary} />
                     <Text style={S.photoActionTxt}>Video</Text>
                   </TouchableOpacity>
                 </>
               )}
-              <TouchableOpacity style={S.photoActionBtn} onPress={() => { setPhotoViewer(false); openProfile(); }}>
+              <TouchableOpacity style={S.photoActionBtn} onPress={() => { setPhotoViewer(false); openProfile(); }} accessibilityRole="button" accessibilityLabel="Info">
                 <Ionicons name="information-circle" size={22} color={colors.primary} />
                 <Text style={S.photoActionTxt}>Info</Text>
               </TouchableOpacity>
@@ -4296,6 +4340,8 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
                   style={S.attachCell}
                   activeOpacity={0.7}
                   onPress={() => { setAttachOpen(false); setTimeout(a.onPress, 120); }}
+                  accessibilityRole="button"
+                  accessibilityLabel={a.label}
                 >
                   <View style={S.attachIcon}>
                     <Ionicons name={a.icon} size={26} color={colors.text} />
@@ -4345,12 +4391,12 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
                 <TouchableOpacity
                   onPress={() => setPendingItems([])} accessibilityLabel="Discard all attachments"
                   hitSlop={12}
-                  style={{ position: 'absolute', top: 48, left: 16, zIndex: 2, width: 40, height: 40, borderRadius: 20, backgroundColor: '#00000088', alignItems: 'center', justifyContent: 'center' }}
+                  style={{ position: 'absolute', top: insets.top + 12, left: 16, zIndex: 2, width: 40, height: 40, borderRadius: 20, backgroundColor: '#00000088', alignItems: 'center', justifyContent: 'center' }}
                 >
                   <Ionicons name="close" size={26} color="#fff" />
                 </TouchableOpacity>
                 {multi && (
-                  <View style={{ position: 'absolute', top: 54, right: 16, zIndex: 2, backgroundColor: '#00000088', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 14 }}>
+                  <View style={{ position: 'absolute', top: insets.top + 18, right: 16, zIndex: 2, backgroundColor: '#00000088', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 14 }}>
                     <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>{currentIdx + 1} / {pendingItems.length}</Text>
                   </View>
                 )}
@@ -4361,7 +4407,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
                       <View style={{ width: 96, height: 96, borderRadius: 24, backgroundColor: BRAND_ACCENT + '22', alignItems: 'center', justifyContent: 'center' }}>
                         <Ionicons name="document-text" size={44} color={colors.primary} />
                       </View>
-                      <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700', textAlign: 'center' }} numberOfLines={2}>{cur.filename}</Text>
+                      <Text style={{ color: colors.text, fontSize: 16, fontWeight: '700', textAlign: 'center' }} numberOfLines={2}>{cur.filename}</Text>
                       <Text style={{ color: colors.textDim, fontSize: 13 }}>Scanned document</Text>
                     </View>
                   ) : cur.mediaType === 'image' ? (
@@ -4402,21 +4448,24 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
                       </TouchableOpacity>
                     ))}
                     <TouchableOpacity onPress={addMorePhotos} accessibilityLabel="Add more photos" style={{ width: 56, height: 56, borderRadius: 8, borderWidth: 1, borderColor: colors.glassStroke, alignItems: 'center', justifyContent: 'center' }}>
-                      <Ionicons name="add" size={26} color="#fff" />
+                      <Ionicons name="add" size={26} color={colors.text} />
                     </TouchableOpacity>
                   </ScrollView>
                 )}
 
-                <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, padding: 10, paddingBottom: Platform.OS === 'ios' ? 28 : 14, backgroundColor: colors.bg }}>
+                <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, padding: 10, paddingBottom: Math.max(insets.bottom, 14), backgroundColor: colors.bg }}>
                   {/* Per-item view-once toggle (WhatsApp "1-in-a-circle") */}
                   <TouchableOpacity
                     onPress={() => updateCurrentItem({ viewOnce: !cur.viewOnce })}
                     disabled={cur.mediaType === 'file'}
-                    style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: cur.viewOnce ? colors.primary : '#1F2937', alignItems: 'center', justifyContent: 'center', opacity: cur.mediaType === 'file' ? 0.4 : 1 }}
+                    accessibilityRole="switch"
+                    accessibilityLabel="View once"
+                    accessibilityState={{ checked: !!cur.viewOnce, disabled: cur.mediaType === 'file' }}
+                    style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: cur.viewOnce ? colors.primary : colors.surfaceSolid, alignItems: 'center', justifyContent: 'center', opacity: cur.mediaType === 'file' ? 0.4 : 1 }}
                     hitSlop={6}
                   >
                     <View style={{ width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: colors.glassStroke, alignItems: 'center', justifyContent: 'center' }}>
-                      <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>1</Text>
+                      <Text style={{ color: cur.viewOnce ? '#fff' : colors.text, fontSize: 12, fontWeight: '800' }}>1</Text>
                     </View>
                   </TouchableOpacity>
                   <TextInput
@@ -4430,6 +4479,9 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
                   <TouchableOpacity
                     onPress={confirmSendPendingMedia}
                     disabled={sending}
+                    accessibilityRole="button"
+                    accessibilityLabel={multi ? `Send ${pendingItems.length} attachments` : 'Send attachment'}
+                    accessibilityState={{ disabled: sending, busy: sending }}
                     style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', opacity: sending ? 0.6 : 1 }}
                   >
                     {sending ? <ActivityIndicator color="#fff" /> : <Ionicons name="send" size={22} color="#fff" />}
@@ -4496,11 +4548,13 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
                     style={S.forwardRow}
                     onPress={() => doForward(item)}
                     activeOpacity={0.7}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Forward to ${item.name || 'chat'}`}
                   >
                     <Text style={S.forwardRowTxt} numberOfLines={1}>
                       {item.name || item.id.slice(0, 8)}
                     </Text>
-                    <Text style={S.forwardRowSub}>{item.type}</Text>
+                    <Text style={S.forwardRowSub}>{item.type === 'group' ? 'Group' : 'Chat'}</Text>
                   </TouchableOpacity>
                 )}
               />
@@ -4559,16 +4613,17 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
                 maxLength={8}
                 placeholder="Enter PIN"
                 placeholderTextColor={colors.textFaint}
+                accessibilityLabel="Chat PIN"
                 onSubmitEditing={submitLockPin}
               />
               {!!lockErr && <Text style={S.lockGateErr}>{lockErr}</Text>}
-              <TouchableOpacity style={[S.lockGateBtn, { marginTop: 12 }]} onPress={submitLockPin}>
+              <TouchableOpacity style={[S.lockGateBtn, { marginTop: 12 }]} onPress={submitLockPin} accessibilityRole="button" accessibilityLabel="Unlock">
                 <Text style={S.lockGateBtnTxt}>Unlock</Text>
               </TouchableOpacity>
             </View>
           )}
 
-          <TouchableOpacity style={{ marginTop: 20 }} onPress={() => router.replace('/(tabs)/chats' as any)}>
+          <TouchableOpacity style={{ marginTop: 20 }} onPress={() => router.replace('/(tabs)/chats' as any)} accessibilityRole="button" accessibilityLabel="Back to chats">
             <Text style={S.lockGateBack}>Back to chats</Text>
           </TouchableOpacity>
           </>)}
@@ -4577,12 +4632,3 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     </View>
   );
 }
-
-// Quick-reaction emojis. WhatsApp-style: tap one to toggle. Long-pressing
-// the emoji button (future) could open the system emoji picker.
-const QUICK_REACTS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
-
-// Case-insensitive substring highlighter — splits `body` around every
-// occurrence of `q` and wraps the matches in a styled <Text>. Empty
-// query returns the body unchanged.
-// Color @mention tokens (e.g. "@Alex") in a message body.
