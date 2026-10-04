@@ -20,7 +20,7 @@ import { unionWithLocalHistoryAsc } from '../lib/messageHistory';
 import {
   exportBody, exportHtmlHead, exportHtmlLine, exportTextHead, exportTextLine, EXPORT_HTML_TAIL, type ExportLineCtx,
 } from '../lib/chatExportFormat';
-import { ExportCancelled, shareExportFile, writeExportFile } from '../components/chattools/chatExportFile';
+import { ExportCancelled, shareExportFile, sweepExportFiles, writeExportFile } from '../components/chattools/chatExportFile';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { getLock, pinRetryAfterMs, verifyBiometric, verifyPin, type LockedChat } from '../lib/chatLock';
 import { AuroraBackground } from '../components/ui';
@@ -106,6 +106,8 @@ export default function ChatExportScreen() {
   const cancelRef = useRef(false);
   const mounted = useRef(true);
   useEffect(() => () => { mounted.current = false; cancelRef.current = true; }, []);
+  // Plaintext left in caches by an export the app died during (no export runs yet).
+  useEffect(() => { if (EXPORT_SUPPORTED) sweepExportFiles().catch(() => {}); }, []);
   const cancelled = () => cancelRef.current;
   const live = <T,>(set: (v: T) => void) => (v: T) => { if (mounted.current) set(v); };
 
@@ -203,7 +205,7 @@ export default function ChatExportScreen() {
     );
   };
 
-  const guard = async (fn: (msgs: Message[], myId: string) => Promise<void>) => {
+  const guard = async (fn: (msgs: Message[], myId: string, onProgress: (written: number) => void) => Promise<void>) => {
     if (!chatId) { Alert.alert('Export failed', 'Missing chat id.'); return; }
     if (busyRef.current) return;
     busyRef.current = true;
@@ -226,7 +228,9 @@ export default function ChatExportScreen() {
       ))) return;
       if (cancelled()) return;
       live(setProgress)('Decrypting and writing ' + msgs.length + ' messages…');
-      await fn(msgs, me?.id ?? '');
+      await fn(msgs, me?.id ?? '', (n) => {
+        if (!cancelled()) live(setProgress)(`Decrypting and writing… ${n.toLocaleString()} of ${msgs.length.toLocaleString()}`);
+      });
       live(setProgress)('');
     } catch (e: any) {
       if (!(e instanceof ExportCancelled) && mounted.current) {
@@ -238,20 +242,20 @@ export default function ChatExportScreen() {
     }
   };
 
-  const exportAsText = () => guard(async (msgs, myId) => {
+  const exportAsText = () => guard(async (msgs, myId, onProgress) => {
     const ctx = lineCtx(myId);
     const uri = await writeExportFile(
       fileName(peerName, 'txt'), exportTextHead(peerName, msgs.length, new Date().toLocaleString()),
-      msgs, (m) => exportTextLine(m, ctx), '', { cancelled, prepare: decryptChunk(chatId) },
+      msgs, (m) => exportTextLine(m, ctx), '', { cancelled, onProgress, prepare: decryptChunk(chatId) },
     );
     await shareExportFile(uri, 'text/plain');
   });
 
-  const exportAsHTML = () => guard(async (msgs, myId) => {
+  const exportAsHTML = () => guard(async (msgs, myId, onProgress) => {
     const ctx = lineCtx(myId);
     const uri = await writeExportFile(
       fileName(peerName, 'html'), exportHtmlHead(peerName, msgs.length, new Date().toLocaleString(), BRAND_ACCENT),
-      msgs, (m) => exportHtmlLine(m, ctx), EXPORT_HTML_TAIL, { cancelled, prepare: decryptChunk(chatId) },
+      msgs, (m) => exportHtmlLine(m, ctx), EXPORT_HTML_TAIL, { cancelled, onProgress, prepare: decryptChunk(chatId) },
     );
     await shareExportFile(uri, 'text/html');
   });
@@ -300,7 +304,7 @@ export default function ChatExportScreen() {
         {exporting && (
           <View style={s.progressBox}>
             <ActivityIndicator color={colors.primary} />
-            <Text style={s.progressTxt}>{progress}</Text>
+            <Text style={s.progressTxt} accessibilityLiveRegion="polite">{progress}</Text>
             {msgCount > 0 && <Text style={s.progressCount}>{msgCount} messages</Text>}
             <TouchableOpacity style={s.cancelBtn} onPress={() => { cancelRef.current = true; setProgress('Cancelling…'); }} accessibilityRole="button" accessibilityLabel="Cancel export">
               <Text style={s.cancelTxt}>Cancel</Text>

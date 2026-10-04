@@ -152,7 +152,17 @@ export default function ChatWallpaperScreen() {
     ]);
   }), [navigation]);
 
-  const save = async () => {
+  // After a failed read the stored wallpaper is unknown: replacing it is asked,
+  // not a side effect of Set wallpaper.
+  const save = () => {
+    if (!loadErr) { doSave(); return; }
+    Alert.alert(
+      'Replace your saved wallpaper?',
+      "Your saved wallpaper couldn't be read, so this screen can't show it. Setting this one replaces it.",
+      [{ text: 'Cancel', style: 'cancel' }, { text: 'Replace', onPress: () => { doSave(); } }],
+    );
+  };
+  const doSave = async () => {
     // A double tap would copy the photo twice and orphan one copy.
     if (savingRef.current) return;
     savingRef.current = true;
@@ -163,6 +173,10 @@ export default function ChatWallpaperScreen() {
     try {
       let toSave = selected;
       // The picker returns a cache URI the OS may evict; keep our own copy.
+      // It is a plain file in the app's private documents directory, like
+      // received chat media: the OS sandbox protects it and uninstall deletes
+      // it. It is the user's own photo, picked from their gallery, so it is not
+      // sealed with the cache key.
       if (toSave?.type === 'image' && dir && FileSystem.documentDirectory
           && !toSave.value.startsWith(FileSystem.documentDirectory)) {
         await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});

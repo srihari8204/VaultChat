@@ -58,14 +58,15 @@ export const NetInfo = { async fetch() { return H().net; } };
 export async function uploadCloudBackup()   { H().calls.push('cloud');  if (H().fail.cloud) throw new Error('cloud down'); return { messageCount: 1, sizeBytes: 1 }; }
 export async function writeLocalBackup()    { H().calls.push('local');  if (H().fail.local) throw new Error('local down'); return { path: '/x', messageCount: 1, sizeBytes: 1 }; }
 export async function backupToGoogleDrive() { H().calls.push('drive');  if (H().fail.drive) throw new Error('drive down'); return { messageCount: 1, sizeBytes: 1 }; }
+export async function restoreDecisionPending() { H().calls.push('pending?'); return H().restorePending; }
 `;
 writeFileSync(join(WORK, 'stubs.js'), STUBS);
 
 const IMPORT_REWRITES: [RegExp, string][] = [
   [/^import NetInfo from '@react-native-community\/netinfo';$/m, `import { NetInfo } from './stubs.js';`],
   [/^import AsyncStorage from '@react-native-async-storage\/async-storage';$/m, `import AsyncStorage from './stubs.js';`],
-  [/^import \{ writeLocalBackup, backupToGoogleDrive, uploadCloudBackup \} from '\.\/cloudBackup';$/m,
-   `import { writeLocalBackup, backupToGoogleDrive, uploadCloudBackup } from './stubs.js';`],
+  [/^import \{ writeLocalBackup, backupToGoogleDrive, uploadCloudBackup, restoreDecisionPending \} from '\.\/cloudBackup';$/m,
+   `import { writeLocalBackup, backupToGoogleDrive, uploadCloudBackup, restoreDecisionPending } from './stubs.js';`],
 ];
 
 let src = readFileSync(join(HERE, 'backupScheduler.ts'), 'utf8');
@@ -86,6 +87,7 @@ const H: any = {
   calls: [] as string[],
   fail: { cloud: false, local: false, drive: false },
   net: { isConnected: true, type: 'wifi' },
+  restorePending: false,
 };
 (globalThis as any).__H = H;
 
@@ -94,7 +96,9 @@ function reset(store: Record<string, string> = {}) {
   H.calls = [];
   H.fail = { cloud: false, local: false, drive: false };
   H.net = { isConnected: true, type: 'wifi' };
+  H.restorePending = false;
 }
+const uploads = () => H.calls.filter((c: string) => c !== 'pending?');
 const SETTINGS_KEY = 'vc_backup_settings';
 const settings = (o: any) => ({ [SETTINGS_KEY]: JSON.stringify(o) });
 const saved = () => JSON.parse(H.store[SETTINGS_KEY] ?? '{}');
@@ -145,7 +149,7 @@ console.log('\nA due backup reaches the server, not just the sandbox:');
 reset();
 await B.runScheduledBackupIfDue();
 check('uploadCloudBackup() is called', H.calls.includes('cloud'), `called: [${H.calls}]`);
-check('the server copy is attempted FIRST', H.calls[0] === 'cloud', `order: [${H.calls}]`);
+check('the server copy is attempted FIRST', uploads()[0] === 'cloud', `order: [${H.calls}]`);
 check('local + Drive still run as secondary copies',
   H.calls.includes('local') && H.calls.includes('drive'), `called: [${H.calls}]`);
 
@@ -201,6 +205,33 @@ reset();
 H.net = { isConnected: false, type: 'none' };
 await B.runScheduledBackupIfDue();
 check('offline uploads nothing', H.calls.length === 0, `called: [${H.calls}]`);
+
+// ── 6. a new phone that has not decided about its online backup ───────────
+// THE data-loss path (rerate5 N1): a fresh install is due at once
+// (lastBackupAt 0). Skipping the restore offer used to be followed, seconds
+// later, by an upload of the near-empty phone over the only server copy.
+console.log('\nA phone that has not restored or replaced its backup uploads nothing:');
+reset();
+H.restorePending = true;
+await B.runScheduledBackupIfDue();
+check('no destination is written while the decision is pending', uploads().length === 0, `called: [${H.calls}]`);
+check('the timer is left alone, so the first run after deciding is not delayed', !(saved().lastBackupAt > 0));
+check('the run asked whether the decision is pending',
+  H.calls[0] === 'pending?', `called: [${H.calls}]`);
+reset(settings({ frequency: 'daily', network: 'wifi', includeVideos: false, lastBackupAt: Date.now() }));
+H.restorePending = true;
+await B.runScheduledBackupIfDue();
+check('an undue run does not even ask (no network call on every launch)', H.calls.length === 0, `called: [${H.calls}]`);
+reset();
+H.net = { isConnected: false, type: 'none' };
+H.restorePending = true;
+await B.runScheduledBackupIfDue();
+check('offline: not asked either', H.calls.length === 0, `called: [${H.calls}]`);
+reset();
+H.store.vc_backup_switch_pending = '1';
+H.restorePending = true;
+await B.runScheduledBackupIfDue();
+check('even an unfinished secret switch waits for the decision', uploads().length === 0, `called: [${H.calls}]`);
 
 rmSync(WORK, { recursive: true, force: true });
 }

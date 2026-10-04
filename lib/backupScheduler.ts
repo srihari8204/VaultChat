@@ -28,10 +28,16 @@
 // An unfinished secret switch (lib/backupSecretSwitch) makes a run due at once,
 // whatever the schedule: until the server copy is re-uploaded under the secret
 // the device holds, it may be under one the user never saw.
+//
+// A new phone that has not yet restored the account's backup, or chosen to
+// replace it, runs nothing (lib/cloudBackup's "restore decision pending"). A
+// fresh install is due at once (lastBackupAt 0), so without this a skipped
+// restore offer was followed within seconds by an upload of the near-empty
+// phone over the only server copy.
 
 import NetInfo from '@react-native-community/netinfo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { writeLocalBackup, backupToGoogleDrive, uploadCloudBackup } from './cloudBackup';
+import { writeLocalBackup, backupToGoogleDrive, uploadCloudBackup, restoreDecisionPending } from './cloudBackup';
 
 const SETTINGS_KEY = 'vc_backup_settings';
 // Must equal lib/cloudBackup's SWITCH_PENDING_KEY (not imported: this module's
@@ -131,6 +137,10 @@ export async function runScheduledBackupIfDue(): Promise<void> {
     if (!net.isConnected) return;
     const onWifi = net.type === 'wifi';
     if (s.network === 'wifi' && !onWifi) return; // Wi-Fi-only and not on Wi-Fi → wait
+
+    // Not restored and not told to replace: nothing runs, and the timer stays
+    // where it is, so the first run after the user decides is not delayed.
+    if (await restoreDecisionPending()) return;
 
     // CLOUD FIRST, because it is the only destination that survives a reinstall.
     //

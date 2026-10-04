@@ -88,7 +88,7 @@ export default function AppLockChatsScreen() {
   // The setup dialog's fields. The PIN is typed twice: a typo in the only PIN
   // that can remove the lock would leave the chat locked behind a PIN nobody knows.
   const [draft, setDraft] = useState<LockDraft>({ method: 'biometric', timer: 0, pin: '', pinConfirm: '' });
-  const patchDraft = useCallback((p: Partial<LockDraft>) => setDraft(d => ({ ...d, ...p })), []);
+  const patchDraft = useCallback((p: Partial<LockDraft>) => setDraft(prev => ({ ...prev, ...p })), []);
   const setConfigMethod = useCallback((method: LockMethod) => patchDraft({ method }), [patchDraft]);
   const setConfigTimer = useCallback((timer: AutoLockTimer) => patchDraft({ timer }), [patchDraft]);
   const [saving, setSaving] = useState(false);

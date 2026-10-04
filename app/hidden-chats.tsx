@@ -19,7 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useRef, useState , useMemo} from 'react';
-import { ActivityIndicator, Alert, AppState, FlatList, Image, Platform, RefreshControl, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, AppState, FlatList, Image, RefreshControl, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { focusWithKeyboard, retryKeyboard } from '../lib/imeFocus';
@@ -35,8 +35,15 @@ import { isOfflineError, retryAfterSec } from '../lib/onboarding';
 import { initialOf } from '../lib/format';
 import { createPinAttemptTracker } from '../services/security/pinAttempts';
 import { tint } from '../lib/tintColor';
+import { holdAppSwitcherBlur } from '../lib/screenGuard';
 
 const MAX_ATTEMPTS = 5;
+// How long the app may be away (a file picker, a quick app switch) before a
+// hidden chat open above this screen is closed on return. ponytail: a fixed
+// grace, not the user's Auto Screen Lock timer — the hidden chats keep their
+// own, shorter, limit. A picker left open longer than this still closes the
+// chat; skipping only while a picker is open would need chat.tsx to report it.
+const HIDDEN_CHAT_GRACE_MS = 60_000;
 type Router = ReturnType<typeof useRouter>;
 
 // Persisted wrong-PIN streak for this gate. Its own key: this gate checks the
@@ -62,20 +69,33 @@ export default function HiddenChatsScreen() {
   const navigation = useNavigation();
   const [stage, setStage] = useState<'pin' | 'list'>('pin');
 
-  // Re-lock when the app is backgrounded, so the list is never left open in
-  // the app switcher or for whoever picks the phone up next. A hidden chat
-  // opened from the list (or anything pushed above it) is closed too: re-locking
-  // only this screen left that chat on top, visible on return and in the switcher.
+  // Re-lock when the app goes to the background, so the list is never left
+  // open for whoever picks the phone up next.
+  //
+  // A hidden chat opened from the list (or anything pushed above it) is closed
+  // too — but only after a real trip away, not on every background event.
+  // Attaching a file starts the system photo/document picker, which on Android
+  // is another activity and backgrounds the app; Face ID and system alerts pass
+  // through iOS 'inactive'. Closing the chat on those dropped the user at the
+  // PIN gate and lost the draft and the picked file. So: 'background' only,
+  // and the chat is closed on return when the app was away longer than
+  // HIDDEN_CHAT_GRACE_MS. While anything here is open, the iOS app-switcher
+  // snapshot is blurred instead (Android's FLAG_SECURE blanks its thumbnail).
+  const awaySince = useRef<number | null>(null);
   useEffect(() => {
     const sub = AppState.addEventListener('change', (st) => {
-      // iOS takes the app-switcher snapshot at 'inactive', before 'background'.
-      if (st === 'background' || (Platform.OS === 'ios' && st === 'inactive')) {
+      if (st === 'background') {
+        awaySince.current = Date.now();
         setStage('pin');
-        if (!navigation.isFocused()) router.dismissTo('/hidden-chats');
+      } else if (st === 'active' && awaySince.current !== null) {
+        const away = Date.now() - awaySince.current;
+        awaySince.current = null;
+        if (away >= HIDDEN_CHAT_GRACE_MS && !navigation.isFocused()) router.dismissTo('/hidden-chats');
       }
     });
     return () => sub.remove();
   }, [navigation, router]);
+  useEffect(() => (stage === 'list' ? holdAppSwitcherBlur() : undefined), [stage]);
 
   if (stage === 'pin') {
     return <PinGate router={router} onPass={() => setStage('list')} />;

@@ -18,7 +18,8 @@ import {
   backupToGoogleDrive, restoreFromGoogleDrive,
   writeLocalBackup, restoreLocalBackup, listLocalBackups, type LocalBackup,
   uploadCloudBackup, restoreCloudBackup, cloudBackupMeta, type BackupMeta,
-  getBackupMode, isSecretRequired, isBackupSettingsUnreadable,
+  getBackupMode, isSecretRequired, isBackupSettingsUnreadable, isWrongSecret,
+  hasRestoreDecisionFlag, resolveRestoreDecision, isRestorePending,
 } from '../lib/cloudBackup';
 import { backupErrorText } from '../lib/backupSecretSwitch';
 import { driveBackupMeta, getDriveEmail, getDriveToken } from '../lib/googleDrive';
@@ -77,6 +78,10 @@ export default function ChatBackupScreen() {
   // The secret is masked by default (shoulder-surfing); Show reveals it to check a long key.
   const [showSecret, setShowSecret] = useState(false);
   const [busy, setBusy] = useState<'backup' | 'restore' | 'signin' | null>(null);
+  // This phone has not restored the account's backup or chosen to replace it
+  // (lib/cloudBackup "restore decision pending"): automatic backups are paused
+  // so they cannot overwrite it, and BACK UP asks first.
+  const [restorePending, setRestorePending] = useState(false);
 
   const [loadErr, setLoadErr] = useState(false);
   // The metadata reads below are fire-and-forget; none may set state after
@@ -94,6 +99,7 @@ export default function ChatBackupScreen() {
     listLocalBackups().then(live(setLocal)).catch(() => {});
     cloudBackupMeta().then(live(setCloud)).catch(() => {});
     getBackupMode().then(live(setMode)).catch(() => { if (mounted.current) setMode('unknown'); });
+    hasRestoreDecisionFlag().then(live(setRestorePending)).catch(() => {});
   }, []);
 
   const connectGoogle = async () => {
@@ -120,7 +126,31 @@ export default function ChatBackupScreen() {
     }
   };
 
-  const onBackUp = async () => {
+  // An undecided phone (see restorePending) replaces the online copy only after
+  // the user is told so and agrees.
+  const onBackUp = () => {
+    if (!(restorePending && cloud.exists)) { runBackUp(); return; }
+    const what = [
+      cloud.messageCount ? `${cloud.messageCount.toLocaleString()} messages` : '',
+      cloud.updatedAt ? `from ${fmt(new Date(cloud.updatedAt).getTime())}` : '',
+    ].filter(Boolean).join(', ');
+    Alert.alert(
+      'Replace your online backup?',
+      `This phone hasn't restored the backup in your account${what ? ` (${what})` : ''}. Backing up now replaces it with this phone's chats, and that can't be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Restore instead', onPress: onRestore },
+        { text: 'Replace', style: 'destructive', onPress: async () => {
+            try { await resolveRestoreDecision(); }
+            catch (e) { Alert.alert('Backup failed', `Nothing was uploaded. ${backupErrorText(e)}`); return; }
+            setRestorePending(false);
+            runBackUp();
+          } },
+      ],
+    );
+  };
+
+  const runBackUp = async () => {
     setBusy('backup');
     try {
       // The account copy FIRST, and it is the one whose failure is reported.
@@ -150,6 +180,10 @@ export default function ChatBackupScreen() {
         // Every destination refused: nothing may be written without the
         // secret, and nothing was.
         Alert.alert('Backup paused', backupErrorText(cloudErr));
+      } else if (isRestorePending(cloudErr)) {
+        // The online copies were protected; only a device file may exist.
+        Alert.alert('Not backed up online', backupErrorText(cloudErr)
+          + (localOk ? ' A copy was saved on this device only.' : ''));
       } else if (cloudOk) {
         Alert.alert('Backup complete', driveOk
           ? `Backed up to your account, Google Drive${onDevice}.`
@@ -198,21 +232,25 @@ export default function ChatBackupScreen() {
       if (!from) throw lastErr;
       closeAsk();
       const when = savedAt(from);
+      // An end-to-end encrypted copy keeps this phone end-to-end encrypted
+      // (lib/cloudBackup adopts the secret that opened it).
+      const nowMode = await getBackupMode().catch(() => null);
+      refresh();
       // Restored rows go straight into the local store, which every chat reads
       // when it opens, and the Chats list re-reads itself on focus — so going
       // back to Chats shows them; no restart needed.
       Alert.alert('Restore complete',
         `${n} messages restored from ${SOURCE_NAME[from]}${when ? ` (backup from ${when})` : ''}.`
-        + (from !== 'cloud' ? ' The copy in your account could not be used.' : ''), [
+        + (from !== 'cloud' ? ' The copy in your account could not be used.' : '')
+        + (nowMode === 'password' || nowMode === 'key' ? ' Backups from this phone stay end-to-end encrypted.' : ''), [
           { text: 'Stay here', style: 'cancel' },
           { text: 'Open chats', onPress: () => router.dismissTo('/(tabs)/chats') },
         ]);
     } catch (e: any) {
-      // A supplied secret that did not open it is the overwhelmingly likely
-      // cause here, and AES-GCM's failure surfaces as an opaque decrypt error.
-      // Saying "wrong password" is both the truthful reading and the only one
-      // the user can act on.
-      if (userSecret && !isNoBackup(e) && !backupErrorText(e, '')) {
+      // lib/cloudBackup marks a typed secret that did not open the copy (a
+      // different key id, or AES-GCM refusing it) — anything else is reported
+      // as what it is, not guessed to be a wrong password.
+      if (userSecret && isWrongSecret(e)) {
         Alert.alert('Could not unlock the backup',
           askSecret === 'key' ? 'That key did not work. If you have made a new key since this backup, use the key you had then.'
                               : 'That password did not work. If you have changed it since this backup, use the password you had then.');
@@ -293,6 +331,17 @@ export default function ChatBackupScreen() {
             <Text style={s.timeLabel}>Google Drive</Text>
             <Text style={s.timeVal}>{drive.modifiedTime ? fmt(new Date(drive.modifiedTime).getTime()) : 'Never'}</Text>
           </View>
+
+          {restorePending && cloud.exists && (
+            <View style={s.notice}>
+              <Ionicons name="pause-circle-outline" size={20} color={colors.warning} />
+              <Text style={s.noticeTxt}>
+                Automatic backup is paused on this phone. It hasn&apos;t restored the backup in your account,
+                and backing up would replace it. Restore it below, or tap BACK UP to replace it with this
+                phone&apos;s chats.
+              </Text>
+            </View>
+          )}
 
           <TouchableOpacity style={[s.backupBtn, busy && s.btnOff]} onPress={onBackUp} disabled={!!busy} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel="Back up now" accessibilityState={{ disabled: !!busy, busy: busy === 'backup' }}>
             {busy === 'backup'
@@ -460,7 +509,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   timesRow: { flexDirection: 'row', justifyContent: 'space-between', alignSelf: 'stretch', marginTop: 14, paddingHorizontal: 6 },
   timeLabel: { color: c.textDim, fontSize: 14 },
   timeVal: { color: c.text, fontSize: 14, fontWeight: '600' },
-  backupBtn: { backgroundColor: c.primary, borderRadius: 26, paddingVertical: 14, paddingHorizontal: 48, marginTop: 22, minWidth: 200, alignItems: 'center' },
+  backupBtn: { backgroundColor: c.primary, borderRadius: 26, paddingVertical: 14, paddingHorizontal: 48, marginTop: 22, minWidth: 200, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
+  notice: {
+    flexDirection: 'row', gap: 10, alignSelf: 'stretch', marginTop: 16, padding: 12, borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: c.warning, backgroundColor: c.glassSoft,
+  },
+  noticeTxt: { flex: 1, color: c.text, fontSize: 13, lineHeight: 19 },
   btnOff: { opacity: 0.6 },
   backupTxt: { color: c.onPrimary, fontSize: 15, fontWeight: '800', letterSpacing: 0.5 },
   restoreLink: { color: c.primary, fontSize: 14, fontWeight: '700' },

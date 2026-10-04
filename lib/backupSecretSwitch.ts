@@ -109,19 +109,73 @@ export async function switchBackupSecret<H>(
   throw new BackupSwitchError(cause, 'prev', 'prev');
 }
 
+/** Thrown by a lock call that gave up waiting (createLock's `waitMs`). fn never ran. */
+function busyError(): Error {
+  const err: Error & { code?: string } = new Error('Another backup is still running on this phone.');
+  err.code = 'BACKUP_BUSY';
+  return err;
+}
+export function isBackupBusy(e: unknown): boolean {
+  return (e as { code?: string } | null)?.code === 'BACKUP_BUSY';
+}
+
 /**
  * A FIFO lock: each call runs after every earlier one has settled. Shared by
  * the switch and every backup write in lib/cloudBackup, so a scheduled backup
  * cannot resolve the old secret, wait on the network, and land its upload after
  * a switch stored the new one.
+ *
+ * `waitMs` is for calls a person is watching (a switch, a restore, confirming a
+ * key): if the lock is not free by then, the call rejects with BACKUP_BUSY and
+ * `fn` never runs — the queue moves on without it. The holder itself is never
+ * cut loose (that would let its upload land after the next writer's): instead
+ * every network step lib/cloudBackup runs under the lock has a deadline
+ * (lib/backupTransfer), so a dead link fails the holder rather than hanging it.
  */
 export function createLock() {
   let tail: Promise<unknown> = Promise.resolve();
-  return <T>(fn: () => Promise<T>): Promise<T> => {
-    const run = tail.then(fn, fn);
+  return <T>(fn: () => Promise<T>, waitMs?: number): Promise<T> => {
+    let gaveUp = false;
+    let started = false;
+    const go = () => {
+      if (gaveUp) throw busyError();
+      started = true;
+      return fn();
+    };
+    const run = tail.then(go, go);
     tail = run.catch(() => {});
-    return run;
+    if (!waitMs) return run;
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => { if (!started) { gaveUp = true; reject(busyError()); } }, waitMs);
+      run.then((v) => { clearTimeout(timer); resolve(v); }, (e) => { clearTimeout(timer); reject(e); });
+    });
   };
+}
+
+/**
+ * After a restore opened an end-to-end encrypted copy, keep this phone
+ * end-to-end encrypted with the pair that opened it. Without this the phone
+ * stayed in account mode, and its next backup replaced the user's end-to-end
+ * encrypted copy with one the server can read.
+ *
+ * Only from account mode: a phone that already holds a pair keeps it ('kept') —
+ * restoring an older copy must not quietly bring back a key the user replaced
+ * with "Make a new key". Run BEFORE the restore writes anything: when the pair
+ * cannot be stored (the read-back decides, as in switchBackupSecret) it throws
+ * BACKUP_ADOPT_FAILED and nothing is restored, rather than restoring onto a
+ * phone whose next backup would be server-readable.
+ */
+export async function adoptRestoredSecret<H>(slot: SecretSlot<H>, pair: SecretPair<H>): Promise<'adopted' | 'kept'> {
+  let held: SecretPair<H> | null = null;
+  try { held = await slot.get(); } catch { /* unreadable: store it; the read-back decides */ }
+  if (held) return 'kept';
+  try { await slot.put(pair); } catch { /* the read-back decides */ }
+  let now: string | null = null;
+  try { now = secretOf(await slot.get()); } catch { /* unknown: refuse below */ }
+  if (now === pair.secret) return 'adopted';
+  const err: Error & { code?: string } = new Error('The backup secret could not be saved on this phone.');
+  err.code = 'BACKUP_ADOPT_FAILED';
+  throw err;
 }
 
 /**
@@ -134,6 +188,14 @@ export function backupErrorText(e: unknown, fallback = 'Please try again.'): str
   if (x?.code === 'BACKUP_SETTINGS_UNREADABLE') {
     return "This phone couldn't read your backup encryption settings, so nothing was uploaded. Try again, or restart the phone.";
   }
+  if (x?.code === 'BACKUP_BUSY') return 'Another backup is still running on this phone. Try again in a few minutes.';
+  if (x?.code === 'BACKUP_RESTORE_PENDING') {
+    return "This phone hasn't restored the backup in your account yet, and backing up now would replace it, so nothing was uploaded. Restore it, or replace it, from Settings → Chat backup.";
+  }
+  if (x?.code === 'BACKUP_ADOPT_FAILED') {
+    return "This phone couldn't save your backup password or key, so nothing was restored — its next backups would not have been end-to-end encrypted. Try again.";
+  }
+  if (x?.code === 'BACKUP_SECRET_WRONG') return 'That password or key did not open this backup.';
   const msg = String(x?.message ?? '');
   const put = /^backup (upload|download) failed \((\d+)\)$/.exec(msg);
   if (put) return Number(put[2]) >= 500 ? 'The storage server is having trouble. Please try again shortly.' : `The ${put[1]} was refused. Please try again.`;

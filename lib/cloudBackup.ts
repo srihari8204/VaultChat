@@ -48,16 +48,18 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { isSecretBackupKey } from './backupSecretKeys';
 import { VISION_COMFORT_STORAGE_KEY } from './visionComfortModel';
-import { vaultEncrypt, vaultDecrypt } from './vaultCrypto';
+import { vaultEncryptAsync, vaultDecryptAsync } from './vaultCrypto';
 import {
   readE2EEHeader, stampE2EEHeader, newHeader, backupSecretAsync, generateRecoveryKey,
   passwordProblem, recoveryKeyId, normalizeRecoveryKey, heldSecretMayOpen, type E2EEHeader, type BackupMode,
 } from './backupCrypto';
 import { exportAll, importAll } from './localDb';
 import {
-  switchBackupSecret, createLock, isBackupSwitchError,
+  switchBackupSecret, createLock, isBackupSwitchError, adoptRestoredSecret,
   type SecretPair, type SecretSlot, type PendingMarker,
 } from './backupSecretSwitch';
+import { withDeadline, transferDeadlineMs } from './backupTransfer';
+import { driveUpload, driveDownload, getDriveToken } from './googleDrive';
 // getCachedUser is what app/(constants)/authService's getCurrentUserAsync
 // returned anyway — it is a one-line passthrough to this. Taken directly, so
 // lib no longer reaches up into app (2026-09-17).
@@ -200,9 +202,65 @@ const pendingMarker: PendingMarker = {
   clear: () => AsyncStorage.removeItem(SWITCH_PENDING_KEY),
 };
 
-// Every write that resolves a secret and uploads, and every switch, runs under
-// this one lock (lib/backupSecretSwitch.createLock).
+// Every write that resolves a secret and uploads, every switch and every
+// restore runs under this one lock (lib/backupSecretSwitch.createLock). Every
+// network step under it has a deadline (lib/backupTransfer, lib/api's own
+// 30 s), and the calls a person is watching give up waiting after
+// INTERACTIVE_WAIT_MS with "another backup is still running" instead of
+// spinning behind a long scheduled upload.
 const backupLock = createLock();
+const INTERACTIVE_WAIT_MS = 20_000;
+
+// ── "Restore decision pending" ────────────────────────────────────────────
+// A new phone that has neither restored the account's backup nor been told,
+// plainly, that backing up will REPLACE it must not upload anything. Before
+// this, skipping the restore offer let the scheduler (due at once: a fresh
+// install has lastBackupAt 0) upload the near-empty phone over the only server
+// copy within seconds — while the offer said "Skipping changes nothing".
+//
+// app/restore-backup sets this when it is shown (a signed-in phone with no
+// history, lib/restoreGate). It is cleared by a successful restore (any
+// source), by the user choosing to replace the online copy (restore-backup's
+// "Start fresh", chat-backup's confirmed BACK UP), or once the server says
+// there is no backup to protect. Until then the scheduler skips its run and
+// every upload and secret switch refuses with BACKUP_RESTORE_PENDING. Writing
+// a local file is still allowed: it replaces nothing. Device-local, never in a
+// bundle.
+export const RESTORE_PENDING_KEY = 'vc_backup_restore_pending';
+
+export async function markRestoreDecisionPending(): Promise<void> {
+  await AsyncStorage.setItem(RESTORE_PENDING_KEY, String(Date.now()));
+}
+/** The user restored, or chose to replace the online copy. */
+export async function resolveRestoreDecision(): Promise<void> {
+  await AsyncStorage.removeItem(RESTORE_PENDING_KEY);
+}
+/** The flag alone (no network). An unreadable flag counts as set: fail closed. */
+export async function hasRestoreDecisionFlag(): Promise<boolean> {
+  try { return !!(await AsyncStorage.getItem(RESTORE_PENDING_KEY)); } catch { return true; }
+}
+/**
+ * True while uploads must wait for the user. Asks the server only when the flag
+ * is set; a real "no backup" answer clears it (there is nothing to replace),
+ * and a failed lookup keeps it.
+ */
+export async function restoreDecisionPending(): Promise<boolean> {
+  if (!(await hasRestoreDecisionFlag())) return false;
+  const meta = await cloudBackupMeta();
+  if (meta.unavailable || meta.exists) return true;
+  await resolveRestoreDecision().catch(() => {});
+  return false;
+}
+async function assertRestoreDecided(): Promise<void> {
+  if (await restoreDecisionPending()) {
+    const err: Error & { code?: string } = new Error('This phone has not restored or replaced the backup in your account.');
+    err.code = 'BACKUP_RESTORE_PENDING';
+    throw err;
+  }
+}
+export function isRestorePending(e: unknown): boolean {
+  return (e as { code?: string } | null)?.code === 'BACKUP_RESTORE_PENDING';
+}
 
 /** Which mode this device is currently backing up in. Rejects when it cannot be read. */
 export async function getBackupMode(): Promise<'account' | BackupMode> {
@@ -222,7 +280,7 @@ export function confirmRecoveryKey(key: string): Promise<void> {
     if (p?.unconfirmed && p.secret === normalizeRecoveryKey(key)) {
       await e2eeSlot.put({ secret: p.secret, header: p.header });
     }
-  });
+  }, INTERACTIVE_WAIT_MS);
 }
 
 /**
@@ -237,8 +295,13 @@ export function confirmRecoveryKey(key: string): Promise<void> {
  *
  * Transactional (lib/backupSecretSwitch): on failure it throws a
  * BackupSwitchError saying what the device and the server copy are now under.
- * In 'key' mode, when the server copy was left under the new key, the error
+ * In 'key' mode, when the server copy was left under the new key — or may
+ * have been (the upload failed without saying whether it landed) — the error
  * carries that key as `recoveryKey`, so the screen can show it.
+ *
+ * Refuses (BACKUP_RESTORE_PENDING, nothing changed) on a phone that has not
+ * restored or replaced the account's backup: the switch re-uploads this
+ * phone's history over it.
  */
 export function enableE2EEBackup(
   mode: BackupMode, password?: string,
@@ -249,17 +312,18 @@ export function enableE2EEBackup(
     if (problem) return Promise.reject(new Error(problem));
   }
   return backupLock(async () => {
+    await assertRestoreDecided();
     const header = newHeader(mode, mode === 'key' ? userSecret : undefined);
     const next: StoredE2EE = { secret: await backupSecretAsync(header, userSecret), header };
     if (mode === 'key') next.unconfirmed = true;
     try {
       await switchBackupSecret(e2eeSlot, pendingMarker, next, (using) => uploadCloudBackupUsing(using).then(() => {}));
     } catch (e) {
-      if (mode === 'key' && isBackupSwitchError(e) && e.server === 'next') e.recoveryKey = userSecret;
+      if (mode === 'key' && isBackupSwitchError(e) && e.server !== 'prev') e.recoveryKey = userSecret;
       throw e;
     }
     return mode === 'key' ? { recoveryKey: userSecret } : {};
-  });
+  }, INTERACTIVE_WAIT_MS);
 }
 
 /**
@@ -268,10 +332,14 @@ export function enableE2EEBackup(
  * upload or the clear fails, the device keeps writing encrypted backups instead
  * of silently switching to server-readable ones while the screen says "On".
  * Callers should re-read getBackupMode() on failure; the BackupSwitchError says
- * what the server copy is under.
+ * what the server copy is under. Refuses, like enableE2EEBackup, on a phone
+ * that has not restored or replaced the account's backup.
  */
 export function disableE2EEBackup(): Promise<void> {
-  return backupLock(() => switchBackupSecret(e2eeSlot, pendingMarker, null, (using) => uploadCloudBackupUsing(using).then(() => {})));
+  // The decision check runs before the switch sets its marker (and, being a
+  // server lookup, before the lock is taken).
+  return assertRestoreDecided().then(() =>
+    backupLock(() => switchBackupSecret(e2eeSlot, pendingMarker, null, (using) => uploadCloudBackupUsing(using).then(() => {})), INTERACTIVE_WAIT_MS));
 }
 
 /** Thrown by a restore that needs a secret this device does not hold. */
@@ -286,6 +354,16 @@ function secretRequired(mode: BackupMode): Error {
   return err;
 }
 
+/** Thrown when a typed password or key does not open the copy (wrong key id, or AES-GCM refused it). */
+export function isWrongSecret(e: any): boolean {
+  return e?.code === 'BACKUP_SECRET_WRONG';
+}
+function wrongSecret(message: string): Error {
+  const err: any = new Error(message);
+  err.code = 'BACKUP_SECRET_WRONG';
+  return err;
+}
+
 /** The secret to WRITE with, plus the header to stamp (null ⇒ account-managed). Throws when unreadable. */
 async function writeSecret(): Promise<{ secret: string; header: E2EEHeader | null }> {
   const e = await storedE2EE();
@@ -297,28 +375,37 @@ async function writeSecret(): Promise<{ secret: string; header: E2EEHeader | nul
  * Decrypt a blob with the secret it needs — decided by the BLOB, not by what
  * this device happens to be set to. A device restoring someone's e2ee backup
  * has no local state to consult, and a device whose password or key has since
- * changed holds a secret that no longer opens it. Returns the bundle JSON.
+ * changed holds a secret that no longer opens it. Returns the bundle JSON, and
+ * for an end-to-end encrypted copy the pair that opened it (applyEncryptedBackup
+ * keeps the phone on it).
  *
  * The device's own secret is tried only when the blob's header names it (same
  * password salt, same key id). A key-mode blob from before key ids existed is
  * tried too, and a failed decrypt then asks for the secret instead of failing
  * as an unexplained "restore failed" — after "Make a new key", an older copy
  * needs the OLD key, and the user is asked for it.
+ *
+ * Key derivation runs through the async KDF (vaultDecryptAsync), not the
+ * synchronous 100k-round PBKDF2 that held the JS thread.
  */
-async function decryptBlob(blob: string, userSecret?: string): Promise<string> {
+async function decryptBlob(blob: string, userSecret?: string): Promise<{ json: string; pair: SecretPair<E2EEHeader> | null }> {
   const payload = JSON.parse(blob);
   const header = readE2EEHeader(blob);
-  if (!header) return vaultDecrypt(await accountBackupKey(), payload);   // account-managed or pre-e2ee
+  if (!header) return { json: await vaultDecryptAsync(await accountBackupKey(), payload), pair: null };   // account-managed or pre-e2ee
   if (userSecret) {
     if (header.mode === 'key' && header.kid && recoveryKeyId(userSecret) !== header.kid) {
-      throw new Error('That key is not the one this backup was made with.');
+      throw wrongSecret('That key is not the one this backup was made with.');
     }
-    return vaultDecrypt(await backupSecretAsync(header, userSecret), payload);
+    let secret: string;
+    try { secret = await backupSecretAsync(header, userSecret); } catch (e: any) { throw wrongSecret(e?.message ?? 'That key is not valid.'); }
+    try { return { json: await vaultDecryptAsync(secret, payload), pair: { secret, header } }; }
+    catch { throw wrongSecret('That password or key did not open this backup.'); }
   }
   // A read failure here only means "ask the user", which is always safe.
   const cached = await storedE2EE().catch(() => null);
   if (cached && heldSecretMayOpen(cached.header, header)) {
-    try { return vaultDecrypt(cached.secret, payload); } catch { /* not this device's secret: ask */ }
+    try { return { json: await vaultDecryptAsync(cached.secret, payload), pair: { secret: cached.secret, header } }; }
+    catch { /* not this device's secret: ask */ }
   }
   throw secretRequired(header.mode);
 }
@@ -339,7 +426,7 @@ async function buildEncryptedBackup(using?: SecretPair<E2EEHeader> | null): Prom
   //    state — e.g. carrying the media-migration flag across would convince a
   //    device that still has a legacy external tree that it had already been
   //    drained, stranding those files outside the sandbox permanently.
-  const DEVICE_LOCAL_KEYS = new Set(['vc_media_migrated_v1', 'vc_restore_prompted', VISION_COMFORT_STORAGE_KEY, SWITCH_PENDING_KEY]);
+  const DEVICE_LOCAL_KEYS = new Set(['vc_media_migrated_v1', 'vc_restore_prompted', VISION_COMFORT_STORAGE_KEY, SWITCH_PENDING_KEY, RESTORE_PENDING_KEY]);
   // ── Key material must not ride along in the blanket sweep ──────────────
   //
   // The exclusion documented above removed the e2eeKeys FIELD, and the identity
@@ -407,15 +494,24 @@ async function buildEncryptedBackup(using?: SecretPair<E2EEHeader> | null): Prom
   // under the account key because a caller was missed.
   const { secret, header } = using === undefined ? await writeSecret()
     : using ?? { secret: await accountBackupKey(), header: null };
-  const payload = vaultEncrypt(secret, bundle);              // real AES-256-GCM
+  const payload = await vaultEncryptAsync(secret, bundle);   // real AES-256-GCM; KDF off the critical path
   const blob = header ? stampE2EEHeader(payload, header) : JSON.stringify(payload);
   return { blob, messageCount: local.messages.length, sizeBytes: bundle.length };
 }
 
-/** Decrypt + apply a backup blob to local storage. Returns messages restored. */
+/**
+ * Decrypt + apply a backup blob to local storage. Returns messages restored.
+ * Callers hold backupLock, so a scheduled upload cannot commit while a restore
+ * is half-applied.
+ */
 async function applyEncryptedBackup(blob: string, userSecret?: string): Promise<number> {
   // Decrypted in full before anything is written: a wrong key changes nothing.
-  const data = JSON.parse(await decryptBlob(blob, userSecret));
+  const { json, pair } = await decryptBlob(blob, userSecret);
+  const data = JSON.parse(json);
+  // An end-to-end encrypted copy keeps this phone end-to-end encrypted with the
+  // same pair — stored BEFORE anything is written, so a phone that could not
+  // store it restores nothing rather than backing up server-readable next time.
+  if (pair) await adoptRestoredSecret(e2eeSlot, pair);
 
   if (data.asyncStorage) {
     // Filter on the way IN as well, not only on the way out. Bundles taken
@@ -451,6 +547,9 @@ async function applyEncryptedBackup(blob: string, userSecret?: string): Promise<
     try { await restoreFinanceBackup(await financeUserId(), data.finance); }
     catch (e) { console.warn('[backup] finance restore skipped:', (e as any)?.message); }
   }
+  // Restored: this phone's backups now carry the user's history, so they may
+  // replace the online copy again.
+  await resolveRestoreDecision().catch(() => {});
   return n;
 }
 
@@ -513,6 +612,7 @@ export async function cloudBackupMeta(): Promise<BackupMeta> {
  */
 export function uploadCloudBackup(): Promise<{ messageCount: number; sizeBytes: number }> {
   return backupLock(async () => {
+    await assertRestoreDecided();
     const r = await uploadCloudBackupUsing(undefined);
     await pendingMarker.clear().catch(() => {});
     return r;
@@ -529,30 +629,42 @@ async function uploadCloudBackupUsing(
   const presign = await api<{ mode: string; uploadUrl?: string; key?: string }>(
     '/user/backup/presign', { method: 'POST', json: { sizeBytes, messageCount } },
   );
+  // Bounded by the blob's size (lib/backupTransfer): this runs under backupLock.
+  const deadline = transferDeadlineMs(blob.length);
   if (presign.mode === 'object' && presign.uploadUrl && presign.key) {
-    const put = await fetch(presign.uploadUrl, {
+    const uploadUrl = presign.uploadUrl;
+    const put = await withDeadline(deadline, (signal) => fetch(uploadUrl, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/octet-stream' },
       body: blob,
-    });
+      signal,
+    }));
     if (!put.ok) throw new Error(`backup upload failed (${put.status})`);
     await api('/user/backup/commit', { method: 'POST', json: { key: presign.key, sizeBytes, messageCount } });
   } else {
-    await api('/user/backup', { method: 'PUT', json: { blob, sizeBytes, messageCount } });
+    // A caller's signal replaces api()'s 30 s timeout, which a whole history
+    // sent inline can legitimately exceed.
+    await withDeadline(deadline, (signal) => api('/user/backup', { method: 'PUT', json: { blob, sizeBytes, messageCount }, signal }));
   }
   return { messageCount, sizeBytes };
 }
 
-export async function restoreCloudBackup(userSecret?: string): Promise<number> {
-  const r = await api<{ mode?: string; downloadUrl?: string; blob?: string }>('/user/backup');
-  let blob = r?.blob;
-  if (r?.mode === 'object' && r.downloadUrl) {
-    const resp = await fetch(r.downloadUrl);
-    if (!resp.ok) throw new Error(`backup download failed (${resp.status})`);
-    blob = await resp.text();
-  }
-  if (!blob) throw new Error('No backup found');
-  return applyEncryptedBackup(blob, userSecret);
+export function restoreCloudBackup(userSecret?: string): Promise<number> {
+  return backupLock(async () => {
+    const r = await withDeadline(transferDeadlineMs(), (signal) =>
+      api<{ mode?: string; downloadUrl?: string; blob?: string }>('/user/backup', { signal }));
+    let blob = r?.blob;
+    if (r?.mode === 'object' && r.downloadUrl) {
+      const url = r.downloadUrl;
+      blob = await withDeadline(transferDeadlineMs(), async (signal) => {
+        const resp = await fetch(url, { signal });
+        if (!resp.ok) throw new Error(`backup download failed (${resp.status})`);
+        return resp.text();
+      });
+    }
+    if (!blob) throw new Error('No backup found');
+    return applyEncryptedBackup(blob, userSecret);
+  }, INTERACTIVE_WAIT_MS);
 }
 
 export async function deleteCloudBackup(): Promise<void> {
@@ -560,20 +672,28 @@ export async function deleteCloudBackup(): Promise<void> {
 }
 
 // ── Google Drive (the user's own Drive — WhatsApp model) ─────────────────
-import { driveUpload, driveDownload } from './googleDrive';
-
-export function backupToGoogleDrive(interactive = true): Promise<{ messageCount: number; sizeBytes: number }> {
+// An interactive call signs in FIRST, outside the lock: the Google sign-in
+// sheet can stay open for as long as the user leaves it, and must not hold up
+// every other backup and switch while it does. Under the lock the token is
+// then fetched silently, with a deadline (lib/googleDrive).
+export async function backupToGoogleDrive(interactive = true): Promise<{ messageCount: number; sizeBytes: number }> {
+  if (interactive) await getDriveToken(true);
   return backupLock(async () => {
+    // Drive may hold the user's only other copy: the same rule as the server's.
+    await assertRestoreDecided();
     const { blob, messageCount, sizeBytes } = await buildEncryptedBackup();
-    await driveUpload(blob, interactive);
+    await driveUpload(blob, false);
     return { messageCount, sizeBytes };
   });
 }
 
 export async function restoreFromGoogleDrive(userSecret?: string): Promise<number> {
-  const blob = await driveDownload();
-  if (!blob) throw new Error('No backup found');
-  return applyEncryptedBackup(blob, userSecret);
+  await getDriveToken(true);
+  return backupLock(async () => {
+    const blob = await driveDownload(false);
+    if (!blob) throw new Error('No backup found');
+    return applyEncryptedBackup(blob, userSecret);
+  }, INTERACTIVE_WAIT_MS);
 }
 
 // ── Local file backups ("Databases" folder) ──────────────────────────────
@@ -623,11 +743,13 @@ async function pruneLocalBackups(): Promise<void> {
 }
 
 /** Restore from a specific local backup file (or the newest if omitted). */
-export async function restoreLocalBackup(path?: string, userSecret?: string): Promise<number> {
-  let p = path;
-  if (!p) { const list = await listLocalBackups(); if (!list.length) throw new Error('No local backup found'); p = list[0].path; }
-  const blob = await RNFS.readFile(p, 'utf8');
-  return applyEncryptedBackup(blob, userSecret);
+export function restoreLocalBackup(path?: string, userSecret?: string): Promise<number> {
+  return backupLock(async () => {
+    let p = path;
+    if (!p) { const list = await listLocalBackups(); if (!list.length) throw new Error('No local backup found'); p = list[0].path; }
+    const blob = await RNFS.readFile(p, 'utf8');
+    return applyEncryptedBackup(blob, userSecret);
+  }, INTERACTIVE_WAIT_MS);
 }
 
 export default {};

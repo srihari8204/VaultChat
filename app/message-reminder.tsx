@@ -265,7 +265,7 @@ function Composer({
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }}>
         <View style={S.previewCard}>
           <Text style={S.previewLabel}>MESSAGE</Text>
-          <Text style={[S.previewBody, !cached && S.previewMissing]} numberOfLines={4}>
+          <Text style={[S.previewBody, (!cached || cached === PROTECTED_TEXT) && S.previewMissing]} numberOfLines={4}>
             {cached || 'This message’s text is not saved on this phone — the reminder still opens it.'}
           </Text>
         </View>
@@ -408,7 +408,8 @@ function RemindersList({ router }: { router: Router }) {
           <Text style={S.rowWhen} numberOfLines={1}>
             Fires {new Date(r.when).toLocaleString()}
           </Text>
-          <Text style={S.rowPreview} numberOfLines={2}>
+          {/* Only the message's own text in normal ink; a stand-in (hidden, locked, not on this phone) is dimmed. */}
+          <Text style={[S.rowPreview, (!texts[r.id] || texts[r.id] === PROTECTED_TEXT || texts[r.id] === LOCKED_TEXT) && S.previewMissing]} numberOfLines={2}>
             {texts[r.id] || 'Message reminder'}
           </Text>
           <Text style={S.rowSub}>Tap to open the chat</Text>

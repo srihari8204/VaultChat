@@ -27,7 +27,8 @@ import {
   getBackupMode, enableE2EEBackup, disableE2EEBackup, getUnconfirmedRecoveryKey, confirmRecoveryKey,
 } from '../lib/cloudBackup';
 import { formatRecoveryKey, passwordProblem } from '../lib/backupCrypto';
-import { backupErrorText, isBackupSwitchError } from '../lib/backupSecretSwitch';
+import { backupErrorText, isBackupSwitchError, isBackupBusy } from '../lib/backupSecretSwitch';
+import { holdAppSwitcherBlur } from '../lib/screenGuard';
 import { AuroraBackground, KeyboardSafe } from '../components/ui';
 import { KEY_GROUP_LEN, keyGroupMatches, pickCheckGroups } from '../lib/recoveryKeyCheck';
 
@@ -44,8 +45,11 @@ export default function BackupE2EEScreen() {
   const [pw2, setPw2] = useState('');
   const [recoveryKey, setRecoveryKey] = useState('');
   // Why the key is on screen: just made, never confirmed (shown again until it
-  // is typed back), or the key a failed switch left the ONLINE copy under.
-  const [keyNote, setKeyNote] = useState<'new' | 'unconfirmed' | 'serverOnly'>('new');
+  // is typed back), the key a failed switch left the ONLINE copy under
+  // (serverOnly), or may have (serverMaybe: the upload failed without saying
+  // whether it landed).
+  const [keyNote, setKeyNote] = useState<'new' | 'unconfirmed' | 'serverOnly' | 'serverMaybe'>('new');
+  const serverKey = keyNote === 'serverOnly' || keyNote === 'serverMaybe';
   const [busy, setBusy] = useState(false);
   // Before leaving the show-once key: two of its groups, typed back.
   const [checkGroups, setCheckGroups] = useState<number[] | null>(null);
@@ -72,22 +76,36 @@ export default function BackupE2EEScreen() {
   }, []);
   useEffect(() => { loadMode(); }, [loadMode]);
 
+  // The key on screen can be read off the iOS app-switcher snapshot; blur it
+  // while it is shown (Android's FLAG_SECURE already blanks the thumbnail).
+  useEffect(() => (stage === 'keyshown' ? holdAppSwitcherBlur() : undefined), [stage]);
+
+  // The key and the check screen stay up until confirmRecoveryKey settles: it
+  // waits on the backup lock, and clearing them first drew an empty key box
+  // (with an "I'VE SAVED IT" that led to a check with no fields) for as long as
+  // a scheduled backup held it.
   const submitKeyCheck = async () => {
-    if (!checkGroups) return;
+    if (!checkGroups || busy) return;
     if (!checkGroups.every((g, i) => keyGroupMatches(recoveryKey, g, checkTyped[i] ?? ''))) {
       Alert.alert("That doesn't match", 'Check the key you saved, or go back and look at it again.');
       return;
     }
-    const k = recoveryKey;
-    setCheckGroups(null); setRecoveryKey('');
-    if (keyNote === 'serverOnly') { loadMode(); return; }
+    const done = () => { setCheckGroups(null); setRecoveryKey(''); };
+    if (serverKey) { done(); loadMode(); return; }
+    setBusy(true);
     try {
-      await confirmRecoveryKey(k);
+      await confirmRecoveryKey(recoveryKey);
+      done();
       loadMode();
-    } catch {
+    } catch (e) {
+      if (isBackupBusy(e)) {
+        Alert.alert('Not recorded yet', `${backupErrorText(e)} Your key is still shown here.`);
+        return;
+      }
+      done();
       setStage('on');
       Alert.alert('Key checked', "This phone couldn't record that you checked the key, so it will show it to you again next time.");
-    }
+    } finally { setBusy(false); }
   };
 
   // Leaving before the key is checked: every exit — header back, Android back,
@@ -95,14 +113,14 @@ export default function BackupE2EEScreen() {
   // again next time until it is checked; the key of a failed switch is not.
   const confirmLeaveKey = useCallback((leave: () => void) => Alert.alert(
     'Saved it?',
-    keyNote === 'serverOnly'
-      ? 'Once you leave this screen this key cannot be shown again.'
+    serverKey
+      ? 'Once you leave this screen this key may not be shown again.'
       : 'This key will be shown again the next time you open this screen, until you check it.',
     [
       { text: 'Go back', style: 'cancel' },
       { text: "I've saved it", onPress: leave },
     ],
-  ), [keyNote]);
+  ), [serverKey]);
   useEffect(() => {
     if (stage !== 'keyshown') return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -120,17 +138,22 @@ export default function BackupE2EEScreen() {
   const fail = (e: any, nextMode: 'password' | 'key') => {
     const why = backupErrorText(isBackupSwitchError(e) ? e.reason : e);
     const nextName = nextMode === 'key' ? 'new key' : 'new password';
-    if (isBackupSwitchError(e) && e.server === 'next') {
+    // server 'unknown': the upload under the new secret failed, but a failed
+    // upload can still have landed. Not "Nothing was changed".
+    if (isBackupSwitchError(e) && e.server !== 'prev') {
+      const maybe = e.server === 'unknown';
       if (nextMode === 'key' && e.recoveryKey) {
-        // The online copy is under a key this phone does not keep: show it.
-        setRecoveryKey(e.recoveryKey); setKeyNote('serverOnly'); setCheckGroups(null); setStage('keyshown');
+        // The online copy is (or may be) under a key this phone does not keep: show it.
+        setRecoveryKey(e.recoveryKey); setKeyNote(maybe ? 'serverMaybe' : 'serverOnly'); setCheckGroups(null); setStage('keyshown');
       }
       Alert.alert(
         'Not finished',
         (e.device === 'unknown'
           ? "This phone couldn't confirm which secret it now uses, so backups are paused until it can. "
           : `This phone still backs up with ${current}. `)
-        + `Your online backup copy is locked with the ${nextName} until the next backup replaces it, which the app does automatically as soon as it can.`
+        + (maybe
+          ? `The upload with the ${nextName} didn't finish, so your online backup copy is most likely unchanged — but if it reached the server, that copy is locked with the ${nextName} until the next backup replaces it, which the app does automatically as soon as it can.`
+          : `Your online backup copy is locked with the ${nextName} until the next backup replaces it, which the app does automatically as soon as it can.`)
         + (nextMode === 'key' && e.recoveryKey ? ' Save the key shown here until then.' : '')
         + `\n\n${why}`,
       );
@@ -209,10 +232,19 @@ export default function BackupE2EEScreen() {
               Alert.alert('Encrypted backup is off', 'This device now backs up with your account key.');
             } else if (now === null) {
               setStage('error');
-              Alert.alert('Could not turn this off', `This phone couldn't read its backup settings, so backups are paused. ${why}`);
+              // The switch may already have replaced the online copy with an
+              // account-key one: say so, not only that backups are paused.
+              const online = !isBackupSwitchError(e) ? ''
+                : e.server === 'next' ? ' Your online backup copy is now readable with your account key.'
+                : e.server === 'unknown' ? ' If the upload reached the server, your online backup copy is now readable with your account key.'
+                : '';
+              Alert.alert('Could not turn this off', `This phone couldn't read its backup settings, so backups are paused.${online} ${why}`);
             } else if (isBackupSwitchError(e) && e.server === 'next') {
               Alert.alert('Could not turn this off',
                 `Encrypted backup is still on. Your online backup copy is readable with your account key until the next backup re-encrypts it, which the app does automatically as soon as it can.\n\n${why}`);
+            } else if (isBackupSwitchError(e) && e.server === 'unknown') {
+              Alert.alert('Could not turn this off',
+                `Encrypted backup is still on. The upload didn't finish — if it reached the server, your online backup copy is readable with your account key until the next backup re-encrypts it, which the app does automatically as soon as it can.\n\n${why}`);
             } else {
               Alert.alert('Could not turn this off', `Encrypted backup is still on. ${why}`);
             }
@@ -292,14 +324,15 @@ export default function BackupE2EEScreen() {
             />
           ))}
           <TouchableOpacity
-            style={[s.primaryBtn, checkTyped.some(t => t.length < KEY_GROUP_LEN) && s.btnOff]}
-            disabled={checkTyped.some(t => t.length < KEY_GROUP_LEN)}
+            style={[s.primaryBtn, (busy || checkTyped.some(t => t.length < KEY_GROUP_LEN)) && s.btnOff]}
+            disabled={busy || checkTyped.some(t => t.length < KEY_GROUP_LEN)}
             accessibilityRole="button"
-            accessibilityState={{ disabled: checkTyped.some(t => t.length < KEY_GROUP_LEN) }}
+            accessibilityState={{ disabled: busy || checkTyped.some(t => t.length < KEY_GROUP_LEN), busy }}
             onPress={submitKeyCheck}>
-            <Text style={s.primaryTxt}>CHECK</Text>
+            {busy ? <ActivityIndicator color={colors.onPrimary} accessibilityLabel="Recording that you checked the key" />
+                  : <Text style={s.primaryTxt}>CHECK</Text>}
           </TouchableOpacity>
-          <TouchableOpacity style={s.linkRow} accessibilityRole="button" onPress={() => setCheckGroups(null)}>
+          <TouchableOpacity style={[s.linkRow, busy && s.btnOff]} disabled={busy} accessibilityRole="button" accessibilityState={{ disabled: busy }} onPress={() => setCheckGroups(null)}>
             <Text style={s.link}>Show the key again</Text>
           </TouchableOpacity>
         </ScrollView>
@@ -315,7 +348,9 @@ export default function BackupE2EEScreen() {
           <Text style={s.h1} accessibilityRole="header">Save your 64-character key</Text>
           <Text style={s.body}>
             {keyNote === 'serverOnly'
-              ? 'Your online backup copy is locked with this key until the next backup replaces it. This phone does not keep it, so this is the only time it will be shown.'
+              ? 'Your online backup copy is locked with this key until the next backup replaces it. This phone may not keep it, so this may be the only time it is shown.'
+              : keyNote === 'serverMaybe'
+                ? 'The upload with this key did not finish. If it reached the server, your online backup copy is locked with this key until the next backup replaces it. This phone still uses your current key and does not keep this one, so save it until then.'
               : keyNote === 'unconfirmed'
                 ? 'You have not yet checked that you saved this key. Your backups are locked with it — save it now.'
                 : 'Write it down or save it in a password manager — you will need it to restore your chats on a new phone. It is shown until you check it, then never again.'}
@@ -329,8 +364,8 @@ export default function BackupE2EEScreen() {
               try {
                 await copyAndAutoClear(recoveryKey);
                 Alert.alert('Copied', 'Paste it somewhere safe now — the clipboard is cleared in 30 seconds.');
-              } catch (e: any) {
-                Alert.alert('Could not copy', e?.message ?? 'Write the key down instead.');
+              } catch {
+                Alert.alert('Could not copy', 'Write the key down instead.');
               }
             }}>
             <Ionicons name="copy-outline" size={18} color={colors.primary} />

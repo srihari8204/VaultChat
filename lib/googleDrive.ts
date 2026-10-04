@@ -8,8 +8,15 @@
 // Requires Google Sign-In configured in the Firebase/Google project (OAuth
 // Android client via SHA-1, Google sign-in enabled, Drive API enabled) and the
 // drive.appdata scope.
+//
+// Every request here has a deadline (lib/backupTransfer): lib/cloudBackup runs
+// the upload and download under its backup lock, and RN's fetch on Android has
+// none of its own, so a dead link used to hold that lock until the app was
+// killed. The interactive sign-in is NOT run under the lock: lib/cloudBackup
+// signs in first, then calls these with `interactive` false.
 
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import { withDeadline, transferDeadlineMs, SMALL_REQUEST_MS } from './backupTransfer';
 
 const SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
 const BACKUP_NAME = 'vaultchat-backup.vcbak';
@@ -50,15 +57,22 @@ export async function driveSignOut(): Promise<void> {
   try { await GoogleSignin.signOut(); } catch {}
 }
 
+/** A token without UI (silent refresh), within a deadline; interactive sign-in has none. */
+function tokenFor(interactive: boolean): Promise<string> {
+  return interactive ? getDriveToken(true) : withDeadline(SMALL_REQUEST_MS, () => getDriveToken(false));
+}
+
 async function findBackupFile(token: string): Promise<{ id: string; modifiedTime?: string; size?: string } | null> {
   const q = encodeURIComponent(`name='${BACKUP_NAME}'`);
-  const r = await fetch(
-    `https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&fields=files(id,name,modifiedTime,size)&q=${q}`,
-    { headers: { Authorization: `Bearer ${token}` } },
-  );
-  if (!r.ok) throw new Error(`drive list ${r.status}`);
-  const j = await r.json();
-  return j.files?.[0] ?? null;
+  return withDeadline(SMALL_REQUEST_MS, async (signal) => {
+    const r = await fetch(
+      `https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&fields=files(id,name,modifiedTime,size)&q=${q}`,
+      { headers: { Authorization: `Bearer ${token}` }, signal },
+    );
+    if (!r.ok) throw new Error(`drive list ${r.status}`);
+    const j = await r.json();
+    return j.files?.[0] ?? null;
+  });
 }
 
 export async function driveBackupMeta(): Promise<{ exists: boolean; modifiedTime?: string; size?: number }> {
@@ -71,14 +85,16 @@ export async function driveBackupMeta(): Promise<{ exists: boolean; modifiedTime
 
 /** Upload (or replace) the encrypted backup blob in the user's Drive appData. */
 export async function driveUpload(blob: string, interactive = true): Promise<void> {
-  const token = await getDriveToken(interactive);
+  const token = await tokenFor(interactive);
   const existing = await findBackupFile(token);
+  const deadline = transferDeadlineMs(blob.length);
   if (existing) {
-    const r = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${existing.id}?uploadType=media`, {
+    const r = await withDeadline(deadline, (signal) => fetch(`https://www.googleapis.com/upload/drive/v3/files/${existing.id}?uploadType=media`, {
       method: 'PATCH',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/octet-stream' },
       body: blob,
-    });
+      signal,
+    }));
     if (!r.ok) throw new Error(`drive update ${r.status}`);
     return;
   }
@@ -87,24 +103,28 @@ export async function driveUpload(blob: string, interactive = true): Promise<voi
   const body =
     `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n` +
     `--${boundary}\r\nContent-Type: application/octet-stream\r\n\r\n${blob}\r\n--${boundary}--`;
-  const r = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+  const r = await withDeadline(deadline, (signal) => fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': `multipart/related; boundary=${boundary}` },
     body,
-  });
+    signal,
+  }));
   if (!r.ok) throw new Error(`drive upload ${r.status}`);
 }
 
 /** Download the encrypted backup blob from the user's Drive, or null if none. */
-export async function driveDownload(): Promise<string | null> {
-  const token = await getDriveToken(true);
+export async function driveDownload(interactive = true): Promise<string | null> {
+  const token = await tokenFor(interactive);
   const f = await findBackupFile(token);
   if (!f) return null;
-  const r = await fetch(`https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`, {
-    headers: { Authorization: `Bearer ${token}` },
+  return withDeadline(transferDeadlineMs(Number(f.size) || undefined), async (signal) => {
+    const r = await fetch(`https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal,
+    });
+    if (!r.ok) throw new Error(`drive download ${r.status}`);
+    return await r.text();
   });
-  if (!r.ok) throw new Error(`drive download ${r.status}`);
-  return await r.text();
 }
 
 export default {};

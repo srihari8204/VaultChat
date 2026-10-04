@@ -12,7 +12,7 @@ import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
-  switchBackupSecret, createLock, isBackupSwitchError, backupErrorText,
+  switchBackupSecret, createLock, isBackupSwitchError, backupErrorText, isBackupBusy, adoptRestoredSecret,
   type SecretPair, type SecretSlot, type PendingMarker, type BackupSwitchError,
 } from './backupSecretSwitch';
 
@@ -252,6 +252,54 @@ const tick = () => new Promise((r) => setTimeout(r, 5));
     await assert.rejects(lock(async () => { throw new Error('x'); }));
     assert.equal(await lock(async () => 7), 7);
   }
+  // A watched call gives up waiting behind a long holder, and never runs late.
+  {
+    const lock = createLock();
+    let release!: () => void;
+    const holder = lock(() => new Promise<void>((r) => { release = r; }));
+    let ran = false;
+    const waiter = lock(async () => { ran = true; }, 20);
+    await assert.rejects(waiter, (e: unknown) => isBackupBusy(e), 'BACKUP_BUSY after waitMs');
+    release();
+    await holder;
+    await tick();
+    assert.equal(ran, false, 'a call that gave up never runs once the lock frees');
+    assert.equal(await lock(async () => 8, 20), 8, 'the queue moves on past it');
+    // A waitMs call that gets the lock in time runs to completion, however long.
+    const slow = await lock(async () => { await new Promise((r) => setTimeout(r, 40)); return 9; }, 20);
+    assert.equal(slow, 9, 'waitMs bounds the WAIT, not the work');
+  }
+
+  // ── A restore that opened an end-to-end encrypted copy (rerate5 N2) ─────
+  {
+    const w = world(null);
+    assert.equal(await adoptRestoredSecret(w.slot, pw1), 'adopted');
+    assert.deepEqual(w.st.stored, pw1, 'an account-mode phone stays end-to-end encrypted after the restore');
+  }
+  {
+    const w = world(key2);
+    assert.equal(await adoptRestoredSecret(w.slot, key), 'kept');
+    assert.deepEqual(w.st.stored, key2, 'restoring an older copy never brings back a replaced key');
+  }
+  {
+    const w = world(null, { failPut: 'after' });
+    assert.equal(await adoptRestoredSecret(w.slot, pw1), 'adopted', 'a put that threw after landing counts');
+  }
+  {
+    const w = world(null, { failPut: 'before' });
+    await assert.rejects(adoptRestoredSecret(w.slot, pw1), (e: any) => e?.code === 'BACKUP_ADOPT_FAILED',
+      'not stored: the restore stops before writing anything');
+    assert.equal(w.st.stored, null);
+  }
+  {
+    const w = world(null, { failGetAt: [2] });
+    await assert.rejects(adoptRestoredSecret(w.slot, pw1), (e: any) => e?.code === 'BACKUP_ADOPT_FAILED',
+      'cannot read it back: refuse rather than guess');
+  }
+  {
+    const w = world(null, { failGetAt: [1] });
+    assert.equal(await adoptRestoredSecret(w.slot, pw1), 'adopted', 'an unreadable first read still stores and verifies');
+  }
 
   // ── User copy for failures ─────────────────────────────────────────────
   assert.equal(backupErrorText(new TypeError('Network request failed')), 'Check your connection and try again.');
@@ -260,6 +308,11 @@ const tick = () => new Promise((r) => setTimeout(r, 5));
     'Your session has expired. Please sign in again.', 'lib/api copy passes through');
   assert.match(backupErrorText({ code: 'BACKUP_SETTINGS_UNREADABLE', message: 'x' }), /couldn't read your backup encryption settings/);
   assert.equal(backupErrorText(new Error('aes/gcm: invalid ghash tag'), 'F'), 'F', 'no raw crypto text');
+  assert.match(backupErrorText({ code: 'BACKUP_BUSY' }), /still running/);
+  assert.match(backupErrorText({ code: 'BACKUP_RESTORE_PENDING' }), /replace it/);
+  assert.match(backupErrorText({ code: 'BACKUP_ADOPT_FAILED' }), /nothing was restored/);
+  assert.match(backupErrorText(Object.assign(new Error('The backup transfer timed out.'), { name: 'TimeoutError' })), /connection/,
+    'a transfer deadline reads as a connection problem');
 
   // ── Wiring that cannot run under Node (react-native imports) ───────────
   {
@@ -277,11 +330,39 @@ const tick = () => new Promise((r) => setTimeout(r, 5));
     const upload = cb.slice(cb.indexOf('export function uploadCloudBackup'), cb.indexOf('async function uploadCloudBackupUsing'));
     assert.match(upload, /backupLock\(/, 'uploads share the switch lock');
     assert.match(upload, /pendingMarker\.clear\(\)/, 'a successful upload settles an unfinished switch');
-    for (const fn of ['export function backupToGoogleDrive', 'export function writeLocalBackup', 'export function enableE2EEBackup', 'export function disableE2EEBackup']) {
-      const body = cb.slice(cb.indexOf(fn), cb.indexOf(fn) + 900);
-      assert.ok(cb.includes(fn) && body.includes('backupLock('), `${fn} runs under the lock`);
+    const bodyOf = (fn: string) => {
+      const at = cb.search(new RegExp(`export (async )?function ${fn}\\b`));
+      assert.ok(at >= 0, `${fn} exists`);
+      return cb.slice(at, cb.indexOf('\n}\n', at));
+    };
+    for (const fn of ['backupToGoogleDrive', 'writeLocalBackup', 'enableE2EEBackup', 'disableE2EEBackup',
+      'restoreCloudBackup', 'restoreFromGoogleDrive', 'restoreLocalBackup', 'confirmRecoveryKey']) {
+      assert.ok(bodyOf(fn).includes('backupLock('), `${fn} runs under the lock`);
     }
-    assert.ok(cb.includes('SWITCH_PENDING_KEY]);'), 'the marker never rides along in a bundle');
+    // N1: nothing that can replace an online copy runs before the decision.
+    for (const fn of ['uploadCloudBackup', 'backupToGoogleDrive', 'enableE2EEBackup', 'disableE2EEBackup']) {
+      const b = bodyOf(fn);
+      assert.ok(b.includes('assertRestoreDecided()'), `${fn} refuses on an undecided phone`);
+      if (fn.endsWith('E2EEBackup')) {
+        assert.ok(b.indexOf('assertRestoreDecided') < b.indexOf('switchBackupSecret'), `${fn} checks before the switch sets its marker`);
+      }
+    }
+    assert.ok(!bodyOf('writeLocalBackup').includes('assertRestoreDecided'), 'a local file replaces nothing, so it is allowed');
+    // The interactive Google sign-in happens before the lock is taken.
+    const drive = bodyOf('backupToGoogleDrive');
+    assert.ok(drive.indexOf('getDriveToken(true)') < drive.indexOf('backupLock('), 'sign in outside the lock');
+    assert.match(drive, /driveUpload\(blob, false\)/, 'and only silently under it');
+    // N2: the pair is adopted before the restore writes anything, and a restore clears the decision.
+    const apply = cb.slice(cb.indexOf('async function applyEncryptedBackup'), cb.indexOf('// ── Cloud (zero-knowledge'));
+    assert.ok(apply.indexOf('adoptRestoredSecret(e2eeSlot, pair)') > 0
+      && apply.indexOf('adoptRestoredSecret') < apply.indexOf('AsyncStorage.multiSet'), 'adopt before any write');
+    assert.ok(apply.includes('resolveRestoreDecision()'), 'a successful restore settles the decision');
+    // R1: the transfers under the lock have deadlines.
+    const using = cb.slice(cb.indexOf('async function uploadCloudBackupUsing'), cb.indexOf('export function restoreCloudBackup'));
+    assert.equal((using.match(/withDeadline\(/g) ?? []).length, 2, 'presigned PUT and inline PUT are bounded');
+    assert.ok(!/await fetch\(/.test(using), 'no bare fetch under the lock');
+    assert.ok(!/vaultEncrypt\(|vaultDecrypt\(/.test(cb), 'backups derive keys with the async KDF');
+    assert.ok(cb.includes('SWITCH_PENDING_KEY, RESTORE_PENDING_KEY]);'), 'neither marker ever rides along in a bundle');
   }
 
   // ── Key ids (the real lib/backupCrypto + lib/vaultCrypto) ──────────────

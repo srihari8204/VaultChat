@@ -30,7 +30,7 @@ function useS() {
 }
 
 const ResultGap = () => <View style={{ height: 8 }} />;
-// searchInChat's cap; a full page says so instead of looking like every match.
+// searchInChat's cap per page; a full page says so and offers the next one.
 const HIT_LIMIT = 80;
 
 export default function InChatSearchScreen() {
@@ -44,6 +44,9 @@ export default function InChatSearchScreen() {
   const reqSeq = useRef(0);
 
   const [query, setQuery] = useState('');
+  // Grows by HIT_LIMIT with "Show more matches"; a new query starts over.
+  const [limit, setLimit] = useState(HIT_LIMIT);
+  const onQuery = useCallback((t: string) => { setQuery(t); setLimit(HIT_LIMIT); }, []);
   const [results, setResults] = useState<InChatMessageHit[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -110,7 +113,7 @@ export default function InChatSearchScreen() {
     setLoading(true);
     debounce.current = setTimeout(async () => {
       try {
-        const hits = await searchInChat(chatId, term, HIT_LIMIT);
+        const hits = await searchInChat(chatId, term, limit);
         if (seq === reqSeq.current) { setResults(hits); setError(null); }
       } catch {
         // The local store failed (it is on-device, so not a network error);
@@ -121,7 +124,7 @@ export default function InChatSearchScreen() {
       }
     }, 300);
     return () => { if (debounce.current) clearTimeout(debounce.current); };
-  }, [query, chatId, gate, retryKey]);
+  }, [query, chatId, gate, retryKey, limit]);
 
   // Auto-focus the input once the chat is open to search.
   useEffect(() => {
@@ -192,6 +195,8 @@ export default function InChatSearchScreen() {
   ), [s, onTapResult, formatTime, highlightMatch, term]);
 
   const hasQuery = query.trim().length > 0;
+  // Fetching the next page keeps the current matches on screen.
+  const loadingMore = loading && limit > HIT_LIMIT && results.length > 0;
 
   if (gate !== 'open') {
     const m = lockInfo?.lockMethod;
@@ -283,25 +288,25 @@ export default function InChatSearchScreen() {
             accessibilityLabel="Search messages in this chat"
             placeholderTextColor={colors.textFaint}
             value={query}
-            onChangeText={setQuery}
+            onChangeText={onQuery}
             autoCapitalize="none"
             autoCorrect={false}
             returnKeyType="search"
           />
           {query.length > 0 && (
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Clear search" onPress={() => setQuery('')} hitSlop={8}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Clear search" onPress={() => onQuery('')} hitSlop={8}>
               <Ionicons name="close-circle" size={18} color={colors.textDim} />
             </TouchableOpacity>
           )}
         </View>
       </View>
 
-      {hasQuery && !loading && !error && (
+      {hasQuery && (!loading || loadingMore) && !error && (
         <View style={s.badgeRow}>
           <View style={s.badge}>
             <Text style={s.badgeText}>
-              {results.length >= HIT_LIMIT
-                ? `Showing the first ${HIT_LIMIT} matches — type more to narrow it`
+              {results.length >= limit
+                ? `Showing the first ${limit} matches — type more to narrow it`
                 : `${results.length} result${results.length !== 1 ? 's' : ''}`}
             </Text>
           </View>
@@ -317,7 +322,7 @@ export default function InChatSearchScreen() {
             <Text style={s.unlockTxt}>Try again</Text>
           </TouchableOpacity>
         </View>
-      ) : loading ? (
+      ) : loading && !loadingMore ? (
         <View style={s.center}>
           <ActivityIndicator size="large" color={colors.primary} />
           <Text style={s.loadingText}>Searching…</Text>
@@ -342,6 +347,18 @@ export default function InChatSearchScreen() {
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
           ItemSeparatorComponent={ResultGap}
+          ListFooterComponent={results.length >= limit ? (
+            <TouchableOpacity
+              style={s.moreBtn}
+              onPress={() => setLimit(l => l + HIT_LIMIT)}
+              disabled={loadingMore}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: loadingMore, busy: loadingMore }}
+            >
+              {loadingMore ? <ActivityIndicator color={colors.primary} accessibilityLabel="Loading more matches" />
+                : <Text style={s.moreTxt}>Show more matches</Text>}
+            </TouchableOpacity>
+          ) : null}
         />
       )}
     </View>
@@ -381,6 +398,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     paddingVertical: 4,
   },
   badgeText: { color: c.primary, fontSize: 13, fontWeight: '600' },
+  moreBtn: { marginTop: 12, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  moreTxt: { color: c.primary, fontSize: 15, fontWeight: '700' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
   loadingText: { color: c.textDim, marginTop: 12, fontSize: 14 },
   emptyTitle: { color: c.text, fontSize: 18, fontWeight: '600', marginTop: 16 },

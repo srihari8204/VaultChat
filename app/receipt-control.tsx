@@ -22,6 +22,7 @@ import { AppText as Text, AuroraBackground } from '../components/ui';
 import { initialOf } from '../lib/format';
 import { tint } from '../lib/tintColor';
 import { userErrorText } from '../lib/userErrorText';
+import { mergeReloadedRules, type HideFlag } from '../lib/ghostRulesMerge';
 
 interface Contact { userId: string; name: string }
 type Field = 'read' | 'typing' | 'lastSeen';
@@ -81,9 +82,10 @@ export default function ReceiptControlScreen() {
   // One request at a time per contact+flag, so responses cannot land out of
   // order and leave the server on a different value than the screen.
   const chains = useRef<Record<string, Promise<void>>>({});
-  // Toggles whose request has not settled. A reload must not replace rulesRef
-  // under them: their rollback would then apply to the reloaded rules.
-  const inFlight = useRef(0);
+  // Toggles whose request has not settled, counted per contact+flag. A reload
+  // keeps the screen's value for exactly those (their own request and its
+  // rollback decide them) and takes the server's for everything else.
+  const inFlight = useRef(new Map<string, { userId: string; flag: HideFlag; n: number }>());
 
   const onRefresh = useCallback(async () => {
     pulling.current = true;
@@ -108,8 +110,9 @@ export default function ReceiptControlScreen() {
         for (const g of ghost) rmap[g.targetId] = g;
         if (active) {
           setContacts(Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name)));
-          // A toggle tapped while this load was out keeps the screen's rules.
-          if (inFlight.current === 0) { setRules(rmap); rulesRef.current = rmap; }
+          // A toggle tapped while this load was out keeps that one flag.
+          rulesRef.current = mergeReloadedRules(rmap, rulesRef.current, inFlight.current.values());
+          setRules(rulesRef.current);
           setLoadFailed(false);
           setError(null);
         }
@@ -139,7 +142,8 @@ export default function ReceiptControlScreen() {
     };
     patchFlag(!nextShown);
     const k = `${userId}:${hideKey}`;
-    inFlight.current++;
+    const busy = inFlight.current.get(k);
+    inFlight.current.set(k, { userId, flag: hideKey, n: (busy?.n ?? 0) + 1 });
     chains.current[k] = (chains.current[k] ?? Promise.resolve()).then(async () => {
       try {
         await setGhostMode(userId, { [hideKey]: !nextShown } as Partial<Record<typeof hideKey, boolean>>);
@@ -149,7 +153,8 @@ export default function ReceiptControlScreen() {
         if (!!rulesRef.current[userId]?.[hideKey] === !nextShown) patchFlag(nextShown);
         setError(userErrorText(e, 'That setting could not be changed. Try again.'));
       } finally {
-        inFlight.current--;
+        const b = inFlight.current.get(k);
+        if (b && b.n > 1) b.n--; else inFlight.current.delete(k);
       }
     });
   }, []);

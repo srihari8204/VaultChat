@@ -15,23 +15,31 @@
 // risks overwriting newer local history with an older backup; offering it before
 // sign-in is impossible, because the backup is account-scoped.
 //
-// SKIPPING IS SAFE AND SAYS SO. The backup is not consumed by being declined —
-// it stays on the server, and Settings → Chat backup can restore it later. A
-// restore prompt that implies "now or never" pressures people into a slow
-// operation on mobile data at the worst moment.
+// SKIPPING IS SAFE, AND SAYS WHAT IT COSTS. The backup is not consumed by being
+// declined — it stays on the server, and Settings → Chat backup can restore it
+// later. A restore prompt that implies "now or never" pressures people into a
+// slow operation on mobile data at the worst moment.
+//
+// It used to say "Skipping changes nothing" while the scheduler, due at once on
+// a fresh install, uploaded the near-empty phone over that backup seconds
+// later. Showing this screen now marks the restore decision pending
+// (lib/cloudBackup): until the user restores, or explicitly chooses "Start
+// fresh" after being told the next backup replaces the online copy, this phone
+// uploads nothing. "Skip for now" keeps it that way, and says so.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { HEADER_TOP } from '../constants/layout';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { AuroraBackground } from '../components/ui';
 import {
   cloudBackupMeta, isSecretRequired, restoreCloudBackup, restoreFromGoogleDrive, type BackupMeta,
+  markRestoreDecisionPending, resolveRestoreDecision, hasRestoreDecisionFlag,
 } from '../lib/cloudBackup';
 import { markRestorePromptSeen } from '../lib/restoreGate';
 import { resetTo } from '../lib/authNav';
@@ -64,17 +72,38 @@ export default function RestoreBackupScreen() {
   // A restore can finish after the screen is gone (resetTo from elsewhere).
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  // Sent to Chat backup for an encrypted restore: on the way back, a cleared
+  // restore-decision flag means the backup was restored (or replaced) there,
+  // so this screen offers Continue instead of "Restore now" again.
+  const [handledElsewhere, setHandledElsewhere] = useState(false);
+  const sentToChatBackup = useRef(false);
+  useFocusEffect(useCallback(() => {
+    if (!sentToChatBackup.current) return;
+    sentToChatBackup.current = false;
+    hasRestoreDecisionFlag()
+      .then((pending) => { if (!pending && alive.current) setHandledElsewhere(true); })
+      .catch(() => {});
+  }, []));
 
   // `unavailable` means the lookup failed — NOT "no backup". Showing "No
   // backup was found" for a dead connection invited the user to carry on and
   // lose a backup that exists; offer a retry instead.
+  //
+  // A real "no backup" answer settles the restore decision: there is nothing
+  // for this phone's backups to replace.
   const lookUp = useCallback(() => {
     setMeta(null);
     cloudBackupMeta()
-      .then((m) => { if (alive.current) setMeta(m); })
+      .then((m) => {
+        if (!m.exists && !m.unavailable) resolveRestoreDecision().catch(() => {});
+        if (alive.current) setMeta(m);
+      })
       .catch(() => { if (alive.current) setMeta({ exists: false, unavailable: true }); });
   }, []);
-  useEffect(() => { lookUp(); }, [lookUp]);
+  // Marked before the lookup, so its "no backup" answer is what clears it.
+  useEffect(() => {
+    markRestoreDecisionPending().catch(() => {}).finally(lookUp);
+  }, [lookUp]);
   const lookupFailed = !!meta?.unavailable;
 
   // Leaving after a real answer marks the prompt seen, or a user who skips is
@@ -88,6 +117,25 @@ export default function RestoreBackupScreen() {
     // (lib/postSignIn.ts deliberately leaves it in place on the way here).
     resetTo('/(tabs)/chats');
   }, [answered]);
+
+  // Declining a backup that exists: say what each choice does to it.
+  const skip = useCallback(() => {
+    if (!meta?.exists) { leave(); return; }
+    const what = meta.messageCount ? ` (${meta.messageCount.toLocaleString()} messages)` : '';
+    Alert.alert(
+      'Skip restoring?',
+      `Your online backup${what} stays as it is. To keep it safe, this phone won't back up until you restore it or choose to replace it — both from Settings → Chat backup.`
+      + "\n\nStart fresh if you don't need those chats: this phone's next backup replaces the online copy, and that can't be undone.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Start fresh', style: 'destructive', onPress: () => {
+            // If this fails the decision stays pending, which is the safe side.
+            resolveRestoreDecision().catch(() => {}).finally(leave);
+          } },
+        { text: 'Skip for now', onPress: leave },
+      ],
+    );
+  }, [meta, leave]);
 
   // A ref, not `busy`: two taps in one frame both read busy === null from the
   // same render and started two restores.
@@ -111,7 +159,7 @@ export default function RestoreBackupScreen() {
         Alert.alert(
           'Your backup is end-to-end encrypted',
           `Restore it from Settings → Chat backup → Restore, with the ${e.mode === 'key' ? '64-character key' : 'backup password'} you set.`,
-          [{ text: 'Later', style: 'cancel' }, { text: 'Open Chat backup', onPress: () => router.push('/chat-backup') }],
+          [{ text: 'Later', style: 'cancel' }, { text: 'Open Chat backup', onPress: () => { sentToChatBackup.current = true; router.push('/chat-backup'); } }],
         );
         return;
       }
@@ -131,17 +179,19 @@ export default function RestoreBackupScreen() {
     if (alive.current) setBusy(null);
   }, []);
 
-  if (restored !== null) {
+  if (restored !== null || handledElsewhere) {
     return (
       <View style={S.screen}>
         <AuroraBackground />
         <View style={S.done}>
           <Ionicons name="checkmark-circle" size={64} color={colors.success} />
-          <Text style={S.doneTitle} accessibilityRole="header">Chats restored</Text>
+          <Text style={S.doneTitle} accessibilityRole="header">{restored !== null ? 'Chats restored' : 'Backup settled'}</Text>
           <Text style={S.doneSub}>
-            {restored > 0
-              ? `${restored.toLocaleString()} message${restored === 1 ? '' : 's'} are back on this phone.`
-              : 'Your backup was applied.'}
+            {restored === null
+              ? 'Your backup was restored or replaced in Chat backup.'
+              : restored > 0
+                ? `${restored.toLocaleString()} message${restored === 1 ? '' : 's'} are back on this phone.`
+                : 'Your backup was applied.'}
           </Text>
           <TouchableOpacity style={S.cta} onPress={leave} activeOpacity={0.85} accessibilityRole="button">
             <Text style={S.ctaTxt}>Continue</Text>
@@ -162,7 +212,7 @@ export default function RestoreBackupScreen() {
           {meta === null
             ? 'Looking for a backup…'
             : lookupFailed
-              ? 'Couldn’t check for a backup — you may be offline. Try again, or carry on: while this phone has no chats yet, crazzychat offers this again the next time it opens, and you can restore any time from Settings → Chat backup.'
+              ? 'Couldn’t check for a backup — you may be offline. Try again, or carry on: while this phone has no chats yet, crazzychat offers this again the next time it opens, and you can restore any time from Settings → Chat backup. Until it can check, this phone won’t back up over a backup it hasn’t seen.'
             : meta.exists
               ? 'We found a backup for this account. Restoring brings your messages and media onto this phone.'
               : 'No backup was found for this account. You can carry on — new messages will be backed up from here.'}
@@ -218,7 +268,7 @@ export default function RestoreBackupScreen() {
 
         <TouchableOpacity
           style={S.skip}
-          onPress={leave}
+          onPress={skip}
           disabled={!!busy}
           activeOpacity={0.7}
           accessibilityRole="button"
@@ -229,8 +279,8 @@ export default function RestoreBackupScreen() {
 
         {meta?.exists && (
           <Text style={S.reassure}>
-            Skipping changes nothing — your backup stays where it is, and Settings → Chat backup
-            can restore it whenever you like.
+            Skipping keeps your backup where it is: this phone won’t back up over it until you
+            restore it or choose to replace it, from Settings → Chat backup.
           </Text>
         )}
       </ScrollView>

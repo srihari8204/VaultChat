@@ -44,6 +44,10 @@ export default function ChatThemesScreen() {
   const savedRef = useRef<string | null>(null);
   // Only the latest tap's failure rolls back (an older one's must not undo it).
   const applySeq = useRef(0);
+  // The tap whose value savedRef holds: AsyncStorage applies writes in call
+  // order, so a later tap's write is the one in storage even if an earlier
+  // tap's promise settles after it.
+  const savedSeq = useRef(0);
 
   useEffect(() => {
     touched.current = false;
@@ -61,7 +65,17 @@ export default function ChatThemesScreen() {
 
   // Saves on tap. Per-chat "Default" is stored explicitly (see lib/scopedChoice);
   // null removes the key (global: app default, per-chat: follow all chats).
-  const apply = async (id: string | null) => {
+  // After a failed read the stored choice is unknown: replacing it is the
+  // user's call, asked once, not a side effect of a tap.
+  const apply = (id: string | null) => {
+    if (!loadErr) { save(id); return; }
+    Alert.alert(
+      'Replace your saved colour?',
+      "Your saved bubble colour couldn't be read, so this screen can't show it. Choosing this one replaces it.",
+      [{ text: 'Cancel', style: 'cancel' }, { text: 'Replace', onPress: () => { save(id); } }],
+    );
+  };
+  const save = async (id: string | null) => {
     touched.current = true;
     setLoadErr(false);
     const seq = ++applySeq.current;
@@ -70,7 +84,7 @@ export default function ChatThemesScreen() {
     try {
       if (next == null) await AsyncStorage.removeItem(key);
       else await AsyncStorage.setItem(key, next);
-      savedRef.current = next;
+      if (seq > savedSeq.current) { savedSeq.current = seq; savedRef.current = next; }
     } catch {
       if (seq !== applySeq.current) return;
       setStored(savedRef.current);
@@ -127,7 +141,7 @@ export default function ChatThemesScreen() {
         {loadErr && (
           <View style={s.loadErrBox}>
             <Text style={s.loadErr} accessibilityRole="alert">
-              {"Couldn't read your saved colour, so the default is shown. Picking a colour replaces it."}
+              {"Couldn't read your saved colour, so the default is shown. Try again, or pick a colour to replace it."}
             </Text>
             <TouchableOpacity style={s.retryBtn} onPress={() => setReloadKey(k => k + 1)} accessibilityRole="button" accessibilityLabel="Try reading your saved colour again">
               <Text style={s.resetText}>Try again</Text>

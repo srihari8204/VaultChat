@@ -13,6 +13,24 @@ import * as Sharing from 'expo-sharing';
 import { Share } from 'react-native';
 
 const CHUNK = 500;
+// Exports are written into their own cache folder, so a sweep can remove every
+// leftover without guessing at names.
+const EXPORT_DIR = `${RNFS.CachesDirectoryPath}/chat-export`;
+const LEGACY_PREFIX = 'crazzychat_';   // older builds wrote to the cache root
+
+/**
+ * Remove plaintext export files a crash or a killed app left behind (a thrown
+ * error already removes its own; a process death does not). Call it when no
+ * export is running — app/chat-export does on open.
+ */
+export async function sweepExportFiles(): Promise<void> {
+  await RNFS.unlink(EXPORT_DIR).catch(() => {});
+  try {
+    for (const f of await RNFS.readDir(RNFS.CachesDirectoryPath)) {
+      if (f.isFile() && f.name.startsWith(LEGACY_PREFIX)) await RNFS.unlink(f.path).catch(() => {});
+    }
+  } catch { /* best effort */ }
+}
 
 /** Thrown when the user cancels (or leaves) mid-export. Not an error to report. */
 export class ExportCancelled extends Error {
@@ -28,7 +46,8 @@ export async function writeExportFile<T>(
     prepare?: (chunk: T[]) => Promise<T[]>;
   },
 ): Promise<string> {
-  const path = `${RNFS.CachesDirectoryPath}/${name}`;
+  await RNFS.mkdir(EXPORT_DIR).catch(() => {});
+  const path = `${EXPORT_DIR}/${name}`;
   await RNFS.writeFile(path, head, 'utf8');
   try {
     for (let i = 0; i < items.length; i += CHUNK) {

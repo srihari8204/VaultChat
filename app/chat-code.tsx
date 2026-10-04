@@ -412,5 +412,5 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   hint: { color: c.textFaint, fontSize: 12, marginTop: 10, lineHeight: 17 },
   retryRow: { minHeight: 44, justifyContent: 'center', paddingVertical: 8 },
-  retryTxt: { color: c.danger, marginTop: 0 },
+  retryTxt: { color: c.danger, marginTop: 0, fontSize: 14, lineHeight: 20, fontWeight: '600' },
 });

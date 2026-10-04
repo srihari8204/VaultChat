@@ -3,9 +3,8 @@
 // Moved out of app/import-chats.tsx unchanged (the screen keeps the render).
 //
 // Nothing here touches the network either: the parser is pure, and this file
-// imports neither lib/api nor a socket. lib/waImport.selftest.ts scans the
-// screen and its parts for a way off the device (see the handoff in R5C2.md to
-// add this file to that list).
+// imports neither lib/api nor a socket. lib/waImport.selftest.ts scans this
+// file, the screen and its parts for a way off the device.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert } from 'react-native';
