@@ -420,8 +420,10 @@ export default function VaultScreen() {
           text: 'Delete', style: 'destructive',
           onPress: async () => {
             try {
-              await FileSystem.deleteAsync(file.encPath, { idempotent: true });
+              // List first: if saving it fails, the file is still there and still
+              // listed. The other order left an entry pointing at a deleted file.
               await saveManifest(filesRef.current.filter(f => f.id !== file.id));
+              await FileSystem.deleteAsync(file.encPath, { idempotent: true }).catch(() => {});
             } catch (e: any) {
               Alert.alert('Not deleted', e?.message ?? 'The file could not be removed. Try again.');
             }
@@ -491,10 +493,13 @@ export default function VaultScreen() {
           <Text style={styles.headerSub}>AES-256-GCM Encrypted</Text>
         </View>
         <TouchableOpacity hitSlop={4}
-          style={styles.backupBtn}
+          style={[styles.backupBtn, manifestState !== 'ok' && { opacity: 0.4 }]}
           onPress={() => setShowBackup(true)}
+          // Exporting before the list has loaded would share an empty list.
+          disabled={manifestState !== 'ok'}
           accessibilityRole="button"
           accessibilityLabel="Export file list"
+          accessibilityState={{ disabled: manifestState !== 'ok' }}
         >
           <Text style={styles.backupBtnText}>💾</Text>
         </TouchableOpacity>
