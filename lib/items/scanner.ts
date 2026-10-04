@@ -75,8 +75,8 @@ export async function ensureBlePermissions(): Promise<boolean> {
     const api = Number(Platform.Version);
     if (api >= 31) {
       const res = await PermissionsAndroid.requestMultiple([
-        'android.permission.BLUETOOTH_SCAN' as any,
-        'android.permission.BLUETOOTH_CONNECT' as any,
+        PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+        PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
       ]);
       neverAskAgain = Object.values(res).some((v) => v === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN);
       return Object.values(res).every((v) => v === PermissionsAndroid.RESULTS.GRANTED);

@@ -15,7 +15,7 @@
 // to ~11 m — the From-Home route, a Meet Here / trip destination).
 
 import { AppText as Text } from '../components/ui/Text';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,28 +25,26 @@ import { useTheme } from '../lib/theme';
 import { useSpaceGlass } from '../components/spaces/SpaceGround';
 import FamilyMap, { type FamilyMarker } from '../components/family/FamilyMap';
 import MeetHereSheet, { type MeetDestination } from '../components/family/MeetHereSheet';
-import { type MemberInput, formatMetres, formatRoute } from '../lib/family/distance';
+import { type MemberInput, formatMetres } from '../lib/family/distance';
 import { circleMembers } from '../lib/family/circle';
 import { subscribeCircle, type PresenceEvent } from '../lib/family/presence';
 import { freshnessOf, zoomForSpeed } from '../lib/family/status';
 import { subscribeSpaceLocations, fetchSpaceSnapshot } from '../lib/location/live';
 import { foldPoint, foldSealed } from '../lib/family/presenceFold';
 import { startRefreshController } from '../lib/family/refresh';
-import { useVisibleTick } from '../lib/family/useVisibleTick';
+import { useVisibleNow } from '../lib/family/useVisibleTick';
 import { type CircleMember, type MemberPresence } from '../lib/family/types';
 import { getPlaces, getDefaultRef } from '../lib/family/store';
 import { type Geofence } from '../lib/family/geofence';
-import { fetchRoute, fetchMatrix, nextTurnAlong, type Maneuver } from '../lib/nav/routing';
+import { mapSlots } from '../lib/family/mapSlots';
 import { haversine } from '../lib/nav/geo';
-import { startNavigation, stopNavigation, forceReroute, useNavBanner } from '../lib/nav/navigationService';
-import { loadNavSettings, getNavSettings } from '../lib/nav/navSettings';
-import { playHaptic } from '../lib/nav/hapticPlayer';
 import NavigationLayer from '../components/family/NavigationLayer';
 import SelectedMemberSheet from '../components/family/SelectedMemberSheet';
+import { useMapNavigation } from '../components/family/useMapNavigation';
+import { useMemberRoute, useDestRoute, useHomeRoute, useRoadLabels, useMemberTurn } from '../components/family/useMapRoutes';
 import { createDirectChat } from '../lib/chatService';
-import { cameraForManeuver, type CameraPlan } from '../lib/nav/navPresentation';
 import {
-  startTrip, joinTrip, endTrip, leaveTrip, subscribeTrip, currentTrip, setTripRoute,
+  startTrip, joinTrip, endTrip, leaveTrip, subscribeTrip, currentTrip,
 } from '../lib/groups/tripSession';
 import { foldParticipants, lastEta, minutesUntil, type Trip, type TripPing } from '../lib/groups/trips';
 import { leavePlan } from '../lib/family/leaveNow';
@@ -82,6 +80,12 @@ export default function FamilyMapScreen() {
   /** Meet Here (§40). A mode over the same map, never a separate screen (§4). */
   const [meetOpen, setMeetOpen] = useState(false);
   const [destination, setDestination] = useState<MeetDestination | null>(null);
+  // My own turn-by-turn, its follow camera and reroute state
+  // (components/family/useMapNavigation).
+  const {
+    navBanner, camera, following, setFollowing, rerouteFailed, reroute, resetCam,
+    navTargetName, startNavTo, startNav, stopNav, stopIfOurs,
+  } = useMapNavigation(destination);
   /**
    * The circle's live FAMILY TRIP (shared destination). Discovered from the
    * same announcement channel the hub watches; while one is running it OWNS
@@ -90,10 +94,6 @@ export default function FamilyMapScreen() {
    */
   const [trip, setTrip] = useState<Trip | null>(currentTrip());
   const [tripPings, setTripPings] = useState<TripPing[]>([]);
-  /** True while a navigation session started FROM THIS SCREEN is running —
-   *  so ending the trip stops OUR guidance and never someone's unrelated
-   *  Navigate-app session. */
-  const navHere = useRef(false);
   /** Dashed distance lines to every member. On by default — it is the picture
    *  the screen exists to show — but dismissible when the map gets busy. */
   const [showLinks, setShowLinks] = useState(true);
@@ -101,12 +101,10 @@ export default function FamilyMapScreen() {
   //
   // Gated on visibility: backgrounded, this screen was re-rendering the map,
   // every member row and every distance every 30 s for pixels nobody could
-  // see. `now` is derived from the tick rather than stored, so returning to
-  // the foreground recomputes freshness immediately instead of showing a
-  // timestamp frozen at the moment the user left.
-  const visibleTick = useVisibleTick(30_000);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const now = useMemo(() => Date.now(), [visibleTick]);
+  // see. `now` is re-taken on every tick, and the tick fires at once on
+  // returning to the foreground, so freshness is recomputed immediately
+  // instead of showing a timestamp frozen at the moment the user left.
+  const now = useVisibleNow(30_000);
 
   /**
    * My own position, for "1.2 km from You".
@@ -202,18 +200,22 @@ export default function FamilyMapScreen() {
   /**
    * A live trip OWNS the destination pin: every member's map shows the same
    * place, nobody types it. Ending the trip releases it.
+   *
+   * Keyed on the trip's ID and destination: a manual Meet Here destination
+   * (trip never set) must not be clobbered by re-renders, and a join/leave
+   * (a copy of the same trip) changes none of these.
    */
+  const tripId = trip?.id;
+  const tripDestName = trip?.destinationName, tripDestLat = trip?.destination.lat, tripDestLng = trip?.destination.lng;
   useEffect(() => {
-    if (trip) setDestination({ name: trip.destinationName, lat: trip.destination.lat, lng: trip.destination.lng });
-    else {
+    if (tripId && tripDestName != null && tripDestLat != null && tripDestLng != null) {
+      setDestination({ name: tripDestName, lat: tripDestLat, lng: tripDestLng });
+    } else {
       setDestination(null);
       // The trip is over — guidance started for it stops with it.
-      if (navHere.current) { stopNavigation(); navHere.current = false; }
+      stopIfOurs();
     }
-  // Keyed on the trip's ID: a manual Meet Here destination (trip never set)
-  // must not be clobbered by re-renders.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trip?.id]);
+  }, [tripId, tripDestName, tripDestLat, tripDestLng, stopIfOurs]);
 
   /** MY saved places, for the From-Home route. Device-local by doctrine —
    *  the coordinate never leaves this phone, so this route can only ever be
@@ -236,18 +238,7 @@ export default function FamilyMapScreen() {
   }, [circleId]);
   const homePlace = homeName ? myPlaces.find((p) => p.name === homeName) ?? null : null;
 
-  /**
-   * Road route to ONE member, fetched on demand (spec §8/§42).
-   *
-   * Deliberately not fetched for everyone: ten members would be ten Valhalla
-   * routings for lines nobody asked to see. The dashed connectors already
-   * answer "who is where and how far"; this answers "how do I actually get to
-   * THIS one", and only when asked.
-   *
-   * WITH A DESTINATION SET the same tap answers the trip's question instead:
-   * THAT member's own road to the destination ("individual route path"), not
-   * my road to them.
-   */
+  /** The member whose road route is drawn (Route on their sheet or row). */
   const [routeTo, setRouteTo] = useState<string | null>(null);
   /**
    * The member whose sheet is open. Tapping a marker used to only centre the
@@ -257,242 +248,15 @@ export default function FamilyMapScreen() {
    */
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [chatBusy, setChatBusy] = useState(false);
-  /** What the navigation dock calls the place we are going. A member route
-   *  has no `destination` object, so the name has to travel separately. */
-  const [navTargetName, setNavTargetName] = useState<string | null>(null);
-  const [routeShape, setRouteShape] = useState<{ lat: number; lng: number }[] | null>(null);
-  /** The tapped route's maneuvers — they feed the member turn indicator. */
-  const [routeMans, setRouteMans] = useState<Maneuver[] | null>(null);
-  const [routeInfo, setRouteInfo] = useState<string | null>(null);
-  const [routeBusy, setRouteBusy] = useState(false);
-
-  useEffect(() => {
-    const target = routeTo ? presences[routeTo] : undefined;
-    const from = destination ? target?.pos : mine?.pos;
-    const to = destination ? { lat: destination.lat, lng: destination.lng } : target?.pos;
-    if (!routeTo || !target || !from || !to) { setRouteShape(null); setRouteMans(null); setRouteInfo(null); return; }
-    let live = true;
-    setRouteBusy(true);
-    // ~11 m (4 dp), as the history trace: the router snaps to the road anyway,
-    // and it need not see either exact position.
-    const r4 = (p: { lat: number; lng: number }) => ({ lat: Math.round(p.lat * 1e4) / 1e4, lng: Math.round(p.lng * 1e4) / 1e4 });
-    fetchRoute(r4(from), r4(to), 'auto')
-      .then((r) => {
-        if (!live) return;
-        setRouteShape(r.shape);
-        setRouteMans(r.maneuvers);
-        // Road figures, explicitly labelled as such — never mixed with the
-        // straight-line numbers on the connectors (§8).
-        setRouteInfo(formatRoute(r.lengthM, r.timeS));
-      })
-      .catch(() => {
-        if (!live) return;
-        setRouteShape(null);
-        setRouteMans(null);
-        setRouteInfo('Route unavailable');
-      })
-      .finally(() => { if (live) setRouteBusy(false); });
-    return () => { live = false; };
-  // Keyed on the target's COORDINATES: re-route when they actually move, not on
-  // every ping that repeats the same position.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeTo, mine?.pos.lat, mine?.pos.lng, presences[routeTo ?? '']?.pos.lat, presences[routeTo ?? '']?.pos.lng, destination?.lat, destination?.lng]);
-
-  /**
-   * MY OWN road to the destination, drawn automatically the moment one exists
-   * (a trip landing, or a Meet Here pick). This is the "your route" half of a
-   * family trip — no tap required. Also feeds the trip's deviation check, so
-   * "left the route" is measured against the road actually drawn.
-   */
-  const [destRoute, setDestRoute] = useState<{ lat: number; lng: number }[] | null>(null);
-  const [destInfo, setDestInfo] = useState<string | null>(null);
-  /** Road seconds to the destination — what "leave now" is computed from.
-   *  Kept separate from destInfo, which is a formatted human string. */
-  const [destSecs, setDestSecs] = useState<number | null>(null);
-  useEffect(() => {
-    if (!destination || !mine) { setDestRoute(null); setDestInfo(null); setDestSecs(null); return; }
-    let live = true;
-    fetchRoute(mine.pos, { lat: destination.lat, lng: destination.lng }, 'auto')
-      .then((r) => {
-        if (!live) return;
-        setDestRoute(r.shape);
-        setDestInfo(formatRoute(r.lengthM, r.timeS));
-        setDestSecs(r.timeS);
-        const t = currentTrip();
-        // Never override a leader's shared route — that is the road the group
-        // agreed on; mine only stands in when nobody is leading.
-        if (t && !t.leaderId) setTripRoute(r.shape);
-      })
-      .catch(() => { if (live) { setDestRoute(null); setDestInfo(null); setDestSecs(null); } });
-    return () => { live = false; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [destination?.lat, destination?.lng, mine?.pos.lat, mine?.pos.lng]);
-
+  const { routeShape, routeMans, routeInfo, routeBusy, clearShape } = useMemberRoute({ routeTo, presences, mine, destination });
+  const { destRoute, destInfo, destSecs } = useDestRoute({ destination, mine });
   /** From-Home: the road from MY reference place to where I am now. */
   const [showHomeRoute, setShowHomeRoute] = useState(false);
-  const [homeRoute, setHomeRoute] = useState<{ lat: number; lng: number }[] | null>(null);
-  const [homeInfo, setHomeInfo] = useState<string | null>(null);
-  useEffect(() => {
-    if (!showHomeRoute || !homePlace || !mine) { setHomeRoute(null); setHomeInfo(null); return; }
-    let live = true;
-    fetchRoute(homePlace.center, mine.pos, 'auto')
-      .then((r) => { if (live) { setHomeRoute(r.shape); setHomeInfo(formatRoute(r.lengthM, r.timeS)); } })
-      .catch(() => { if (live) { setHomeRoute(null); setHomeInfo('Route unavailable'); } });
-    return () => { live = false; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showHomeRoute, homePlace?.center.lat, homePlace?.center.lng, mine?.pos.lat, mine?.pos.lng]);
+  const { homeRoute, homeInfo } = useHomeRoute({ show: showHomeRoute, homePlace, mine });
+  // Road figures for the connectors: one coarse /nav/matrix call.
+  const roadLabel = useRoadLabels({ enabled: showLinks, mine, presences, me, now });
+  const memberTurn = useMemberTurn({ routeTo, routeShape, routeMans, presences });
 
-  /**
-   * ROAD FIGURES ON THE ALWAYS-ON CONNECTORS — one call, coarse positions.
-   *
-   * This used to fetch a full Valhalla ROUTE from me to every member, each at
-   * full GPS precision, again whenever anyone moved 250 m: every member's
-   * decrypted position went to the routing server, one request per member,
-   * for lines nobody asked to see in detail. The connectors only need a
-   * distance and a time, so now ONE /nav/matrix call answers the whole family
-   * (as the hub already does), with every position rounded to ~110 m first —
-   * the precision those figures can show. A road SHAPE is fetched only when a
-   * member's Route is tapped (routeTo, above).
-   *
-   * Keyed on the rounded positions, so jitter and small moves cost nothing. A
-   * failed call leaves the straight-line figures, which never claim a road.
-   */
-  const [roadLabel, setRoadLabel] = useState<Record<string, string>>({});
-  const linkTargets = useMemo(() => {
-    if (!showLinks || !mine) return null;
-    const q = (n: number) => Math.round(n * 1000) / 1000;
-    const rows = Object.entries(presences)
-      .filter(([uid, p]) => uid !== me && freshnessOf(p.ts, now) !== 'unavailable')
-      .map(([uid, p]) => ({ id: uid, pos: { lat: q(p.pos.lat), lng: q(p.pos.lng) } }))
-      .sort((a, b) => (a.id < b.id ? -1 : 1));
-    if (!rows.length) return null;
-    const origin = { lat: q(mine.pos.lat), lng: q(mine.pos.lng) };
-    return { key: JSON.stringify([origin, rows]), origin, rows };
-  }, [showLinks, mine, presences, me, now]);
-  useEffect(() => {
-    if (!linkTargets) { setRoadLabel({}); return; }
-    const { origin, rows } = linkTargets;
-    let live = true;
-    fetchMatrix(rows.map((r) => r.pos), origin, 'auto')
-      .then((res) => {
-        if (!live) return;
-        const next: Record<string, string> = {};
-        for (const r of res) {
-          const t = rows[r.index];
-          if (t) next[t.id] = `${formatRoute(r.distanceM, r.durationS)} by road`;
-        }
-        setRoadLabel(next);
-      })
-      .catch(() => { if (live) setRoadLabel({}); });
-    return () => { live = false; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [linkTargets?.key]);
-
-  /**
-   * NEXT TURN of the member whose route is on screen — the watcher's
-   * indicator: their route, their live pings, their next left/right. The cue
-   * also FIRES (sound per nav settings' mode, vibration per profile) once per
-   * maneuver as they close within the trigger distance.
-   */
-  useEffect(() => { loadNavSettings().catch(() => {}); }, []);
-  const routedPos = routeTo ? presences[routeTo]?.pos : null;
-  const memberTurn = useMemo(() => {
-    if (!routeTo || !routeShape || !routeMans || !routedPos) return null;
-    return nextTurnAlong(routeShape, routeMans, routedPos);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeTo, routeShape, routeMans, routedPos?.lat, routedPos?.lng]);
-  const TURN_FIRE_M = 250;
-  const firedTurn = useRef<string | null>(null);
-  useEffect(() => {
-    if (!memberTurn || !routeTo) return;
-    const key = `${routeTo}:${memberTurn.index}`;
-    if (memberTurn.distM <= TURN_FIRE_M && firedTurn.current !== key) {
-      firedTurn.current = key;
-      const s = getNavSettings();
-      playHaptic(memberTurn.event, s.profile, { mode: s.mode });
-    }
-  }, [memberTurn, routeTo]);
-
-  /**
-   * MY OWN turn-by-turn to the destination — the REAL navigation loop
-   * (navigationService): GPS, adaptive haptic timeline, voice per the user's
-   * nav settings, missed-turn reroute — rendered here through the same
-   * NavBanner the Navigate app uses. Left running on navigate-away on
-   * purpose; STOP (or the trip ending) ends it.
-   */
-  const navBanner = useNavBanner();
-  /**
-   * AUTO-FOLLOW. On by default while guiding; the map reports the user's own
-   * pan/rotate/pinch (FamilyMap onUserMove) and we step out of the way rather
-   * than fighting the gesture. The Follow control puts it back — an explicit
-   * way in, instead of waiting out the map's silent 10 s timeout.
-   */
-  const [following, setFollowing] = useState(true);
-  /** A reroute that came back empty, so the UI can offer a manual retry
-   *  instead of looping. Cleared the moment a fresh route arrives. */
-  const [rerouteFailed, setRerouteFailed] = useState(false);
-  /**
-   * The camera band from the previous frame. Passing it back into
-   * cameraForManeuver is what applies the hysteresis — without it the zoom
-   * oscillates every time the distance wobbles across a band edge.
-   */
-  const camRef = useRef<CameraPlan | null>(null);
-  const camera = useMemo(() => {
-    if (!navBanner.active) { camRef.current = null; return null; }
-    const next = cameraForManeuver(navBanner.distanceToManeuver, navBanner.remainingM, camRef.current);
-    camRef.current = next;
-    return next;
-  }, [navBanner.active, navBanner.distanceToManeuver, navBanner.remainingM]);
-  // A new route (or the session ending) clears a stale failure.
-  useEffect(() => { if (!navBanner.rerouting) setRerouteFailed(false); }, [navBanner.rerouting]);
-  // Re-arm follow whenever a session starts, so a previous journey's manual
-  // pan does not leave the next one un-followed.
-  useEffect(() => { if (navBanner.active) setFollowing(true); }, [navBanner.active]);
-  /**
-   * PUT THE CAMERA BACK WHEN THE JOURNEY ENDS.
-   *
-   * Found on the Honor: navigation leaves the map in the pitched, heading-up
-   * chase camera, and ending the session used to leave it there — the map
-   * stayed rotated with no journey to justify it, which reads as broken. The
-   * cameraMode prop is declarative, so simply dropping to `undefined` changes
-   * nothing (FamilyMap keeps its last mode); it has to be told 'north' once.
-   *
-   * One-shot, and only after a session we actually ran: passing 'north'
-   * permanently would override the camera the user chose themselves on a map
-   * they never navigated from.
-   */
-  const wasNavigating = useRef(false);
-  const [resetCam, setResetCam] = useState(false);
-  useEffect(() => {
-    if (wasNavigating.current && !navBanner.active) {
-      setResetCam(true);
-      const t = setTimeout(() => setResetCam(false), 900);
-      wasNavigating.current = false;
-      return () => clearTimeout(t);
-    }
-    wasNavigating.current = navBanner.active;
-  }, [navBanner.active]);
-  /** Start real turn-by-turn to any point. `startNav` below is the Meet-Here
-   *  destination form of this and is unchanged; member routes use it directly
-   *  with the member's CURRENT position, which is the honest target — a person
-   *  is not a fixed point, and a reroute picks up their newer fix. */
-  const startNavTo = async (name: string, lat: number, lng: number) => {
-    try {
-      const s = await loadNavSettings();
-      await startNavigation({
-        to: { lat, lng },
-        profile: s.profile, mode: s.mode, timing: s.timing,
-        costing: s.costing, custom: s.custom, routeOpts: s.routeOpts,
-      });
-      navHere.current = true;
-      setNavTargetName(name);
-    } catch (e: any) { Alert.alert('Navigation', e?.message ?? 'Could not start navigation.'); }
-  };
-  const startNav = async () => {
-    if (!destination) return;
-    await startNavTo(destination.name, destination.lat, destination.lng);
-  };
-  const stopNav = () => { stopNavigation(); navHere.current = false; setNavTargetName(null); };
   /** Chat with a member — the same createDirectChat path family-member.tsx uses. */
   const openChat = async (userId: string) => {
     if (chatBusy) return;
@@ -537,23 +301,13 @@ export default function FamilyMapScreen() {
     return [30, 60, 120].map((m) => base + m * 60_000);
   }, [now]);
 
-  /**
-   * OVERLAY SLOTS. Every floating bar used to carry a hardcoded offset, and
-   * three pairs collided the moment their conditions were both true: the
-   * follow banner sat exactly on the search bar, the Routes chip sat under
-   * the full-width route bar, and the From-Home chip sat on the turn strip.
-   * Offsets are computed from what is actually on screen instead, so bars
-   * stack in a fixed reading order and never share a pixel.
-   */
-  // Compact by intent: every pixel of chrome is a pixel of map the family
-  // cannot see. Bars are sized to their content and stacked at that pitch.
-  const TOP_0 = 8, TOP_PITCH = 46;
+  // Bar positions: lib/family/mapSlots (stacking order and pitch there).
   // BOT_0 carries the gesture inset. NavigationLayer already applies whatever
   // it is handed (components/family/NavigationLayer.tsx:92), but the literal 10
   // fed into it had none, so the dock, the follow button and the arrival card
   // all sat inside the 48dp swipe strip on a gesture-nav device — edgeToEdge is
   // on at every API level. One value, all three consumers (2026-09-17).
-  const BOT_0 = 10 + insets.bottom, BOT_PITCH = 44;
+  const BOT_0 = 10 + insets.bottom;
   const showTrip = !!trip && !meetOpen;
   const showFollowBar = !!followId && !meetOpen;
   const showLeave = !!destination && !meetOpen && destSecs != null;
@@ -562,27 +316,11 @@ export default function FamilyMapScreen() {
   // same top offset and cover it.
   const showSearch = !meetOpen && !navBanner.active;
   const showPlaces = showSearch && !trip && myPlaces.length > 0;
-  const slots = useMemo(() => {
-    let i = 0;
-    const searchTop = showSearch ? TOP_0 + TOP_PITCH * i++ : 0;
-    // The place-chip row is a slot like any bar; at a fixed searchTop+52 it
-    // sat under the follow/leave bars, which also started at searchTop+46.
-    const placesTop = showPlaces ? TOP_0 + TOP_PITCH * i++ : 0;
-    const tripTop = showTrip ? TOP_0 + TOP_PITCH * i++ : 0;
-    const followTop = showFollowBar ? TOP_0 + TOP_PITCH * i++ : 0;
-    const leaveTop = showLeave ? TOP_0 + TOP_PITCH * i++ : 0;
-    // Where the free map starts below the stacked bars — the nav capsule's top.
-    const barsBottom = TOP_PITCH * i;
-    return { searchTop, placesTop, tripTop, followTop, leaveTop, barsBottom };
-  }, [showSearch, showPlaces, showTrip, showFollowBar, showLeave]);
-
-  const anyRouteBar = !!(routeShape || homeRoute || destRoute);
-  const showTurnBar = !!(memberTurn && routeShape);
-  // Bottom bars claim the floor first; the chips and the map's own controls
-  // then start above whatever is there.
-  const routeBarBottom = BOT_0;
-  const turnBarBottom = BOT_0 + (anyRouteBar ? BOT_PITCH : 0);
-  const chipsBottom = BOT_0 + (anyRouteBar ? BOT_PITCH : 0) + (showTurnBar ? BOT_PITCH : 0);
+  const slots = mapSlots({
+    search: showSearch, places: showPlaces, trip: showTrip, follow: showFollowBar, leave: showLeave,
+    bottom0: BOT_0, routeBar: !!(routeShape || homeRoute || destRoute), turnBar: !!(memberTurn && routeShape),
+  });
+  const { routeBarBottom, turnBarBottom, chipsBottom } = slots;
 
   const nameOf = useMemo(() => new Map(members.map((m) => [m.id, m.name])), [members]);
   const markers: FamilyMarker[] = useMemo(() => Object.entries(presences)
@@ -648,9 +386,8 @@ export default function FamilyMapScreen() {
   /** Am I an active participant of the shown trip (sharing my ETA)? */
   const joined = !!trip && currentTrip()?.id === trip.id;
   const tripEta = useMemo(
-    () => (trip ? lastEta(foldParticipants(tripPings, {}, now)) : null),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [trip?.id, tripPings, now],
+    () => (tripId ? lastEta(foldParticipants(tripPings, {}, now)) : null),
+    [tripId, tripPings, now],
   );
 
   const beginTrip = (d: MeetDestination) => {
@@ -799,10 +536,7 @@ export default function FamilyMapScreen() {
           camera={camera}
           following={following}
           onFollow={() => setFollowing(true)}
-          onReroute={() => {
-            setRerouteFailed(false);
-            forceReroute().catch(() => setRerouteFailed(true));
-          }}
+          onReroute={reroute}
           onStop={stopNav}
           onDone={stopNav}
           bottomInset={chipsBottom}
@@ -983,7 +717,7 @@ export default function FamilyMapScreen() {
                   <BarAction onPress={stopNav} label="STOP NAV" a11y="Stop navigation"
                     style={{ color: G.dangerText, fontWeight: '800', fontSize: 12 }} />
                 )}
-                <BarAction onPress={() => { setRouteTo(null); setRouteShape(null); setRouteMans(null); }}
+                <BarAction onPress={() => { setRouteTo(null); clearShape(); }}
                   label="CLEAR" a11y="Clear the route"
                   style={{ color: G.accentText, fontWeight: '800', fontSize: 12 }} />
               </View>

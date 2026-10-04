@@ -11,14 +11,16 @@ import { useTheme } from '../../lib/theme';
 import { useSpaceGlass } from '../spaces/SpaceGround';
 import { sheetSt } from './sheetStyles';
 import { tint } from '../../lib/tintColor';
+import type { Palette } from '../../constants/theme';
 
-/** Status colours are semantic (safe / on the way / late / help), the same in
- *  both themes; the label text on each tile is theme text. */
-export const CHECKINS: { label: string; emoji: string; color: string }[] = [
-  { label: "I'm Safe",     emoji: '✅', color: '#22C55E' },
-  { label: 'On My Way',    emoji: '🚗', color: '#4A9FFF' },
-  { label: 'Running Late', emoji: '⏳', color: '#F59E0B' },
-  { label: 'Need Help',    emoji: '🆘', color: '#EF4444' },
+/** Each status's colour is a semantic theme token (safe / on the way / late /
+ *  help), so its tile edge and checkmark keep their contrast in both themes;
+ *  the label text on each tile is theme text. */
+export const CHECKINS: { label: string; emoji: string; tone: keyof Pick<Palette, 'success' | 'primary' | 'warning' | 'danger'> }[] = [
+  { label: "I'm Safe",     emoji: '✅', tone: 'success' },
+  { label: 'On My Way',    emoji: '🚗', tone: 'primary' },
+  { label: 'Running Late', emoji: '⏳', tone: 'warning' },
+  { label: 'Need Help',    emoji: '🆘', tone: 'danger' },
 ];
 export type Checkin = typeof CHECKINS[number];
 
@@ -51,6 +53,7 @@ export default function CheckinSheet({ visible, onClose, picked, onPick, note, o
             <View style={st.checkGrid} accessibilityRole="radiogroup">
               {CHECKINS.map((c) => {
                 const on = picked?.label === c.label;
+                const color = colors[c.tone];
                 return (
                   <TouchableOpacity
                     key={c.label}
@@ -59,14 +62,14 @@ export default function CheckinSheet({ visible, onClose, picked, onPick, note, o
                     accessibilityState={{ selected: on, checked: on }}
                     accessibilityLabel={c.label}
                     style={[st.checkBtn, {
-                      backgroundColor: tint(c.color, on ? 0.2 : 0.12),
-                      borderColor: on ? c.color : tint(c.color, 0.33),
+                      backgroundColor: tint(color, on ? 0.2 : 0.12),
+                      borderColor: on ? color : tint(color, 0.33),
                       borderWidth: on ? 2 : 1,
                     }]}
                   >
                     <Text style={{ fontSize: 18 }}>{c.emoji}</Text>
                     <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13.5 }}>{c.label}</Text>
-                    {on && <Ionicons name="checkmark-circle" size={16} color={c.color} style={{ position: 'absolute', top: 8, right: 8 }} />}
+                    {on && <Ionicons name="checkmark-circle" size={16} color={color} style={{ position: 'absolute', top: 8, right: 8 }} />}
                   </TouchableOpacity>
                 );
               })}

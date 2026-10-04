@@ -21,7 +21,7 @@
 // basemap: members, paths and routes over the app background.
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, type StyleProp, type ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { WebView } from 'react-native-webview';
 import { useTheme } from '../../lib/theme';
@@ -32,6 +32,7 @@ import { STREETVIEW_API_KEY, FAMILY_MAP_3D } from '../../constants/flags';
 import { clusterForZoom } from '../../lib/groups/clustering';
 import { fetchRoute } from '../../lib/nav/routing';
 import { mapStyleUrl, buildings3DLayer, RASTER_FALLBACK_URL, ATTRIBUTION } from '../../lib/map/tileProvider';
+import { FAMILY_MAP_MEMBER, FAMILY_MAP_TRACK } from '../../constants/familyPalette';
 
 export interface FamilyMarker {
   id: string;
@@ -49,7 +50,14 @@ export interface FamilyMarker {
 /** Camera modes for the 3D engine. Mirrors NavMap's, deliberately. */
 export type FamilyCameraMode = 'follow' | 'north' | 'overview';
 
-const COLORS = ['#4A9FFF', '#EC4899', '#22C55E', '#F59E0B', '#A855F7', '#EF4444', '#14B8A6', '#F97316'];
+// Member hues and the track caps are a fixed map palette, documented and
+// contrast-checked in constants/familyPalette.ts.
+const COLORS = FAMILY_MAP_MEMBER;
+/** The track caps cross the bridge with each setPath call: the page templates
+ *  take no extra interpolations (lib/map/mapHtml.selftest.ts evaluates them). */
+const TRACK_CAPS_JS = JSON.stringify(FAMILY_MAP_TRACK);
+/** The only documents this WebView may show; see originWhitelist below. */
+const MAP_PAGE_ORIGINS = ['about:blank', 'data:*'];
 const initials = (name: string) => (name || '?').trim().split(/\s+/).slice(0, 2).map((w) => [...w][0]?.toUpperCase() ?? '').join('') || '?';
 
 /** Marker styling, shared verbatim by both engines so a member looks identical
@@ -126,15 +134,16 @@ function fitAll(){ var ids=Object.keys(markers); if(!ids.length)return;
 function focus(id,z){ if(markers[id]) map.setView(markers[id].getLatLng(),z||16,{animate:true}); }
 // Location-history track. Drawn under the markers; fitting the line wins over
 // fitAll() because when a path is supplied it IS the subject of the view.
+// caps = {start,end,ring}: the fixed track colours (constants/familyPalette).
 var pathLine=null, pathDots=[];
-function setPath(pts){
+function setPath(pts,caps){
   if(pathLine){ map.removeLayer(pathLine); pathLine=null; }
   pathDots.forEach(function(d){ map.removeLayer(d); }); pathDots=[];
   if(!pts||pts.length<2) return;
   var ll=pts.map(function(p){ return [p.lat,p.lng]; });
   pathLine=L.polyline(ll,{color:'${selfColor}',weight:4,opacity:.85,lineJoin:'round'}).addTo(map);
-  [[ll[0],'#22C55E'],[ll[ll.length-1],'#EF4444']].forEach(function(e){
-    pathDots.push(L.circleMarker(e[0],{radius:6,color:'#fff',weight:2,fillColor:e[1],fillOpacity:1}).addTo(map));
+  [[ll[0],caps.start],[ll[ll.length-1],caps.end]].forEach(function(e){
+    pathDots.push(L.circleMarker(e[0],{radius:6,color:caps.ring,weight:2,fillColor:e[1],fillOpacity:1}).addTo(map));
   });
   map.fitBounds(pathLine.getBounds().pad(0.2));
   fitted=true;
@@ -331,8 +340,8 @@ function setTilt(d){
 }
 // Location-history track. Drawn UNDER the markers (HTML markers always sit
 // above the canvas), and fitting the line wins over fitAll() because when a
-// path is supplied it IS the subject of the view.
-function setPath(pts){
+// path is supplied it IS the subject of the view. caps as on the Leaflet page.
+function setPath(pts,caps){
   pathIds.forEach(function(id){
     if(map.getLayer(id+'-l')) map.removeLayer(id+'-l');
     if(map.getLayer(id+'-c')) map.removeLayer(id+'-c');
@@ -346,10 +355,10 @@ function setPath(pts){
     paint:{'line-color':'${selfColor}','line-width':4,'line-opacity':.85},
     layout:{'line-join':'round','line-cap':'round'}});
   pathIds.push('track');
-  [['start',coords[0],'#22C55E'],['end',coords[coords.length-1],'#EF4444']].forEach(function(e){
+  [['start',coords[0],caps.start],['end',coords[coords.length-1],caps.end]].forEach(function(e){
     map.addSource(e[0],{type:'geojson',data:{type:'Feature',geometry:{type:'Point',coordinates:e[1]}}});
     map.addLayer({id:e[0]+'-c',type:'circle',source:e[0],
-      paint:{'circle-radius':6,'circle-color':e[2],'circle-stroke-color':'#fff','circle-stroke-width':2}});
+      paint:{'circle-radius':6,'circle-color':e[2],'circle-stroke-color':caps.ring,'circle-stroke-width':2}});
     pathIds.push(e[0]);
   });
   var b=coords.reduce(function(bb,c){return bb.extend(c);},new maplibregl.LngLatBounds(coords[0],coords[0]));
@@ -554,7 +563,7 @@ export default function FamilyMap({
   linkFrom?: { lat: number; lng: number } | null;
   /** Road-route polyline for ONE member, from Valhalla. Solid, not dashed. */
   route?: { lat: number; lng: number }[] | null;
-  style?: any;
+  style?: StyleProp<ViewStyle>;
   /** Device heading. Rotates the basemap in 'follow' (heading-up) only. */
   headingDeg?: number | null;
   /** Controlled camera. Uncontrolled — with an on-map toggle — if omitted. */
@@ -627,12 +636,12 @@ export default function FamilyMap({
   // re-cluster at the same zoom) does not yank the camera. No polling — this
   // rides the presence updates that already arrive.
   const followed = followId ? members.find((m) => m.id === followId) : undefined;
+  const followedId = followed?.id, followedLat = followed?.lat, followedLng = followed?.lng;
   useEffect(() => {
-    if (!ready || !followed || !ref.current) return;
+    if (!ready || !followedId || !ref.current) return;
     const z = followZoom != null && Number.isFinite(followZoom) ? `,${followZoom}` : '';
-    ref.current.injectJavaScript(`focus(${JSON.stringify(followed.id)}${z});true;`);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, followed?.id, followed?.lat, followed?.lng, followZoom]);
+    ref.current.injectJavaScript(`focus(${JSON.stringify(followedId)}${z});true;`);
+  }, [ready, followedId, followedLat, followedLng, followZoom]);
 
   // Thin the track before it crosses the bridge: a month of samples is thousands
   // of points and Leaflet gains nothing from more than a few hundred.
@@ -644,18 +653,19 @@ export default function FamilyMap({
   }, [path]);
 
   useEffect(() => {
-    if (ready && ref.current) ref.current.injectJavaScript(`setPath(${trackJs});true;`);
+    if (ready && ref.current) ref.current.injectJavaScript(`setPath(${trackJs},${TRACK_CAPS_JS});true;`);
   }, [ready, trackJs]);
 
-  useEffect(() => {
-    if (!ready || !ref.current) return;
-    ref.current.injectJavaScript(destination
-      ? `setDest(${destination.lat},${destination.lng},${JSON.stringify(destination.name ?? '')});true;`
-      : 'setDest(null);true;');
   // Keyed on the destination's FIELDS, not the object: a parent that rebuilds
   // the literal each render would otherwise re-centre the camera on every tick.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, destination?.lat, destination?.lng, destination?.name]);
+  const destLat = destination?.lat, destLng = destination?.lng, destName = destination?.name;
+  const hasDest = !!destination;
+  useEffect(() => {
+    if (!ready || !ref.current) return;
+    ref.current.injectJavaScript(hasDest
+      ? `setDest(${destLat},${destLng},${JSON.stringify(destName ?? '')});true;`
+      : 'setDest(null);true;');
+  }, [ready, hasDest, destLat, destLng, destName]);
 
   /**
    * Connector payload. Built from the SAME coloured, clustered list the markers
@@ -731,7 +741,19 @@ export default function FamilyMap({
         accessible
         accessibilityLabel={a11ySummary}
         source={source}
-        originWhitelist={['*']}
+        // The page is inline HTML, so the only document it is ever loaded as
+        // is about:blank (react-native-webview 13 loads `source.html` with an
+        // empty base URL on Android and a nil one on iOS; the library always
+        // allows about:blank itself). data: is listed defensively: a platform
+        // that reported the inline page by a data: URL and was refused would
+        // show a blank map. The page's scripts and styles are data:
+        // subresources and its tiles are fetches; the whitelist checks neither.
+        // What it does stop: a tap on an attribution link (or anything else
+        // that navigates the top frame) replacing the map inside the WebView.
+        // Such a link now opens in the system browser. 📱 Verify first paint on
+        // Android and iOS; if Street View is ever enabled (STREETVIEW_API_KEY),
+        // re-check its panorama, which this map has never had to load.
+        originWhitelist={MAP_PAGE_ORIGINS}
         javaScriptEnabled
         domStorageEnabled
         onMessage={(e) => {

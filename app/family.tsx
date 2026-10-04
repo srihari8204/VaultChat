@@ -14,10 +14,7 @@
 
 import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  View, TouchableOpacity, ScrollView, Alert, Animated, Vibration, Linking, useWindowDimensions,
-} from 'react-native';
-import * as Location from 'expo-location';
+import { View, TouchableOpacity, ScrollView, Alert, useWindowDimensions } from 'react-native';
 import { Stack, useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import ChatDoorButton from '../components/spaces/ChatDoorButton';
@@ -30,7 +27,6 @@ import FamilyMap, { type FamilyMarker } from '../components/family/FamilyMap';
 // to the group registry and must survive the switch — dropping it would bring
 // back a phone retrying a dead circle on every focus.
 import { getSettings, removeCircle, getPlaces } from '../lib/family/store';
-import { canShareInBackground } from '../lib/family/presence';
 import { memberLabel } from '../lib/family/relations';
 import { useVisibleTick } from '../lib/family/useVisibleTick';
 import { type Geofence } from '../lib/family/geofence';
@@ -41,14 +37,10 @@ import { listGroups, resolveActiveGroup, saveGroup, setActiveGroupId, type Group
 import { groupIdentity } from '../lib/groups/catalog';
 import { can as hasPerm, type Permission } from '../lib/groups/permissions';
 import { familyOf, isOperational, sectionsFor, memberHeading } from '../lib/spaces/layout';
-import {
-  circleMembers, renameCircle, leaveCircle, deleteCircle,
-  removeCircleMember, setGuardian,
-} from '../lib/family/circle';
+import { circleMembers } from '../lib/family/circle';
 import { loadGroupsReconciled } from '../lib/family/hubGroups';
 import { loadAlerts, recordAlert, useUnreadCount } from '../lib/family/alerts';
-import { requestCheckin, confirmImOk } from '../lib/family/escalationService';
-import { MISSES_BEFORE_EMERGENCY } from '../lib/family/escalation';
+import { confirmImOk } from '../lib/family/escalationService';
 import { type CircleMember, STALE_MS, DEFAULT_SPEED_ALERT_KMH } from '../lib/family/types';
 import { sendMessage, getChat, sendAnnouncement } from '../lib/chatService';
 import { getCurrentUserAsync } from './(constants)/authService';
@@ -70,10 +62,8 @@ import { useHubPresence } from '../components/family/useHubPresence';
 import { useHubDistances } from '../components/family/useHubDistances';
 import { useHubTrip, useHubHighlights, useHubRuns, useHubRelations } from '../components/family/useHubFeeds';
 import { useWatchAlerts, useCrashDetection } from '../components/family/useHubSafety';
-
-const SOS_HOLD_MS = 1500;
-/** Oldest cached fix an SOS message may quote as the sender's position. */
-const SOS_FIX_MAX_AGE_MS = 5 * 60_000;
+import { useHubSos } from '../components/family/useHubSos';
+import { useHubCircleActions } from '../components/family/useHubCircleActions';
 
 // The dusk-glass ground (gradient + identity aura) is shared with every other
 // Space screen — see components/spaces/SpaceGround.tsx. Switching spaces
@@ -391,67 +381,10 @@ export default function FamilySpaceScreen() {
     router.push({ pathname: '/family-add', params: { circleId: active.id, circleName: active.name } });
   };
 
-  // ── SOS: hold-to-activate ────────────────────────────────────────────
-  const sosProg = useRef(new Animated.Value(0)).current;
-  const sosTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const fireSos = async () => {
-    sosProg.setValue(0);
-    if (!active || !me) return;
-    Vibration.vibrate([0, 400, 150, 400]);
-    // THE MESSAGE GOES FIRST. Turning sharing on can raise the location,
-    // background-location and battery-exemption system dialogs, and a high-
-    // accuracy fix can take tens of seconds — none of that may stand between
-    // the user and the alert. The OS's cached fix is instant and prompt-free
-    // (it throws without permission, which just means no coordinates); live
-    // sharing, started right after, supplies the real position.
-    // The cache can be hours old, and a stale fix sent as "where I am" sends
-    // the circle to the wrong place — so it only goes when it is recent.
-    try {
-      let where = ' (location unavailable)';
-      try {
-        const c = await Location.getLastKnownPositionAsync({ maxAge: SOS_FIX_MAX_AGE_MS });
-        if (c && Date.now() - c.timestamp <= SOS_FIX_MAX_AGE_MS) {
-          where = ` (${c.coords.latitude.toFixed(5)}, ${c.coords.longitude.toFixed(5)})`;
-        }
-      } catch {}
-      await sendMessage(active.id, `🆘 ${me.name} triggered an SOS — please respond${where}`, 'system');
-    } catch (e: any) { Alert.alert('SOS', e?.message ?? 'Could not send SOS.'); return; }
-    recordAlert({
-      circleId: active.id, kind: 'sos', actorId: me.id, actorName: me.name,
-      text: `${me.name} triggered an SOS`,
-    }).catch(() => {});
-    setBump((b) => b + 1);
-    const live = await toggleShare(true, true).catch(() => false);
-    // The one dialog after an SOS: what happened, plus the single fix that
-    // matters — location access when sharing could not start, or always-on
-    // location when it only runs while this screen is open — instead of the
-    // stack of dialogs toggleShare would otherwise raise.
-    const bgMissing = live && !(await canShareInBackground().catch(() => true));
-    if (bgMissing) bgAsked.current = true;
-    const fix = !live
-      ? [{ text: 'Open settings', onPress: () => { Linking.openSettings().catch(() => {}); } }]
-      : bgMissing
-        ? [{ text: 'Keep sharing when locked', onPress: () => { enableBackgroundSharing(); } }]
-        : [];
-    Alert.alert('SOS sent', !live
-      ? 'Your circle has been alerted. Your live location is NOT being shared — check that location access is on.'
-      : bgMissing
-        ? 'Your circle has been alerted and your live location is on while crazzychat is open.'
-        : 'Your circle has been alerted and your live location is on.', [
-      ...fix,
-      { text: 'Also alert trusted contacts', onPress: () => router.push('/emergency-sos') },
-      { text: 'OK' },
-    ]);
-  };
-  const sosStart = () => {
-    Vibration.vibrate(30);
-    Animated.timing(sosProg, { toValue: 1, duration: SOS_HOLD_MS, useNativeDriver: true }).start();
-    sosTimer.current = setTimeout(fireSos, SOS_HOLD_MS);
-  };
-  const sosEnd = () => {
-    if (sosTimer.current) { clearTimeout(sosTimer.current); sosTimer.current = null; }
-    Animated.timing(sosProg, { toValue: 0, duration: 120, useNativeDriver: true }).start();
-  };
+  // ── SOS: hold-to-activate (components/family/useHubSos) ──────────────
+  const { sosProg, fireSos, sosStart, sosEnd } = useHubSos({
+    active, me, toggleShare, bgAsked, enableBackgroundSharing, router, onSent: () => setBump((b) => b + 1),
+  });
 
   useWatchAlerts({ activeId, myId: me?.id, members, membersLoaded, presences, tick });
   const crash = useCrashDetection({ armed: share, presences, myId: me?.id, onSos: fireSos });
@@ -471,28 +404,6 @@ export default function FamilySpaceScreen() {
       setPicked(null);
       setBump((b) => b + 1);
     } catch (e: any) { Alert.alert('Check-in', e?.message ?? 'Could not send.'); }
-  };
-
-  // ── Escalation ladder (F6) ───────────────────────────────────────────
-  /** Guardian asks a member to check in; the ladder escalates if they don't. */
-  const askCheckin = (m: CircleMember) => {
-    if (!active || !me) return;
-    Alert.alert(
-      `Ask ${m.name} to check in?`,
-      `They'll be asked now, reminded twice if there's no reply, and after ${MISSES_BEFORE_EMERGENCY} missed reminders the circle gets an emergency alert.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Ask', onPress: async () => {
-          try {
-            await requestCheckin({
-              circleId: active.id, subjectId: m.id, subjectName: m.name,
-              meId: me.id, meName: me.name,
-            });
-            setBump((b) => b + 1);
-          } catch (e: any) { Alert.alert('Check-in', e?.message ?? 'Could not send the request.'); }
-        } },
-      ],
-    );
   };
 
   /** Member answers a request. Harmless when no ladder is running for them. */
@@ -525,64 +436,11 @@ export default function FamilySpaceScreen() {
     } finally { setBusy(false); }
   };
 
-  // ── Member management (guardians) ────────────────────────────────────
-  const memberActions = (m: CircleMember) => {
-    if (!active || !me || m.id === me.id || !canRemove) return;
-    Alert.alert(m.name, 'Manage this member', [
-      { text: 'Ask to check in', onPress: () => askCheckin(m) },
-      { text: m.role === 'guardian' ? 'Make member' : 'Make guardian', onPress: async () => {
-        try { await setGuardian(active.id, m.id, m.role !== 'guardian'); refreshMembers(); }
-        catch (e: any) { Alert.alert('Role', e?.message ?? 'Could not change role.'); }
-      } },
-      { text: 'Remove from circle', style: 'destructive', onPress: () => {
-        Alert.alert('Remove member?', `${m.name} will no longer see or share locations in "${active.name}".`, [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Remove', style: 'destructive', onPress: async () => {
-            try { await removeCircleMember(active.id, m.id); refreshMembers(); }
-            catch (e: any) { Alert.alert('Remove', e?.message ?? 'Could not remove.'); }
-          } },
-        ]);
-      } },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  };
-
-  const doRename = async () => {
-    if (!active || !renameTxt.trim() || busy) return;
-    setBusy(true);
-    try {
-      await renameCircle(active.id, renameTxt);
-      const name = renameTxt.trim();
-      setActive({ ...active, name });
-      setCircles(await listGroups());
-      setRenameTxt('');
-    } catch (e: any) { Alert.alert('Rename', e?.message ?? 'Could not rename.'); }
-    finally { setBusy(false); }
-  };
-  const doLeave = () => {
-    if (!active || !me) return;
-    Alert.alert('Leave circle?', `You will stop sharing and seeing locations in "${active.name}".`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Leave', style: 'destructive', onPress: async () => {
-        // leaveCircle throws when the server refused; the circle then stays
-        // listed (the user is still in it) and they are told why.
-        try { await leaveCircle(active.id, me.id); await afterCircleGone(); }
-        catch (e: any) { Alert.alert('Leave', e?.message ?? 'Could not leave the circle. Try again.'); }
-      } },
-    ]);
-  };
-  const doDelete = () => {
-    if (!active || !me) return;
-    Alert.alert('Delete circle?', `"${active.name}" will be disbanded for everyone. This cannot be undone.`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete circle', style: 'destructive', onPress: async () => {
-        setBusy(true);
-        try { await deleteCircle(active.id, me.id); await afterCircleGone(); }
-        catch (e: any) { Alert.alert('Delete', e?.message ?? 'Could not delete the circle.'); }
-        finally { setBusy(false); }
-      } },
-    ]);
-  };
+  // ── Guardian and circle actions (components/family/useHubCircleActions) ──
+  const { memberActions, doRename, doLeave, doDelete } = useHubCircleActions({
+    active, me, canRemove, busy, setBusy, renameTxt, setRenameTxt,
+    refreshMembers, afterCircleGone, setActive, setCircles, onSent: () => setBump((b) => b + 1),
+  });
 
   if (loading) return <HubSkeleton />;
 
