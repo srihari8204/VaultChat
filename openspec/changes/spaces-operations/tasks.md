@@ -145,6 +145,18 @@ screen, and could not be reached from either end.
 **Not a regression from this change.** The stranded row predates it, and nothing
 in Spaces & Operations touches the invitation path.
 
+## 2026-10-04 screen audit follow-ups (client only)
+Level reached for every item below: **written** — not deployed (no release build
+carries it yet) and not device-verified. No migration and no server file changed;
+each item uses endpoints that are already on production.
+- [x] A.1 Written: the run builder (`app/space-runs-admin.tsx`, `lib/spaces/runPlan.ts`) sends stop `label/lat/lng/plannedAt` and a per-rider `stopId`, and re-sends the manifest remapped to the new stop ids after every stop save (the server DELETE+INSERTs stops, and the 086 FK `ON DELETE SET NULL` otherwise wipes each rider's stop). Check: `npx tsx lib/spaces/runPlan.selftest.ts`
+- [x] A.2 Written: `driverView()` in `lib/spaces/runs.ts` lists unassigned riders (and riders whose stop id no longer exists) at the first stop, and every rider when a run has no stops, so the driver can mark them
+- [x] A.3 Written: overspeed, deviation and long-stop detections are sent as sealed famEvent `overspeed` / `deviation` / `longstop` messages on the existing alert path (`lib/family/alerts.ts`), never carrying a coordinate. They reach every space member's inbox, as geofence famEvents already do
+- [x] A.4 Written: device command agent `lib/spaces/deviceAgent.ts` (pure plan in `lib/spaces/deviceCommands.ts`), mounted once in `app/_layout.tsx`. It sends a position-free heartbeat and carries out `ring` and `message` only; `lock`, `wipe`, `photo` and `locate` are acked `failed` because no safe implementation exists. Check: `npx tsx lib/spaces/deviceCommands.selftest.ts`
+- [x] A.5 Written: space links editor (`components/spaces/SpaceLinksSheet.tsx`, gated `manage_roster`) and shift editor (`components/spaces/ShiftSheet.tsx`, `lib/spaces/shift.ts`, gated `edit_settings`), opened from space admin. Check: `npx tsx lib/spaces/shift.selftest.ts`
+- [ ] A.6 Ship A.1–A.5 in a release build (deployed level)
+- [ ] A.7 Device-verify A.1–A.5: a rider's stop survives a stop edit; an unassigned rider can be marked; a detection appears in another member's alert inbox; a `ring` command rings the bound phone and a `lock` command is acked failed; a saved link and shift are read back
+
 ## Explicitly not in this change
 Recorded here so they read as deferred, not forgotten: AI delay prediction and
 route optimisation, occupancy forecasting, driver scoring, multi-campus and

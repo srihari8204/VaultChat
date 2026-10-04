@@ -30,6 +30,9 @@ export interface ShelfFile {
   createdAt: string;
   kind: ShelfKind;
   pinned?: boolean;
+  /** Protection flags the viewer needs (lib/shelfOpen). */
+  encrypted?: boolean;
+  viewOnce?: boolean;
 }
 
 const EXT: Record<string, ShelfKind> = {};

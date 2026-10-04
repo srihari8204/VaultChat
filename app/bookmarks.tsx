@@ -116,7 +116,7 @@ export default function BookmarksScreen() {
         { text: 'Cancel', style: 'cancel' },
         { text: 'Remove', style: 'destructive', onPress: async () => {
             try {
-              await removeBookmark(b.id);
+              await removeBookmark(b.id, Number(b.message?.id) || null);
               setRows(prev => {
                 const next = prev.filter(r => r.id !== b.id);
                 writeCache('bookmarks', withoutBodies(next)); // keep instant-paint cache consistent

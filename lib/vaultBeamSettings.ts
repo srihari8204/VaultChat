@@ -98,11 +98,13 @@ export async function getSettings(): Promise<VBSettings> {
   return cached;
 }
 
+/** Applies `next` in memory at once; rejects if it could not be persisted, so
+ *  the caller can say the choice will not survive a restart. */
 export async function saveSettings(next: VBSettings): Promise<void> {
   cached = clamp(next);
   loaded = true;
   for (const cb of subs) { try { cb(); } catch {} }
-  try { await AsyncStorage.setItem(KEY, JSON.stringify(cached)); } catch {}
+  await AsyncStorage.setItem(KEY, JSON.stringify(cached));
 }
 
 export async function patchSettings(patch: Partial<VBSettings>): Promise<void> {

@@ -143,8 +143,13 @@ The feature SHALL provide a settings screen grouped as: General (units metric/im
 - **THEN** distances render in feet/miles and speeds in mph across the status card, alerts, history, and statistics
 
 ### Requirement: Location privacy
-All geofence evaluation SHALL happen on-device; lock coordinates, fixes, zone events, and history SHALL never be transmitted off the device by this feature. The only permitted network calls are route requests to the app's own authenticated routing proxy and (if enabled) geocoding queries to the app's own search proxy.
+All geofence evaluation SHALL happen on-device; lock coordinates, fixes, zone events, and history SHALL never be transmitted off the device by this feature. The only permitted network calls are route requests to the app's own authenticated routing proxy, (if enabled) geocoding queries to the app's own search proxy, and basemap tile requests to `tiles.openfreemap.org` for the map viewport currently on screen. Tile requests SHALL carry only the tile coordinates of the visible viewport, never the device fix, lock coordinates, or zone events, and SHALL be made only while a map is displayed.
 
 #### Scenario: Monitoring generates no location traffic
 - **WHEN** a lock is armed and the device moves between zones for an hour without using navigate-back or search
 - **THEN** the feature performs no network requests containing coordinates
+
+#### Scenario: Map tiles reveal only the visible viewport
+- **WHEN** the user opens a lock map screen and pans it
+- **THEN** the only tile traffic is requests to `tiles.openfreemap.org` for the tiles in the visible viewport
+- **AND** no request carries the device fix, lock coordinates, or zone events

@@ -21,7 +21,8 @@ export default function ConnectionBanner() {
   const connecting = state === 'CONNECTING';
   const ink = connecting && scheme === 'light' ? c.text : '#fff';
   return (
-    <View style={[styles.bar, connecting ? styles.connecting : styles.offline]}>
+    // Android announces the strip as it appears and changes state.
+    <View style={[styles.bar, connecting ? styles.connecting : styles.offline]} accessibilityLiveRegion="polite">
       {connecting && <ActivityIndicator size="small" color={ink} style={styles.spinner} />}
       <Text style={[styles.txt, { color: ink }]}>{connecting ? 'Connecting…' : 'Waiting for network…'}</Text>
     </View>
@@ -31,7 +32,7 @@ export default function ConnectionBanner() {
 const makeStyles = (c: Palette) => StyleSheet.create({
   bar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 6, paddingHorizontal: 12 },
   connecting: { backgroundColor: c.surfaceSolid },
-  offline: { backgroundColor: '#B00020' },
+  offline: { backgroundColor: c.danger },
   spinner: { marginRight: 8 },
   txt: { color: '#fff', fontSize: 13, fontWeight: '600' },
 });

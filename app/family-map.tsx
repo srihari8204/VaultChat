@@ -692,7 +692,7 @@ export default function FamilyMapScreen() {
         // Clearing local state only when the server agreed: a silent throw
         // here left the trip on screen and the tap looking like a no-op.
         { text: 'End trip', style: 'destructive', onPress: async () => {
-          try { await endTrip(); setTrip(null); setTripPings([]); }
+          try { await endTrip(trip); setTrip(null); setTripPings([]); }
           catch (e: any) { Alert.alert('Family trip', e?.message ?? 'Could not end the trip.'); }
         } },
       ]);

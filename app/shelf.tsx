@@ -25,13 +25,10 @@ import {
   type ShelfFile, type ShelfKind, type ShelfSort,
 } from '../lib/shelf';
 import { AuroraBackground } from '../components/ui';
-import { shelfListable, shelfOpenParams, type ShelfOpenRow } from '../lib/shelfOpen';
+import { shelfListable, shelfOpenParams } from '../lib/shelfOpen';
 import { getCurrentUserAsync } from './(constants)/authService';
 
 const PINS_KEY = 'vc_shelf_pins_v1';
-
-/** A shelf row plus the protection flags the viewer needs. */
-type ShelfRow = ShelfFile & Pick<ShelfOpenRow, 'encrypted' | 'viewOnce'>;
 
 const KIND_ICON: Record<ShelfKind, any> = {
   document: 'document-text-outline',
@@ -65,7 +62,7 @@ export default function ShelfScreen() {
   const { colors } = useTheme();
   const S = useMemo(() => makeStyles(colors), [colors]);
 
-  const [files, setFiles] = useState<ShelfRow[]>([]);
+  const [files, setFiles] = useState<ShelfFile[]>([]);
   const [loadFailed, setLoadFailed] = useState(false);
   const [myId, setMyId] = useState<string | null>(null);
   const [pins, setPins] = useState<Set<string>>(new Set());
@@ -114,7 +111,7 @@ export default function ShelfScreen() {
     // Reuse the viewers that already exist rather than adding a third one.
     // media-viewer routes archives on to app/archive-viewer itself. queryShelf
     // returns the same row objects, so the protection flags are still on them.
-    router.push({ pathname: '/media-viewer', params: shelfOpenParams(f as ShelfRow, myId) } as any);
+    router.push({ pathname: '/media-viewer', params: shelfOpenParams(f, myId) } as any);
   }, [router, myId]);
 
   return (

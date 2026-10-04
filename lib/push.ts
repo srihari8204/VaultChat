@@ -14,6 +14,8 @@
 
 import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
+import notifee, { EventType } from '@notifee/react-native';
+import { router } from 'expo-router';
 
 import { handleMessageAction } from './notificationActions';
 import { AppState, Platform } from 'react-native';
@@ -224,7 +226,14 @@ export function attachTapHandler(
       routeNotificationTap(response, data, onOpenChat, onCall, onMembership, onGame);
     });
   });
-  return () => sub.remove();
+  // Family alerts are LOCAL notifee notifications (lib/family/notify.ts), so a
+  // tap never reaches the expo listener above. Open that circle's alert inbox.
+  const offFamily = Platform.OS === 'web' ? () => {} : notifee.onForegroundEvent(({ type, detail }) => {
+    const d: any = detail?.notification?.data;
+    if (type !== EventType.PRESS || d?.type !== 'family-alert') return;
+    try { router.push({ pathname: '/family-alerts' as any, params: { circleId: String(d.circleId ?? '') } }); } catch {}
+  });
+  return () => { sub.remove(); offFamily(); };
 }
 
 /** Tap routing, unchanged — split out so an action can short-circuit it. */

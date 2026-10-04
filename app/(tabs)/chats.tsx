@@ -38,6 +38,8 @@ import { getDraftMap } from '../../lib/drafts';
 import { getLastMessagePerChat, getCachedChats, cacheChats } from '../../lib/localDb';
 import { getCurrentUserAsync } from '../(constants)/authService';
 import { isFamEvent } from '../../lib/family/alerts';
+import { NOTE_PREFIX } from '../../lib/groups/notes';
+import { TASK_PREFIX } from '../../lib/groups/tasks';
 import { initialOf } from '../../lib/format';
 
 type LastMsg = { content: string | null; type: string | null; senderId: string | null; id: number };
@@ -855,7 +857,10 @@ const ChatRow = memo(function ChatRow({
     // trade-off, not silently swept: the alternative (client-side markRead up
     // to the famEvent's id) would also retroactively mark any REAL unread
     // message with a lower id as read, which is worse.
-    if (isFamEvent(lastMsg.type, lastMsg.content)) {
+    // Group notes/tasks ops are hidden from the thread for the same reason.
+    if (isFamEvent(lastMsg.type, lastMsg.content)
+      || (typeof lastMsg.content === 'string'
+        && (lastMsg.content.startsWith(NOTE_PREFIX) || lastMsg.content.startsWith(TASK_PREFIX)))) {
       return 'Tap to open chat';
     }
     const t = lastMsg.type;

@@ -4,10 +4,11 @@
 // typography instead of a 66%-wide bubble. Design: docs/design/mobile/
 // m19-reader (the page) and m20-reader-settings (the controls).
 //
-// The text is passed in already DECRYPTED by the caller — the Reader never
-// touches ciphertext, never fetches, and never writes the message anywhere. It
-// is a rendering surface over a string, which is what keeps it out of the E2EE
-// story entirely.
+// The caller passes a chat + message id, and the Reader reads the already
+// DECRYPTED body from the local message cache — so plaintext never travels as a
+// route param. A message the cache cannot answer (unsent, or still an envelope)
+// arrives as `text` instead. The Reader never touches ciphertext, never
+// fetches, and never writes the message anywhere.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ErrorBoundary } from '../components/ErrorBoundary';
@@ -19,6 +20,8 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { paginate, readStats, formatStats, toBlocks, type Block } from '../lib/reader';
+import { getCachedMessagesByIds } from '../lib/localDb';
+import { looksEncrypted } from '../lib/chatService';
 import {
   MARGIN_PX, READER_THEMES, SIZE_MAX, SIZE_MIN, SPACING_MAX, SPACING_MIN,
   getReaderSettingsCached, resetReaderSettings, setReaderSettings,
@@ -35,9 +38,23 @@ function ReaderScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const params = useLocalSearchParams<{ text: string; title?: string; author?: string; at?: string }>();
+  const params = useLocalSearchParams<{
+    chatId?: string; id?: string; text?: string; title?: string; author?: string; at?: string;
+  }>();
 
-  const body = (params.text || '') + '';
+  const msgId = Number(params.id) || 0;
+  const fromCache = !!params.chatId && msgId > 0;
+  // null = still reading the cache (renders blank, not "Nothing to read").
+  const [cached, setCached] = useState<string | null>(fromCache ? null : '');
+  useEffect(() => {
+    if (!fromCache) return;
+    let live = true;
+    getCachedMessagesByIds(params.chatId!, [msgId])
+      .then(([m]) => { if (live) setCached(m?.content && !looksEncrypted(m.content) ? m.content : ''); })
+      .catch(() => { if (live) setCached(''); });
+    return () => { live = false; };
+  }, [fromCache, params.chatId, msgId]);
+  const body = fromCache ? (cached ?? '') : (params.text || '') + '';
   const title = (params.title || '') + '';
   const author = (params.author || '') + '';
 
@@ -113,7 +130,7 @@ function ReaderScreen() {
         </TouchableOpacity>
       </View>
 
-      {!body.trim() ? (
+      {cached === null ? null : !body.trim() ? (
         // Reached without a message (bare deep link): say so rather than
         // render "Long message · 0 words".
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 }}>

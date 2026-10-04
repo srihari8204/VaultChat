@@ -303,9 +303,9 @@ export default function SettingsScreen() {
             title: 'Media auto-download',
             message: 'When to download photos automatically.',
             actions: [
-              { label: 'Wi-Fi & mobile data', onPress: () => { setAutoDl('always'); setAutoDownload('always'); } },
-              { label: 'Wi-Fi only', onPress: () => { setAutoDl('wifi'); setAutoDownload('wifi'); } },
-              { label: 'Never', onPress: () => { setAutoDl('never'); setAutoDownload('never'); } },
+              { label: 'Wi-Fi & mobile data', selected: autoDl === 'always', onPress: () => { setAutoDl('always'); setAutoDownload('always'); } },
+              { label: 'Wi-Fi only', selected: autoDl === 'wifi', onPress: () => { setAutoDl('wifi'); setAutoDownload('wifi'); } },
+              { label: 'Never', selected: autoDl === 'never', onPress: () => { setAutoDl('never'); setAutoDownload('never'); } },
             ],
           })}>
             <View style={S.linkIconWrap}><Ionicons name="cloud-download-outline" size={22} color={colors.text} /></View>
@@ -369,9 +369,9 @@ export default function SettingsScreen() {
         <TouchableOpacity style={S.prefRow} activeOpacity={0.7} disabled={prefBusy} accessibilityRole="button" accessibilityLabel={`Add me to groups, ${groupAddLabel(settings.groupAddPolicy)}`} accessibilityState={{ disabled: prefBusy }} onPress={() => setPicker({
           title: 'Who can add me to groups',
           actions: [
-            { label: 'Everyone', onPress: () => savePref({ groupAddPolicy: 'everyone' }) },
-            { label: 'My contacts', onPress: () => savePref({ groupAddPolicy: 'contacts' }) },
-            { label: 'Nobody', onPress: () => savePref({ groupAddPolicy: 'nobody' }) },
+            { label: 'Everyone', selected: settings.groupAddPolicy === 'everyone', onPress: () => savePref({ groupAddPolicy: 'everyone' }) },
+            { label: 'My contacts', selected: settings.groupAddPolicy === 'contacts', onPress: () => savePref({ groupAddPolicy: 'contacts' }) },
+            { label: 'Nobody', selected: settings.groupAddPolicy === 'nobody', onPress: () => savePref({ groupAddPolicy: 'nobody' }) },
           ],
         })}>
           <View style={{ flex: 1 }}>
@@ -384,10 +384,10 @@ export default function SettingsScreen() {
           title: 'Default disappearing timer',
           message: 'Applied to new chats you start.',
           actions: [
-            { label: 'Off', onPress: () => savePref({ defaultDisappearingSeconds: 0 }) },
-            { label: '24 hours', onPress: () => savePref({ defaultDisappearingSeconds: 86400 }) },
-            { label: '7 days', onPress: () => savePref({ defaultDisappearingSeconds: 604800 }) },
-            { label: '90 days', onPress: () => savePref({ defaultDisappearingSeconds: 7776000 }) },
+            { label: 'Off', selected: !settings.defaultDisappearingSeconds, onPress: () => savePref({ defaultDisappearingSeconds: 0 }) },
+            { label: '24 hours', selected: settings.defaultDisappearingSeconds === 86400, onPress: () => savePref({ defaultDisappearingSeconds: 86400 }) },
+            { label: '7 days', selected: settings.defaultDisappearingSeconds === 604800, onPress: () => savePref({ defaultDisappearingSeconds: 604800 }) },
+            { label: '90 days', selected: settings.defaultDisappearingSeconds === 7776000, onPress: () => savePref({ defaultDisappearingSeconds: 7776000 }) },
           ],
         })}>
           <View style={{ flex: 1 }}>
@@ -415,11 +415,12 @@ export default function SettingsScreen() {
           {/* The sub-line used to advertise screenshot alerts and an incognito
               keyboard, which nothing reads (2026-10-04 audit). It names only
               what the screen really does; the message timer lives below. */}
-          <LinkRow icon="shield-checkmark-outline" title="Vault features" sub="Temporary invite code and other advanced options" onPress={() => router.push('/vault-features' as any)} />
+          <LinkRow icon="shield-checkmark-outline" title="Vault features" sub="Temp invite codes, auto screen lock, Vault" onPress={() => router.push('/vault-features' as any)} />
           {/* #32: the opt-in for session sealing. Setting a device PIN is what
               seals the signed-in session under it (services/security/pinStore);
               nobody is migrated into it, they choose it here. */}
           <LinkRow icon="keypad-outline" title="Device PIN" sub="Lock this device's session behind a PIN only you know" onPress={() => router.push('/backup-pin?from=settings' as any)} />
+          <LinkRow icon="lock-closed-outline" title="Chat locks" sub="Lock individual chats behind a PIN or biometrics" onPress={() => router.push('/app-lock-chats' as any)} />
           {/* app/permissions.tsx existed with no entry point: the only way in was
               the old onboarding chain, whose first screen nothing reaches. It is a
               genuine feature - one place to see and re-request every permission,

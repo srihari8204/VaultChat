@@ -21,6 +21,8 @@ export interface SheetAction {
   label: string;
   icon?: React.ComponentProps<typeof Ionicons>['name'];
   destructive?: boolean;
+  /** The current choice in a picker: shows a check and reports selected state. */
+  selected?: boolean;
   onPress: () => void;
 }
 
@@ -73,6 +75,7 @@ export function Sheet({ visible, title, message, actions, onClose }: SheetProps)
           {actions.map((a, i) => (
             <TouchableOpacity
               accessibilityRole="button"
+              accessibilityState={a.selected === undefined ? undefined : { selected: a.selected }}
               key={i}
               style={[styles.row, { backgroundColor: Aurora.glassSoft, borderColor: Aurora.glassStroke }]}
               onPress={() => pick(a)}
@@ -80,6 +83,7 @@ export function Sheet({ visible, title, message, actions, onClose }: SheetProps)
             >
               {a.icon && <Ionicons name={a.icon} size={20} color={a.destructive ? Aurora.danger : Aurora.text} />}
               <AppText style={{ flex: 1 }} variant="body" color={a.destructive ? Aurora.danger : Aurora.text}>{a.label}</AppText>
+              {a.selected && <Ionicons name="checkmark" size={20} color={Aurora.primary} />}
             </TouchableOpacity>
           ))}
         </ScrollView>

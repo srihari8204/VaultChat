@@ -48,8 +48,6 @@ const EXEMPT: Record<string, string> = {
     'same SOS path — sends with lat/lng null rather than blocking on a prompt',
   'app/location-lock.tsx':
     'runs in a mount effect, not from a tap; an alert on arrival would fire before the user asked for anything',
-  'app/camera.tsx':
-    'shows an in-screen notice via setNotice instead of an alert',
   'app/contacts.tsx':
     'already branches on canAskAgain and renders the guidance inline as screen state',
   'app/location.tsx':

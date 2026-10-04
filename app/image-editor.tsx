@@ -13,6 +13,7 @@ import {
   Platform, useWindowDimensions } from 'react-native';
 import { useTheme } from '../lib/theme';
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
+import { returnParams } from '../lib/camera/cameraMode';
 import * as ImageManipulator from 'expo-image-manipulator';
 import ViewShot from 'react-native-view-shot';
 
@@ -54,7 +55,9 @@ export default function ImageEditorScreen() {
   const { colors } = useTheme();
   const styles = useS();
   const router = useRouter();
-  const { uri, chatId, returnTo } = useLocalSearchParams<{ uri: string; chatId?: string; returnTo?: string }>();
+  const { uri, chatId, peerUid, peerName, returnTo } = useLocalSearchParams<{
+    uri: string; chatId?: string; peerUid?: string; peerName?: string; returnTo?: string;
+  }>();
   const viewShotRef = useRef<any>(null);
 
   // Image state
@@ -258,9 +261,11 @@ export default function ImageEditorScreen() {
 
       // Hand the edited image back to the chat via the shared capturedUri
       // contract so it's actually sent (a prior router.back()+setParams lost it).
-      router.replace({
+      // dismissTo pops back to the chat already in the stack instead of
+      // pushing a second /chat, exactly as app/camera.tsx leaves.
+      router.dismissTo({
         pathname: (returnTo || '/chat') as any,
-        params: { chatId, capturedUri: finalUri, capturedType: 'image' },
+        params: returnParams({ chatId, peerUid, peerName }, { uri: finalUri, type: 'image' }),
       });
     } catch {
       Alert.alert('Error', 'Failed to save edited image');

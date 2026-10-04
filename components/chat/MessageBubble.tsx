@@ -976,11 +976,14 @@ function dayLabel(iso: string): string {
  * Renders NOTHING for an ordinary message: a bubble is the right shape for
  * almost everything, and an affordance under every message would be noise. It
  * appears only past lib/reader's word threshold, where a bubble genuinely stops
- * working. The already-decrypted text is handed to the Reader as a param, so no
- * plaintext is persisted and the Reader never sees ciphertext.
+ * working. The Reader is handed the chat + message id and reads the decrypted
+ * body from the local cache, so plaintext never rides in route params. Only a
+ * message the cache cannot answer (`cached` false: unsent, or a still-encrypted
+ * row this bubble decrypted itself) falls back to passing the text.
  */
-function ReaderAffordance({ text, title, author, at }: {
+function ReaderAffordance({ text, title, author, at, chatId, msgId, cached }: {
   text: string; title: string; author: string; at?: string;
+  chatId: string; msgId: number; cached: boolean;
 }) {
   const S = useS();
   const router = useRouter();
@@ -994,7 +997,9 @@ function ReaderAffordance({ text, title, author, at }: {
       activeOpacity={0.75}
       onPress={() => router.push({
         pathname: '/reader',
-        params: { text, title, author, at: at ?? '' },
+        params: cached
+          ? { chatId, id: String(msgId), title, author, at: at ?? '' }
+          : { text, title, author, at: at ?? '' },
       })}
     >
       <Ionicons name="book-outline" size={14} color={BRAND_ACCENT} />
@@ -1595,6 +1600,9 @@ function MessageBubble({
                   title={member?.name ? `${member.name}’s message` : 'Long message'}
                   author={member?.name ?? ''}
                   at={msg.createdAt}
+                  chatId={chatId}
+                  msgId={msg.id}
+                  cached={msg.id > 0 && !looksEncrypted(msg.content)}
                 />
                 {(() => {
                   // F5: prefer the sender-embedded E2EE preview (no fetch at

@@ -131,6 +131,8 @@ import { startSend as vbStartSend } from '../lib/vaultBeamController';
 import { isNativeStreamAvailable as vbNativeAvailable } from '../lib/vaultBeamStreamNative';
 import { makeThumb } from '../lib/thumbnails';
 import { isFamEvent } from '../lib/family/alerts';
+import { NOTE_PREFIX } from '../lib/groups/notes';
+import { TASK_PREFIX } from '../lib/groups/tasks';
 import {
   cancel as queueCancel,
   enqueueText,
@@ -336,6 +338,10 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       // see the family/live checks just above), so the plain marker check is
       // correct here, unlike the raw socket listener in app/_layout.tsx.
       if (isFamEvent(m.type, m.content)) continue;
+      // Group notes/tasks ops ride the message spine as an event log; they
+      // render in group-notes / group-tasks, never as bubbles.
+      if (typeof m.content === 'string'
+        && (m.content.startsWith(NOTE_PREFIX) || m.content.startsWith(TASK_PREFIX))) continue;
       const k = m._tempId ?? String(m.id);
       if (seen.has(k)) continue;
       seen.add(k);
@@ -2529,7 +2535,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   }, []);
 
   // ── Consume media captured by /camera, /video-notes, /image-editor ──
-  // Those screens router.replace back here with capturedUri + capturedType.
+  // Those screens return here (router.dismissTo) with capturedUri + capturedType.
   // Send it exactly once, then clear the params so a re-render or Back never
   // re-sends the same file.
   const consumedCaptureRef = useRef<string | null>(null);
@@ -2711,8 +2717,12 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     if (!perm.granted) { permissionDenied('Permission needed', 'Allow photo library access to attach.', perm.canAskAgain); return; }
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1, allowsEditing: false });
     if (result.canceled || !result.assets?.[0]) return;
-    router.push({ pathname: '/image-editor' as any, params: { uri: result.assets[0].uri, chatId, returnTo: '/chat' } });
-  }, [chatId, sending, router]);
+    const peer = chat?.type === 'direct' && meId ? chat.members.find(m => m.userId !== meId) : null;
+    router.push({ pathname: '/image-editor' as any, params: {
+      uri: result.assets[0].uri, chatId, returnTo: '/chat',
+      peerUid: peer?.userId || '', peerName: peer?.name || chat?.name || '',
+    } });
+  }, [chatId, sending, router, chat, meId]);
 
   // ── Send a GIF (external Tenor URL — no upload; rendered from the URL) ──
   const sendGif = useCallback(async (url: string, preview: string) => {

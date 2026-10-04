@@ -14,7 +14,7 @@ import { BRAND_ACCENT } from '../constants/theme';
 import { VB_AUTODOWNLOAD } from '../constants/flags';
 import {
   useVBSettings, patchSettings, SIZE_OPTIONS,
-  type VBMode, type VBNetwork,
+  type VBMode, type VBNetwork, type VBSettings,
 } from '../lib/vaultBeamSettings';
 
 export default function VaultBeamSettings() {
@@ -22,6 +22,11 @@ export default function VaultBeamSettings() {
   const { colors, scheme } = useTheme();
   const s = useVBSettings();
   const auto = s.mode === 'auto';
+  // A failed write still applies for this session; say it will not survive a restart.
+  const [saveFailed, setSaveFailed] = React.useState(false);
+  const save = (p: Partial<VBSettings>) => {
+    patchSettings(p).then(() => setSaveFailed(false), () => setSaveFailed(true));
+  };
 
   const C = colors as any;
   const card = { backgroundColor: C.glass, borderColor: C.glassStroke };
@@ -46,38 +51,45 @@ export default function VaultBeamSettings() {
           </View>
         )}
 
+        {saveFailed && (
+          <View style={[styles.notice, { backgroundColor: C.glassSoft, borderColor: C.danger }]} accessibilityLiveRegion="polite">
+            <Ionicons name="alert-circle-outline" size={16} color={C.danger} />
+            <Text style={[styles.noticeTxt, { color: C.text }]}>Couldn’t save your last change. It applies until the app restarts.</Text>
+          </View>
+        )}
+
         {/* Mode */}
         <Section title="Mode" colors={C}>
-          <Radio label="Manual approval" desc="Tap Accept for every file (current behavior)" active={s.mode === 'manual'} onPress={() => patchSettings({ mode: 'manual' as VBMode })} card={card} colors={C} />
-          <Radio label="Auto-download" desc="Accept eligible files automatically" active={auto} onPress={() => patchSettings({ mode: 'auto' as VBMode })} card={card} colors={C} />
+          <Radio label="Manual approval" desc="Tap Accept for every file (current behavior)" active={s.mode === 'manual'} onPress={() => save({ mode: 'manual' as VBMode })} card={card} colors={C} />
+          <Radio label="Auto-download" desc="Accept eligible files automatically" active={auto} onPress={() => save({ mode: 'auto' as VBMode })} card={card} colors={C} />
         </Section>
 
         {auto && (
           <>
             <Section title="Network" colors={C}>
-              <Radio label="Wi-Fi only" active={s.network === 'wifi'} onPress={() => patchSettings({ network: 'wifi' as VBNetwork })} card={card} colors={C} />
-              <Radio label="Mobile data only" active={s.network === 'cellular'} onPress={() => patchSettings({ network: 'cellular' as VBNetwork })} card={card} colors={C} />
-              <Radio label="Any network" active={s.network === 'any'} onPress={() => patchSettings({ network: 'any' as VBNetwork })} card={card} colors={C} />
-              <Toggle label="Only on unmetered networks" value={s.unmeteredOnly} onValueChange={(v) => patchSettings({ unmeteredOnly: v })} card={card} colors={C} />
+              <Radio label="Wi-Fi only" active={s.network === 'wifi'} onPress={() => save({ network: 'wifi' as VBNetwork })} card={card} colors={C} />
+              <Radio label="Mobile data only" active={s.network === 'cellular'} onPress={() => save({ network: 'cellular' as VBNetwork })} card={card} colors={C} />
+              <Radio label="Any network" active={s.network === 'any'} onPress={() => save({ network: 'any' as VBNetwork })} card={card} colors={C} />
+              <Toggle label="Only on unmetered networks" value={s.unmeteredOnly} onValueChange={(v) => save({ unmeteredOnly: v })} card={card} colors={C} />
               {/* "Pause while roaming" is not offered: NetInfo does not expose
                   roaming, so lib/vaultBeamAutoDownload never reads the setting.
                   "Only on unmetered networks" above is the control that works. */}
             </Section>
 
             <Section title="Sender" colors={C}>
-              <Toggle label="Trusted contacts only" desc="Only auto-download from verified contacts" value={s.trustedOnly} onValueChange={(v) => patchSettings({ trustedOnly: v })} card={card} colors={C} />
+              <Toggle label="Trusted contacts only" desc="Only auto-download from verified contacts" value={s.trustedOnly} onValueChange={(v) => save({ trustedOnly: v })} card={card} colors={C} />
             </Section>
 
             <Section title="Max auto file size" colors={C}>
               {SIZE_OPTIONS.map((o) => (
-                <Radio key={o.label} label={o.label} active={s.maxBytes === o.bytes} onPress={() => patchSettings({ maxBytes: o.bytes })} card={card} colors={C} />
+                <Radio key={o.label} label={o.label} active={s.maxBytes === o.bytes} onPress={() => save({ maxBytes: o.bytes })} card={card} colors={C} />
               ))}
               <Text style={[styles.hint, { color: C.textFaint ?? C.textDim }]}>Files 2.5 GB and larger always require manual approval (up to the 12 GB limit).</Text>
             </Section>
 
             <Section title="Battery" colors={C}>
-              <Toggle label="Only while charging" value={s.onlyCharging} onValueChange={(v) => patchSettings({ onlyCharging: v })} card={card} colors={C} />
-              <Toggle label="Don't auto-download when battery is low" value={s.notLowBattery} onValueChange={(v) => patchSettings({ notLowBattery: v })} card={card} colors={C} />
+              <Toggle label="Only while charging" value={s.onlyCharging} onValueChange={(v) => save({ onlyCharging: v })} card={card} colors={C} />
+              <Toggle label="Don't auto-download when battery is low" value={s.notLowBattery} onValueChange={(v) => save({ notLowBattery: v })} card={card} colors={C} />
             </Section>
           </>
         )}

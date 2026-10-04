@@ -106,12 +106,6 @@ ok('permissions returns to Settings instead of onboarding',
 // still a deep-linkable URL (see the top of this file), so they were deleted
 // rather than left to rot. A literal pointing at one of them is now a dead end
 // — expo-router's "Unmatched route" screen — so any caller fails this check.
-//
-// PENDING_HANDOFF names a caller that lives in a file another change owns and
-// still points at the removed legacy chain (permissions.tsx's non-Settings
-// exit, reachable only by deep link now that biometric-setup is gone). It is
-// tolerated, not required: once that file drops the push, delete the entry and
-// this check stays green. A caller anywhere else fails.
 const DELETED = [
   '/scanner', '/email-bridge', '/vaultdrop', '/contact', '/lock',
   '/security-questions', '/biometric-setup', '/setup-complete', '/call-recording',
@@ -119,13 +113,9 @@ const DELETED = [
   '/voice-transcribe', '/slideshow', '/current-location', '/location-sharing',
   '/sync-contact', '/msgrequests',
 ];
-const PENDING_HANDOFF: Record<string, string[]> = {
-  '/setup-complete': ['app/permissions.tsx'],
-};
 for (const route of DELETED) {
   ok(`app${route}.tsx is deleted`, !fs.existsSync(`app${route}.tsx`));
-  const tolerated = PENDING_HANDOFF[route] ?? [];
-  const stray = refsTo(route).filter((f) => !tolerated.includes(f));
+  const stray = refsTo(route);
   ok(`nothing navigates to deleted ${route}` + (stray.length ? ` — found: ${stray.join(', ')}` : ''),
      stray.length === 0);
 }
@@ -147,6 +137,8 @@ ok('nothing imports the deleted components',
 const REACHABLE_FROM: Record<string, string[]> = {
   // Genuinely unrouted. The live group path is /chat plus /group-info.
   '/group-chat': [],
+  // A redirect shim kept only for old deep links; nothing in-app may route to it.
+  '/creator-channels': [],
 };
 for (const [route, allowed] of Object.entries(REACHABLE_FROM)) {
   const found = refsTo(route).sort();
