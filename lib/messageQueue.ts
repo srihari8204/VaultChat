@@ -578,7 +578,7 @@ async function postOnce(item: QueuedMessage): Promise<PostResult> {
   // meta (enqueueMessage). Its local record still needs the full meta and an
   // empty body — the ack's content is ciphertext and its meta the routing subset.
   if (real && (item.op ?? 'send') === 'send' && (item.plaintext || item.meta)) {
-    (real as any).content = item.plaintext;   // cast pinned by lib/signalStyleMessageStorage.selftest.ts
+    real.content = item.plaintext;
     // ...and the FULL meta, not the subset that came back from the server.
     // `real` is the POST response, so its meta is the routing subset we just
     // sent; caching that would leave the sender's own row without the thumbnail

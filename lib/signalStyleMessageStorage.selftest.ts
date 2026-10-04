@@ -55,12 +55,12 @@ console.log('the local message record must hold plaintext, like Signal.body');
 const postOnce = QUEUE.match(/async function postOnce[\s\S]*?\n}/)?.[0] ?? '';
 check('postOnce exists', !!postOnce);
 check('the local record is given plaintext',
-  /\(real as any\)\.content\s*=\s*item\.plaintext/.test(postOnce),
+  /(?:\(real as any\)|real)\.content\s*=\s*item\.plaintext/.test(postOnce),
   'without this the POST ack (ciphertext) is cached, cacheMessages nulls the ' +
   'envelope, and the sender loses their own text on restart');
 
 check('it stores item.plaintext, NOT the wrapped wire form',
-  !/\(real as any\)\.content\s*=\s*wire/.test(postOnce),
+  !/(?:\(real as any\)|real)\.content\s*=\s*wire/.test(postOnce),
   'wire is the NUL-prefixed {text+preview} wrapper; Signal keeps previews out ' +
   'of body, and the warm-cache paint path does not unwrap');
 
@@ -82,7 +82,7 @@ check('encryption still happens before the POST',
 // the thing that gets serialised.
 const iPost = postOnce.indexOf('await api<Message>');
 const iSubmit = postOnce.indexOf('await transportModule.submitCCWireMessage<Message>');
-const iAssign = postOnce.search(/\(real as any\)\.content\s*=\s*item\.plaintext/);
+const iAssign = postOnce.search(/(?:\(real as any\)|real)\.content\s*=\s*item\.plaintext/);
 check('plaintext is attached only AFTER either submission path returns',
   iPost >= 0 && iSubmit >= 0 && iAssign > iPost && iAssign > iSubmit,
   'assigning before the POST risks the plaintext reaching the wire');
