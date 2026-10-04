@@ -3,17 +3,20 @@ import { AuroraBackground } from '../components/ui';
 // app/image-editor.tsx — Image Editor before sending
 // Crop (free or fixed ratio, user-positioned box), Rotate, Draw, Text overlay,
 // colour Filters, Brightness/Contrast.
-// expo-image-manipulator does crop/rotate; filters and adjustments are one
-// SVG colour matrix (react-native-svg FilterImage); react-native-view-shot
-// captures the canvas with the drawing, text and colour edits on Done.
+// expo-image-manipulator does crop/rotate at the photo's own resolution;
+// filters and adjustments are one SVG colour matrix (react-native-svg
+// FilterImage). Drawing, text and colour edits are baked in on Done by
+// rendering the edit OFFSCREEN at the photo's pixel size and capturing that
+// with react-native-view-shot (see exportFullRes) — capturing the on-screen
+// canvas would send a screen-sized photo.
 
 import { BRAND_ACCENT, brandAlpha, type Palette } from '../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
-  View, TouchableOpacity, StyleSheet, Image, ScrollView,
+  View, TouchableOpacity, StyleSheet, Image, ScrollView, PixelRatio,
   PanResponder, type PanResponderInstance, TextInput, Alert, ActivityIndicator,
-  useWindowDimensions } from 'react-native';
+  useWindowDimensions, type ImageStyle, type StyleProp } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { FilterImage } from 'react-native-svg/filter-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -26,7 +29,11 @@ import {
   containFrame, initialCrop, moveCrop, resizeCrop, toImageCrop, type Rect, type Corner,
 } from '../lib/imageEditMath';
 import * as ImageManipulator from 'expo-image-manipulator';
-import ViewShot from 'react-native-view-shot';
+import * as FileSystem from 'expo-file-system/legacy';
+import ViewShot, { captureRef, releaseCapture } from 'react-native-view-shot';
+import {
+  exportSize, mapForCrop, mapForRotate90, scaleCrop, toExport, type OverlayMap,
+} from '../lib/media/editExport';
 
 
 // Ink colours are image content, not theme roles.
@@ -49,17 +56,21 @@ type ToolMode = 'none' | 'crop' | 'rotate' | 'draw' | 'text' | 'filter' | 'adjus
 
 /** The photo with the colour matrix applied, or the plain Image when there is
  *  no colour edit (no SVG filter pass at all). */
-function EditedImage({ uri, matrix, style }: { uri: string; matrix: Matrix | null; style: any }) {
-  if (!matrix) return <Image source={{ uri }} style={style} resizeMode="contain" />;
+function EditedImage({ uri, matrix, style, onLoad }: {
+  uri: string; matrix: Matrix | null; style: StyleProp<ImageStyle>; onLoad?: () => void;
+}) {
+  if (!matrix) return <Image source={{ uri }} style={style} resizeMode="contain" onLoad={onLoad} />;
   return (
-    <FilterImage source={{ uri }} style={style} resizeMode="contain"
+    <FilterImage source={{ uri }} style={style} resizeMode="contain" onLoad={onLoad}
       filters={[{ name: 'feColorMatrix', type: 'matrix', values: matrix }]} />
   );
 }
 
-function Strokes({ lines }: { lines: DrawLine[] }) {
+/** viewBox maps canvas coordinates onto a differently sized layer (the
+ *  full-resolution export), scaling stroke widths with it. */
+function Strokes({ lines, viewBox }: { lines: DrawLine[]; viewBox?: string }) {
   return (
-    <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
+    <Svg style={StyleSheet.absoluteFill} pointerEvents="none" viewBox={viewBox}>
       {lines.map((l, i) => (
         <Path key={i} d={strokeD(l.points)} stroke={l.color} strokeWidth={l.width}
           strokeLinecap="round" strokeLinejoin="round" fill="none" />
@@ -70,10 +81,14 @@ function Strokes({ lines }: { lines: DrawLine[] }) {
 
 function useS() {
   const { width: SW, height: SH } = useWindowDimensions();
-  const { top } = useSafeAreaInsets();
+  const { top, bottom } = useSafeAreaInsets();
   const { colors } = useTheme();
-  return useMemo(() => makeStyles(colors, SW, SH, top), [colors, SW, SH, top]);
+  return useMemo(() => makeStyles(colors, SW, SH, top, bottom), [colors, SW, SH, top, bottom]);
 }
+
+/** Resolves on the next-but-one frame: an image that just reported onLoad has
+ *  been drawn by then. */
+const twoFrames = () => new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r())));
 
 export default function ImageEditorScreen() {
   // Live metrics owned by THIS component — follows rotation and folds.
@@ -86,12 +101,29 @@ export default function ImageEditorScreen() {
   const { uri, chatId, peerUid, peerName, returnTo } = useLocalSearchParams<{
     uri: string; chatId?: string; peerUid?: string; peerName?: string; returnTo?: string;
   }>();
-  const viewShotRef = useRef<any>(null);
+  const viewShotRef = useRef<ViewShot>(null);
 
   // Image state
   const [imageUri, setImageUri] = useState(uri || '');
   const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(null);
+  // Image.getSize failed: crop cannot map its box to pixels, so say so instead
+  // of leaving Apply Crop waiting for a size that never comes.
+  const [sizeFailed, setSizeFailed] = useState(false);
   const [processing, setProcessing] = useState(false);
+
+  // Files this screen made (rotate/crop results, captures). A superseded one is
+  // deleted at once; the rest go when the screen closes — except the one that
+  // was sent, which the chat still has to upload.
+  const temps = useRef(new Set<string>());
+  const keepOnClose = useRef<string | null>(null);
+  const dropTemp = (u: string) => {
+    if (!temps.current.delete(u)) return;
+    FileSystem.deleteAsync(u, { idempotent: true }).catch(() => {});
+  };
+  useEffect(() => () => {
+    for (const u of temps.current) if (u !== keepOnClose.current) FileSystem.deleteAsync(u, { idempotent: true }).catch(() => {});
+    temps.current.clear();
+  }, []);
 
   // Tool mode
   const [activeMode, setActiveMode] = useState<ToolMode>('none');
@@ -122,8 +154,9 @@ export default function ImageEditorScreen() {
   useEffect(() => {
     let dead = false;
     setImgSize(null);
+    setSizeFailed(false);
     if (!imageUri) return;
-    Image.getSize(imageUri, (w, h) => { if (!dead) setImgSize({ w, h }); }, () => {});
+    Image.getSize(imageUri, (w, h) => { if (!dead) setImgSize({ w, h }); }, () => { if (!dead) setSizeFailed(true); });
     return () => { dead = true; };
   }, [imageUri]);
   const frame = useMemo(
@@ -146,6 +179,29 @@ export default function ImageEditorScreen() {
   overlaysRef.current = textOverlays;
   const cropRef = useRef({ rect: cropRect, frame, ratio: cropRatio });
   cropRef.current = { rect: cropRect, frame, ratio: cropRatio };
+
+  // Rendered size of each text overlay, so a rotate can keep its CENTRE on the
+  // same spot of the photo (the text itself stays upright).
+  const textSizes = useRef(new Map<string, { w: number; h: number }>());
+
+  /** Crop and rotate change where the photo sits on the canvas: move the
+   *  strokes and text with it, or they drift off what they were drawn on. */
+  const remapOverlays = (m: OverlayMap) => {
+    setLines(prev => prev.map(l => ({ ...l, width: l.width * m.scale, points: l.points.map(m.pt) })));
+    setTextOverlays(prev => prev.map(t => {
+      const sz = textSizes.current.get(t.id) ?? { w: 0, h: 0 };
+      const c = m.pt({ x: t.x + sz.w / 2, y: t.y + sz.h / 2 });
+      return { ...t, fontSize: t.fontSize * m.scale, x: c.x - (sz.w * m.scale) / 2, y: c.y - (sz.h * m.scale) / 2 };
+    }));
+  };
+
+  /** A manipulator result replaces the current image (and its temp file). */
+  const adoptResult = (r: { uri: string }) => {
+    temps.current.add(r.uri);
+    const prev = imageUri;
+    setImageUri(r.uri);
+    dropTemp(prev);
+  };
 
   // ── Drawing PanResponder ──
   const drawPan = useRef(
@@ -206,7 +262,10 @@ export default function ImageEditorScreen() {
         [{ rotate: 90 }],
         { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG }
       );
-      setImageUri(result.uri);
+      if (frame && imgSize) {
+        remapOverlays(mapForRotate90(frame, imgSize.w, imgSize.h, containFrame(canvasW, canvasH, result.width, result.height)));
+      }
+      adoptResult(result);
     } catch {
       Alert.alert('Could not rotate', 'The image could not be rotated. Please try again.');
     }
@@ -217,17 +276,21 @@ export default function ImageEditorScreen() {
   const handleCrop = async () => {
     if (processing) return;   // a second tap would crop the stale uri again
     if (!cropRect || !frame || !imgSize) {
-      Alert.alert('Crop not ready', 'The image is still loading. Try again in a moment.');
+      Alert.alert('Crop not ready', sizeFailed
+        ? "This photo's size couldn't be read, so it can't be cropped."
+        : 'The image is still loading. Try again in a moment.');
       return;
     }
     setProcessing(true);
     try {
+      const crop = toImageCrop(cropRect, frame, imgSize.w, imgSize.h);
       const result = await ImageManipulator.manipulateAsync(
         imageUri,
-        [{ crop: toImageCrop(cropRect, frame, imgSize.w, imgSize.h) }],
+        [{ crop }],
         { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG }
       );
-      setImageUri(result.uri);
+      remapOverlays(mapForCrop(frame, imgSize.w, crop, containFrame(canvasW, canvasH, result.width, result.height)));
+      adoptResult(result);
       setActiveMode('none');
     } catch {
       Alert.alert('Could not crop', 'The image could not be cropped. Please try again.');
@@ -250,6 +313,7 @@ export default function ImageEditorScreen() {
   const removeTextOverlay = (id: string) => {
     setTextOverlays(prev => prev.filter(t => t.id !== id));
     textPans.current.delete(id);
+    textSizes.current.delete(id);
   };
 
   // ── Text drag handler ──
@@ -304,6 +368,58 @@ export default function ImageEditorScreen() {
     ]);
   }), [navigation]);
 
+  // ── Full-resolution export ──
+  // The edit is rendered a second time, OFFSCREEN, at the photo's own pixel
+  // size (bounded by EXPORT_MAX_EDGE) and captured: same image, same colour
+  // matrix, same strokes through an SVG viewBox, text scaled by the same
+  // factor. A capture of the on-screen canvas is screen-sized, so a 12 MP photo
+  // went out at about 1 MP.
+  // ponytail: photos past EXPORT_MAX_EDGE (4096 px) are downscaled to it — the
+  // offscreen bitmap is width × height × 4 bytes, ~64 MB at the cap. Lift the
+  // cap only with a native renderer that works in tiles.
+  const [exportPlan, setExportPlan] = useState<{ w: number; h: number } | null>(null);
+  const exportRef = useRef<View>(null);
+  const exportLoaded = useRef<(() => void) | null>(null);
+  const exportFullRes = async (): Promise<string> => {
+    if (!frame || !imgSize) throw new Error('image size unknown');
+    const px = exportSize(imgSize.w, imgSize.h);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const loaded = new Promise<void>((res, rej) => {
+      exportLoaded.current = res;
+      timer = setTimeout(() => rej(new Error('export render timed out')), 10000);
+    });
+    setExportPlan({ w: px.w / PixelRatio.get(), h: px.h / PixelRatio.get() });
+    try {
+      await loaded;
+      await twoFrames();
+      const out = await captureRef(exportRef, { format: 'jpg', quality: 0.92 });
+      temps.current.add(out);
+      return out;
+    } finally {
+      clearTimeout(timer);
+      exportLoaded.current = null;
+      setExportPlan(null);
+    }
+  };
+
+  /** The fallback: the on-screen canvas, cut to the photo's area (`frame`) so
+   *  no letterbox bands are sent. Screen resolution. */
+  const exportScreen = async (): Promise<string> => {
+    if (!viewShotRef.current?.capture) throw new Error('canvas not ready');
+    const shotUri = await viewShotRef.current.capture();
+    if (!frame) return shotUri;
+    const shot = await new Promise<{ w: number; h: number }>((res, rej) =>
+      Image.getSize(shotUri, (w, h) => res({ w, h }), rej));
+    const cut = await ImageManipulator.manipulateAsync(
+      shotUri,
+      [{ crop: toImageCrop(frame, { x: 0, y: 0, w: canvasW, h: canvasH }, shot.w, shot.h) }],
+      { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
+    );
+    releaseCapture(shotUri);
+    temps.current.add(cut.uri);
+    return cut.uri;
+  };
+
   // ── Done — capture final image ──
   const handleDone = async () => {
     if (processing) return;
@@ -311,27 +427,20 @@ export default function ImageEditorScreen() {
     try {
       let finalUri = imageUri;
 
-      // Drawing, text and the colour matrix live in the ViewShot, so
-      // capturing it is what puts them in the sent image. Crop and rotate are
-      // already baked into imageUri by ImageManipulator.
+      // Drawing, text and the colour matrix are not in imageUri, so the edit
+      // is rendered and captured to put them in the sent image. Crop and
+      // rotate are already baked into imageUri by ImageManipulator.
       if (lines.length > 0 || textOverlays.length > 0 || matrix) {
-        if (!viewShotRef.current) throw new Error('canvas not ready');
-        finalUri = await viewShotRef.current.capture();
-        // The canvas is screen-sized with the photo letterboxed inside it:
-        // keep only the photo's area (`frame`), so no bands are sent.
-        // ponytail: still screen resolution, not the photo's; rendering the
-        // edits onto the full-size image needs an offscreen renderer.
-        if (frame) {
-          const shot = await new Promise<{ w: number; h: number }>((res, rej) =>
-            Image.getSize(finalUri, (w, h) => res({ w, h }), rej));
-          const cut = await ImageManipulator.manipulateAsync(
-            finalUri,
-            [{ crop: toImageCrop(frame, { x: 0, y: 0, w: canvasW, h: canvasH }, shot.w, shot.h) }],
-            { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
-          );
-          finalUri = cut.uri;
+        try {
+          finalUri = await exportFullRes();
+        } catch (e: any) {
+          // Out of memory, or a platform that will not draw the offscreen
+          // view: a screen-resolution photo beats no photo.
+          console.warn('[image-editor] full-resolution export failed, using the screen capture —', e?.message ?? e);
+          finalUri = await exportScreen();
         }
       }
+      keepOnClose.current = finalUri;
 
       // Hand the edited image back to the chat via the shared capturedUri
       // contract so it's actually sent (a prior router.back()+setParams lost it).
@@ -379,7 +488,7 @@ export default function ImageEditorScreen() {
         <Text style={styles.topTitle} accessibilityRole="header">Edit Image</Text>
         <TouchableOpacity onPress={handleDone} disabled={processing} style={[styles.topBtn, styles.doneBtn]}
           accessibilityRole="button" accessibilityLabel="Done, send edited image" accessibilityState={{ disabled: processing, busy: processing }}>
-          {processing ? <ActivityIndicator size="small" color="#FFF" /> : <Text style={styles.doneBtnText}>Done</Text>}
+          {processing ? <ActivityIndicator size="small" color={colors.onPrimary} /> : <Text style={styles.doneBtnText}>Done</Text>}
         </TouchableOpacity>
       </View>
 
@@ -398,9 +507,10 @@ export default function ImageEditorScreen() {
               <View
                 key={t.id}
                 style={{ position: 'absolute', left: t.x, top: t.y }}
+                onLayout={e => textSizes.current.set(t.id, { w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}
                 {...textPanFor(t.id).panHandlers}
               >
-                <Text style={{ color: t.color, fontSize: t.fontSize, fontWeight: '700', textShadowColor: '#000', textShadowRadius: 3 }}>
+                <Text style={[styles.overlayText, { color: t.color, fontSize: t.fontSize }]}>
                   {t.text}
                 </Text>
               </View>
@@ -421,8 +531,16 @@ export default function ImageEditorScreen() {
               <View pointerEvents="none" style={[styles.cropShade, { left: cropRect.x + cropRect.w, right: 0, top: cropRect.y, height: cropRect.h }]} />
               <View
                 style={[styles.cropBox, { left: cropRect.x, top: cropRect.y, width: cropRect.w, height: cropRect.h }]}
+                accessible
+                accessibilityRole="adjustable"
                 accessibilityLabel="Crop area"
-                accessibilityHint="Drag to move. Drag a corner to resize."
+                accessibilityValue={frame ? { text: `${Math.round((cropRect.w * cropRect.h * 100) / (frame.w * frame.h))}% of the photo` } : undefined}
+                accessibilityHint="Drag to move. Drag a corner to resize. Swipe up or down to grow or shrink."
+                accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+                onAccessibilityAction={e => {
+                  if (!frame) return;
+                  setCropRect(r => r && scaleCrop(r, e.nativeEvent.actionName === 'increment' ? 1.15 : 1 / 1.15, frame, cropRatio));
+                }}
                 {...cropPanFor('move').panHandlers}
               >
                 {CORNERS.map(c => (
@@ -439,6 +557,31 @@ export default function ImageEditorScreen() {
         </View>
       </View>
 
+      {/* Offscreen full-resolution render of the edit, mounted only while Done
+          captures it (exportFullRes). Same layers as the canvas, in export units. */}
+      {exportPlan && frame && (
+        <View ref={exportRef} collapsable={false} pointerEvents="none"
+          importantForAccessibility="no-hide-descendants" accessibilityElementsHidden
+          style={[styles.exportLayer, { width: exportPlan.w, height: exportPlan.h, left: -(exportPlan.w + SW) }]}>
+          <EditedImage uri={imageUri} matrix={matrix} style={styles.image} onLoad={() => exportLoaded.current?.()} />
+          <Strokes lines={lines} viewBox={`${frame.x} ${frame.y} ${frame.w} ${frame.h}`} />
+          {textOverlays.map(t => {
+            const k = exportPlan.w / frame.w;
+            const at = toExport(t, frame, exportPlan.w);
+            // The on-screen width, scaled (plus slack for glyph rounding), so the
+            // text breaks into the same lines.
+            const w = textSizes.current.get(t.id)?.w;
+            return (
+              <View key={t.id} style={{ position: 'absolute', left: at.x, top: at.y, width: w ? Math.ceil(w * k * 1.02) : undefined }}>
+                <Text style={[styles.overlayText, { color: t.color, fontSize: t.fontSize * k, textShadowRadius: 3 * k }]}>{t.text}</Text>
+              </View>
+            );
+          })}
+        </View>
+      )}
+
+      {/* Bottom: the open tool's panel above the tool bar, padded past the home indicator. */}
+      <View style={styles.bottomChrome}>
       {/* Tool bar */}
       <View style={styles.toolbar}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.toolRow}>
@@ -483,9 +626,14 @@ export default function ImageEditorScreen() {
               disabled={processing || !cropRect}
               accessibilityRole="button" accessibilityLabel="Apply crop"
               accessibilityState={{ disabled: processing || !cropRect, busy: processing }}>
-              <Text style={[styles.chipText, { color: '#FFF' }]}>Apply Crop</Text>
+              <Text style={[styles.chipText, { color: colors.onPrimary }]}>Apply Crop</Text>
             </TouchableOpacity>
           </ScrollView>
+          {sizeFailed && (
+            <Text style={styles.sliderLabel} accessibilityLiveRegion="polite">
+              {"This photo's size couldn't be read, so it can't be cropped."}
+            </Text>
+          )}
         </View>
       )}
 
@@ -637,6 +785,8 @@ export default function ImageEditorScreen() {
         </View>
       )}
 
+      </View>
+
       {processing && (
         <View style={styles.processingOverlay} accessibilityViewIsModal>
           <View style={[StyleSheet.absoluteFill, styles.processingScrim]} />
@@ -651,14 +801,14 @@ export default function ImageEditorScreen() {
 // Width/height are threaded in from useWindowDimensions() rather than read
 // from a module-level Dimensions.get(): orientation is 'default', so a frozen
 // value survived rotation, folds and split-screen resizes.
-const makeStyles = (c: Palette, SW: number, SH: number, insetTop: number) => StyleSheet.create({
+const makeStyles = (c: Palette, SW: number, SH: number, insetTop: number, insetBottom: number) => StyleSheet.create({
   container: { flex: 1, backgroundColor: c.bg },
   topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: insetTop + 8, paddingHorizontal: 16, paddingBottom: 12, backgroundColor: c.surfaceSolid },
   topBtn: { minHeight: 44, justifyContent: 'center', paddingVertical: 6, paddingHorizontal: 14 },
   topBtnText: { color: c.textDim, fontSize: 16, fontWeight: '600' },
   topTitle: { color: c.text, fontSize: 17, fontWeight: '700' },
   doneBtn: { backgroundColor: c.accent, borderRadius: 8 },
-  doneBtnText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
+  doneBtnText: { color: c.onPrimary, fontSize: 16, fontWeight: '700' },
   canvasWrapper: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   canvas: { width: SW, height: SH * 0.55, overflow: 'hidden' },
   image: { width: '100%', height: '100%' },
@@ -685,7 +835,7 @@ const makeStyles = (c: Palette, SW: number, SH: number, insetTop: number) => Sty
   textInputRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   textInput: { flex: 1, backgroundColor: c.glassSoft, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, color: c.text, fontSize: 14, borderWidth: 1, borderColor: c.border },
   addTextBtn: { marginLeft: 8, backgroundColor: c.accent, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
-  addTextBtnText: { color: '#FFF', fontSize: 13, fontWeight: '700' },
+  addTextBtnText: { color: c.onPrimary, fontSize: 13, fontWeight: '700' },
   textTag: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glassSoft, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, marginRight: 6 },
   filterBtn: { alignItems: 'center', marginRight: 14 },
   filterPreview: { width: 52, height: 52, borderRadius: 8, backgroundColor: c.glassSoft, marginBottom: 4, borderWidth: 2, borderColor: 'transparent', overflow: 'hidden' },
@@ -705,5 +855,10 @@ const makeStyles = (c: Palette, SW: number, SH: number, insetTop: number) => Sty
   // both themes (like any photo editor), not theme tokens.
   cropShade: { position: 'absolute', backgroundColor: 'rgba(0,0,0,0.55)' },
   cropBox: { position: 'absolute', borderWidth: 2, borderColor: '#FFFFFF' },
+  // Overlay text is image content: a dark halo keeps any ink colour legible on any photo.
+  overlayText: { fontWeight: '700', textShadowColor: '#000', textShadowRadius: 3 },
+  bottomChrome: { backgroundColor: c.card, paddingBottom: insetBottom },
+  // Offscreen (left is set past the screen's width): laid out and drawable, never seen.
+  exportLayer: { position: 'absolute', top: 0, overflow: 'hidden' },
   cropHandle: { position: 'absolute', width: 28, height: 28, borderColor: '#FFFFFF', borderWidth: 4, borderRadius: 4, backgroundColor: 'rgba(0,0,0,0.25)' },
 });

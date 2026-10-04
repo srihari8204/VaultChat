@@ -204,7 +204,7 @@ export function xlsxRows(sheetXml: string, shared: string[]): string[][] {
 
 /** A slide's title (from its title placeholder) and its remaining text. */
 export function pptxSlide(xml: string, n: number): Block {
-  const shapes: Array<{ title: boolean; lines: string[] }> = [];
+  const shapes: { title: boolean; lines: string[] }[] = [];
   const re = /<p:sp(?:\s[^>]*)?>[\s\S]*?<\/p:sp>/g;
   for (let m = re.exec(xml); m; m = re.exec(xml)) {
     const sp = m[0];
@@ -237,8 +237,8 @@ export function pptxSlide(xml: string, n: number): Block {
  * stream actually offers — there are no paragraph or heading markers in it — and
  * it is enough to stop an invoice rendering as one grey wall.
  */
-export function pdfPageLines(content: string): Array<{ text: string; size: number }> {
-  const lines: Array<{ text: string; size: number }> = [];
+export function pdfPageLines(content: string): { text: string; size: number }[] {
+  const lines: { text: string; size: number }[] = [];
   let cur = '';
   let size = 0, curSize = 0, gap = false;
 
@@ -277,7 +277,7 @@ function pdfLiteralLocal(raw: string): string {
 }
 
 /** Group a page's sized lines into heading/paragraph blocks. */
-export function pdfBlocksFromLines(lines: Array<{ text: string; size: number }>): Block[] {
+export function pdfBlocksFromLines(lines: { text: string; size: number }[]): Block[] {
   if (!lines.length) return [];
   const sizes = lines.map(l => l.size).filter(s => s > 0).sort((a, b) => a - b);
   const body = sizes.length ? sizes[Math.floor(sizes.length / 2)] : 0;

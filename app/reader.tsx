@@ -137,22 +137,22 @@ function ReaderScreen() {
       {cached === null ? (
         <ActivityIndicator style={{ marginTop: 48 }} color={theme.dim} accessibilityLabel="Loading message" />
       ) : readFailed ? (
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 }}>
+        <View style={st.state} accessibilityLiveRegion="polite">
           <Ionicons name="alert-circle-outline" size={44} color={theme.dim} />
-          <Text accessibilityRole="header" style={{ color: theme.text, fontSize: 17, fontWeight: '700', textAlign: 'center' }}>Couldn’t open this message</Text>
-          <Text style={{ color: theme.dim, fontSize: 14, textAlign: 'center' }}>It could not be read from this device’s storage.</Text>
+          <Text accessibilityRole="header" style={[st.stateTitle, { color: theme.text }]}>Couldn’t open this message</Text>
+          <Text style={[st.stateBody, { color: theme.dim }]}>It could not be read from this device’s storage.</Text>
           <TouchableOpacity onPress={() => setReloadKey(k => k + 1)} accessibilityRole="button" accessibilityLabel="Retry"
-            style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 20 }}>
-            <Text style={{ color: theme.text, fontSize: 15, fontWeight: '700' }}>Retry</Text>
+            style={st.stateBtn}>
+            <Text style={[st.stateBtnTxt, { color: theme.text }]}>Retry</Text>
           </TouchableOpacity>
         </View>
       ) : !body.trim() ? (
         // Reached without a message (bare deep link): say so rather than
         // render "Long message · 0 words".
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 }}>
+        <View style={st.state}>
           <Ionicons name="document-text-outline" size={44} color={theme.dim} />
-          <Text style={{ color: theme.text, fontSize: 17, fontWeight: '700', textAlign: 'center' }}>Nothing to read</Text>
-          <Text style={{ color: theme.dim, fontSize: 14, textAlign: 'center' }}>This message is no longer available.</Text>
+          <Text accessibilityRole="header" style={[st.stateTitle, { color: theme.text }]}>Nothing to read</Text>
+          <Text style={[st.stateBody, { color: theme.dim }]}>This message is no longer available.</Text>
         </View>
       ) : (
       <ScrollView
@@ -292,6 +292,12 @@ const st = StyleSheet.create({
   },
   sheetTitle: { fontSize: 17, fontWeight: '800' },
   sheetActions: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 28, marginBottom: 4 },
+  // Error / nothing-to-read states
+  state: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 },
+  stateTitle: { fontSize: 17, fontWeight: '700', textAlign: 'center' },
+  stateBody: { fontSize: 14, textAlign: 'center' },
+  stateBtn: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 20 },
+  stateBtnTxt: { fontSize: 15, fontWeight: '700' },
 });
 
 // A render fault in a viewer used to take the WHOLE app down: these screens

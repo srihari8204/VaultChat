@@ -20,10 +20,10 @@
 // is deliberately worded to avoid implying otherwise.
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Dimensions, AppState, type AppStateStatus, type ViewStyle, useWindowDimensions} from 'react-native';
+import { View, Text, StyleSheet, AppState, type AppStateStatus, type ViewStyle, useWindowDimensions} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { watch, capabilities, isSafeToRender, setSecure, type GuardState } from '../lib/screenGuard';
-import type { Palette } from '../constants/theme';
+import { watch, getState, capabilities, isSafeToRender, setSecure, type GuardState } from '../lib/screenGuard';
+import { AuroraDark, type Palette } from '../constants/theme';
 import { useColors } from '../lib/theme';
 
 export interface ProtectedMediaViewProps {
@@ -44,11 +44,7 @@ export default function ProtectedMediaView({
 }: ProtectedMediaViewProps) {
   const c = useColors();
   const S = useMemo(() => makeS(c), [c]);
-  // Reactive size. The module-level Dimensions.get above is captured ONCE at
-  // import and never updates, so it froze the layout at the size the app
-  // launched with. Shadowing it here makes every use in this component follow
-  // rotation; StyleSheet.create keeps the initial value, which is fine for
-  // static rules.
+  // Live window size, so the watermark tiling follows rotation.
   const { width: SW, height: SH } = useWindowDimensions();
 
   const [guard, setGuard] = useState<GuardState>({
@@ -81,12 +77,16 @@ export default function ProtectedMediaView({
   }, []);
 
   // Re-check on foreground: a recording can start while the app is backgrounded,
-  // and on some OS versions the transition event is missed.
+  // and on some OS versions the transition event is missed — so the capture
+  // state is read again here, not just the watermark clock bumped.
   useEffect(() => {
+    let alive = true;
     const sub = AppState.addEventListener('change', (st: AppStateStatus) => {
-      if (st === 'active') setNow(Date.now());
+      if (st !== 'active') return;
+      setNow(Date.now());
+      getState().then(s => { if (alive) { setGuard(s); setReady(true); } }).catch(() => {});
     });
-    return () => sub.remove();
+    return () => { alive = false; sub.remove(); };
   }, []);
 
   // Live timestamp in the watermark — a still photo of the screen carries the
@@ -118,7 +118,7 @@ export default function ProtectedMediaView({
   if (!ready) {
     return (
       <View style={S.blocked}>
-        <Ionicons name="lock-closed-outline" size={34} color="#9CA3AF" />
+        <Ionicons name="lock-closed-outline" size={34} color={c.textDim} />
         <Text style={S.blockedTitle}>Checking screen…</Text>
       </View>
     );
@@ -127,7 +127,7 @@ export default function ProtectedMediaView({
   if (!safe) {
     return (
       <View style={S.blocked}>
-        <Ionicons name={reason === 'captured' ? 'videocam-off-outline' : 'tv-outline'} size={40} color="#FF3C6E" />
+        <Ionicons name={reason === 'captured' ? 'videocam-off-outline' : 'tv-outline'} size={40} color={c.danger} />
         <Text style={S.blockedTitle}>
           {reason === 'captured' ? 'Screen recording detected' : 'External display detected'}
         </Text>
@@ -165,7 +165,7 @@ export default function ProtectedMediaView({
           <Ionicons
             name={caps.canBlock ? 'shield-checkmark' : 'shield-half'}
             size={13}
-            color={caps.canBlock ? '#00D4AA' : '#FFC53D'}
+            color={caps.canBlock ? AuroraDark.success : AuroraDark.warning}   // on the fixed dark status bar
           />
           <Text style={S.statusTxt}>
             {caps.canBlock
@@ -204,7 +204,7 @@ const makeS = (c: Palette) => StyleSheet.create({
     paddingVertical: 10, paddingHorizontal: 16,
     backgroundColor: 'rgba(0,0,0,0.72)',
   },
-  statusTxt: { color: '#D1D5DB', fontSize: 11, flexShrink: 1 },   // theme-exempt: sits on the fixed rgba(0,0,0,0.72) bar below
+  statusTxt: { color: AuroraDark.textDim, fontSize: 11, flexShrink: 1 },   // dark palette: sits on the fixed rgba(0,0,0,0.72) bar
   blocked: {
     flex: 1, alignItems: 'center', justifyContent: 'center',
     backgroundColor: c.bg, padding: 32, gap: 10,

@@ -13,7 +13,6 @@ import { useTheme } from '../lib/theme';
 import { Stack, useNavigation, useLocalSearchParams, useRouter } from 'expo-router';
 import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
-import { AuroraBackground } from '../components/ui';
 import { CANVAS_BG, DEFAULT_INK, commitWhiteboardPath, type Tool, type PathData, type Point } from '../lib/whiteboardStroke';
 import { strokeD } from '../lib/strokePath';
 import { returnParams } from '../lib/camera/cameraMode';
@@ -56,12 +55,21 @@ export default function WhiteboardScreen() {
   const canvasRef = useRef<View>(null);
   const [paths, setPaths] = useState<PathData[]>([]);
   const [redoStack, setRedoStack] = useState<PathData[]>([]);
-  const [currentPath, setCurrentPath] = useState<Point[]>([]);
+  // The live stroke grows in a ref; a render is asked for at most once per
+  // frame (it used to copy the whole point array and re-render the screen on
+  // every move event).
+  const [, setFrame] = useState(0);
+  const frameReq = useRef<number | null>(null);
+  const requestFrame = () => {
+    if (frameReq.current != null) return;
+    frameReq.current = requestAnimationFrame(() => { frameReq.current = null; setFrame(f => f + 1); });
+  };
+  useEffect(() => () => { if (frameReq.current != null) cancelAnimationFrame(frameReq.current); }, []);
   const [color, setColor] = useState(DEFAULT_INK);
   const [brushSize, setBrushSize] = useState(4);
   const [tool, setTool] = useState<Tool>('pen');
   const [busy, setBusy] = useState(false);
-  const currentPathRef = useRef<Point[]>(currentPath);
+  const currentPathRef = useRef<Point[]>([]);
   const colorRef = useRef(color);
   const brushSizeRef = useRef(brushSize);
   const toolRef = useRef(tool);
@@ -75,53 +83,61 @@ export default function WhiteboardScreen() {
     onMoveShouldSetPanResponder: () => true,
     onPanResponderGrant: (e) => {
       const { locationX, locationY } = e.nativeEvent;
-      const next = [{ x: locationX, y: locationY }];
-      currentPathRef.current = next;
-      setCurrentPath(next);
+      currentPathRef.current = [{ x: locationX, y: locationY }];
+      requestFrame();
     },
     onPanResponderMove: (e) => {
       const { locationX, locationY } = e.nativeEvent;
-      const next = [...currentPathRef.current, { x: locationX, y: locationY }];
-      currentPathRef.current = next;
-      setCurrentPath(next);
+      currentPathRef.current.push({ x: locationX, y: locationY });
+      requestFrame();
     },
     onPanResponderRelease: () => {
       const committed = commitWhiteboardPath(currentPathRef.current, toolRef.current, colorRef.current, brushSizeRef.current);
       if (committed) {
         setPaths(prev => [...prev, committed]);
         setRedoStack([]); // a new stroke ends the redo history, as in any editor
+        version.current++;
       }
       currentPathRef.current = [];
-      setCurrentPath([]);
+      requestFrame();
     },
   })).current;
+
+  // Every change to the drawing bumps this. The leave guard compares it with
+  // the version last shared — counting strokes could not tell "undid one, drew
+  // another" from "nothing changed", so that edit could be lost without asking.
+  const version = useRef(0);
+  const sharedVersion = useRef(0);
 
   const undo = () => {
     if (paths.length === 0) return;
     setRedoStack(r => [...r, paths[paths.length - 1]]);
     setPaths(prev => prev.slice(0, -1));
+    version.current++;
   };
   const redo = () => {
     if (redoStack.length === 0) return;
     setPaths(prev => [...prev, redoStack[redoStack.length - 1]]);
     setRedoStack(r => r.slice(0, -1));
+    version.current++;
   };
   const clear = () => {
     if (paths.length === 0) return;
     Alert.alert('Clear Canvas?', 'This will erase everything.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Clear', style: 'destructive', onPress: () => { setPaths([]); setRedoStack([]); } },
+      { text: 'Clear', style: 'destructive', onPress: () => { setPaths([]); setRedoStack([]); version.current++; } },
     ]);
   };
 
-  // Strokes drawn since the last share/send. Leaving with unsaved strokes asks
-  // first: the drawing lives only in memory, and back used to drop it silently.
-  const sharedCount = useRef(0);
+  // Leaving with an unshared drawing asks first: the drawing lives only in
+  // memory, and back used to drop it silently.
   const pathsRef = useRef(paths);
   pathsRef.current = paths;
   const navigation = useNavigation();
-  useEffect(() => navigation.addListener('beforeRemove', (e: any) => {
-    if (pathsRef.current.length === 0 || pathsRef.current.length === sharedCount.current) return;
+  useEffect(() => navigation.addListener('beforeRemove', (ev) => {
+    // beforeRemove is preventable at runtime; the generic navigation type says otherwise.
+    const e = ev as typeof ev & { preventDefault(): void };
+    if (pathsRef.current.length === 0 || version.current === sharedVersion.current) return;
     e.preventDefault();
     Alert.alert('Discard drawing?', 'Your drawing has not been shared and will be lost.', [
       { text: 'Keep drawing', style: 'cancel' },
@@ -139,7 +155,7 @@ export default function WhiteboardScreen() {
     try {
       const uri = await capture();
       // Mark as saved BEFORE leaving, or the leave guard would block the pop.
-      sharedCount.current = pathsRef.current.length;
+      sharedVersion.current = version.current;
       router.dismissTo({
         pathname: (returnTo || '/chat') as any,
         params: returnParams({ chatId, peerUid, peerName }, { uri, type: 'image' }),
@@ -156,8 +172,11 @@ export default function WhiteboardScreen() {
     try {
       const uri = await capture();
       if (await Sharing.isAvailableAsync()) {
+        // The capture is left in place: the receiving app may still be reading
+        // it after the sheet closes. react-native-view-shot deletes its
+        // snapshot files itself when the app next starts.
         await Sharing.shareAsync(uri, { mimeType: 'image/jpeg' });
-        sharedCount.current = pathsRef.current.length;
+        sharedVersion.current = version.current;
       } else {
         Alert.alert('Sharing unavailable', 'No app on this device can receive the drawing.');
       }
@@ -169,6 +188,7 @@ export default function WhiteboardScreen() {
   };
 
   const empty = paths.length === 0;
+  const currentPath = currentPathRef.current;
   const live: PathData | null = currentPath.length > 0
     ? { points: currentPath, color: tool === 'eraser' ? CANVAS_BG : color, width: tool === 'eraser' ? brushSize * 3 : brushSize }
     : null;
@@ -178,25 +198,24 @@ export default function WhiteboardScreen() {
       <Stack.Screen options={{
         headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */  title: 'Whiteboard', headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text,
         headerRight: () => (
-          <View style={{ flexDirection: 'row', gap: 14, marginRight: 8, alignItems: 'center' }}>
+          <View style={s.headerActions}>
             {busy && <ActivityIndicator color={colors.accentOn} />}
             <TouchableOpacity accessibilityRole="button" accessibilityLabel="Share drawing to another app"
-              accessibilityState={{ disabled: empty || busy }} disabled={empty || busy}
-              style={{ minHeight: 44, justifyContent: 'center', opacity: empty ? 0.5 : 1 }} onPress={saveAndShare}>
-              <Text style={{ color: colors.accentOn, fontSize: 13, fontWeight: '700' }}>Share</Text>
+              accessibilityState={{ disabled: empty || busy, busy }} disabled={empty || busy}
+              style={[s.headerBtn, empty && s.headerBtnOff]} onPress={saveAndShare}>
+              <Text style={s.headerBtnTxt}>Share</Text>
             </TouchableOpacity>
             {!!chatId && (
               <TouchableOpacity accessibilityRole="button" accessibilityLabel="Send drawing to this chat"
-                accessibilityState={{ disabled: empty || busy }} disabled={empty || busy}
-                style={{ minHeight: 44, justifyContent: 'center', opacity: empty ? 0.5 : 1 }} onPress={sendToChat}>
-                <Text style={{ color: colors.accentOn, fontSize: 13, fontWeight: '800' }}>Send</Text>
+                accessibilityState={{ disabled: empty || busy, busy }} disabled={empty || busy}
+                style={[s.headerBtn, empty && s.headerBtnOff]} onPress={sendToChat}>
+                <Text style={[s.headerBtnTxt, s.headerBtnStrong]}>Send</Text>
               </TouchableOpacity>
             )}
           </View>
         ),
       }} />
       <View style={s.container}>
-      <AuroraBackground />
 
         {/* Canvas — collapsable={false} keeps the native view that captureRef snapshots. */}
         <View ref={canvasRef} collapsable={false} style={s.canvas} {...panResponder.panHandlers}
@@ -263,7 +282,13 @@ export default function WhiteboardScreen() {
 }
 
 const makeStyles = (c: Palette, insetBottom: number) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: 'transparent' },
+  // The canvas is opaque white and the toolbar a glass bar over this ground.
+  container: { flex: 1, backgroundColor: c.bg },
+  headerActions: { flexDirection: 'row', gap: 14, marginRight: 8, alignItems: 'center' },
+  headerBtn: { minHeight: 44, justifyContent: 'center' },
+  headerBtnOff: { opacity: 0.5 },
+  headerBtnTxt: { color: c.accentOn, fontSize: 13, fontWeight: '700' },
+  headerBtnStrong: { fontWeight: '800' },
   canvas: { flex: 1, backgroundColor: CANVAS_BG },
   toolbar: { backgroundColor: c.glass, padding: 12, paddingBottom: insetBottom + 12, borderTopWidth: 1, borderTopColor: c.glassStroke },
   toolRow: { flexDirection: 'row', justifyContent: 'center', gap: 16, marginBottom: 12 },

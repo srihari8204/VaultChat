@@ -10,7 +10,7 @@
 // Pins live in the localDb kv table, not on the server: "keep this at the top of
 // my shelf" is a per-device view preference, not shared state.
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator, Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
@@ -96,20 +96,33 @@ export default function ShelfScreen() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const togglePin = useCallback(async (id: string) => {
-    const next = new Set(pins);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    setPins(next);
-    setFiles(fs => fs.map(f => (f.attachmentId === id ? { ...f, pinned: next.has(id) } : f)));
-    try {
-      await setMeta(PINS_KEY, JSON.stringify([...next]));
-    } catch {
-      // The pin only looked saved: put the row back and say so.
-      setPins(pins);
-      setFiles(fs => fs.map(f => (f.attachmentId === id ? { ...f, pinned: pins.has(id) } : f)));
-      Alert.alert('Couldn’t save the pin', 'The change could not be written to this device. Please try again.');
-    }
-  }, [pins]);
+  // The live pin set, so overlapping toggles on two rows each start from the
+  // other's result, and a failed write undoes only its OWN row (restoring a
+  // snapshot taken at tap time used to undo the other row's toggle too).
+  // Writes are chained so an older set can never land after a newer one.
+  const pinsRef = useRef(pins);
+  pinsRef.current = pins;
+  const pinWrites = useRef<Promise<unknown>>(Promise.resolve());
+  const togglePin = useCallback((id: string) => {
+    const was = pinsRef.current.has(id);
+    const withPin = (set: Set<string>, on: boolean) => {
+      const n = new Set(set);
+      if (on) n.add(id); else n.delete(id);
+      return n;
+    };
+    const setRow = (on: boolean) => {
+      pinsRef.current = withPin(pinsRef.current, on);
+      setPins(pinsRef.current);
+      setFiles(fs => fs.map(f => (f.attachmentId === id ? { ...f, pinned: on } : f)));
+    };
+    setRow(!was);
+    pinWrites.current = pinWrites.current.then(() =>
+      setMeta(PINS_KEY, JSON.stringify([...pinsRef.current])).catch(() => {
+        // The pin only looked saved: put this row back and say so.
+        setRow(was);
+        Alert.alert('Couldn’t save the pin', 'The change could not be written to this device. Please try again.');
+      }));
+  }, []);
 
   const counts = useMemo(() => countsByKind(files), [files]);
   const shown = useMemo(() => queryShelf(files, { kind, search, sort }), [files, kind, search, sort]);
@@ -118,7 +131,7 @@ export default function ShelfScreen() {
     // Reuse the viewers that already exist rather than adding a third one.
     // media-viewer routes archives on to app/archive-viewer itself. queryShelf
     // returns the same row objects, so the protection flags are still on them.
-    router.push({ pathname: '/media-viewer', params: shelfOpenParams(f, myId) } as any);
+    router.push({ pathname: '/media-viewer', params: shelfOpenParams(f, myId) });
   }, [router, myId]);
 
   return (
@@ -226,7 +239,11 @@ export default function ShelfScreen() {
           renderItem={({ item }) => (
             <TouchableOpacity style={S.row} activeOpacity={0.75} onPress={() => open(item)}
               accessibilityRole="button"
-              accessibilityLabel={`Open ${item.filename}, ${formatSize(item.size)}`}>
+              accessibilityLabel={`Open ${item.filename}, ${formatSize(item.size)}${item.pinned ? ', pinned' : ''}`}
+              // The pin button sits inside this row, where a screen reader may
+              // not reach it: offer it as an action on the row as well.
+              accessibilityActions={[{ name: 'pin', label: item.pinned ? 'Unpin' : 'Pin' }]}
+              onAccessibilityAction={e => { if (e.nativeEvent.actionName === 'pin') togglePin(item.attachmentId); }}>
               <View style={S.rowIcon}>
                 <Ionicons name={KIND_ICON[item.kind]} size={20} color={colors.primary} />
               </View>

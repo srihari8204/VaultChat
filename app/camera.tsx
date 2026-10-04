@@ -23,10 +23,12 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  AccessibilityInfo, ActivityIndicator, Alert, Animated, AppState, Image,
+  ActivityIndicator, Alert, Animated, AppState, BackHandler, Image,
   KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, StatusBar, StyleSheet, TextInput, View,
 } from 'react-native';
+import * as FileSystem from 'expo-file-system/legacy';
 import { permissionDenied } from '../lib/permissionDenied';
+import { useReducedMotion } from '../lib/useReducedMotion';
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import * as MediaLibrary from 'expo-media-library';
@@ -100,13 +102,7 @@ export default function CameraScreen() {
   const scanningRef = useRef(false);  // ML Kit's activity is up; don't launch a second
 
   // ── Reduce motion ────────────────────────────────────────────────────
-  const [reduceMotion, setReduceMotion] = useState(false);
-  useEffect(() => {
-    let alive = true;
-    AccessibilityInfo.isReduceMotionEnabled().then(v => { if (alive) setReduceMotion(v); }).catch(() => {});
-    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion);
-    return () => { alive = false; sub?.remove?.(); };
-  }, []);
+  const reduceMotion = useReducedMotion();
   const dur = reduceMotion ? 0 : MOTION.base;
 
   // Returning to the foreground means ML Kit's activity is gone, whether or not
@@ -148,6 +144,25 @@ export default function CameraScreen() {
     return () => { if (recTimer.current) clearInterval(recTimer.current); };
   }, []);
 
+  // ── Scanned pages are plaintext images in the cache ───────────────────
+  // ML Kit writes each page to a file. Once a page is removed, abandoned, or
+  // inside the attached PDF, that copy has no further use, so it is deleted.
+  const dropPages = useCallback((pages: string[]) => {
+    for (const p of pages) FileSystem.deleteAsync(p, { idempotent: true }).catch(() => {});
+  }, []);
+
+  // ── A recording the user walked away from is not delivered ───────────
+  // ✕ / back while recording used to leave recordAsync running; when it
+  // resolved after the screen had gone, leave(capture) sent a video the user
+  // had closed on. Abandoning stops it and marks the result as unwanted.
+  const recordingRef = useRef(false);
+  const abandoned = useRef(false);
+  const abandonRecording = useCallback(() => {
+    if (!recordingRef.current) return;
+    abandoned.current = true;
+    try { cameraRef.current?.stopRecording(); } catch {}
+  }, []);
+
   // ── Unsent scanned pages are confirmed before they are thrown away ────
   // Covers ✕, "Not now", Android back and the swipe-back gesture alike: they
   // all remove this screen, and beforeRemove sees every one of them. Leaving
@@ -156,15 +171,23 @@ export default function CameraScreen() {
   const allowLeave = useRef(false);
   const scanPagesRef = useRef(scanPages);
   scanPagesRef.current = scanPages;
-  useEffect(() => navigation.addListener('beforeRemove', (e: any) => {
-    if (allowLeave.current || scanPagesRef.current.length === 0) return;
+  useEffect(() => navigation.addListener('beforeRemove', (ev) => {
+    // beforeRemove is preventable at runtime; the generic navigation type says otherwise.
+    const e = ev as typeof ev & { preventDefault(): void };
+    if (allowLeave.current) return;
+    if (scanPagesRef.current.length === 0) { abandonRecording(); return; }
     e.preventDefault();
     const n = scanPagesRef.current.length;
     Alert.alert('Discard scanned pages?', `${n} scanned page${n > 1 ? 's' : ''} will be lost.`, [
       { text: 'Keep scanning', style: 'cancel' },
-      { text: 'Discard', style: 'destructive', onPress: () => { allowLeave.current = true; navigation.dispatch(e.data.action); } },
+      { text: 'Discard', style: 'destructive', onPress: () => {
+        allowLeave.current = true;
+        abandonRecording();
+        dropPages(scanPagesRef.current);
+        navigation.dispatch(e.data.action);
+      } },
     ]);
-  }), [navigation]);
+  }), [navigation, abandonRecording, dropPages]);
 
   // ── Waiting for the preview to reconfigure ─────────────────────────────
   // Switching PHOTO→VIDEO rebuilds the native camera session; recording before
@@ -178,14 +201,18 @@ export default function CameraScreen() {
     w.forEach(f => f());
   }, []);
   const waitForCamera = () => new Promise<void>(resolve => {
-    readyWaiters.current.push(resolve);
-    setTimeout(resolve, 1500);
+    const floor = setTimeout(resolve, 1500);
+    readyWaiters.current.push(() => { clearTimeout(floor); resolve(); });
   });
 
   // ── Leaving: always by chat id, never by popping the stack ────────────
   const leave = useCallback((capture?: Parameters<typeof returnParams>[1]) => {
     // A capture is what the user came for: never ask before delivering it.
-    if (capture) allowLeave.current = true;
+    // Scanned pages left behind by a photo/video capture are abandoned.
+    if (capture) {
+      allowLeave.current = true;
+      if (capture.type !== 'file') dropPages(scanPagesRef.current);
+    }
     if (!chatId) { router.back(); return; }   // opened outside a chat — nothing to address
     // dismissTo = POP_TO: pops back to the chat already in the stack (no second
     // copy of it), and pushes it if the stack is shallow — which is exactly the
@@ -194,7 +221,7 @@ export default function CameraScreen() {
       pathname: (returnTo || '/chat') as any,
       params: returnParams({ chatId, peerUid, peerName }, capture),
     });
-  }, [router, returnTo, chatId, peerUid, peerName]);
+  }, [router, returnTo, chatId, peerUid, peerName, dropPages]);
 
   // ── Permissions, asked at the moment they are earned ──────────────────
   const ensureMic = useCallback(async () => {
@@ -233,13 +260,17 @@ export default function CameraScreen() {
     const revert = mode !== 'VIDEO';
     if (revert) { const ready = waitForCamera(); setMode('VIDEO'); await ready; }
     setRecording(true);
+    recordingRef.current = true;
+    abandoned.current = false;
     setRecSecs(0);
     recTimer.current = setInterval(() => setRecSecs(s => s + 1), 1000);
     try {
       const video = await cameraRef.current.recordAsync({ maxDuration: MAX_VIDEO_SECONDS });
-      if (video?.uri) leave({ uri: video.uri, type: isNote ? 'video-note' : 'video', viewOnce });
+      if (video?.uri && abandoned.current) FileSystem.deleteAsync(video.uri, { idempotent: true }).catch(() => {});
+      else if (video?.uri) leave({ uri: video.uri, type: isNote ? 'video-note' : 'video', viewOnce });
     } catch { /* cancelled */ }
     finally {
+      recordingRef.current = false;
       setRecording(false);
       if (recTimer.current) { clearInterval(recTimer.current); recTimer.current = null; }
       setRecSecs(0);
@@ -290,20 +321,32 @@ export default function CameraScreen() {
     setBusy(true);
     try {
       const uri = await pagesToPdf(scanPages, style);
+      // The pages are inside the PDF now; their plaintext copies can go.
+      dropPages(scanPages);
       leave({ uri, type: 'file', filename: docFilename(docName, style, new Date()) });
     } catch (e: any) {
       console.warn('[camera] PDF build failed:', e?.message ?? e);
       setNotice('Could not build the PDF. Your pages are kept — try Attach again.');
     } finally { setBusy(false); }
-  }, [busy, scanPages, style, docName, leave]);
+  }, [busy, scanPages, style, docName, leave, dropPages]);
 
   const removePage = useCallback((i: number) => {
+    const gone = scanPagesRef.current[i];
     setScanPages(prev => {
       const next = prev.filter((_, j) => j !== i);
       if (next.length === 0) setReviewing(false);
       return next;
     });
-  }, []);
+    if (gone) dropPages([gone]);
+  }, [dropPages]);
+
+  // Android back closes the review sheet first: it is an in-tree overlay, so
+  // without this back went straight to the discard prompt.
+  useEffect(() => {
+    if (!reviewing) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => { setReviewing(false); return true; });
+    return () => sub.remove();
+  }, [reviewing]);
 
   const openPicker = useCallback(async () => {
     if (busy || recording) return;

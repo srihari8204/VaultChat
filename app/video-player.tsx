@@ -10,7 +10,6 @@ import {
   StatusBar, ActivityIndicator, Animated, PanResponder, Alert,
   useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useTheme } from '../lib/theme';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
@@ -19,6 +18,7 @@ import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { seekFraction, seekTargetMs, resumeKey } from '../lib/videoSeek';
+import { videoResumeKey } from '../lib/media/videoResumeKey';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { getAccessToken } from '../lib/api';
 import { isOwnServerUrl } from '../lib/serverOrigin';
@@ -27,12 +27,14 @@ import { VIEWER_TEMP_PREFIX } from '../lib/mediaCacheGC';
 // Fixed palette, deliberately not theme tokens: the video stage is black in
 // both themes, so the chrome on it must stay light-on-dark.
 const ACCENT = '#4A9FFF';
+const ACCENT_FILL = 'rgba(74,159,255,0.25)';   // ACCENT, translucent, behind the play icon
 const BG = '#000000';
 const CTA = '#1D4ED8'; // 6.7:1 under white text
 const OVERLAY = 'rgba(0,0,0,0.55)';
 // Controls sit on the fixed black stage + OVERLAY in BOTH themes, so they use
 // a fixed light foreground. c.text is #1B1526 in light theme — invisible here.
 const FG = '#FFFFFF';
+const FG_DIM = 'rgba(255,255,255,0.75)';
 const SPEEDS = [0.5, 1, 1.25, 1.5, 2];
 
 const formatTime = (ms: number) => {
@@ -55,7 +57,6 @@ export default function VideoPlayerScreen() {
 
 function VideoPlayerInner() {
   const { width: SCREEN_W, height: SCREEN_H } = useWindowDimensions();
-  const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => makeStyles(insets.top, insets.bottom), [insets.top, insets.bottom]);
   const router = useRouter();
@@ -70,7 +71,6 @@ function VideoPlayerInner() {
   const lastTapRight = useRef(0);
 
   // Playback state
-  const [, setStatus] = useState<AVPlaybackStatus | null>(null);
   const [isPlaying, setIsPlaying] = useState(true);
   const [positionMs, setPositionMs] = useState(0);
   const [durationMs, setDurationMs] = useState(0);
@@ -89,16 +89,27 @@ function VideoPlayerInner() {
   const durationRef = useRef(0);
   const positionRef = useRef(0);
 
-  // Resume from last position
+  // Resume from the last position. Read on mount, APPLIED in onLoad: a seek
+  // issued before the video has loaded is dropped by the player, so the old
+  // mount-time seek mostly did nothing. Applied once per file.
+  const resumeAt = useRef<number | null>(null);
+  const applyResume = () => {
+    const pos = resumeAt.current;
+    resumeAt.current = null;
+    if (pos != null && videoRef.current) videoRef.current.setPositionAsync(pos).catch(() => {});
+  };
   useEffect(() => {
+    resumeAt.current = null;
     if (!videoUri) return;
-    const key = resumeKey(videoUri);
-    AsyncStorage.getItem(key).then(saved => {
-      if (saved) {
-        const pos = parseInt(saved, 10);
-        if (pos > 1000 && videoRef.current) {
-          videoRef.current.setPositionAsync(pos).catch(() => {});
-        }
+    // The old key (lib/videoSeek.resumeKey) kept a readable prefix of the path
+    // and was shared by every video in the same folder: drop it.
+    AsyncStorage.removeItem(resumeKey(videoUri)).catch(() => {});
+    AsyncStorage.getItem(videoResumeKey(videoUri)).then(saved => {
+      const pos = saved ? parseInt(saved, 10) : 0;
+      if (pos > 1000) {
+        resumeAt.current = pos;
+        // Already loaded by the time storage answered: seek now.
+        if (durationRef.current > 0) applyResume();
       }
     }).catch(() => {});
   }, [videoUri]);
@@ -107,7 +118,7 @@ function VideoPlayerInner() {
   // on positionMs re-ran it on every 250 ms progress tick (~4 writes/s).
   const saveResume = useCallback(() => {
     if (videoUri && positionRef.current > 1000) {
-      AsyncStorage.setItem(resumeKey(videoUri), String(positionRef.current)).catch(() => {});
+      AsyncStorage.setItem(videoResumeKey(videoUri), String(positionRef.current)).catch(() => {});
     }
   }, [videoUri]);
   useEffect(() => () => saveResume(), [saveResume]);
@@ -228,7 +239,6 @@ function VideoPlayerInner() {
     }
     positionRef.current = s.positionMillis || 0;
     durationRef.current = s.durationMillis || 0;
-    setStatus(s);
     setIsPlaying(s.isPlaying);
     setPositionMs(s.positionMillis || 0);
     setDurationMs(s.durationMillis || 0);
@@ -400,23 +410,19 @@ function VideoPlayerInner() {
   // After the hooks, so hook order is unchanged.
   if (!videoUri) {
     return (
-      <View style={[styles.container, { alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 }]}>
+      <View style={[styles.container, styles.stateBox]}>
         <Stack.Screen options={{ headerShown: false }} />
         <StatusBar hidden />
-        <Ionicons name="videocam-off-outline" size={44} color={colors.textDim} />
-        <Text accessibilityRole="header" style={{ color: FG, fontSize: 17, fontWeight: '700', textAlign: 'center' }}>
-          Nothing to play
-        </Text>
-        <Text style={{ color: colors.textDim, fontSize: 14, textAlign: 'center' }}>
-          This link carried no video, or the file is no longer available.
-        </Text>
+        <Ionicons name="videocam-off-outline" size={44} color={FG_DIM} />
+        <Text accessibilityRole="header" style={styles.stateTitle}>Nothing to play</Text>
+        <Text style={styles.stateBody}>This link carried no video, or the file is no longer available.</Text>
         <TouchableOpacity
-          onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/chats' as any))}
+          onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/chats'))}
           accessibilityRole="button"
           accessibilityLabel="Go back"
-          style={{ marginTop: 8, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, backgroundColor: CTA }}
+          style={[styles.stateBtn, styles.stateBtnTop]}
         >
-          <Text style={{ color: FG, fontWeight: '700' }}>Go back</Text>
+          <Text style={styles.stateBtnTxt}>Go back</Text>
         </TouchableOpacity>
       </View>
     );
@@ -447,6 +453,7 @@ function VideoPlayerInner() {
           rate={currentSpeed}
           progressUpdateIntervalMillis={250}
           onPlaybackStatusUpdate={onPlaybackStatusUpdate}
+          onLoad={applyResume}
           onError={(e) => { setLoadError(String(e || 'unknown')); setIsBuffering(false); }}
         />
 
@@ -459,28 +466,24 @@ function VideoPlayerInner() {
 
         {/* Load failure: a bad or expired file used to spin forever. */}
         {loadError && (
-          <View style={[styles.bufferingOverlay, { padding: 24, gap: 12 }]}>
+          <View style={[styles.bufferingOverlay, styles.stateBox]} accessibilityLiveRegion="polite">
             <Ionicons name="alert-circle-outline" size={44} color={FG} />
-            <Text accessibilityRole="header" style={{ color: FG, fontSize: 17, fontWeight: '700', textAlign: 'center' }}>
-              {"Can't play this video"}
-            </Text>
-            <Text style={{ color: 'rgba(255,255,255,0.75)', fontSize: 14, textAlign: 'center' }}>
-              The file may be damaged, in an unsupported format, or no longer available.
-            </Text>
-            <View style={{ flexDirection: 'row', gap: 12, marginTop: 8 }}>
+            <Text accessibilityRole="header" style={styles.stateTitle}>{"Can't play this video"}</Text>
+            <Text style={styles.stateBody}>The file may be damaged, in an unsupported format, or no longer available.</Text>
+            <View style={styles.stateRow}>
               <TouchableOpacity
                 onPress={() => { setLoadError(null); setIsBuffering(true); setReloadKey(k => k + 1); }}
                 accessibilityRole="button" accessibilityLabel="Retry loading the video"
-                style={{ paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, backgroundColor: CTA }}
+                style={styles.stateBtn}
               >
-                <Text style={{ color: FG, fontWeight: '700' }}>Retry</Text>
+                <Text style={styles.stateBtnTxt}>Retry</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={handleClose}
                 accessibilityRole="button" accessibilityLabel="Close video player"
-                style={{ paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, borderWidth: 1, borderColor: 'rgba(255,255,255,0.4)' }}
+                style={[styles.stateBtn, styles.stateBtnGhost]}
               >
-                <Text style={{ color: FG, fontWeight: '700' }}>Close</Text>
+                <Text style={styles.stateBtnTxt}>Close</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -726,7 +729,7 @@ const makeStyles = (insetTop: number, insetBottom: number) => StyleSheet.create(
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: 'rgba(0,229,255,0.25)',
+    backgroundColor: ACCENT_FILL,
     borderWidth: 2.5,
     borderColor: ACCENT,
     justifyContent: 'center',
@@ -841,4 +844,14 @@ const makeStyles = (insetTop: number, insetBottom: number) => StyleSheet.create(
     fontSize: 10,
     fontWeight: '800',
   },
+
+  // "Nothing to play" and the load-error overlay
+  stateBox: { alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },
+  stateTitle: { color: FG, fontSize: 17, fontWeight: '700', textAlign: 'center' },
+  stateBody: { color: FG_DIM, fontSize: 14, textAlign: 'center' },
+  stateRow: { flexDirection: 'row', gap: 12, marginTop: 8 },
+  stateBtn: { paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, backgroundColor: CTA },
+  stateBtnTop: { marginTop: 8 },
+  stateBtnGhost: { backgroundColor: 'transparent', borderWidth: 1, borderColor: 'rgba(255,255,255,0.4)' },
+  stateBtnTxt: { color: FG, fontWeight: '700' },
 });

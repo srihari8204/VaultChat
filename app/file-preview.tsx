@@ -3,8 +3,9 @@
 // Supports: JS, TS, Python, Java, C, Go, Rust, SQL, HTML, CSS, JSON, YAML, MD, TXT
 // Dark theme with line numbers
 
-import React, { useState, useEffect , useMemo} from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, FlatList, ActivityIndicator, Share, Alert } from 'react-native';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, FlatList, ActivityIndicator, Alert } from 'react-native';
+import * as Sharing from 'expo-sharing';
 import { type Palette, brandAlpha } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
@@ -178,8 +179,8 @@ export default function FilePreviewScreen() {
           local = tmp;
         }
         if (!local) throw new Error('no file');
-        const info: any = await FileSystem.getInfoAsync(local);
-        if (info?.exists && Number(info.size ?? 0) > MAX_PREVIEW_BYTES) {
+        const info = await FileSystem.getInfoAsync(local);
+        if (info.exists && info.size > MAX_PREVIEW_BYTES) {
           if (!dead) setFailure('too-large');
           return;
         }
@@ -207,19 +208,50 @@ export default function FilePreviewScreen() {
     }
   };
 
+  // Share the FILE (its name, its type) — not its text pasted into a message,
+  // which lost the filename and broke anything that is not plain prose. A local
+  // file goes as itself; a downloaded one was not kept (plaintext), so its text
+  // is written to a vt_share_ copy that lib/mediaCacheGC sweeps at boot/logout
+  // — the receiving app may still be reading it after the sheet closes.
+  const [sharing, setSharing] = useState(false);
   const shareFile = async () => {
+    if (sharing) return;
+    setSharing(true);
     try {
-      await Share.share({ message: content, title: (filename || 'file') + '' });
+      if (!(await Sharing.isAvailableAsync())) {
+        Alert.alert('Sharing unavailable', 'No app on this device can receive this file.');
+        return;
+      }
+      const name = ((filename || 'file') + '').replace(/[/\\:*?"<>|]/g, '_');
+      let local = fileUri;
+      if (!/^file:/i.test(fileUri)) {
+        const dir = FileSystem.cacheDirectory + VIEWER_TEMP_PREFIX + 'share_' + Date.now() + '/';
+        await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+        local = dir + name;
+        await FileSystem.writeAsStringAsync(local, content);
+      }
+      await Sharing.shareAsync(local, { dialogTitle: name });
     } catch {
-      Alert.alert('Could not share', 'The file content could not be shared. Please try again.');
+      Alert.alert('Could not share', 'The file could not be shared. Please try again.');
+    } finally {
+      setSharing(false);
     }
   };
 
   const lines = useMemo(() => content.split('\n'), [content]);
-  // Tokenise each line once per file/language, not on every row render (the
-  // list re-renders rows as they scroll back into the window).
-  const tokens = useMemo(() => lines.map((l) => tokenize(l, lang)), [lines, lang]);
+  // Tokenise LAZILY, per row, and remember it: a 2 MB file is tens of
+  // thousands of lines, and tokenising all of them up front held the first
+  // paint for the whole file. The cache is per file and language, so a row
+  // scrolled back into the window is not tokenised twice.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- a new file or language starts a new cache
+  const tokenCache = useMemo(() => new Map<number, Token[]>(), [lines, lang]);
+  const tokensAt = useCallback((idx: number): Token[] => {
+    let tk = tokenCache.get(idx);
+    if (!tk) { tk = tokenize(lines[idx] ?? '', lang); tokenCache.set(idx, tk); }
+    return tk;
+  }, [tokenCache, lines, lang]);
   const lineNumWidth = String(lines.length).length * 9 + 16;
+  const actionsOff = !!failure || loading;
 
   const codeList = (
     <FlatList
@@ -228,12 +260,12 @@ export default function FilePreviewScreen() {
       keyExtractor={(_, idx) => String(idx)}
       initialNumToRender={60}
       windowSize={11}
-      ListFooterComponent={<View style={{ height: 100 }} />}
-      renderItem={({ item: line, index: idx }) => (
+      ListFooterComponent={<View style={s.listTail} />}
+      renderItem={({ index: idx }) => (
         <View style={s.lineRow}>
           <Text style={[s.lineNum, { width: lineNumWidth }]}>{idx + 1}</Text>
-          <Text style={[s.codeLine, wordWrap && { flexWrap: 'wrap', flex: 1 }]}>
-            {tokens[idx].map((t, ti) => (
+          <Text style={[s.codeLine, wordWrap && s.codeLineWrap]}>
+            {tokensAt(idx).map((t, ti) => (
               <Text key={ti} style={{ color: TOKEN_COLORS[t.type] }}>{t.text}</Text>
             ))}
           </Text>
@@ -250,18 +282,20 @@ export default function FilePreviewScreen() {
         headerStyle: { backgroundColor: colors.surfaceSolid },
         headerTintColor: colors.text,
         headerRight: () => (
-          <View style={{ flexDirection: 'row', gap: 12, marginRight: 8 }}>
-            <TouchableOpacity style={{ minHeight: 44, justifyContent: 'center' }} onPress={() => setWordWrap(!wordWrap)}
+          <View style={s.headerActions}>
+            <TouchableOpacity style={s.headerBtn} onPress={() => setWordWrap(!wordWrap)}
               accessibilityRole="switch" accessibilityLabel="Wrap lines" accessibilityState={{ checked: wordWrap }}>
-              <Text style={{ color: wordWrap ? colors.accent : colors.textDim, fontSize: 12, fontWeight: '700' }}>Wrap</Text>
+              <Text style={[s.headerBtnTxt, !wordWrap && s.headerBtnOff]}>Wrap</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={{ minHeight: 44, justifyContent: 'center' }} onPress={copyAll} disabled={!!failure || loading}
-              accessibilityRole="button" accessibilityLabel="Copy file contents">
-              <Text style={{ color: colors.accent, fontSize: 12, fontWeight: '700' }}>Copy</Text>
+            <TouchableOpacity style={s.headerBtn} onPress={copyAll} disabled={actionsOff}
+              accessibilityRole="button" accessibilityLabel="Copy file contents" accessibilityState={{ disabled: actionsOff }}>
+              <Text style={[s.headerBtnTxt, actionsOff && s.headerBtnOff]}>Copy</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={{ minHeight: 44, justifyContent: 'center' }} onPress={shareFile} disabled={!!failure || loading}
-              accessibilityRole="button" accessibilityLabel="Share file contents">
-              <Text style={{ color: colors.accent, fontSize: 12, fontWeight: '700' }}>Share</Text>
+            <TouchableOpacity style={s.headerBtn} onPress={shareFile} disabled={actionsOff || sharing}
+              accessibilityRole="button" accessibilityLabel="Share file"
+              accessibilityState={{ disabled: actionsOff || sharing, busy: sharing }}>
+              {sharing ? <ActivityIndicator color={colors.accent} size="small" />
+                : <Text style={[s.headerBtnTxt, actionsOff && s.headerBtnOff]}>Share</Text>}
             </TouchableOpacity>
           </View>
         ),
@@ -278,7 +312,7 @@ export default function FilePreviewScreen() {
         )}
 
         {loading ? (
-          <ActivityIndicator color={colors.accent} style={{ marginTop: 40 }} />
+          <ActivityIndicator color={colors.accent} style={s.spinner} />
         ) : failure ? (
           <View style={s.failure}>
             <Text style={s.failureTitle} accessibilityRole="header">
@@ -294,7 +328,7 @@ export default function FilePreviewScreen() {
               accessibilityRole="button"
               accessibilityLabel={failure === 'too-large' ? 'Open in file viewer' : 'Retry'}
               onPress={() => (failure === 'too-large'
-                ? router.replace({ pathname: '/file-viewer', params: { uri: fileUri, filename: (filename || '') + '' } } as any)
+                ? router.replace({ pathname: '/file-viewer', params: { uri: fileUri, filename: (filename || '') + '' } })
                 : setReloadKey(k => k + 1))}
             >
               <Text style={s.failureBtnTxt}>{failure === 'too-large' ? 'Open in file viewer' : 'Retry'}</Text>
@@ -329,5 +363,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   failureTitle: { color: c.text, fontSize: 16, fontWeight: '700', textAlign: 'center' },
   failureBody: { color: c.textDim, fontSize: 13, textAlign: 'center', lineHeight: 19 },
   failureBtn: { marginTop: 6, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20, backgroundColor: c.accent },
-  failureBtnTxt: { color: c.bubbleOutText, fontSize: 14, fontWeight: '700' },
+  failureBtnTxt: { color: c.onPrimary, fontSize: 14, fontWeight: '700' },
+  headerActions: { flexDirection: 'row', gap: 12, marginRight: 8 },
+  headerBtn: { minHeight: 44, justifyContent: 'center' },
+  headerBtnTxt: { color: c.accentOn, fontSize: 12, fontWeight: '700' },
+  headerBtnOff: { color: c.textDim },
+  codeLineWrap: { flexWrap: 'wrap', flex: 1 },
+  listTail: { height: 100 },
+  spinner: { marginTop: 40 },
 });

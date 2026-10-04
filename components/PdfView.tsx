@@ -23,16 +23,31 @@
 // expo-image. Only what is near the viewport is ever rendered, so a 400-page
 // document costs the same as a 4-page one — the old viewer's whole-document
 // bitmap pressure is gone with it.
+//
+// ZOOM re-lays the pages out wider and re-renders them at the new width
+// (lib/media/pdfZoom), inside a horizontal scroller, so zoomed text stays sharp
+// and every part of a page stays reachable. A pinch shows a live scale for
+// feedback and commits one zoom when the fingers lift; double-tap toggles 2x;
+// the zoom pill resets and is adjustable for screen readers.
+//
+// iOS has no PdfRenderer module. WKWebView renders a local PDF itself (PDFKit,
+// native pinch and scroll), so iOS shows the file there — no JavaScript, no
+// navigation away from the file — instead of always dropping to the text reader.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, FlatList, Platform, StyleSheet, Text, View, useWindowDimensions,
+  ActivityIndicator, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions,
+  type ScrollView,
 } from 'react-native';
+import { Gesture, GestureDetector, FlatList as GHFlatList, ScrollView as GHScrollView } from 'react-native-gesture-handler';
+import Animated, { runOnJS, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
+import { WebView } from 'react-native-webview';
 import { Image as ExpoImage } from 'expo-image';
 import * as FileSystem from 'expo-file-system/legacy';
 import type { Palette } from '../constants/theme';
 import { useColors } from '../lib/theme';
 import { pdfInfo, pdfNativeAvailable, renderPdfPage, type PdfInfo } from '../lib/pdfNative';
+import { PDF_MAX_ZOOM, PDF_MIN_ZOOM, keepCentre, pdfZoom, pdfZoomLabel, stepZoom } from '../lib/media/pdfZoom';
 
 /** Render scale over the layout width — keeps text crisp without a zoom re-render. */
 const OVERSAMPLE = 2;
@@ -47,11 +62,13 @@ function pageKeyFor(uri: string): string {
   return uri.replace(/^file:\/\//, '').replace(/[^A-Za-z0-9]/g, '_').slice(-60);
 }
 
+type Styles = ReturnType<typeof makeS>;
+
 function Page({
   uri, index, width, aspect, docKey, cacheDir, s,
 }: {
   uri: string; index: number; width: number; aspect: number;
-  docKey: string; cacheDir: string; s: any;
+  docKey: string; cacheDir: string; s: Styles;
 }) {
   const [img, setImg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -103,9 +120,33 @@ function Page({
       ) : (
         <View style={s.pagePending}>
           {err ? <Text style={s.pageErr}>{err}</Text>
-               : <ActivityIndicator color="rgba(0,0,0,0.35)" />}
+               : <ActivityIndicator color="rgba(0,0,0,0.35)" accessibilityLabel={`Loading page ${index + 1}`} />}
         </View>
       )}
+    </View>
+  );
+}
+
+/** iOS: WKWebView draws a local PDF natively (PDFKit) with its own pinch zoom. */
+function IosPdf({ uri, onFail, s }: { uri: string; onFail: (why: string) => void; s: Styles }) {
+  const fileUrl = /^file:/i.test(uri) ? uri : `file://${uri}`;
+  const dir = fileUrl.slice(0, fileUrl.lastIndexOf('/') + 1);
+  return (
+    <View style={s.fill}>
+      <WebView
+        source={{ uri: fileUrl }}
+        originWhitelist={['file://*']}
+        allowingReadAccessToURL={dir}
+        allowFileAccess
+        javaScriptEnabled={false}
+        // The document itself, and nothing else: a link inside the PDF must
+        // not turn this into a browser.
+        onShouldStartLoadWithRequest={r => r.url === fileUrl}
+        onError={() => onFail('This PDF could not be opened.')}
+        onHttpError={() => onFail('This PDF could not be opened.')}
+        style={s.fill}
+        accessibilityLabel="PDF document"
+      />
     </View>
   );
 }
@@ -121,6 +162,49 @@ export function PdfView({ uri, onFail, onReady }: {
   const [info, setInfo] = useState<PdfInfo | null>(null);
   const [page, setPage] = useState(1);
   const failedRef = useRef(false);
+  const ios = Platform.OS === 'ios';
+
+  // ── Zoom ────────────────────────────────────────────────────
+  const [zoom, setZoom] = useState(1);
+  const zoomRef = useRef(1);
+  const base = useSharedValue(1);   // the committed zoom, readable by the gesture worklet
+  const live = useSharedValue(1);   // pinch feedback, relative to the committed zoom
+  const listRef = useRef<GHFlatList<number>>(null);
+  const hRef = useRef<ScrollView>(null);
+  const scroll = useRef({ x: 0, y: 0, w: 0, h: 0 });
+  const pendingRatio = useRef<number | null>(null);
+  const setZoomTo = useCallback((next: number) => {
+    if (next === zoomRef.current) { live.value = 1; return; }
+    pendingRatio.current = next / zoomRef.current;
+    zoomRef.current = next;
+    base.value = next;
+    setZoom(next);
+  }, [base, live]);
+  const commitPinch = useCallback((scale: number) => setZoomTo(pdfZoom(zoomRef.current, scale)), [setZoomTo]);
+  const toggleZoom = useCallback(() => setZoomTo(zoomRef.current > 1 ? 1 : 2), [setZoomTo]);
+  // After the wider layout lands: drop the live scale and keep the same spot
+  // in the middle of the screen.
+  useEffect(() => {
+    live.value = 1;
+    const r = pendingRatio.current;
+    if (r == null) return;
+    pendingRatio.current = null;
+    const { x, y, w, h } = scroll.current;
+    requestAnimationFrame(() => {
+      listRef.current?.scrollToOffset({ offset: keepCentre(y, h, r), animated: false });
+      hRef.current?.scrollTo({ x: keepCentre(x, w, r), animated: false });
+    });
+  }, [zoom, live]);
+  const gesture = useMemo(() => Gesture.Simultaneous(
+    Gesture.Pinch()
+      .onUpdate(e => {
+        const z = Math.min(PDF_MAX_ZOOM, Math.max(PDF_MIN_ZOOM, base.value * e.scale));
+        live.value = z / base.value;
+      })
+      .onEnd(e => { runOnJS(commitPinch)(e.scale); }),
+    Gesture.Tap().numberOfTaps(2).onEnd((_e, ok) => { if (ok) runOnJS(toggleZoom)(); }),
+  ), [base, live, commitPinch, toggleZoom]);
+  const liveStyle = useAnimatedStyle(() => ({ transform: [{ scale: live.value }] }));
 
   const fail = useCallback((why: string) => {
     if (failedRef.current) return;
@@ -145,15 +229,12 @@ export function PdfView({ uri, onFail, onReady }: {
     () => `${(FileSystem as any).cacheDirectory}dc_pdfpages`, [],
   );
 
-  // iOS has no native module yet; say so plainly rather than showing a grey
-  // page. In an effect, not in render — onFail sets state on the PARENT.
+  // An Android build without the native module says so plainly rather than
+  // showing a grey page (iOS uses WKWebView, above). In an effect, not in
+  // render — onFail sets state on the PARENT.
   useEffect(() => {
-    if (!pdfNativeAvailable) {
-      fail(Platform.OS === 'android'
-        ? 'This build has no PDF renderer.'
-        : 'Page rendering is Android-only so far.');
-    }
-  }, [fail]);
+    if (!pdfNativeAvailable && !ios) fail('This build has no PDF renderer.');
+  }, [fail, ios]);
 
   useEffect(() => {
     if (!pdfNativeAvailable) return;
@@ -181,6 +262,8 @@ export function PdfView({ uri, onFail, onReady }: {
     return () => { dead = true; };
   }, [uri, cacheDir, fail, onReady]);
 
+  if (ios && !pdfNativeAvailable) return <IosPdf uri={uri} onFail={fail} s={s} />;
+
   if (!pdfNativeAvailable || !info) {
     return (
       <View style={s.fill}>
@@ -194,42 +277,83 @@ export function PdfView({ uri, onFail, onReady }: {
     );
   }
 
-  const pageW = Math.max(120, winW - 20);
+  const pageW = Math.round(Math.max(120, winW - 20) * zoom);
   const aspect = info.height / info.width;
   const itemH = Math.round(pageW * aspect) + 10;
+  // The list is as wide as the zoomed page, inside a horizontal scroller, so a
+  // zoomed page can be panned edge to edge; at 100% nothing scrolls sideways.
+  const listW = Math.max(winW, pageW + 20);
 
   return (
     <View style={s.fill}>
-      <FlatList
-        data={Array.from({ length: info.pageCount }, (_, i) => i)}
-        keyExtractor={i => String(i)}
-        renderItem={({ item }) => (
-          <Page uri={uri} index={item} width={pageW} aspect={aspect}
-                docKey={docKey} cacheDir={cacheDir} s={s} />
-        )}
-        // Bounded rendering: only pages near the viewport exist as bitmaps, which
-        // is what keeps a 400-page document the same cost as a 4-page one.
-        initialNumToRender={2}
-        maxToRenderPerBatch={2}
-        windowSize={3}
-        removeClippedSubviews
-        getItemLayout={(_, i) => ({ length: itemH, offset: itemH * i, index: i })}
-        onViewableItemsChanged={onViewable}
-        viewabilityConfig={viewabilityConfig}
-        contentContainerStyle={s.list}
-      />
+      <GestureDetector gesture={gesture}>
+        <Animated.View style={[s.fill, liveStyle]}>
+          <GHScrollView
+            ref={hRef}
+            horizontal
+            bounces={false}
+            showsHorizontalScrollIndicator={zoom > 1}
+            scrollEnabled={zoom > 1}
+            onLayout={e => { scroll.current.w = e.nativeEvent.layout.width; }}
+            onScroll={e => { scroll.current.x = e.nativeEvent.contentOffset.x; }}
+            scrollEventThrottle={64}
+          >
+            <GHFlatList
+              ref={listRef}
+              style={{ width: listW }}
+              data={Array.from({ length: info.pageCount }, (_, i) => i)}
+              keyExtractor={i => String(i)}
+              extraData={pageW}
+              renderItem={({ item }) => (
+                <Page uri={uri} index={item} width={pageW} aspect={aspect}
+                      docKey={docKey} cacheDir={cacheDir} s={s} />
+              )}
+              // Bounded rendering: only pages near the viewport exist as bitmaps, which
+              // is what keeps a 400-page document the same cost as a 4-page one.
+              initialNumToRender={2}
+              maxToRenderPerBatch={2}
+              windowSize={3}
+              removeClippedSubviews
+              getItemLayout={(_, i) => ({ length: itemH, offset: itemH * i, index: i })}
+              onViewableItemsChanged={onViewable}
+              viewabilityConfig={viewabilityConfig}
+              onLayout={e => { scroll.current.h = e.nativeEvent.layout.height; }}
+              onScroll={e => { scroll.current.y = e.nativeEvent.contentOffset.y; }}
+              scrollEventThrottle={64}
+              contentContainerStyle={s.list}
+            />
+          </GHScrollView>
+        </Animated.View>
+      </GestureDetector>
       {info.pageCount > 1 && (
         <View style={s.pill} pointerEvents="none">
           <Text style={s.pillTxt}>{page} / {info.pageCount}</Text>
         </View>
       )}
+      {/* Tap resets to 100%; screen readers adjust it in steps. */}
+      <Pressable
+        onPress={() => setZoomTo(1)}
+        style={s.zoomPill}
+        hitSlop={8}
+        accessibilityRole="adjustable"
+        accessibilityLabel="Zoom"
+        accessibilityValue={{ text: pdfZoomLabel(zoom) }}
+        accessibilityHint="Double-tap to reset to 100%"
+        accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }, { name: 'activate' }]}
+        onAccessibilityAction={e => {
+          const a = e.nativeEvent.actionName;
+          setZoomTo(a === 'activate' ? 1 : stepZoom(zoomRef.current, a === 'increment' ? 1 : -1));
+        }}
+      >
+        <Text style={s.pillTxt}>{pdfZoomLabel(zoom)}</Text>
+      </Pressable>
     </View>
   );
 }
 
 const makeS = (c: Palette) => StyleSheet.create({
   fill: { flex: 1, backgroundColor: '#3A3A3E' },   // theme-exempt: the mat behind the pages. Every PDF reader uses a fixed neutral here — theming it would tint the paper's surround against the paper.
-  list: { paddingVertical: 10 },
+  list: { paddingVertical: 10, paddingHorizontal: 10 },
   page: { alignSelf: 'center', marginBottom: 10, backgroundColor: '#FFFFFF' },   // theme-exempt: a PDF page IS white paper, and the rendered bitmap assumes it. A dark page would show as white content on a dark card.
   pagePending: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
   pageErr: { color: 'rgba(0,0,0,0.45)', fontSize: 12 },
@@ -243,7 +367,11 @@ const makeS = (c: Palette) => StyleSheet.create({
     paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999,
     backgroundColor: 'rgba(0,0,0,0.6)',
   },
-  pillTxt: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
+  pillTxt: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },   // theme-exempt: on the fixed dark pill
+  zoomPill: {
+    position: 'absolute', bottom: 16, right: 14, minHeight: 32, justifyContent: 'center',
+    paddingHorizontal: 12, borderRadius: 999, backgroundColor: 'rgba(0,0,0,0.6)',
+  },
 });
 
 export default PdfView;

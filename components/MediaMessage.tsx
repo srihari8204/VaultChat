@@ -4,7 +4,8 @@
 import React, { useState, useMemo } from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { Audio, AVPlaybackStatus } from 'expo-av';
-import type { Palette } from '../constants/theme';
+import { Ionicons } from '@expo/vector-icons';
+import { brandAlpha, type Palette } from '../constants/theme';
 import { useColors } from '../lib/theme';
 
 interface Props {
@@ -21,7 +22,7 @@ function ImageMsg({ url }: { url: string }) {
   const [loading, setLoading] = useState(true);
   return (
     <View style={s.imgWrap}>
-      {loading && <ActivityIndicator color="#00E5FF" style={s.loader} />}
+      {loading && <ActivityIndicator color={c.accentOn} style={s.loader} />}
       <Image
         source={{ uri: url }}
         style={s.img}
@@ -69,7 +70,7 @@ function AudioMsg({ url, duration }: { url: string; duration?: number }) {
       );
       setSound(s);
       setPlaying(true);
-    } catch (e: any) { Alert.alert('Playback error', e.message); }
+    } catch { Alert.alert('Playback error', "This audio couldn't be played. It may be damaged or in an unsupported format."); }
   };
 
   const fmt = (ms: number) => {
@@ -80,12 +81,12 @@ function AudioMsg({ url, duration }: { url: string; duration?: number }) {
 
   return (
     <View style={s.audioRow}>
-      <TouchableOpacity onPress={toggle} style={s.playBtn}>
-        <Text style={{ fontSize: 20 }}>{playing ? '⏸' : '▶️'}</Text>
+      <TouchableOpacity onPress={toggle} style={s.playBtn} accessibilityRole="button" accessibilityLabel={playing ? 'Pause audio' : 'Play audio'}>
+        <Ionicons name={playing ? 'pause' : 'play'} size={20} color={c.accentOn} />
       </TouchableOpacity>
       <View style={s.audioRight}>
         <View style={s.progressBg}>
-          <View style={[s.progressFill, { width: `${pct * 100}%` as any }]} />
+          <View style={[s.progressFill, { width: `${pct * 100}%` }]} />
         </View>
         <Text style={s.audioTime}>{fmt(playing ? pos : dur * 1000)}</Text>
       </View>
@@ -99,8 +100,8 @@ function FileMsg({ filename, url }: { filename?: string; url: string }) {
   const s = useMemo(() => makeS(c), [c]);
   return (
     <View style={s.fileRow}>
-      <Text style={{ fontSize: 28 }}>📄</Text>
-      <View style={{ flex: 1 }}>
+      <Ionicons name="document-outline" size={28} color={c.textDim} importantForAccessibility="no" />
+      <View style={s.flex}>
         <Text style={s.fileName} numberOfLines={1}>{filename ?? 'File'}</Text>
         <Text style={s.fileOpen}>Tap to open</Text>
       </View>
@@ -118,7 +119,7 @@ export default function MediaMessage({ url, msgType, filename, duration }: Props
   if (msgType === 'video')  return (
     <View style={s.imgWrap}>
       <Image source={{ uri: url }} style={s.img} resizeMode="cover" />
-      <View style={s.videoPlay}><Text style={{ fontSize: 36 }}>▶</Text></View>
+      <View style={s.videoPlay}><Ionicons name="play" size={36} color={c.text} accessibilityLabel="Video" /></View>
     </View>
   );
   return null;
@@ -128,12 +129,13 @@ const makeS = (c: Palette) => StyleSheet.create({
   imgWrap: { width: 220, height: 180, borderRadius: 10, overflow: 'hidden', backgroundColor: c.bg },
   img: { width: '100%', height: '100%' },
   loader: { position: 'absolute', top: '50%', left: '50%' },
-  videoPlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#00000055' },
+  videoPlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.33)' },
+  flex: { flex: 1 },
   audioRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 180, maxWidth: 240 },
-  playBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#00E5FF22', alignItems: 'center', justifyContent: 'center' },
+  playBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: brandAlpha(0.13), alignItems: 'center', justifyContent: 'center' },
   audioRight: { flex: 1 },
   progressBg: { height: 3, backgroundColor: c.surfaceSolid, borderRadius: 2, overflow: 'hidden', marginBottom: 4 },
-  progressFill: { height: '100%', backgroundColor: '#00E5FF', borderRadius: 2 },
+  progressFill: { height: '100%', backgroundColor: c.accentOn, borderRadius: 2 },
   audioTime: { color: c.textDim, fontSize: 11 },
   fileRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 160, maxWidth: 240 },
   fileName: { color: c.text, fontSize: 14, fontWeight: '600' },

@@ -5,7 +5,9 @@
 //   * A top progress bar per story (auto-advances every IMAGE_MS / VIDEO_MS)
 //   * Tap-left  → previous story
 //   * Tap-right → next story (or close if at the last)
-//   * Long-press → pause auto-advance (release to resume)
+//   * Long-press → pause auto-advance (release to resume); a Pause button too
+//   * Reduce Motion: no sweeping progress bar — the segment shows full and the
+//     story still advances after its time (pausable as usual)
 //   * Author + relative time at top-left
 //   * Caption overlay at bottom
 //   * For my own stories: a 👁️ button → /stories/:id/views (viewer list)
@@ -35,7 +37,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../lib/theme';
 import { storyDurationMs } from '../lib/storyDuration';
-import { type Palette } from '../constants/theme';
+import { AuroraDark } from '../constants/theme';
+import { useReducedMotion } from '../lib/useReducedMotion';
 import { initialOf } from '../lib/format';
 import {
   attachmentUrl,
@@ -55,19 +58,25 @@ import { peekStoryFeed, putStoryFeed } from '../lib/storyFeedCache';
 import { unlockKeyWithAnswer } from '../lib/status/gateKey';
 import { puzzleFrameUri } from '../lib/status/puzzleFrame';
 
-/** Icon ink over the always-dark story stage (not a theme role). */
-const ON_STAGE = '#FFFFFF';
-
-
-function useS() {
-  const { colors } = useTheme();
-  return useMemo(() => makeStyles(colors), [colors]);
-}
+// The story stage is black in EVERY theme (full-bleed media; the light status
+// bar and the white chrome assume it), so its chrome takes the dark palette's
+// tokens. Black and white are the stage itself, kept as deliberate fixed ink.
+const STAGE = {
+  black: '#000000',
+  ink: '#FFFFFF',                  // icons and text over media
+  dim: 'rgba(255,255,255,0.7)',
+  faint: 'rgba(255,255,255,0.62)',
+  sheet: AuroraDark.card,
+  danger: AuroraDark.danger,
+  avatar: AuroraDark.accentDeep,   // under white initials (6.3:1)
+  textBg: AuroraDark.bg,           // a text status with no colour of its own
+};
 
 function StoryViewerScreen() {
   const { colors } = useTheme();
-  const S = useS();
+  const S = styles;
   const router = useRouter();
+  const reduceMotion = useReducedMotion();
   const { userId, userName } = useLocalSearchParams<{ userId?: string; userName?: string }>();
 
   const [entry,      setEntry]      = useState<StoryFeedEntry | null>(null);
@@ -153,6 +162,14 @@ function StoryViewerScreen() {
   }, [userId]);
 
   const current = entry?.stories[index] ?? null;
+  // Primitives of the current story for effect dependencies: the effects below
+  // must re-run when THESE change, not whenever a new feed object arrives.
+  const curId = current?.id;
+  const curType = current?.mediaType;
+  const curEncrypted = current?.encrypted;
+  const curAttachmentId = current?.attachmentId;
+  const curGate = current?.gateKind;
+  const authorId = entry?.userId;
   // The playing video's real length (null until it loads) — drives the bar.
   const [videoDurMs, setVideoDurMs] = useState<number | null>(null);
   useEffect(() => { setVideoDurMs(null); }, [current?.id]);
@@ -185,31 +202,31 @@ function StoryViewerScreen() {
   useEffect(() => {
     let cancel = false;
     setMediaSrc(null);
-    if (!current) return;
-    if (current.mediaType === 'text') return;   // text status has no attachment
+    if (!curId || !curAttachmentId) return;
+    if (curType === 'text') return;   // text status has no attachment
     (async () => {
-      if (current.encrypted) {
+      if (curEncrypted) {
         try {
           // Fast path: we already hold the content key locally (our OWN story, or
           // a previously-unwrapped one) → decrypt directly, no wrapped-key fetch.
-          const haveKey = await getMediaKey(current.attachmentId).catch(() => null);
+          const haveKey = await getMediaKey(curAttachmentId).catch(() => null);
           if (!haveKey) {
-            const wrapped = await getStoryKey(current.id);
-            if (!wrapped || !entry) return;                     // not in audience → leave blank
-            if (current.gateKind === 'question') {
+            const wrapped = await getStoryKey(curId);
+            if (!wrapped || !authorId) return;                  // not in audience → leave blank
+            if (curGate === 'question') {
               // The wrapped payload here is the ANSWER-LOCKED envelope, not the
               // key — so it cannot be turned into media until the viewer
               // answers. Stash it and let GateChallenge do the unlocking.
-              const raw = await unwrapPayload(entry.userId, wrapped);
+              const raw = await unwrapPayload(authorId, wrapped);
               if (!raw) return;
               if (!cancel) setLockedEnvelope(raw);
               return;                                           // nothing to render yet
             }
-            const mk = await unwrapStoryKey(entry.userId, wrapped);
+            const mk = await unwrapStoryKey(authorId, wrapped);
             if (!mk) return;
-            await putMediaKey(current.attachmentId, mk);        // feed the standard media-decrypt path
+            await putMediaKey(curAttachmentId, mk);             // feed the standard media-decrypt path
           }
-          const r = await getDecryptedAttachmentUri(current.attachmentId);
+          const r = await getDecryptedAttachmentUri(curAttachmentId);
           if (!cancel) setMediaSrc(r);
         } catch { /* leave blank on failure */ }
       } else {
@@ -218,7 +235,7 @@ function StoryViewerScreen() {
         // URL gated on authHeader, which left a black screen when the token was
         // slow or the Image's onLoad never fired.
         try {
-          const uri = await getAttachmentLocalUri(current.attachmentId);
+          const uri = await getAttachmentLocalUri(curAttachmentId);
           if (!cancel) setMediaSrc({ uri });
         } catch { if (!cancel) setLoaded(true); /* let the timer advance past a failed story */ }
       }
@@ -228,7 +245,8 @@ function StoryViewerScreen() {
     // fetchable: a correct answer calls putMediaKey and this effect must run
     // AGAIN to pick the key up. Without it the story unlocks and then shows
     // nothing — the worst possible outcome for someone who answered correctly.
-  }, [current?.id, current?.encrypted, current?.attachmentId, entry?.userId, authHeader, gated]);
+    // authHeader: a token arriving late re-runs a fetch that may have 401'd.
+  }, [curId, curType, curEncrypted, curAttachmentId, curGate, authorId, authHeader, gated]);
 
   // Extract the puzzle still only when a puzzle is actually pending. Doing it
   // for every story would pay a decode on clips nobody is asked to solve.
@@ -236,7 +254,7 @@ function StoryViewerScreen() {
     let cancel = false;
     setPuzzleUri(null);
     setPuzzleTried(false);
-    if (!gated || !current || current.gateKind !== 'puzzle') return;
+    if (!gated || !curId || curGate !== 'puzzle' || !curType) return;
     if (!mediaSrc?.uri) {
       // Media is still decrypting. Stay PENDING rather than falling through to
       // the Open button — but not forever: if the key never arrives (not in the
@@ -246,11 +264,11 @@ function StoryViewerScreen() {
       return () => { cancel = true; clearTimeout(t); };
     }
     (async () => {
-      const uri = await puzzleFrameUri(mediaSrc.uri, current.mediaType);
+      const uri = await puzzleFrameUri(mediaSrc.uri, curType);
       if (!cancel) { setPuzzleUri(uri); setPuzzleTried(true); }
     })();
     return () => { cancel = true; };
-  }, [gated, current?.id, current?.gateKind, current?.mediaType, mediaSrc?.uri]);
+  }, [gated, curId, curGate, curType, mediaSrc?.uri]);
 
   // ── Prefetch ONE story ahead ────────────────────────────────────────
   //
@@ -275,13 +293,14 @@ function StoryViewerScreen() {
     // weaken the lock.
     if (next.gateKind === 'question') return;
 
+    const author = entry.userId;
     let cancel = false;
     (async () => {
       try {
         if (!(await getMediaKey(next.attachmentId).catch(() => null))) {
           const wrapped = await getStoryKey(next.id);
           if (cancel || !wrapped) return;
-          const mk = await unwrapStoryKey(entry.userId, wrapped);
+          const mk = await unwrapStoryKey(author, wrapped);
           if (cancel || !mk) return;
           await putMediaKey(next.attachmentId, mk);
         }
@@ -290,7 +309,8 @@ function StoryViewerScreen() {
       } catch { /* best effort: a failed prefetch just means the normal path pays for it */ }
     })();
     return () => { cancel = true; };
-  }, [entry?.userId, entry?.stories.length, index, loaded]);
+    // `entry` keeps its identity unless the story set changes (see apply above).
+  }, [entry, index, loaded]);
 
   // Reset the "loaded" gate whenever the current story changes. Text stories
   // have no media to wait for, so they're ready immediately.
@@ -302,10 +322,10 @@ function StoryViewerScreen() {
   // Safety: if the media stalls (slow network), don't sit on a blank screen
   // forever — treat it as loaded after a max wait so the timer can run/advance.
   useEffect(() => {
-    if (!current || loaded) return;
+    if (!curId || loaded) return;
     const t = setTimeout(() => setLoaded(true), 12000);
     return () => clearTimeout(t);
-  }, [current?.id, loaded]);
+  }, [curId, loaded]);
 
   // ── Per-story side effects: mark viewed, run progress, auto-advance.
   // The progress timer only starts once the media has actually loaded, so the
@@ -331,6 +351,21 @@ function StoryViewerScreen() {
     }
 
     const total = storyDurationMs(current.mediaType, videoDurMs);
+    if (reduceMotion) {
+      // No sweeping bar (the active segment is drawn full below); the story
+      // still moves on after its time, and Pause still stops that clock.
+      const startedAt = Date.now();
+      const startFrac = progressFrac.current;
+      const t = setTimeout(() => { progressFrac.current = 1; advance(+1); },
+        Math.max(0, total * (1 - startFrac)));
+      return () => {
+        clearTimeout(t);
+        progressFrac.current = Math.min(1, startFrac + (Date.now() - startedAt) / total);
+      };
+    }
+    // Continue from where the clock is (a Reduce Motion stretch may have moved
+    // it without moving the bar).
+    progress.setValue(progressFrac.current);
     const anim = Animated.timing(progress, {
       toValue:  1,
       duration: Math.max(0, total * (1 - progressFrac.current)),
@@ -343,7 +378,7 @@ function StoryViewerScreen() {
   // intentional: re-runs when *index* changes, on pause/resume, once loaded, or
   // when the media source resolves (so mark-viewed sees a non-null mediaSrc).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current?.id, isPaused, loaded, mediaSrc, gated, videoDurMs]);
+  }, [current?.id, isPaused, loaded, mediaSrc, gated, videoDurMs, reduceMotion]);
 
   const close = useCallback(() => router.back(), [router]);
 
@@ -438,7 +473,7 @@ function StoryViewerScreen() {
     return (
       <View style={[S.screen, S.center]}>
         <StatusBar barStyle="light-content" />
-        <ActivityIndicator color="#fff" size="large" />
+        <ActivityIndicator color={STAGE.ink} size="large" />
       </View>
     );
   }
@@ -462,8 +497,8 @@ function StoryViewerScreen() {
 
       {/* Text status — full-bleed colored card with centered text (WhatsApp). */}
       {!gated && current?.mediaType === 'text' && (
-        <View style={[S.media, { backgroundColor: current.bgColor || '#0B0B10', alignItems: 'center', justifyContent: 'center', padding: 32 }]}>
-          <Text style={{ color: '#fff', fontSize: 28, fontWeight: '700', textAlign: 'center' }}>{current.text || ''}</Text>
+        <View style={[S.media, S.textStory, { backgroundColor: current.bgColor || STAGE.textBg }]}>
+          <Text style={S.textStoryTxt}>{current.text || ''}</Text>
         </View>
       )}
 
@@ -471,7 +506,7 @@ function StoryViewerScreen() {
       {!gated && mediaSrc && current?.mediaType !== 'text' && (
         current?.mediaType === 'video' ? (
           <Video
-            source={mediaSrc as any}
+            source={mediaSrc}
             style={S.media}
             resizeMode={ResizeMode.CONTAIN}
             shouldPlay={!isPaused && loaded}
@@ -493,8 +528,8 @@ function StoryViewerScreen() {
 
       {/* Spinner while the media (or its decrypt/download) is still loading. */}
       {!gated && current?.mediaType !== 'text' && !loaded && (
-        <View style={[S.media, { alignItems: 'center', justifyContent: 'center' }]} pointerEvents="none">
-          <ActivityIndicator color="#fff" size="large" />
+        <View style={[S.media, S.center]} pointerEvents="none">
+          <ActivityIndicator color={STAGE.ink} size="large" />
         </View>
       )}
 
@@ -571,7 +606,7 @@ function StoryViewerScreen() {
                 style={[
                   S.progressFill,
                   i < index  && { width: '100%' },
-                  i === index && { width: progressW },
+                  i === index && { width: reduceMotion ? '100%' : progressW },
                   i > index  && { width: '0%' },
                 ]}
               />
@@ -583,23 +618,23 @@ function StoryViewerScreen() {
             {userName || entry.name || entry.email || ''}
           </Text>
           <Text style={S.authorTime}>{formatAgo(current.createdAt)}</Text>
-          <View style={{ flex: 1 }} />
+          <View style={S.flex} />
           <TouchableOpacity onPress={() => setUserPaused(p => !p)} hitSlop={8} style={S.iconBtn}
             accessibilityRole="button" accessibilityLabel={userPaused ? 'Resume story' : 'Pause story'}>
-            <Ionicons name={userPaused ? 'play' : 'pause'} size={20} color={ON_STAGE} />
+            <Ionicons name={userPaused ? 'play' : 'pause'} size={20} color={STAGE.ink} />
           </TouchableOpacity>
           {isMyStory && (
             <TouchableOpacity onPress={openViewers} hitSlop={8} style={S.iconBtn} accessibilityRole="button" accessibilityLabel="Who has seen this">
-              <Ionicons name="eye-outline" size={20} color={ON_STAGE} />
+              <Ionicons name="eye-outline" size={20} color={STAGE.ink} />
             </TouchableOpacity>
           )}
           {isMyStory && (
             <TouchableOpacity onPress={onDelete} hitSlop={8} style={S.iconBtn} accessibilityRole="button" accessibilityLabel="Delete status">
-              <Ionicons name="trash-outline" size={20} color="#FCA5A5" />
+              <Ionicons name="trash-outline" size={20} color={STAGE.danger} />
             </TouchableOpacity>
           )}
           <TouchableOpacity onPress={close} hitSlop={8} style={S.iconBtn} accessibilityRole="button" accessibilityLabel="Close">
-            <Ionicons name="close" size={22} color={ON_STAGE} />
+            <Ionicons name="close" size={22} color={STAGE.ink} />
           </TouchableOpacity>
         </View>
       </View>
@@ -614,19 +649,19 @@ function StoryViewerScreen() {
       {/* Viewers sheet */}
       {viewersOpen && (
         <Pressable style={S.viewersBackdrop} onPress={closeViewers} accessibilityRole="button" accessibilityLabel="Close viewers list">
-          <Pressable style={[S.viewersSheet, { paddingBottom: insets.bottom + 16 }]} onPress={(e) => e.stopPropagation()} accessible={false}>
+          <Pressable style={[S.viewersSheet, { paddingBottom: insets.bottom + 16 }]} onPress={(e) => e.stopPropagation()} accessible={false} accessibilityRole="none">
             <Text style={S.viewersTitle} accessibilityRole="header">
               {viewers ? `${viewers.length} ${viewers.length === 1 ? 'viewer' : 'viewers'}` : viewersFailed ? 'Viewers' : 'Loading…'}
             </Text>
             {viewersFailed ? (
-              <View style={{ alignItems: 'center', gap: 12, paddingVertical: 16 }}>
+              <View style={S.viewersRetry}>
                 <Text style={S.viewersEmpty}>{"Couldn't load who viewed this."}</Text>
                 <TouchableOpacity onPress={openViewers} style={S.closeBtn} accessibilityRole="button" accessibilityLabel="Retry loading viewers">
                   <Text style={S.closeBtnTxt}>Retry</Text>
                 </TouchableOpacity>
               </View>
             ) : viewers === null ? (
-              <ActivityIndicator color="#fff" style={{ marginTop: 24 }} />
+              <ActivityIndicator color={STAGE.ink} style={S.viewersSpinner} />
             ) : viewers.length === 0 ? (
               <Text style={S.viewersEmpty}>No one has viewed this yet.</Text>
             ) : viewers.map(v => (
@@ -666,11 +701,14 @@ function formatAgo(iso: string): string {
   } catch { return ''; }
 }
 
-const makeStyles = (c: Palette) => StyleSheet.create({
+const styles = StyleSheet.create({
   // Full-bleed media surface: black in every theme (the white spinner, light
   // status bar and white chrome all assume it; c.bg made them vanish in light).
-  screen:        { flex: 1, backgroundColor: '#000' },
+  screen:        { flex: 1, backgroundColor: STAGE.black },
   center:        { justifyContent: 'center', alignItems: 'center' },
+  flex:          { flex: 1 },
+  textStory:     { alignItems: 'center', justifyContent: 'center', padding: 32 },
+  textStoryTxt:  { color: STAGE.ink, fontSize: 28, fontWeight: '700', textAlign: 'center' },
 
   media:         { ...StyleSheet.absoluteFillObject },
 
@@ -680,34 +718,35 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   // Full-bleed, but BELOW topBar in z-order (declared earlier in the tree), so
   // the progress segments and close button stay reachable over a locked story.
-  gateLayer:     { ...StyleSheet.absoluteFillObject, backgroundColor: '#000' },
+  gateLayer:     { ...StyleSheet.absoluteFillObject, backgroundColor: STAGE.black },
   topBar:        { position: 'absolute', left: 12, right: 12, gap: 8, padding: 10, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.6)' },
   progressRow:   { flexDirection: 'row', gap: 3 },
   progressTrack: { flex: 1, height: 2, backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: 1, overflow: 'hidden' },
-  progressFill:  { height: 2, backgroundColor: '#fff', borderRadius: 1 },
+  progressFill:  { height: 2, backgroundColor: STAGE.ink, borderRadius: 1 },
   authorRow:     { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 6 },
-  authorName:    { flexShrink: 1, color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
-  authorTime:    { color: 'rgba(255,255,255,0.7)', fontSize: 12 },
+  authorName:    { flexShrink: 1, color: STAGE.ink, fontSize: 15, fontWeight: '700' },
+  authorTime:    { color: STAGE.dim, fontSize: 12 },
   iconBtn:       { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  iconBtnTxt:    { color: '#FFFFFF', fontSize: 18 },
 
   captionBar:    { position: 'absolute', left: 16, right: 16, backgroundColor: 'rgba(0,0,0,0.55)', padding: 12, borderRadius: 12 },
-  captionTxt:    { color: '#FFFFFF', fontSize: 14, lineHeight: 20 },
+  captionTxt:    { color: STAGE.ink, fontSize: 14, lineHeight: 20 },
 
-  errorTxt:      { color: '#FFFFFF', fontSize: 14, marginBottom: 16, textAlign: 'center', paddingHorizontal: 24 },
-  closeBtn:      { backgroundColor: '#fff', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20 },
-  closeBtnTxt:   { color: '#000', fontWeight: '700' },
+  errorTxt:      { color: STAGE.ink, fontSize: 14, marginBottom: 16, textAlign: 'center', paddingHorizontal: 24 },
+  closeBtn:      { backgroundColor: STAGE.ink, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20 },
+  closeBtnTxt:   { color: STAGE.black, fontWeight: '700' },
 
   viewersBackdrop:  { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
-  viewersSheet:     { backgroundColor: '#161A22', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, paddingBottom: 32, maxHeight: '70%' },
-  viewersTitle:     { color: '#FFFFFF', fontSize: 16, fontWeight: '700', marginBottom: 12 },
-  viewersEmpty:     { color: 'rgba(255,255,255,0.68)', fontSize: 13, textAlign: 'center', paddingVertical: 24 },
+  viewersSheet:     { backgroundColor: STAGE.sheet, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, paddingBottom: 32, maxHeight: '70%' },
+  viewersTitle:     { color: STAGE.ink, fontSize: 16, fontWeight: '700', marginBottom: 12 },
+  viewersEmpty:     { color: STAGE.dim, fontSize: 13, textAlign: 'center', paddingVertical: 24 },
+  viewersRetry:     { alignItems: 'center', gap: 12, paddingVertical: 16 },
+  viewersSpinner:   { marginTop: 24 },
   viewerRow:        { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(255,255,255,0.12)' },
-  viewerAvatar:     { width: 36, height: 36, borderRadius: 18, backgroundColor: '#6C63FF', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  viewerAvatar:     { width: 36, height: 36, borderRadius: 18, backgroundColor: STAGE.avatar, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   viewerAvatarImg:  { width: '100%', height: '100%' },
-  viewerAvatarTxt:  { color: '#FFFFFF', fontWeight: '700' },
-  viewerName:       { color: '#FFFFFF', fontSize: 14, flex: 1 },
-  viewerWhen:       { color: 'rgba(255,255,255,0.62)', fontSize: 11 },
+  viewerAvatarTxt:  { color: STAGE.ink, fontWeight: '700' },
+  viewerName:       { color: STAGE.ink, fontSize: 14, flex: 1 },
+  viewerWhen:       { color: STAGE.faint, fontSize: 11 },
 });
 
 // A render fault in a viewer used to take the WHOLE app down: these screens

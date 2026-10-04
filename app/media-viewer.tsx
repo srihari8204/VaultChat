@@ -8,8 +8,9 @@ import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, StatusBar,
-  ActivityIndicator, ScrollView, Animated,
+  ActivityIndicator, ScrollView,
   PanResponder, Alert } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Video, Audio, ResizeMode, type AVPlaybackStatusSuccess } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -26,7 +27,7 @@ import { onScreenshot } from '../lib/screenGuard';
 import { permissionDenied } from '../lib/permissionDenied';
 import { VIEWER_TEMP_PREFIX } from '../lib/mediaCacheGC';
 import { seekFraction, seekTargetMs } from '../lib/videoSeek';
-import { pinchZoom, clampPan } from '../lib/zoomPan';
+import { ZoomableImage } from '../components/media/ZoomableImage';
 
 // Playback status is a union (loaded | error); every read below wants the loaded
 // shape. Partial<> keeps the `{}` initial state honest — the fields genuinely
@@ -35,7 +36,8 @@ type PlaybackState = Partial<AVPlaybackStatusSuccess>;
 
 // DARK-MEDIA TOKENS. Media sits on a black stage in BOTH app themes, so this
 // screen takes the dark palette's tokens rather than the active theme's (a
-// light-theme card on a black stage was the old bug).
+// light-theme card on a black stage was the old bug). The two hex values left
+// are deliberate: the stage is black and the error red is tuned for black.
 const M = {
   stage: '#000000',
   card: AuroraDark.card,
@@ -45,7 +47,8 @@ const M = {
   faint: AuroraDark.textFaint,
   track: AuroraDark.glassStroke,
   accent: AuroraDark.accentOn,        // accent as text/icon on dark (9.5:1)
-  accentFill: AuroraDark.accentDeep,  // accent as a fill under white text
+  accentFill: AuroraDark.accentDeep,  // accent as a fill under onAccent text
+  onAccent: AuroraDark.onPrimary,     // text/icon on accentFill
   danger: '#FF7B72',                   // readable red on black
   scrim: 'rgba(0,0,0,0.67)',
 };
@@ -79,64 +82,10 @@ type PlayerProps = {
   onStreaming: () => void;
 };
 
-// IMAGE — pinch to zoom (1x–5x), drag to pan while zoomed, tap to toggle 2.5x.
+// IMAGE — pinch to zoom (1x–5x), drag to pan while zoomed, tap to toggle 2.5x
+// (components/media/ZoomableImage, shared with file-viewer).
 function ImageViewer({ source, onLoaded, onFail }: PlayerProps) {
-  const scale = useRef(new Animated.Value(1)).current;
-  const tx = useRef(new Animated.Value(0)).current;
-  const ty = useRef(new Animated.Value(0)).current;
-  const [imgLoaded, setImgLoaded] = useState(false);
-  // Live values + the gesture's starting point (the responder is created once).
-  const cur = useRef({ z: 1, x: 0, y: 0 });
-  const start = useRef({ z: 1, x: 0, y: 0, dist: 0, pinched: false });
-  const box = useRef({ w: 0, h: 0 });
-  const apply = (z: number, x: number, y: number, animate = false) => {
-    const nx = clampPan(x, z, box.current.w), ny = clampPan(y, z, box.current.h);
-    cur.current = { z, x: nx, y: ny };
-    if (animate) {
-      Animated.parallel([
-        Animated.spring(scale, { toValue: z, useNativeDriver: true }),
-        Animated.spring(tx, { toValue: nx, useNativeDriver: true }),
-        Animated.spring(ty, { toValue: ny, useNativeDriver: true }),
-      ]).start();
-    } else { scale.setValue(z); tx.setValue(nx); ty.setValue(ny); }
-  };
-  const dist = (t: any[]) => Math.hypot(t[1].pageX - t[0].pageX, t[1].pageY - t[0].pageY);
-  const panResponder = useRef(PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: () => true,
-    onPanResponderGrant: (e) => {
-      const t = e.nativeEvent.touches;
-      start.current = { ...cur.current, dist: t.length >= 2 ? dist(t) : 0, pinched: t.length >= 2 };
-    },
-    onPanResponderMove: (e, g) => {
-      const t = e.nativeEvent.touches;
-      if (t.length >= 2) {
-        // A second finger can land mid-gesture: start the pinch from there.
-        if (!start.current.dist) start.current = { ...cur.current, dist: dist(t), pinched: true };
-        apply(pinchZoom(start.current.z, start.current.dist, dist(t)), cur.current.x, cur.current.y);
-      } else if (cur.current.z > 1 && !start.current.pinched) {
-        apply(cur.current.z, start.current.x + g.dx, start.current.y + g.dy);
-      }
-    },
-    onPanResponderRelease: (_, g) => {
-      const tap = !start.current.pinched && Math.abs(g.dx) < 5 && Math.abs(g.dy) < 5;
-      if (tap) apply(cur.current.z > 1 ? 1 : 2.5, 0, 0, true);
-      else if (cur.current.z <= 1.01) apply(1, 0, 0, true);
-    },
-    onPanResponderTerminate: () => { if (cur.current.z <= 1.01) apply(1, 0, 0, true); },
-  })).current;
-  return (
-    <View style={s.full} {...panResponder.panHandlers}
-      onLayout={(e) => { box.current = { w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height }; }}
-      accessible accessibilityRole="image" accessibilityLabel="Photo"
-      accessibilityHint="Pinch to zoom. Tap to zoom in or out."
-      accessibilityActions={[{ name: 'activate', label: 'Zoom in or out' }]}
-      onAccessibilityAction={() => apply(cur.current.z > 1 ? 1 : 2.5, 0, 0, true)}>
-      {!imgLoaded && <ActivityIndicator color={M.accent} style={s.center} />}
-      <Animated.Image source={source} style={[s.fullImg, { transform: [{ translateX: tx }, { translateY: ty }, { scale }] }]} resizeMode="contain"
-        onLoad={() => { setImgLoaded(true); onLoaded(); }} onError={() => onFail("This photo couldn't be loaded.")} />
-    </View>
-  );
+  return <ZoomableImage source={source} spinnerColor={M.accent} onLoaded={onLoaded} onFail={onFail} />;
 }
 
 // VIDEO — streams while loading; the track is draggable (lib/videoSeek).
@@ -146,6 +95,7 @@ function VideoPlayer({ source, waitingForAuth, onLoaded, onFail, onStreaming }: 
   const [ctrl, setCtrl] = useState(true);
   const [shouldPlay, setShouldPlay] = useState(true);
   const [seekFrac, setSeekFrac] = useState<number | null>(null);   // while dragging
+  const insets = useSafeAreaInsets();
   const durRef = useRef(0);
   const trackW = useRef(0);
   durRef.current = st.durationMillis ?? 0;
@@ -185,7 +135,7 @@ function VideoPlayer({ source, waitingForAuth, onLoaded, onFail, onStreaming }: 
         onLoad={onLoaded} onError={() => onFail("This video couldn't be played. It may be damaged or in an unsupported format.")} />
       {st.isBuffering && !st.isPlaying && <View style={s.bufOverlay}><ActivityIndicator color={M.accent} size="large" /><Text style={s.bufTxt}>Streaming...</Text></View>}
       {ctrl && (
-        <View style={s.vidCtrl}>
+        <View style={[s.vidCtrl, { paddingBottom: insets.bottom + 16 }]}>
           <TouchableOpacity style={s.playBtn} accessibilityRole="button" accessibilityLabel={st.isPlaying ? 'Pause video' : 'Play video'} onPress={async () => {
             const v = videoRef.current; if (!v) return;
             if (st.isPlaying) { await v.pauseAsync().catch(() => {}); setShouldPlay(false); }
@@ -246,10 +196,12 @@ function AudioPlayer({ source, waitingForAuth, onLoaded, onFail, fileName, fileS
     // eslint-disable-next-line react-hooks/exhaustive-deps -- load once per source
   }, [waitingForAuth, source]);
   const prog = (ast.positionMillis||0) / (ast.durationMillis||1);
-  const jump = (delta: number) => {
-    if (!soundRef.current) return;
-    const p = Math.max(0, Math.min(1, prog + delta));
-    soundRef.current.setPositionAsync(p * (ast.durationMillis || 0)).catch(() => {});
+  // Fixed seconds, not a share of the clip: 10% of a two-hour recording is
+  // twelve minutes, which is not a skip anyone means.
+  const jump = (deltaMs: number) => {
+    const dur = ast.durationMillis || 0;
+    if (!soundRef.current || !dur) return;
+    soundRef.current.setPositionAsync(Math.max(0, Math.min(dur, (ast.positionMillis || 0) + deltaMs))).catch(() => {});
   };
   return (
     <View style={s.audioWrap}>
@@ -257,17 +209,19 @@ function AudioPlayer({ source, waitingForAuth, onLoaded, onFail, fileName, fileS
         <Ionicons name="musical-notes" size={48} color={M.accent} />
         <Text style={s.audioName}>{fileName}</Text>
         <Text style={s.audioMeta}>{formatSize(fileSize)}{ast.durationMillis ? ' | ' + formatDur(ast.durationMillis) : ''}</Text>
-        <View style={s.waveform} accessible accessibilityRole="progressbar" accessibilityLabel="Playback position"
-          accessibilityValue={{ text: `${formatDur(ast.positionMillis)} of ${formatDur(ast.durationMillis)}` }}>
+        <View style={s.waveform} accessible accessibilityRole="adjustable" accessibilityLabel="Playback position"
+          accessibilityValue={{ text: `${formatDur(ast.positionMillis)} of ${formatDur(ast.durationMillis)}` }}
+          accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+          onAccessibilityAction={(e) => jump(e.nativeEvent.actionName === 'increment' ? 10000 : -10000)}>
           {WAVE.map((h,i) => <View key={i} style={[s.waveBar,{height:h,backgroundColor:i/40<prog?M.accent:M.track}]}/>)}
         </View>
         <View style={s.audioTimeRow}><Text style={s.audioTime}>{formatDur(ast.positionMillis)}</Text><Text style={s.audioTime}>{formatDur(ast.durationMillis)}</Text></View>
         <View style={s.audioCtrlRow}>
-          <TouchableOpacity hitSlop={10} onPress={() => jump(-0.1)} accessibilityRole="button" accessibilityLabel="Back ten per cent"><Ionicons name="play-back" size={26} color={M.text} /></TouchableOpacity>
+          <TouchableOpacity hitSlop={10} onPress={() => jump(-10000)} accessibilityRole="button" accessibilityLabel="Back 10 seconds"><Ionicons name="play-back" size={26} color={M.text} /></TouchableOpacity>
           <TouchableOpacity style={s.audioPlayBtn} onPress={async()=>{if(!soundRef.current)return;await (ast.isPlaying ? soundRef.current.pauseAsync() : soundRef.current.playAsync()).catch(() => {});}} accessibilityRole="button" accessibilityLabel={ast.isPlaying ? 'Pause audio' : 'Play audio'}>
-            <Ionicons name={ast.isPlaying?'pause':'play'} size={30} color="#FFFFFF" />
+            <Ionicons name={ast.isPlaying?'pause':'play'} size={30} color={M.onAccent} />
           </TouchableOpacity>
-          <TouchableOpacity hitSlop={10} onPress={() => jump(0.1)} accessibilityRole="button" accessibilityLabel="Forward ten per cent"><Ionicons name="play-forward" size={26} color={M.text} /></TouchableOpacity>
+          <TouchableOpacity hitSlop={10} onPress={() => jump(10000)} accessibilityRole="button" accessibilityLabel="Forward 10 seconds"><Ionicons name="play-forward" size={26} color={M.text} /></TouchableOpacity>
         </View>
       </View>
     </View>
@@ -292,7 +246,7 @@ function ArchiveCard({ fileName, fileSize, onReady, onBrowse, onSave }: {
       <Text style={s.audioName}>{fileName}</Text>
       <Text style={s.audioMeta}>{formatSize(fileSize)}</Text>
       <TouchableOpacity style={s.primaryBtn} onPress={onBrowse} accessibilityRole="button" accessibilityLabel="Browse archive contents">
-        <Ionicons name="folder-open-outline" size={16} color="#FFFFFF" /><Text style={s.primaryBtnTxt}>Browse contents</Text>
+        <Ionicons name="folder-open-outline" size={16} color={M.onAccent} /><Text style={s.primaryBtnTxt}>Browse contents</Text>
       </TouchableOpacity>
       <TouchableOpacity style={s.secondaryBtn} onPress={onSave} accessibilityRole="button" accessibilityLabel="Save to device">
         <Text style={s.secondaryBtnTxt}>Save to device</Text>
@@ -312,7 +266,7 @@ function GenericViewer({ fileName, fileSize, onReady, onSave, onOpen }: {
       <Text style={s.audioName}>{fileName}</Text>
       <Text style={s.audioMeta}>{formatSize(fileSize)}</Text>
       <TouchableOpacity style={s.primaryBtn} onPress={onSave} accessibilityRole="button" accessibilityLabel="Download and open">
-        <Ionicons name="download-outline" size={16} color="#FFFFFF" /><Text style={s.primaryBtnTxt}>Download & Open</Text>
+        <Ionicons name="download-outline" size={16} color={M.onAccent} /><Text style={s.primaryBtnTxt}>Download & Open</Text>
       </TouchableOpacity>
       {/* app/file-viewer.tsx shows file metadata and hands documents to the
           device's own PDF/Office app WITHOUT saving a copy to shared storage,
@@ -326,8 +280,12 @@ function GenericViewer({ fileName, fileSize, onReady, onSave, onOpen }: {
   );
 }
 
-// CODE/TEXT — a dark code canvas in BOTH themes (it was light text on #FFFFFF).
-const CODE = { bg: '#0D1117', head: '#161B22', border: '#21262D', text: '#E6EDF3', dim: '#8B949E', gutter: '#6E7681' };
+// CODE/TEXT — a dark code canvas in BOTH themes (it was light text on white),
+// drawn from the dark palette like the rest of this screen.
+const CODE = {
+  bg: AuroraDark.bg, head: AuroraDark.headerBar, border: AuroraDark.border,
+  text: AuroraDark.text, dim: AuroraDark.textDim, gutter: AuroraDark.textFaint,
+};
 function CodeViewer({ fileUri, fileName, needsAuth, onLoaded, onOpenHighlighted }: {
   fileUri: string; fileName: string; needsAuth: boolean; onLoaded: () => void; onOpenHighlighted: () => void;
 }) {
@@ -359,30 +317,25 @@ function CodeViewer({ fileUri, fileName, needsAuth, onLoaded, onOpenHighlighted 
   }, [fileUri]);
   const lines = content.split('\n');
   return (
-    <ScrollView style={{flex:1,backgroundColor:CODE.bg}}>
-      <View style={{padding:12,backgroundColor:CODE.head,borderBottomWidth:1,borderBottomColor:CODE.border}}>
-        <Text style={{color:CODE.text,fontSize:14,fontWeight:'800'}}>{fileName}</Text>
-        <Text style={{color:CODE.dim,fontSize:11,marginTop:4}}>{lines.length} lines | {formatSize(content.length)}</Text>
-        <TouchableOpacity style={{marginTop:10,minHeight:44,borderRadius:10,paddingVertical:10,flexDirection:'row',gap:6,justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:M.border}}
+    <ScrollView style={s.codeScroll}>
+      <View style={s.codeHead}>
+        <Text style={s.codeName}>{fileName}</Text>
+        <Text style={s.codeMeta}>{lines.length} lines | {formatSize(content.length)}</Text>
+        <TouchableOpacity style={s.codeOpenBtn}
           onPress={onOpenHighlighted} accessibilityRole="button" accessibilityLabel="Open with syntax highlighting">
           <Ionicons name="code-slash-outline" size={14} color={M.accent} />
-          <Text style={{color:M.accent,fontSize:12,fontWeight:'700'}}>Open with Syntax Highlighting</Text>
+          <Text style={s.codeOpenTxt}>Open with Syntax Highlighting</Text>
         </TouchableOpacity>
       </View>
-      {failed && <Text style={{color:M.danger,fontSize:13,textAlign:'center',padding:20}}>{"Couldn't read this file."}</Text>}
-      {lines.slice(0,500).map((l,i)=><View key={i} style={{flexDirection:'row',minHeight:22}}><Text style={{color:CODE.gutter,fontSize:12,fontFamily:'monospace',width:40,textAlign:'right',paddingRight:12,paddingTop:2}}>{i+1}</Text><Text style={{color:CODE.text,fontSize:12,fontFamily:'monospace',flex:1,paddingTop:2}}>{l}</Text></View>)}
-      {lines.length>500&&<Text style={{color:CODE.gutter,fontSize:12,textAlign:'center',padding:20}}>...{lines.length-500} more lines</Text>}
-      <View style={{height:100}}/>
+      {failed && <Text style={s.codeFail} accessibilityLiveRegion="polite">{"Couldn't read this file."}</Text>}
+      {lines.slice(0,500).map((l,i)=><View key={i} style={s.codeRow}><Text style={s.codeGutter}>{i+1}</Text><Text style={s.codeLine}>{l}</Text></View>)}
+      {lines.length>500&&<Text style={s.codeMore}>...{lines.length-500} more lines</Text>}
+      <View style={s.codeTail}/>
     </ScrollView>
   );
 }
 
 function MediaViewerScreen() {
-  // Reactive size. The module-level Dimensions.get above is captured ONCE at
-  // import and never updates, so it froze the layout at the size the app
-  // launched with. Shadowing it here makes every use in this component follow
-  // rotation; StyleSheet.create keeps the initial value, which is fine for
-  // static rules.
   const router = useRouter();
   const { uri, mediaUrl, attachmentId, needsAuth, isMine, mime, filename, msgType, viewOnce, chatId, encrypted } = useLocalSearchParams();
   const isViewOnce = viewOnce === '1';
@@ -566,7 +519,7 @@ function MediaViewerScreen() {
     router.replace({
       pathname: '/file-viewer',
       params: { uri: fileUri, filename: fileName, mimeType: (mime || '') + '' },
-    } as any);
+    });
   }, [fileUri, docRoute, fileName, mime, router]);
 
   // Share the FILE, not a string.
@@ -659,21 +612,17 @@ function MediaViewerScreen() {
           headerShown: true, title: 'Media unavailable',
           headerStyle: { backgroundColor: M.stage }, headerTintColor: M.text,
         }} />
-        <View style={[s.container, { alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 }]}>
+        <View style={[s.container, s.emptyBox]}>
           <Ionicons name="image-outline" size={44} color={M.dim} />
-          <Text accessibilityRole="header" style={{ color: M.text, fontSize: 17, fontWeight: '700', textAlign: 'center' }}>
-            Nothing to show
-          </Text>
-          <Text style={{ color: M.dim, fontSize: 14, textAlign: 'center' }}>
-            This link carried no media, or the file is no longer available.
-          </Text>
+          <Text accessibilityRole="header" style={s.emptyTitle}>Nothing to show</Text>
+          <Text style={s.emptyBody}>This link carried no media, or the file is no longer available.</Text>
           <TouchableOpacity
-            onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/chats' as any))}
+            onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/chats'))}
             accessibilityRole="button"
             accessibilityLabel="Go back"
-            style={{ marginTop: 8, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, backgroundColor: M.accentFill }}
+            style={s.emptyBtn}
           >
-            <Text style={{ color: '#FFFFFF', fontWeight: '700' }}>Go back</Text>
+            <Text style={s.primaryBtnTxt}>Go back</Text>
           </TouchableOpacity>
         </View>
       </>
@@ -687,7 +636,7 @@ function MediaViewerScreen() {
         // photo the sender was promised is one-view-only would hand the
         // recipient a permanent copy through the app's own UI — the protection
         // has to hold in the viewer, not only on the server.
-        headerRight: () => isViewOnce ? null : <View style={{flexDirection:'row',gap:20,marginRight:8}}>
+        headerRight: () => isViewOnce ? null : <View style={s.headerRight}>
           <TouchableOpacity onPress={shareFile} hitSlop={11} accessibilityRole="button" accessibilityLabel="Share"><Ionicons name="share-social-outline" size={22} color={M.text} /></TouchableOpacity>
           <TouchableOpacity onPress={saveToDevice} hitSlop={11} accessibilityRole="button" accessibilityLabel="Save to device"><Ionicons name="download-outline" size={22} color={M.text} /></TouchableOpacity>
         </View>,
@@ -700,7 +649,7 @@ function MediaViewerScreen() {
             <Ionicons name="alert-circle-outline" size={40} color={M.danger} />
             <Text style={s.errorTxt}>{error}</Text>
             <TouchableOpacity style={s.primaryBtn} onPress={retry} accessibilityRole="button" accessibilityLabel="Retry">
-              <Ionicons name="refresh" size={16} color="#FFFFFF" /><Text style={s.primaryBtnTxt}>Retry</Text>
+              <Ionicons name="refresh" size={16} color={M.onAccent} /><Text style={s.primaryBtnTxt}>Retry</Text>
             </TouchableOpacity>
           </View>
         ) : !fileUri ? (
@@ -729,7 +678,7 @@ function MediaViewerScreen() {
               )}
               {fileType === 'archive' && (
                 <ArchiveCard fileName={fileName} fileSize={fileSize} onReady={() => setLoading(false)} onSave={saveToDevice}
-                  onBrowse={() => router.push({ pathname: '/archive-viewer', params: { uri: fileUri, filename: fileName } } as any)} />
+                  onBrowse={() => router.push({ pathname: '/archive-viewer', params: { uri: fileUri, filename: fileName } })} />
               )}
               {(fileType === 'pdf' || fileType === 'unknown') && (
                 <GenericViewer fileName={fileName} fileSize={fileSize} onReady={() => setLoading(false)} onSave={saveToDevice}
@@ -751,7 +700,7 @@ const s = StyleSheet.create({
   fullVid:{width:'100%',height:'100%'},
   bufOverlay:{position:'absolute',justifyContent:'center',alignItems:'center'},
   bufTxt:{color:M.dim,fontSize:12,marginTop:8},
-  vidCtrl:{position:'absolute',bottom:0,left:0,right:0,backgroundColor:M.scrim,padding:16,paddingBottom:30},
+  vidCtrl:{position:'absolute',bottom:0,left:0,right:0,backgroundColor:M.scrim,padding:16},   // paddingBottom: safe-area inset, set inline
   playBtn:{alignSelf:'center',marginBottom:12},
   progRow:{flexDirection:'row',alignItems:'center',gap:8},
   timeTxt:{color:M.dim,fontSize:11,width:40},
@@ -775,11 +724,28 @@ const s = StyleSheet.create({
   audioCtrlRow:{flexDirection:'row',alignItems:'center',gap:24,marginTop:20},
   audioPlayBtn:{width:64,height:64,borderRadius:32,backgroundColor:M.accentFill,justifyContent:'center',alignItems:'center'},
   primaryBtn:{marginTop:20,backgroundColor:M.accentFill,borderRadius:14,flexDirection:'row',gap:8,alignItems:'center',justifyContent:'center',paddingVertical:14,paddingHorizontal:32},
-  primaryBtnTxt:{color:'#FFFFFF',fontSize:14,fontWeight:'800'},
+  primaryBtnTxt:{color:M.onAccent,fontSize:14,fontWeight:'800'},
   secondaryBtn:{marginTop:12,borderRadius:14,borderWidth:1,borderColor:M.border,flexDirection:'row',gap:8,alignItems:'center',justifyContent:'center',paddingVertical:12,paddingHorizontal:28},
   secondaryBtnTxt:{color:M.accent,fontSize:13,fontWeight:'700'},
   errorBox:{flex:1,alignItems:'center',justifyContent:'center',padding:24,gap:12},
   errorTxt:{color:M.text,fontSize:15,textAlign:'center',lineHeight:21},
+  headerRight:{flexDirection:'row',gap:20,marginRight:8},
+  emptyBox:{alignItems:'center',justifyContent:'center',padding:24,gap:12},
+  emptyTitle:{color:M.text,fontSize:17,fontWeight:'700',textAlign:'center'},
+  emptyBody:{color:M.dim,fontSize:14,textAlign:'center'},
+  emptyBtn:{marginTop:8,paddingHorizontal:20,paddingVertical:12,borderRadius:24,backgroundColor:M.accentFill},
+  codeScroll:{flex:1,backgroundColor:CODE.bg},
+  codeHead:{padding:12,backgroundColor:CODE.head,borderBottomWidth:1,borderBottomColor:CODE.border},
+  codeName:{color:CODE.text,fontSize:14,fontWeight:'800'},
+  codeMeta:{color:CODE.dim,fontSize:11,marginTop:4},
+  codeOpenBtn:{marginTop:10,minHeight:44,borderRadius:10,paddingVertical:10,flexDirection:'row',gap:6,justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:M.border},
+  codeOpenTxt:{color:M.accent,fontSize:12,fontWeight:'700'},
+  codeFail:{color:M.danger,fontSize:13,textAlign:'center',padding:20},
+  codeRow:{flexDirection:'row',minHeight:22},
+  codeGutter:{color:CODE.gutter,fontSize:12,fontFamily:'monospace',width:40,textAlign:'right',paddingRight:12,paddingTop:2},
+  codeLine:{color:CODE.text,fontSize:12,fontFamily:'monospace',flex:1,paddingTop:2},
+  codeMore:{color:CODE.gutter,fontSize:12,textAlign:'center',padding:20},
+  codeTail:{height:100},
 });
 
 // A render fault in a viewer used to take the WHOLE app down: these screens

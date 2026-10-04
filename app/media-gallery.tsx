@@ -7,15 +7,18 @@
 // params the Shelf uses. Links open externally. No Firestore.
 
 import { useAuthHeader } from '../hooks/useAuthHeader';
-import { HEADER_TOP } from '../constants/layout';
 import React, { useState, useEffect, useCallback , useMemo, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, FlatList, SectionList, ActivityIndicator, Alert, Linking, useWindowDimensions } from 'react-native';
+import {
+  View, Text, TouchableOpacity, StyleSheet, FlatList, SectionList, ActivityIndicator, Alert, Linking,
+  useWindowDimensions, type ImageStyle, type StyleProp,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Sharing from 'expo-sharing';
 // expo-image: the 3-up grid recycles tiles, so cache + recyclingKey matter here.
 import { Image } from 'expo-image';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { type Palette } from '../constants/theme';
+import { AuroraDark, type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { getMessages, getChat, decryptFromChat, attachmentUrl, type Message } from '../lib/chatService';
 import { getDecryptedAttachmentUri, parseMediaContent } from '../lib/mediaAttachments';
@@ -72,7 +75,7 @@ function bucket(msgs: Message[]) {
  */
 function MediaThumb({ m, style, resizeMode = 'cover', resolveSrc, placeholder }: {
   m: Message;
-  style: any;
+  style: StyleProp<ImageStyle>;
   resizeMode?: 'cover' | 'contain';
   resolveSrc: (m: Message) => Promise<ThumbSrc>;
   placeholder: string;
@@ -120,7 +123,8 @@ interface GalleryCache {
 
 function useS() {
   const { colors } = useTheme();
-  return useMemo(() => makeStyles(colors), [colors]);
+  const { top } = useSafeAreaInsets();
+  return useMemo(() => makeStyles(colors, top), [colors, top]);
 }
 
 export default function MediaGalleryScreen() {
@@ -243,6 +247,15 @@ export default function MediaGalleryScreen() {
 
   const fmtDate = useCallback((iso: string) => { try { return new Date(iso).toLocaleDateString(); } catch { return ''; } }, []);
 
+  // An encrypted attachment keeps its per-file key inside the message body, so
+  // the body is decrypted first and the key handed to the media store — the
+  // step every open below needs before the file itself can be read.
+  const unlockKey = useCallback(async (m: Message, aid: string) => {
+    if (!m.meta?.encrypted) return;
+    const plain = await decryptFromChat(cid, m.senderId, m.content, m.id);
+    await parseMediaContent(aid, plain);
+  }, [cid]);
+
   // Resolve a renderable source for a media message: for encrypted attachments,
   // decrypt the content to recover the per-file key, then return a decrypted
   // local file:// URI; for plaintext, return the auth-gated /uploads URL.
@@ -253,13 +266,12 @@ export default function MediaGalleryScreen() {
     if (!aid) return null;
     if (m.meta?.encrypted) {
       try {
-        const plain = await decryptFromChat(cid, m.senderId, m.content, m.id);
-        await parseMediaContent(aid, plain);
+        await unlockKey(m, String(aid));
         return await getDecryptedAttachmentUri(aid);
       } catch { return null; }
     }
     return { uri: attachmentUrl(aid), headers: authHeader ? { Authorization: authHeader } : undefined };
-  }, [cid, authHeader]);
+  }, [unlockKey, authHeader]);
 
 
   const openFile = useCallback(async (m: Message) => {
@@ -279,13 +291,7 @@ export default function MediaGalleryScreen() {
     openingRef.current = String(aid);
     const filename = m.meta?.fileName || m.meta?.name || m.meta?.filename || 'File';
     try {
-      // Encrypted attachments keep their per-file key inside the message body,
-      // so the body has to be decrypted before the store can find it. Same two
-      // calls resolveSrc makes, and the reason they cannot be skipped here.
-      if (m.meta?.encrypted) {
-        const plain = await decryptFromChat(cid, m.senderId, m.content, m.id);
-        await parseMediaContent(String(aid), plain);
-      }
+      await unlockKey(m, String(aid));
       const uri = await resolveAttachmentFile({
         attachmentId: String(aid),
         filename,
@@ -307,7 +313,7 @@ export default function MediaGalleryScreen() {
       router.push({
         pathname: route,
         params: { uri, filename, mimeType: m.meta?.mime || '', msgType: 'file' },
-      } as any);
+      });
     } catch (e: any) {
       // A missing key is a STATE, not a crash: it is the normal situation after
       // a reinstall, and saying so is the difference between an explicable
@@ -321,7 +327,7 @@ export default function MediaGalleryScreen() {
     } finally {
       openingRef.current = null;
     }
-  }, [cid, meId, router]);
+  }, [unlockKey, meId, router]);
 
   // Photos and videos open in /media-viewer: it plays video (the old in-screen
   // Modal could only show a still), zooms, shares and saves. Encrypted media
@@ -333,9 +339,11 @@ export default function MediaGalleryScreen() {
     if (!aid || openingRef.current) return;
     openingRef.current = String(aid);
     try {
-      if (m.meta?.encrypted) {
-        const plain = await decryptFromChat(cid, m.senderId, m.content, m.id);
-        await parseMediaContent(String(aid), plain);
+      try {
+        await unlockKey(m, String(aid));
+      } catch {
+        Alert.alert('Can’t open', 'This item could not be decrypted on this device.');
+        return;
       }
       router.push({
         pathname: '/media-viewer',
@@ -344,13 +352,14 @@ export default function MediaGalleryScreen() {
           filename: m.meta?.fileName || m.meta?.name || m.meta?.filename || (m.type === 'video' ? 'Video' : 'Photo'),
           mime: m.meta?.mime ?? null, kind: m.type, encrypted: !!m.meta?.encrypted,
         }, meId),
-      } as any);
-    } catch {
-      Alert.alert('Can’t open', 'This item could not be decrypted on this device.');
+      });
+    } catch (e: any) {
+      console.warn('[media-gallery] open failed:', e?.message ?? e);
+      Alert.alert('Can’t open', 'The viewer could not be opened. Please try again.');
     } finally {
       openingRef.current = null;
     }
-  }, [cid, meId, router]);
+  }, [unlockKey, cid, meId, router]);
 
   const renderPhoto = ({ item }: { item: Message }) => (
     <TouchableOpacity style={[s.tile, { width: tileSize, height: tileSize }]} onPress={() => openMedia(item)} activeOpacity={0.8}
@@ -363,8 +372,8 @@ export default function MediaGalleryScreen() {
     <TouchableOpacity style={[s.tile, { width: tileSize, height: tileSize }]} onPress={() => openMedia(item)} activeOpacity={0.8}
       accessibilityRole="button" accessibilityLabel={`Video, ${fmtDate(item.createdAt)}`}>
       <MediaThumb m={item} style={s.tileImg} resolveSrc={resolveSrc} placeholder={colors.surfaceSolid} />
-      {/* White on a dark scrim over the thumbnail: fixed in both themes. */}
-      <View style={s.playBadge}><Ionicons name="play" size={16} color="#fff" /></View>
+      {/* Light ink on a dark scrim over the thumbnail: fixed in both themes. */}
+      <View style={s.playBadge}><Ionicons name="play" size={16} color={AuroraDark.text} /></View>
     </TouchableOpacity>
   );
 
@@ -527,17 +536,16 @@ const Empty = ({ label }: { label: string }) => {
   );
 };
 
-const makeStyles = (c: Palette) => StyleSheet.create({
+const makeStyles = (c: Palette, insetTop: number) => StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingHorizontal: 16, paddingBottom: 8, gap: 12 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: insetTop + 8, paddingHorizontal: 16, paddingBottom: 8, gap: 12 },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
   title: { color: c.text, fontSize: 18, fontWeight: '800', flex: 1 },
   tabs: { flexDirection: 'row', paddingHorizontal: 12, paddingTop: 8, gap: 6 },
   tab: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: c.glassSoft, borderWidth: 1, borderColor: c.glassStroke },
   tabActive: { backgroundColor: c.primary, borderColor: c.primary },
   tabTxt: { color: c.textDim, fontSize: 12, fontWeight: '700' },
-  // White on the solid primary fill: the deliberate on-accent ink in both themes.
-  tabTxtActive: { color: '#FFFFFF' },
+  tabTxtActive: { color: c.onPrimary },   // on the solid primary fill
   tabCount: { color: c.textDim, fontSize: 10, marginTop: 2 },
   groupBar: { flexDirection: 'row', gap: 7, paddingHorizontal: 12, paddingTop: 10 },
   groupChip: { paddingHorizontal: 13, paddingVertical: 7, borderRadius: 999, borderWidth: 1, borderColor: c.glassStroke },
@@ -545,6 +553,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   sectionHdr: { color: c.text, fontSize: 12.5, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4, paddingHorizontal: 4, paddingTop: 16, paddingBottom: 6 },
   tile: { margin: 4, borderRadius: 8, overflow: 'hidden', backgroundColor: c.surfaceSolid },
   tileImg: { width: '100%', height: '100%' },
+  // A scrim over the photo, so it is dark in both themes.
   playBadge: { position: 'absolute', top: '50%', left: '50%', marginLeft: -16, marginTop: -16, width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
   fileRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 12, padding: 12, marginBottom: 6, borderWidth: 1, borderColor: c.glassStroke, gap: 12 },
   fileIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: c.glassSoft, justifyContent: 'center', alignItems: 'center' },
@@ -557,6 +566,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   errorTitle: { color: c.text, fontSize: 16, fontWeight: '700', textAlign: 'center' },
   errorBody: { color: c.textDim, fontSize: 13, textAlign: 'center' },
   retryBtn: { marginTop: 8, paddingHorizontal: 22, paddingVertical: 10, borderRadius: 20, backgroundColor: c.primary },
-  retryBtnTxt: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  retryBtnTxt: { color: c.onPrimary, fontSize: 14, fontWeight: '700' },
   capNote: { color: c.textFaint, fontSize: 11, textAlign: 'center', paddingVertical: 8 },
 });

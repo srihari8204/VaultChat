@@ -52,6 +52,8 @@ function ArchiveViewerScreen() {
   const [dir, setDir] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // A size refusal cannot be fixed by retrying: it offers the hand-off instead.
+  const [tooBig, setTooBig] = useState(false);
   const [busyPath, setBusyPath] = useState<string | null>(null);
   const [entryError, setEntryError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
@@ -71,6 +73,7 @@ function ArchiveViewerScreen() {
     if (unsupported) { setLoading(false); return; }
     setLoading(true);
     setError('');
+    setTooBig(false);
     (async () => {
       try {
         let local = fileUri;
@@ -92,9 +95,9 @@ function ArchiveViewerScreen() {
         }
         // The whole archive is read into JS to parse it; refuse a huge one
         // before that read rather than crash in it.
-        const info: any = await FileSystem.getInfoAsync(local);
-        if (info?.exists && Number(info.size ?? 0) > MAX_ARCHIVE_BYTES) {
-          if (alive) setError(`This archive is ${formatSize(Number(info.size))}, which is too large to open on the device.`);
+        const info = await FileSystem.getInfoAsync(local);
+        if (info.exists && info.size > MAX_ARCHIVE_BYTES) {
+          if (alive) { setTooBig(true); setError(`This archive is ${formatSize(info.size)}, which is too large to open on the device.`); }
           return;
         }
         const b64 = await FileSystem.readAsStringAsync(local, { encoding: FileSystem.EncodingType.Base64 });
@@ -111,6 +114,7 @@ function ArchiveViewerScreen() {
         if (!alive) return;
         const refusal = refuseDeclared(declared);
         if (refusal) {
+          setTooBig(true);
           setError(refusal.reason === 'size'
             ? `This archive expands to ${formatSize(refusal.bytes)}, which is too large to open on the device.`
             : `This archive holds ${refusal.count.toLocaleString()} entries, which is too many to open on the device.`);
@@ -120,6 +124,7 @@ function ArchiveViewerScreen() {
         // List from the central directory — nothing is inflated until a tap.
         const rows = entriesFromInfos(declared);
         if (tooLargeToOpen(rows)) {
+          setTooBig(true);
           setError(`This archive expands to ${formatSize(totalUncompressed(rows))}, which is too large to open on the device.`);
         } else {
           setRaw(bytes);
@@ -148,6 +153,11 @@ function ArchiveViewerScreen() {
 
   const rows = useMemo(() => listDir(entries, dir), [entries, dir]);
 
+  // Each extracted entry gets its own folder: entries are flattened to their
+  // basename, so two README.md files from different folders used to overwrite
+  // each other.
+  const extractSeq = useRef(0);
+
   /** Extract ONE entry to the cache and hand it to the existing file viewer. */
   const openEntry = useCallback(async (e: ArchiveEntry) => {
     if (!raw || busyPath) return;
@@ -170,9 +180,18 @@ function ArchiveViewerScreen() {
       });
       const bytes = one[e.path];
       if (!bytes) throw new Error('entry missing from the archive');
-      // Flatten into one cache folder per archive: the entry's own directories
-      // are not recreated, so a deep path cannot become a deep write.
-      const outDir = `${workDir}x/`;
+      // The declared size was checked above, and fflate inflates into a buffer
+      // of exactly that size (unzip passes originalSize as the output length
+      // and never grows it; lib/media/fflateBound.selftest.ts pins this), so
+      // an entry that lies about its size is truncated, not unbounded. Checked
+      // again on what actually came out, in case that ever changes.
+      if (bytes.length > MAX_ENTRY_BYTES) {
+        setEntryError(`"${e.name}" is too large to extract on the device.`);
+        return;
+      }
+      // The entry's own directories are not recreated, so a deep path cannot
+      // become a deep write: one numbered folder per extraction.
+      const outDir = `${workDir}x/${++extractSeq.current}/`;
       await FileSystem.makeDirectoryAsync(outDir, { intermediates: true }).catch(() => {});
       const outPath = outDir + safe.split('/').pop();
       await FileSystem.writeAsStringAsync(
@@ -180,7 +199,7 @@ function ArchiveViewerScreen() {
         Buffer.from(bytes).toString('base64'),
         { encoding: FileSystem.EncodingType.Base64 },
       );
-      router.push({ pathname: '/file-viewer', params: { uri: outPath, filename: e.name } } as any);
+      router.push({ pathname: '/file-viewer', params: { uri: outPath, filename: e.name } });
     } catch (err: any) {
       console.warn('[archive-viewer] extract failed:', err?.message ?? err);
       setEntryError(`Could not extract "${e.name}".`);
@@ -261,13 +280,22 @@ function ArchiveViewerScreen() {
       ) : loading ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
       ) : error ? (
-        <View style={S.empty}>
+        <View style={S.empty} accessibilityLiveRegion="polite">
           <Ionicons name="alert-circle-outline" size={44} color={colors.danger} />
           <Text style={S.emptyBody}>{error}</Text>
-          <TouchableOpacity style={S.action} accessibilityRole="button" accessibilityLabel="Retry opening the archive"
-            onPress={() => setReloadKey(k => k + 1)}>
-            <Text style={S.actionTxt}>Retry</Text>
-          </TouchableOpacity>
+          {tooBig ? (
+            // Retrying a size refusal can only fail again; another app can open it.
+            <TouchableOpacity style={S.action} accessibilityRole="button" accessibilityLabel="Open in another app"
+              accessibilityState={{ busy: handingOff, disabled: handingOff }} disabled={handingOff}
+              onPress={openElsewhere}>
+              {handingOff ? <ActivityIndicator color={colors.primary} /> : <Text style={S.actionTxt}>Open in another app</Text>}
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity style={S.action} accessibilityRole="button" accessibilityLabel="Retry opening the archive"
+              onPress={() => setReloadKey(k => k + 1)}>
+              <Text style={S.actionTxt}>Retry</Text>
+            </TouchableOpacity>
+          )}
         </View>
       ) : (
         <>

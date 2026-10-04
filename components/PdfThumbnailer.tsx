@@ -14,12 +14,25 @@
 // If the host is not mounted — iOS today, since plugins/withPdfJs.js only copies
 // the files on Android — requests resolve to null rather than hanging, and the
 // bubble falls back to the plain icon row it has always shown.
+//
+// NATIVE FIRST. pdf.js in a file:// WebView cannot start its Worker, so it parses
+// on the main thread — the ANR components/PdfView.tsx describes. Where the
+// native PdfRenderer module is in the build (lib/pdfNative), page 1 is rendered
+// there, off the UI thread, and the WebView is never mounted. The WebView stays
+// only as the fallback for a build without that module.
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import { WebView } from 'react-native-webview';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as ImageManipulator from 'expo-image-manipulator';
+import { pdfInfo, pdfNativeAvailable, renderPdfPage } from '../lib/pdfNative';
+import { VIEWER_TEMP_PREFIX } from '../lib/mediaCacheGC';
 
 const THUMB_PAGE = 'file:///android_asset/pdfjs/thumb.html';
+/** Same width and JPEG quality as thumb.html's canvas, so both paths match. */
+const THUMB_PX = 480;
+const THUMB_QUALITY = 0.6;
 /** A PDF that has not answered by now is not going to; never hang the send. */
 const TIMEOUT_MS = 20_000;
 
@@ -71,8 +84,29 @@ function settle(id: number, value: PdfThumb | null) {
  * Resolves null if there is no renderer, the PDF is unreadable, or it takes
  * too long — the caller treats every one of those the same way.
  */
+/** Page 1 through the native renderer. The rendered page is plaintext of the
+ *  attachment, so it is written to its own vt_ folder and deleted once read. */
+async function nativeThumb(uri: string): Promise<PdfThumb | null> {
+  const dir = `${FileSystem.cacheDirectory || ''}${VIEWER_TEMP_PREFIX}pdfthumb_${Date.now()}`;
+  try {
+    await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+    const info = await pdfInfo(uri);
+    if (!info.pageCount) return null;
+    const page = await renderPdfPage(uri, 0, THUMB_PX, dir, 'p');
+    const jpeg = await ImageManipulator.manipulateAsync(page.uri, [],
+      { compress: THUMB_QUALITY, format: ImageManipulator.SaveFormat.JPEG, base64: true });
+    FileSystem.deleteAsync(jpeg.uri, { idempotent: true }).catch(() => {});
+    return jpeg.base64 ? { b64: jpeg.base64, pages: info.pageCount } : null;
+  } catch {
+    return null;   // password-protected, damaged, out of memory: the icon row
+  } finally {
+    FileSystem.deleteAsync(dir, { idempotent: true }).catch(() => {});
+  }
+}
+
 export function requestPdfThumb(uri: string): Promise<PdfThumb | null> {
   if (Platform.OS !== 'android') return Promise.resolve(null);
+  if (pdfNativeAvailable) return nativeThumb(uri);
   const id = ++seq;
   const msg = JSON.stringify({ id, uri });
   return new Promise<PdfThumb | null>(resolve => {
@@ -119,7 +153,8 @@ export function PdfThumbnailerHost() {
         originWhitelist={['*']}
         allowFileAccess
         allowFileAccessFromFileURLs
-        // allowUniversalAccessFromFileURLs removed — see components/PdfView.tsx.
+        // allowUniversalAccessFromFileURLs stays off: a page loaded from a file
+        // must not read other files.
         javaScriptEnabled
         domStorageEnabled={false}
         onMessage={onMessage}
