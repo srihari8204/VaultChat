@@ -20,8 +20,8 @@
 import { useAuthHeader } from '../hooks/useAuthHeader';
 import { HEADER_TOP } from '../constants/layout';
 import { brandAlpha, type Palette } from '../constants/theme';
-import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
-import React, { useCallback, useEffect, useState , useMemo} from 'react';
+import { useLocalSearchParams, useRouter, Stack, useFocusEffect } from 'expo-router';
+import React, { useCallback, useEffect, useRef, useState , useMemo} from 'react';
 import { FlatList, StyleSheet, Text, TouchableOpacity, View, ActivityIndicator, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { CALL_ENGINE_V2 } from '../constants/flags';
@@ -44,10 +44,17 @@ export default function GroupCallsScreen() {
   const s = useS();
   const router = useRouter();
   const { chatId, groupName, mode: modeParam } = useLocalSearchParams<{ chatId: string; groupName: string; mode?: string }>();
-  const [mode, setMode] = useState<CallMode>((modeParam as CallMode) || 'voice');
+  // Only the two known modes; anything else in the link falls back to voice.
+  const [mode, setMode] = useState<CallMode>(modeParam === 'video' ? 'video' : 'voice');
   const [members, setMembers] = useState<ChatMember[]>([]);
   const authHeader = useAuthHeader();
   const [loading, setLoading] = useState(true);
+  // Load failed: an error with Retry, not "No other members to call."
+  const [failed, setFailed] = useState(false);
+  const [reload, setReload] = useState(0);
+  // One tap starts one call; cleared when the screen is focused again.
+  const starting = useRef(false);
+  useFocusEffect(useCallback(() => { starting.current = false; }, []));
 
   useEffect(() => {
     let active = true;
@@ -57,12 +64,13 @@ export default function GroupCallsScreen() {
         if (active && chat) {
           setMembers(chat.members.filter((m: ChatMember) => !m.leftAt && m.userId !== me?.id));
         }
-      } catch { /* leaves empty */ } finally {
+        if (active) setFailed(!chat);
+      } catch { if (active) setFailed(true); } finally {
         if (active) setLoading(false);
       }
     })();
     return () => { active = false; };
-  }, [chatId]);
+  }, [chatId, reload]);
 
   const callMember = (m: ChatMember) => {
     router.push({
@@ -71,7 +79,7 @@ export default function GroupCallsScreen() {
     } as any);
   };
 
-  // Real mesh group call: ring every member, then join the call room.
+  // Group call through the SFU: ring every member, then join the call room.
   //
   // Who rings depends on which build is running, and exactly ONE of them must:
   //   • engine build — the roster travels as the `members` param and
@@ -81,6 +89,8 @@ export default function GroupCallsScreen() {
   // Both emit the same `call_incoming` payload, so a caller on either build is
   // indistinguishable to the callee.
   const startGroupCall = useCallback(async () => {
+    if (starting.current || members.length === 0) return;
+    starting.current = true;
     const uids = members.map(m => m.userId);
     if (!CALL_ENGINE_V2) {
       try {
@@ -107,7 +117,7 @@ export default function GroupCallsScreen() {
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <View style={s.header}>
-        <TouchableOpacity accessibilityLabel="Go back" onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.title} numberOfLines={1}>{(groupName as string) || 'Group'} · Call</Text>
@@ -116,21 +126,37 @@ export default function GroupCallsScreen() {
 
       <View style={s.modeRow}>
         {(['voice', 'video'] as const).map(mo => (
-          <TouchableOpacity key={mo} style={[s.modeBtn, mode === mo && s.modeBtnActive]} onPress={() => setMode(mo)}>
+          <TouchableOpacity key={mo} style={[s.modeBtn, mode === mo && s.modeBtnActive]} onPress={() => setMode(mo)}
+            accessibilityRole="radio" accessibilityLabel={mo === 'voice' ? 'Voice' : 'Video'} accessibilityState={{ selected: mode === mo, checked: mode === mo }}>
             <Ionicons name={mo === 'voice' ? 'call' : 'videocam'} size={18} color={mode === mo ? '#FFFFFF' : colors.textDim} />
             <Text style={[s.modeTxt, mode === mo && s.modeTxtActive]}>{mo === 'voice' ? 'Voice' : 'Video'}</Text>
           </TouchableOpacity>
         ))}
       </View>
 
-      <TouchableOpacity style={s.startBtn} activeOpacity={0.85} onPress={startGroupCall}>
+      <TouchableOpacity
+        style={[s.startBtn, (loading || members.length === 0) && { opacity: 0.5 }]}
+        activeOpacity={0.85}
+        onPress={startGroupCall}
+        disabled={loading || members.length === 0}
+        accessibilityRole="button"
+        accessibilityLabel={`Start ${mode} group call`}
+        accessibilityState={{ disabled: loading || members.length === 0 }}
+      >
         <Ionicons name={mode === 'video' ? 'videocam' : 'call'} size={20} color="#fff" />
         <Text style={s.startTxt}>Start {mode} group call</Text>
       </TouchableOpacity>
-      <Text style={s.noticeTxt}>Everyone-at-once call (best for small groups). Or tap a member below for a 1:1 call.</Text>
+      <Text style={s.noticeTxt}>Rings everyone in the group at once. Or tap a member below for a 1:1 call.</Text>
 
       {loading ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: 30 }} />
+      ) : failed ? (
+        <View style={{ alignItems: 'center', padding: 40, gap: 12 }}>
+          <Text style={s.sub}>Couldn’t load the group’s members.</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry loading members" onPress={() => { setLoading(true); setReload(n => n + 1); }}>
+            <Text style={[s.name, { color: colors.primary }]}>Retry</Text>
+          </TouchableOpacity>
+        </View>
       ) : (
         <FlatList
           data={members}
@@ -139,7 +165,8 @@ export default function GroupCallsScreen() {
           renderItem={({ item }) => {
             const name = item.name || item.email || 'Member';
             return (
-              <TouchableOpacity style={s.row} onPress={() => callMember(item)} activeOpacity={0.7}>
+              <TouchableOpacity style={s.row} onPress={() => callMember(item)} activeOpacity={0.7}
+                accessibilityRole="button" accessibilityLabel={`${mode === 'video' ? 'Video' : 'Voice'} call ${name}${item.online ? ', online' : ''}`}>
                 <View style={s.avatar}>
                   {item.photoURL && authHeader
                     ? <Image source={{ uri: attachmentUrl(item.photoURL), headers: { Authorization: authHeader } }} style={s.avatarImg} />
@@ -171,7 +198,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   modeBtnActive: { backgroundColor: c.primary },
   modeTxt: { color: c.textDim, fontSize: 14, fontWeight: '700' },
   modeTxtActive: { color: '#FFFFFF' },
-  notice: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 16, marginTop: 12, padding: 12, borderRadius: 12, backgroundColor: 'rgba(6,182,212,0.1)', borderWidth: 1, borderColor: 'rgba(6,182,212,0.3)' },
   noticeTxt: { color: c.textDim, fontSize: 12, lineHeight: 17, marginHorizontal: 18, marginTop: 8, textAlign: 'center' },
   startBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginHorizontal: 16, marginTop: 12, paddingVertical: 14, borderRadius: 14, backgroundColor: c.primary },
   startTxt: { color: '#fff', fontSize: 15, fontWeight: '800', textTransform: 'capitalize' },

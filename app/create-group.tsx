@@ -1,24 +1,24 @@
 // app/create-group.tsx — Create a new group chat (Postgres-backed).
 //
-// Members are picked from people you already have a direct chat with
-// (derived from GET /chats). This needs no contact-permission round-trip and
-// resolves straight to user IDs, which POST /chats (type:group) accepts.
-// The group is created on Postgres and opened in the shared /chat screen
-// (which renders groups), replacing the old Firebase + group-chat flow.
+// People are picked from those you already have a direct chat with (derived
+// from GET /chats). The group is created with only you in it, and each picked
+// person gets an INVITATION they accept or decline in /group-invitations —
+// the same consent path as Group info → Add member (/family-add) and
+// /group-create. Nobody is added to a group without agreeing to join.
 
 import { useAuthHeader } from '../hooks/useAuthHeader';
 import { HEADER_TOP, SCREEN_BOTTOM } from '../constants/layout';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, TextInput, FlatList, ScrollView, TouchableOpacity,
-  StyleSheet, ActivityIndicator,
+  StyleSheet, ActivityIndicator, Alert,
 } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { AppText as Text, Avatar, AuroraBackground } from '../components/ui';
-import { listChats, createGroupChat, attachmentUrl } from '../lib/chatService';
+import { listChats, createGroupChat, createInvitation, attachmentUrl } from '../lib/chatService';
 
 interface Pick { userId: string; name: string; photoURL: string | null }
 
@@ -40,11 +40,15 @@ export default function CreateGroupScreen() {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The contact list itself failed to load (vs. a failed create).
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     let active = true;
     (async () => {
       try {
+        setLoadFailed(false);
         const chats = await listChats();
         // Direct-chat peers → dedup by userId.
         const seen = new Map<string, Pick>();
@@ -60,14 +64,14 @@ export default function CreateGroupScreen() {
           }
         }
         if (active) setPeople(Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name)));
-      } catch (e: any) {
-        if (active) setError(e?.message ?? 'Failed to load contacts');
+      } catch {
+        if (active) setLoadFailed(true);
       } finally {
         if (active) setLoading(false);
       }
     })();
     return () => { active = false; };
-  }, []);
+  }, [reload]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -93,8 +97,18 @@ export default function CreateGroupScreen() {
     setCreating(true);
     setError(null);
     try {
-      const { id } = await createGroupChat(groupName.trim(), { ids: Array.from(selected) });
+      // Created with only me in it; everyone picked is INVITED, not added.
+      const { id } = await createGroupChat(groupName.trim(), { allowEmpty: true });
+      const ids = Array.from(selected);
+      const results = await Promise.allSettled(ids.map(userId => createInvitation(id, { userId })));
+      const failed = results.filter(r => r.status === 'rejected').length;
       router.replace({ pathname: '/chat', params: { id } } as any);
+      if (failed > 0) {
+        Alert.alert(
+          'Some invitations were not sent',
+          `${failed} of ${ids.length} could not be invited. Open Group info → Add member to try again.`,
+        );
+      }
     } catch (e: any) {
       setError(e?.message ?? 'Could not create group');
       setCreating(false);
@@ -104,7 +118,8 @@ export default function CreateGroupScreen() {
   const renderItem = ({ item }: { item: Pick }) => {
     const sel = selected.has(item.userId);
     return (
-      <TouchableOpacity style={s.row} onPress={() => toggle(item.userId)} activeOpacity={0.7}>
+      <TouchableOpacity style={s.row} onPress={() => toggle(item.userId)} activeOpacity={0.7}
+        accessibilityRole="checkbox" accessibilityLabel={item.name} accessibilityState={{ checked: sel }}>
         <Avatar uri={item.photoURL && authHeader ? attachmentUrl(item.photoURL) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={item.name} size={46} ring />
         <Text style={s.name} numberOfLines={1}>{item.name}</Text>
         <View style={[s.check, sel && s.checkSel]}>
@@ -120,7 +135,7 @@ export default function CreateGroupScreen() {
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={s.header}>
-        <TouchableOpacity accessibilityLabel="Go back" onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.headerTitle}>New Group</Text>
@@ -142,7 +157,8 @@ export default function CreateGroupScreen() {
       {selectedPeople.length > 0 && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.chipRow} contentContainerStyle={{ gap: 8, paddingHorizontal: 16 }}>
           {selectedPeople.map(p => (
-            <TouchableOpacity key={p.userId} style={s.chip} onPress={() => toggle(p.userId)} activeOpacity={0.7}>
+            <TouchableOpacity key={p.userId} style={s.chip} onPress={() => toggle(p.userId)} activeOpacity={0.7}
+              accessibilityRole="button" accessibilityLabel={`Remove ${p.name}`}>
               <Avatar uri={p.photoURL && authHeader ? attachmentUrl(p.photoURL) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={p.name} size={26} />
               <Text style={s.chipTxt} numberOfLines={1}>{p.name.split(' ')[0]}</Text>
               <Ionicons name="close-circle" size={16} color={colors.textDim} />
@@ -157,10 +173,18 @@ export default function CreateGroupScreen() {
         <TextInput style={s.searchInput} value={query} onChangeText={setQuery} placeholder="Search contacts" placeholderTextColor={colors.textDim} autoCorrect={false} />
       </View>
 
-      <Text style={s.label}>{selected.size} SELECTED</Text>
+      <Text style={s.label}>{selected.size} SELECTED · THEY JOIN WHEN THEY ACCEPT</Text>
 
       {loading ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
+      ) : loadFailed && people.length === 0 ? (
+        <View style={s.empty}>
+          <Ionicons name="cloud-offline-outline" size={56} color={colors.textDim} />
+          <Text style={s.emptyTxt}>Couldn’t load your contacts.</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry loading contacts" onPress={() => { setLoading(true); setReload(n => n + 1); }}>
+            <Text style={[s.emptyTxt, { color: colors.primary, fontWeight: '700' }]}>Retry</Text>
+          </TouchableOpacity>
+        </View>
       ) : people.length === 0 ? (
         <View style={s.empty}>
           <Ionicons name="people-outline" size={56} color={colors.surfaceSolid} />
@@ -183,11 +207,13 @@ export default function CreateGroupScreen() {
           onPress={create}
           disabled={!canCreate}
           activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !canCreate, busy: creating }}
         >
           {creating
             ? <ActivityIndicator color="#FFFFFF" />
             : <Text style={[s.createTxt, !canCreate && s.createTxtOff]}>
-                Create Group{selected.size > 0 ? ` (${selected.size + 1})` : ''}
+                Create & invite{selected.size > 0 ? ` (${selected.size})` : ''}
               </Text>}
         </TouchableOpacity>
       </View>
@@ -216,9 +242,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   searchWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginTop: 12, paddingHorizontal: 14, minHeight: 40, paddingVertical: 6, borderRadius: 20, backgroundColor: c.glass, borderWidth: 1, borderColor: c.glassStroke },
   searchInput: { flex: 1, color: c.text, fontSize: 15 },
   row: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 14, paddingVertical: 10, gap: 12, borderRadius: 16, backgroundColor: c.glass, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
-  avatar: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surfaceSolid, borderWidth: 1, borderColor: c.glassStroke },
-  avatarSel: { borderColor: c.primary },
-  avatarTxt: { color: c.accent, fontSize: 18, fontWeight: '800' },
   name: { flex: 1, color: c.text, fontSize: 15, fontWeight: '600' },
   check: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: c.glassStroke, alignItems: 'center', justifyContent: 'center' },
   checkSel: { backgroundColor: c.primary, borderColor: c.primary },

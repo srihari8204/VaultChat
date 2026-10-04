@@ -438,18 +438,26 @@ export async function leaveTrip(): Promise<void> {
 /**
  * End the trip FOR THE WHOLE GROUP — a durable end marker in the thread, so
  * every device (including ones offline right now) stops showing it as active.
+ *
+ * `trip` is the one the screen is showing. After an app restart a trip the
+ * starter only RECEIVED via subscribeTrip is not in `active`, and returning
+ * early then left "End trip" a silent no-op for everyone else.
+ *
+ * Throws when the legacy end marker cannot be sent (nothing else would ever
+ * end that trip), so the caller can report it and the user can retry.
  */
-export async function endTrip(): Promise<void> {
-  if (!active) return;
-  const { groupId, id } = active;
-  lastAnnounce.delete(groupId);
-  emit(EV_END, { chatId: groupId, tripId: id }).catch(() => {});
+export async function endTrip(trip?: Trip | null): Promise<void> {
+  const cur = active ?? trip ?? null;
+  if (!cur) return;
+  const { groupId, id } = cur;
   if (id.startsWith('srv_')) {
     // The server broadcasts space_trip_end to the room; a failure here is
     // eventually corrected by the TTL, so ending locally is never blocked.
     try { await apiOf()(`/chats/${groupId}/trip/end`, { method: 'POST', json: {} }); } catch { /* TTL cleans up */ }
   } else {
-    sendMessage(groupId, TRIP_END_PREFIX + JSON.stringify({ id }), 'system').catch(() => {});
+    await sendMessage(groupId, TRIP_END_PREFIX + JSON.stringify({ id }), 'system');
   }
+  lastAnnounce.delete(groupId);
+  emit(EV_END, { chatId: groupId, tripId: id }).catch(() => {});
   active = null; myKey = null; routeShape = []; wasDeviating = false; announcedArrival = false;
 }

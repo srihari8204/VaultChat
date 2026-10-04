@@ -94,7 +94,10 @@ export default function ContactInfoScreen() {
     let painted = false;
     (async () => {
       // Local-first: paint the last-known snapshot instantly, before the network.
-      const cached = chatId || peerUid ? await readCache<ContactInfoCache>(cacheKey) : null;
+      // readCache can throw (e.g. a locked DEK, see profile.tsx); outside a try
+      // that rejected this IIFE and left the spinner up forever.
+      let cached: ContactInfoCache | null = null;
+      try { cached = chatId || peerUid ? await readCache<ContactInfoCache>(cacheKey) : null; } catch { /* fall through to the network */ }
       if (active && cached) {
         if (cached.peer) setPeer(cached.peer);
         setMuted(cached.muted);
@@ -271,7 +274,7 @@ export default function ContactInfoScreen() {
               <Text style={{ color: colors.text, fontSize: 15, fontWeight: '600' }}>Share my viewing status</Text>
               <Text style={{ color: colors.textDim, fontSize: 12, marginTop: 2 }}>Let {displayName} see when you’re viewing this chat right now</Text>
             </View>
-            <Switch value={shareViewing} onValueChange={toggleShareViewing} trackColor={{ true: colors.primary, false: colors.border }} thumbColor="#fff" />
+            <Switch accessibilityLabel="Share my viewing status" value={shareViewing} onValueChange={toggleShareViewing} trackColor={{ true: colors.primary, false: colors.border }} thumbColor="#fff" />
           </View>
         </View>
 
@@ -320,7 +323,15 @@ export default function ContactInfoScreen() {
           <View style={s.section}>
             <Text style={s.sectionTitle}>Shared Links</Text>
             {links.slice(0, 20).map(l => (
-              <TouchableOpacity key={`${l.id}-${l.url}`} activeOpacity={0.7} onPress={() => Linking.openURL(l.url).catch(() => {})}>
+              <TouchableOpacity key={`${l.id}-${l.url}`} activeOpacity={0.7} onPress={() => {
+                // Peer-supplied link: show where it goes before leaving the app.
+                let host = l.url;
+                try { host = new URL(l.url).host || l.url; } catch { /* show the raw text */ }
+                Alert.alert('Open link?', host, [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Open', onPress: () => { Linking.openURL(l.url).catch(() => {}); } },
+                ]);
+              }} accessibilityRole="link">
                 <View style={s.linkRow}>
                   <View style={s.linkIcon}><Ionicons name="link-outline" size={18} color={colors.textDim} /></View>
                   <Text style={s.linkUrl} numberOfLines={1}>{l.url}</Text>
@@ -406,7 +417,7 @@ export default function ContactInfoScreen() {
 const makeStyles = (c: Palette, SW: number) => StyleSheet.create({
   root: { flex: 1, backgroundColor: 'transparent' },
   hero: { alignItems: 'center', paddingTop: HEADER_TOP, paddingBottom: 24 },
-  backBtn: { position: 'absolute', top: 54, left: 16, zIndex: 10 },
+  backBtn: { position: 'absolute', top: HEADER_TOP, left: 16, zIndex: 10 },
   avatar: { width: 100, height: 100, borderRadius: 50, marginTop: 12, backgroundColor: c.surfaceSolid, borderWidth: 1, borderColor: c.glassStroke, justifyContent: 'center', alignItems: 'center', overflow: 'visible' },
   avatarImg: { width: 100, height: 100, borderRadius: 50 },
   avatarText: { color: c.accent, fontSize: 32, fontWeight: '700' },

@@ -4,22 +4,28 @@
 //   1. Deep link  vaultchat://join/CODE  (and the https://vaultchat.app/join/CODE
 //      universal link once domain verification is live) — Expo Router maps the
 //      path straight here.
-//   2. In-app paste-to-join from /new-chat, which pushes /join/<code>.
+//   2. The invite QR (app/invite-link.tsx) scanned with the OS camera.
 //
 // Backed by POST /chats/join/:code (real redeem: atomic uses++, approval queue).
+// Opening the link does NOT join: a forwarded link must not silently make
+// someone a member, so the screen asks first (as the in-app scanner does for
+// contacts). There is no preview endpoint yet, so the group's name is not shown
+// before joining — ponytail: add it once the server offers GET /chats/join/:code.
 // On success we land in the chat; if the group needs admin approval we tell the
 // user their request was sent.
 
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
 import { joinViaInvite } from '../../lib/chatService';
 import { AuroraBackground } from '../../components/ui';
+import { AppText as Text } from '../../components/ui/Text';
 
 type Phase =
+  | { kind: 'confirm' }
   | { kind: 'joining' }
   | { kind: 'pending' }
   | { kind: 'error'; message: string };
@@ -29,7 +35,7 @@ export default function JoinScreen() {
   const s = useS();
   const router = useRouter();
   const { code } = useLocalSearchParams<{ code: string }>();
-  const [phase, setPhase] = useState<Phase>({ kind: 'joining' });
+  const [phase, setPhase] = useState<Phase>({ kind: 'confirm' });
 
   const redeem = useCallback(async () => {
     const clean = String(code ?? '').trim();
@@ -46,7 +52,10 @@ export default function JoinScreen() {
     }
   }, [code, router]);
 
-  useEffect(() => { redeem(); }, [redeem]);
+  // A link with no code has nothing to confirm.
+  useEffect(() => {
+    if (!String(code ?? '').trim()) setPhase({ kind: 'error', message: 'This invite link is missing its code.' });
+  }, [code]);
 
   const goHome = () => router.replace('/(tabs)/chats' as any);
 
@@ -55,6 +64,23 @@ export default function JoinScreen() {
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <View style={s.body}>
+        {phase.kind === 'confirm' && (
+          <>
+            <Ionicons name="people-circle-outline" size={56} color={colors.primary} />
+            <Text style={s.title} accessibilityRole="header">Join this group?</Text>
+            <Text style={s.sub}>
+              Someone shared a group invite link with you. If you join, the group&apos;s members will see you
+              and your messages there.
+            </Text>
+            <TouchableOpacity style={[s.cta, { backgroundColor: colors.primary }]} onPress={redeem} activeOpacity={0.85} accessibilityRole="button">
+              <Text style={s.ctaTxt}>Join group</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={s.ghost} onPress={goHome} activeOpacity={0.7} accessibilityRole="button">
+              <Text style={s.ghostTxt}>Not now</Text>
+            </TouchableOpacity>
+          </>
+        )}
+
         {phase.kind === 'joining' && (
           <>
             <ActivityIndicator size="large" color={colors.primary} />
@@ -68,7 +94,7 @@ export default function JoinScreen() {
             <Ionicons name="hourglass-outline" size={56} color={colors.accent} />
             <Text style={s.title}>Request sent</Text>
             <Text style={s.sub}>This group approves new members. An admin will review your request to join.</Text>
-            <TouchableOpacity style={s.cta} onPress={goHome} activeOpacity={0.85}>
+            <TouchableOpacity style={s.cta} onPress={goHome} activeOpacity={0.85} accessibilityRole="button">
               <Text style={s.ctaTxt}>Back to chats</Text>
             </TouchableOpacity>
           </>
@@ -79,10 +105,10 @@ export default function JoinScreen() {
             <Ionicons name="alert-circle-outline" size={56} color={colors.danger} />
             <Text style={s.title}>Couldn’t join</Text>
             <Text style={s.sub}>{phase.message}</Text>
-            <TouchableOpacity style={[s.cta, { backgroundColor: colors.primary }]} onPress={redeem} activeOpacity={0.85}>
+            <TouchableOpacity style={[s.cta, { backgroundColor: colors.primary }]} onPress={redeem} activeOpacity={0.85} accessibilityRole="button">
               <Text style={s.ctaTxt}>Try again</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={s.ghost} onPress={goHome} activeOpacity={0.7}>
+            <TouchableOpacity style={s.ghost} onPress={goHome} activeOpacity={0.7} accessibilityRole="button">
               <Text style={s.ghostTxt}>Back to chats</Text>
             </TouchableOpacity>
           </>

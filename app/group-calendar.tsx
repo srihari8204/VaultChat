@@ -9,7 +9,7 @@
 // Events are sealed with the group's own chat encryption, so a calendar entry
 // is exactly as private as a message in the same group.
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   View, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
   ActivityIndicator, Modal,
@@ -22,13 +22,15 @@ import { AppText as Text } from '../components/ui/Text';
 import { brandAlpha } from '../constants/theme';
 import {
   listGroupEvents, createGroupEvent, deleteGroupEvent,
-  encryptForChat, decryptFromChat,
+  encryptForChat, decryptFromChat, type GroupEventRow,
 } from '../lib/chatService';
 import { getCurrentUserAsync } from './(constants)/authService';
 import {
   monthKeysInRange, monthBounds, bucketFor, occurrencesInRange,
+  eventReminderItems, REMINDER_HORIZON_MS,
   type GroupEvent, type Occurrence, type Recurrence,
 } from '../lib/groups/calendar';
+import { syncEventReminders } from '../lib/groups/taskReminders';
 import { KeyboardSafe } from '../components/ui';
 
 const REPEATS: { key: Recurrence; label: string }[] = [
@@ -54,6 +56,36 @@ const dayLabel = (ts: number) =>
 const timeLabel = (ts: number) =>
   new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
+/** Decrypt server rows into events; rows we cannot read or parse are skipped. */
+async function decryptRows(groupId: string, rows: GroupEventRow[]) {
+  const out: GroupEvent[] = [];
+  const ids: Record<string, number> = {};
+  for (const r of rows) {
+    let json = '';
+    try { json = await decryptFromChat(groupId, r.createdBy ?? '', r.payload, r.id); } catch { continue; }
+    try {
+      const e = JSON.parse(json) as GroupEvent;
+      // The row id is the server's handle; the payload carries the rest.
+      if (e && typeof e.startsAt === 'number' && e.title) {
+        out.push({ ...e, id: String(r.id), createdBy: r.createdBy ?? e.createdBy });
+        ids[String(r.id)] = r.id;
+      }
+    } catch { /* a payload we cannot parse is skipped, never fatal */ }
+  }
+  return { events: out, ids };
+}
+
+/**
+ * Book this device's reminders for the next REMINDER_HORIZON_MS, independent of
+ * which month is on screen (the reconciler would otherwise cancel reminders for
+ * months that are not loaded). Never prompts for notification permission.
+ */
+async function syncReminders(groupId: string, me: string): Promise<void> {
+  const now = Date.now(), to = now + REMINDER_HORIZON_MS;
+  const { events } = await decryptRows(groupId, await listGroupEvents(groupId, monthKeysInRange(now, to)));
+  await syncEventReminders(groupId, eventReminderItems(occurrencesInRange(events, now, to), me), me, now);
+}
+
 export default function GroupCalendarScreen() {
   const { colors } = useTheme();
   const params = useLocalSearchParams<{ groupId?: string; name?: string }>();
@@ -63,7 +95,12 @@ export default function GroupCalendarScreen() {
   const [events, setEvents] = useState<GroupEvent[]>([]);
   const [rowIds, setRowIds] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
+  // The month failed to load and nothing is on screen: an error, not "Nothing this month".
+  const [failed, setFailed] = useState(false);
   const [me, setMe] = useState<string | null>(null);
+  // Only the latest load may write state: switching months quickly must not let
+  // an older month's slower response overwrite the one being shown.
+  const loadSeq = useRef(0);
 
   const [composing, setComposing] = useState(false);
   const [title, setTitle] = useState('');
@@ -77,28 +114,18 @@ export default function GroupCalendarScreen() {
 
   const load = useCallback(async () => {
     if (!groupId) { setLoading(false); return; }
+    const seq = ++loadSeq.current;
     try {
       const rows = await listGroupEvents(groupId, monthKeysInRange(bounds.from, bounds.to));
-      const out: GroupEvent[] = [];
-      const ids: Record<string, number> = {};
-      for (const r of rows) {
-        let json = '';
-        try { json = await decryptFromChat(groupId, r.createdBy ?? '', r.payload, r.id); } catch { continue; }
-        try {
-          const e = JSON.parse(json) as GroupEvent;
-          // The row id is the server's handle; the payload carries the rest.
-          if (e && typeof e.startsAt === 'number' && e.title) {
-            const withId: GroupEvent = { ...e, id: String(r.id), createdBy: r.createdBy ?? e.createdBy };
-            out.push(withId);
-            ids[String(r.id)] = r.id;
-          }
-        } catch { /* a payload we cannot parse is skipped, never fatal */ }
-      }
+      const { events: out, ids } = await decryptRows(groupId, rows);
+      if (seq !== loadSeq.current) return;
       setEvents(out);
       setRowIds(ids);
+      setFailed(false);
     } catch {
       // Offline: keep what is on screen rather than blanking the month.
-    } finally { setLoading(false); }
+      if (seq === loadSeq.current) setFailed(true);
+    } finally { if (seq === loadSeq.current) setLoading(false); }
   }, [groupId, bounds.from, bounds.to]);
 
   useFocusEffect(useCallback(() => {
@@ -107,9 +134,10 @@ export default function GroupCalendarScreen() {
       const u = await getCurrentUserAsync().catch(() => null);
       if (live) setMe(u ? String(u.id) : null);
       await load();
+      if (u && groupId) syncReminders(groupId, String(u.id)).catch(() => {});
     })();
     return () => { live = false; };
-  }, [load]));
+  }, [load, groupId]));
 
   const occurrences = useMemo(
     () => occurrencesInRange(events, bounds.from, bounds.to),
@@ -154,6 +182,7 @@ export default function GroupCalendarScreen() {
       // Jump the view to the month the event landed in, so it is visible.
       setCursor(event.startsAt);
       await load();
+      syncReminders(groupId, me).catch(() => {});
     } catch (e: any) {
       Alert.alert('Could not add', e?.message ?? 'Try again.');
     } finally { setBusy(false); }
@@ -171,7 +200,10 @@ export default function GroupCalendarScreen() {
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Delete', style: 'destructive', onPress: async () => {
-          try { await deleteGroupEvent(groupId, rowId); await load(); }
+          try {
+            await deleteGroupEvent(groupId, rowId); await load();
+            if (me) syncReminders(groupId, me).catch(() => {});
+          }
           catch (e: any) { Alert.alert('Could not delete', e?.message ?? 'Try again.'); }
         } },
       ],
@@ -189,24 +221,33 @@ export default function GroupCalendarScreen() {
       <Stack.Screen options={{ headerShown: true, headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,
         title: 'Calendar', headerTitleAlign: 'center',
         headerRight: () => (
-          <TouchableOpacity onPress={() => setComposing(true)} accessibilityLabel="New event" style={{ paddingHorizontal: 8 }}>
+          <TouchableOpacity onPress={() => setComposing(true)} accessibilityRole="button" accessibilityLabel="New event" style={{ paddingHorizontal: 8 }}>
             <Ionicons name="add" size={24} color={colors.primary} />
           </TouchableOpacity>
         ),
       }} />
 
       <View style={[st.monthBar, { borderColor: colors.glassStroke }]}>
-        <TouchableOpacity onPress={() => shiftMonth(-1)} accessibilityLabel="Previous month" hitSlop={10} style={{ padding: 6 }}>
+        <TouchableOpacity onPress={() => shiftMonth(-1)} accessibilityRole="button" accessibilityLabel="Previous month" hitSlop={10} style={{ padding: 6 }}>
           <Ionicons name="chevron-back" size={20} color={colors.primary} />
         </TouchableOpacity>
         <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15 }}>{monthLabel(cursor)}</Text>
-        <TouchableOpacity onPress={() => shiftMonth(1)} accessibilityLabel="Next month" hitSlop={10} style={{ padding: 6 }}>
+        <TouchableOpacity onPress={() => shiftMonth(1)} accessibilityRole="button" accessibilityLabel="Next month" hitSlop={10} style={{ padding: 6 }}>
           <Ionicons name="chevron-forward" size={20} color={colors.primary} />
         </TouchableOpacity>
       </View>
 
       {loading ? (
         <View style={st.center}><ActivityIndicator color={colors.primary} /></View>
+      ) : days.length === 0 && failed ? (
+        <View style={[st.center, { padding: 34 }]}>
+          <Ionicons name="cloud-offline-outline" size={30} color={colors.textFaint} />
+          <Text style={{ color: colors.text, fontWeight: '700', marginTop: 10 }}>Couldn’t load this month</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry loading the calendar" onPress={() => { setLoading(true); load(); }}
+            style={[st.btn, { backgroundColor: colors.primary, paddingHorizontal: 22 }]}>
+            <Text style={st.btnTxt}>Retry</Text>
+          </TouchableOpacity>
+        </View>
       ) : days.length === 0 ? (
         <View style={[st.center, { padding: 34 }]}>
           <Ionicons name="calendar-outline" size={30} color={colors.textFaint} />
@@ -225,6 +266,10 @@ export default function GroupCalendarScreen() {
                   key={`${o.event.id}:${o.startsAt}:${i}`}
                   onLongPress={() => remove(o)}
                   activeOpacity={0.75}
+                  accessibilityLabel={`${o.event.allDay ? 'All day' : timeLabel(o.startsAt)}, ${o.event.title}`}
+                  accessibilityHint="Long-press to delete"
+                  accessibilityActions={[{ name: 'delete', label: 'Delete event' }]}
+                  onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'delete') remove(o); }}
                   style={[st.row, { borderColor: colors.glassStroke }]}
                 >
                   <View style={[st.time, { backgroundColor: brandAlpha(0.1) }]}>
@@ -284,6 +329,7 @@ export default function GroupCalendarScreen() {
                 const on = addDays === wd.addDays;
                 return (
                   <TouchableOpacity key={wd.label} onPress={() => setAddDays(wd.addDays)}
+                    accessibilityRole="radio" accessibilityLabel={wd.label} accessibilityState={{ selected: on, checked: on }}
                     style={[st.chip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? brandAlpha(0.1) : 'transparent' }]}>
                     <Text style={{ color: on ? colors.primary : colors.text, fontSize: 12.5 }}>{wd.label}</Text>
                   </TouchableOpacity>
@@ -296,6 +342,7 @@ export default function GroupCalendarScreen() {
                 const on = hour === h;
                 return (
                   <TouchableOpacity key={h} onPress={() => setHour(h)}
+                    accessibilityRole="radio" accessibilityLabel={`${String(h).padStart(2, '0')}:00`} accessibilityState={{ selected: on, checked: on }}
                     style={[st.chip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? brandAlpha(0.1) : 'transparent' }]}>
                     <Text style={{ color: on ? colors.primary : colors.text, fontSize: 12.5 }}>
                       {String(h).padStart(2, '0')}:00
@@ -310,6 +357,7 @@ export default function GroupCalendarScreen() {
                 const on = repeat === rp.key;
                 return (
                   <TouchableOpacity key={rp.key} onPress={() => setRepeat(rp.key)}
+                    accessibilityRole="radio" accessibilityLabel={`Repeat ${rp.label}`} accessibilityState={{ selected: on, checked: on }}
                     style={[st.chip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? brandAlpha(0.1) : 'transparent' }]}>
                     <Text style={{ color: on ? colors.primary : colors.text, fontSize: 12.5 }}>{rp.label}</Text>
                   </TouchableOpacity>
@@ -317,8 +365,9 @@ export default function GroupCalendarScreen() {
               })}
             </View>
 
-            <TouchableOpacity onPress={add} disabled={!title.trim() || busy}
-              style={[st.btn, { backgroundColor: title.trim() && !busy ? colors.primary : colors.border }]}>
+            <TouchableOpacity onPress={add} disabled={!title.trim() || busy || !me}
+              accessibilityRole="button" accessibilityState={{ disabled: !title.trim() || busy || !me, busy }}
+              style={[st.btn, { backgroundColor: title.trim() && !busy && me ? colors.primary : colors.border }]}>
               {busy ? <ActivityIndicator color="#fff" />
                 : <><Ionicons name="checkmark" size={18} color="#fff" /><Text style={st.btnTxt}>Add to calendar</Text></>}
             </TouchableOpacity>

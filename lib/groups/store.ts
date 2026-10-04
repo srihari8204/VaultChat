@@ -313,13 +313,17 @@ export async function getGroupPrivacy(groupId: string): Promise<GroupPrivacy> {
   return normalizePrivacy(await readJSON<Partial<GroupPrivacy> | null>(kPrivacy(groupId), null));
 }
 
-/** Patch a group's privacy and return the stored result. */
+/**
+ * Patch a group's privacy and return the stored result. THROWS when the write
+ * fails: this is a privacy control, so the screen must not show a setting that
+ * was never persisted (writeJSON's best-effort swallow is wrong here).
+ */
 export async function setGroupPrivacy(
   groupId: string,
   patch: Partial<GroupPrivacy>,
 ): Promise<GroupPrivacy> {
   const next = normalizePrivacy({ ...(await getGroupPrivacy(groupId)), ...patch });
-  await writeJSON(kPrivacy(groupId), next);
+  await storage().setItem(kPrivacy(groupId), JSON.stringify(next));
   return next;
 }
 

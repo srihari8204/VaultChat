@@ -32,20 +32,18 @@ import { AppText as Text } from '../components/ui/Text';
 import { brandAlpha } from '../constants/theme';
 import {
   getChat, setMemberRole, removeChatMember, transferOwnership, setApprovalMode,
-  listChats, shareGroup,
+  listChats, shareGroup, attachmentUrl,
   type ChatMember, type ApprovalMode, type ChatSummary,
 } from '../lib/chatService';
 import {
-  canManageRole, canRemoveMember, canTransferOwnership,
+  memberActions,
   can as hasPerm, seatsRemaining,
   ROLES, ROLE_LABELS, ROLE_BLURBS,
   type GroupRole, type Permission,
 } from '../lib/groups/permissions';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { initialOf } from '../lib/format';
-
-/** Roles that can be ASSIGNED. Owner is absent on purpose — see transfer. */
-const ASSIGNABLE: GroupRole[] = ['admin', 'moderator', 'member', 'guest'];
+import { useAuthHeader } from '../hooks/useAuthHeader';
 
 const ROLE_TONE: Record<GroupRole, string> = {
   owner: '#F59E0B', admin: '#9D6FD0', moderator: '#4A9FFF', member: '#22C55E', guest: '#6B7280',
@@ -71,6 +69,9 @@ export default function GroupMembersScreen() {
   const [mode, setMode] = useState<ApprovalMode>('strict');
   const [typed, setTyped] = useState(false);
   const [loading, setLoading] = useState(true);
+  // Load failed: show an error with Retry instead of an empty member list.
+  const [failed, setFailed] = useState(false);
+  const authHeader = useAuthHeader();
   const [busy, setBusy] = useState<string | null>(null);
   const [sheet, setSheet] = useState<ChatMember | null>(null);
   const [sharing, setSharing] = useState(false);
@@ -93,8 +94,9 @@ export default function GroupMembersScreen() {
       setMaxMembers(chat.maxMembers ?? null);
       setMode(chat.approvalMode ?? 'strict');
       setTyped(!!chat.groupType);
-    } catch (e: any) {
-      Alert.alert('Could not load members', e?.message ?? 'Try again.');
+      setFailed(false);
+    } catch {
+      setFailed(true);
     } finally { setLoading(false); }
   }, [groupId]);
 
@@ -110,7 +112,10 @@ export default function GroupMembersScreen() {
   }, [members]);
 
   const seats = seatsRemaining(members.length, maxMembers ?? 0);
-  const mayManageMembers = hasPerm(perms, 'remove_members');
+  // One shared check with app/group-admin.tsx (lib/groups/permissions.ts).
+  const actionsFor = (m: ChatMember) => memberActions({
+    actorRole: myRole, targetRole: m.role, isMe: m.userId === me, typed, permissions: [...perms],
+  });
 
   const act = async (label: string, fn: () => Promise<unknown>, target: string) => {
     setBusy(target);
@@ -189,9 +194,10 @@ export default function GroupMembersScreen() {
     ]);
   };
 
+  // photoURL is an attachment id behind auth, as in app/group-info.tsx.
   const avatar = (m: ChatMember, size = 40) => (
-    m.photoURL
-      ? <Image source={{ uri: m.photoURL }} style={{ width: size, height: size, borderRadius: size / 2 }} />
+    m.photoURL && authHeader
+      ? <Image source={{ uri: attachmentUrl(m.photoURL), headers: { Authorization: authHeader } }} style={{ width: size, height: size, borderRadius: size / 2 }} />
       : (
         <View style={[st.avatar, { width: size, height: size, borderRadius: size / 2, backgroundColor: brandAlpha(0.18) }]}>
           <Text style={{ color: colors.primary, fontWeight: '800', fontSize: size * 0.38 }}>
@@ -205,18 +211,19 @@ export default function GroupMembersScreen() {
     const isMe = m.userId === me;
     const role = m.role as GroupRole;
     // Two questions, not one. Holding the permission says nothing about whether
-    // this particular person is yours to touch.
-    const canEdit = mayManageMembers && !isMe && typed &&
-      ASSIGNABLE.some((r) => canManageRole(myRole, role, r));
-    const canKick = mayManageMembers && !isMe && canRemoveMember(myRole, role);
-    const canGive = !isMe && canTransferOwnership(myRole, role);
-    const actionable = canEdit || canKick || canGive;
+    // this particular person is yours to touch — memberActions asks both.
+    const a = actionsFor(m);
+    const actionable = a.roles.length > 0 || a.canRemove || a.canTransfer;
 
     return (
       <TouchableOpacity
         key={m.userId}
         disabled={!actionable || busy === m.userId}
         onPress={() => setSheet(m)}
+        accessibilityRole={actionable ? 'button' : undefined}
+        accessibilityLabel={`${m.name ?? 'crazzychat user'}${isMe ? ' (you)' : ''}, ${ROLE_LABELS[role] ?? m.role}`}
+        accessibilityHint={actionable ? 'Opens role and member actions' : undefined}
+        accessibilityState={{ disabled: !actionable, busy: busy === m.userId }}
         style={[st.row, { borderColor: colors.glassStroke }]}
       >
         {avatar(m)}
@@ -248,6 +255,16 @@ export default function GroupMembersScreen() {
 
       {loading ? (
         <View style={st.center}><ActivityIndicator color={colors.primary} /></View>
+      ) : failed && members.length === 0 ? (
+        <View style={[st.center, { padding: 32 }]}>
+          <Ionicons name="cloud-offline-outline" size={30} color={colors.textFaint} />
+          <Text style={{ color: colors.text, fontWeight: '700', marginTop: 10 }}>Couldn’t load members</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry loading members"
+            onPress={() => { setLoading(true); load(); }}
+            style={[st.addBtn, { borderColor: colors.glassStroke, paddingHorizontal: 24 }]}>
+            <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 14 }}>Retry</Text>
+          </TouchableOpacity>
+        </View>
       ) : (
         <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
           <View style={st.sechead}>
@@ -281,6 +298,7 @@ export default function GroupMembersScreen() {
                 const on = m.key === mode;
                 return (
                   <TouchableOpacity key={m.key} onPress={() => pickMode(m.key)} disabled={busy === 'mode'}
+                    accessibilityRole="radio" accessibilityLabel={`${m.label}. ${m.blurb}`} accessibilityState={{ selected: on, checked: on, disabled: busy === 'mode' }}
                     style={[st.mode, {
                       borderColor: on ? colors.primary : colors.border,
                       backgroundColor: on ? brandAlpha(0.08) : 'transparent',
@@ -363,7 +381,8 @@ export default function GroupMembersScreen() {
           <View style={[st.sheet, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
             {!!sheet && (() => {
               const role = sheet.role as GroupRole;
-              const options = ASSIGNABLE.filter((r) => canManageRole(myRole, role, r));
+              const acts = actionsFor(sheet);
+              const options = acts.roles;
               return (
                 <>
                   <View style={st.sheetHead}>
@@ -383,6 +402,8 @@ export default function GroupMembersScreen() {
                       <Text style={[st.h, { color: colors.textDim, marginTop: 20 }]}>Change role</Text>
                       {options.map((r) => (
                         <TouchableOpacity key={r} onPress={() => changeRole(sheet, r)}
+                          accessibilityRole="radio" accessibilityLabel={`${ROLE_LABELS[r]}. ${ROLE_BLURBS[r]}`}
+                          accessibilityState={{ selected: r === role, checked: r === role }}
                           style={[st.opt, { borderColor: colors.glassStroke }]}>
                           <View style={[st.dot, { backgroundColor: ROLE_TONE[r] }]} />
                           <View style={{ flex: 1 }}>
@@ -397,8 +418,8 @@ export default function GroupMembersScreen() {
                     </>
                   )}
 
-                  {canTransferOwnership(myRole, role) && (
-                    <TouchableOpacity onPress={() => handOver(sheet)}
+                  {acts.canTransfer && (
+                    <TouchableOpacity onPress={() => handOver(sheet)} accessibilityRole="button"
                       style={[st.opt, { borderColor: colors.glassStroke, marginTop: 14 }]}>
                       <Ionicons name="key-outline" size={18} color="#F59E0B" />
                       <View style={{ flex: 1 }}>
@@ -410,8 +431,8 @@ export default function GroupMembersScreen() {
                     </TouchableOpacity>
                   )}
 
-                  {mayManageMembers && canRemoveMember(myRole, role) && (
-                    <TouchableOpacity onPress={() => remove(sheet)}
+                  {acts.canRemove && (
+                    <TouchableOpacity onPress={() => remove(sheet)} accessibilityRole="button"
                       style={[st.opt, { borderColor: colors.danger + '55', marginTop: 8 }]}>
                       <Ionicons name="person-remove-outline" size={18} color={colors.danger} />
                       <Text style={{ color: colors.danger, fontSize: 14, fontWeight: '700', flex: 1 }}>

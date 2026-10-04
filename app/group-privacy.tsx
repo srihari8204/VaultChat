@@ -39,9 +39,10 @@ const PRECISIONS: {
     blurb: 'You stay in the group, but nobody sees you on the map.' },
 ];
 
+const HOUR_MS = 60 * 60 * 1000;
 const DURATIONS: { label: string; ms: number | null }[] = [
-  { label: '1 hour', ms: 60 * 60 * 1000 },
-  { label: '8 hours', ms: 8 * 60 * 60 * 1000 },
+  { label: '1 hour', ms: HOUR_MS },
+  { label: '8 hours', ms: 8 * HOUR_MS },
   { label: 'Until I turn it off', ms: null },
 ];
 
@@ -68,13 +69,32 @@ export default function GroupPrivacyScreen() {
   /** Persist, then push into the live publisher so it applies to the next fix. */
   const patch = async (next: Partial<GroupPrivacy>) => {
     if (!groupId) return;
-    const saved = await setGroupPrivacy(groupId, next);
+    let saved: GroupPrivacy;
+    try {
+      saved = await setGroupPrivacy(groupId, next);
+    } catch {
+      // The screen keeps showing what is actually stored, so it never claims a
+      // privacy setting that is not in effect.
+      Alert.alert('Not saved', 'This setting could not be saved on this phone. Nothing changed — try again.');
+      return;
+    }
     setP(saved);
     try { await reloadPrivacy(groupId); } catch { /* not publishing right now */ }
   };
 
   const startTemporary = (ms: number | null) =>
     patch({ sharingUntil: ms == null ? null : Date.now() + ms, invisible: false });
+
+  if (!groupId) {
+    return (
+      <View style={[st.center, { backgroundColor: colors.bg, padding: 32 }]}>
+        <AuroraBackground variant="chat" />
+        <Stack.Screen options={{ headerShown: true, title: 'Privacy', headerTitleAlign: 'center', headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false }} />
+        <Text style={{ color: colors.text, fontWeight: '700', fontSize: 15 }}>Group not found</Text>
+        <Text style={{ color: colors.textDim, fontSize: 13, textAlign: 'center', marginTop: 6 }}>This link did not say which group to open.</Text>
+      </View>
+    );
+  }
 
   if (loading) {
     return (
@@ -122,6 +142,7 @@ export default function GroupPrivacyScreen() {
             <TouchableOpacity
               key={opt.key}
               onPress={() => patch({ precision: opt.key, invisible: false })}
+              accessibilityRole="radio" accessibilityLabel={`${opt.label}. ${opt.blurb}`} accessibilityState={{ selected: on, checked: on }}
               style={[st.row, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? brandAlpha(0.08) : colors.card }]}
             >
               <Ionicons name={opt.icon} size={19} color={on ? colors.primary : colors.textDim} />
@@ -141,7 +162,7 @@ export default function GroupPrivacyScreen() {
               <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14 }}>Hide my battery</Text>
               <Text style={{ color: colors.textDim, fontSize: 11.5 }}>They won&apos;t see your battery level</Text>
             </View>
-            <Switch value={p.hideBattery} onValueChange={(v) => patch({ hideBattery: v })} trackColor={{ true: colors.primary }} />
+            <Switch accessibilityLabel="Hide my battery" value={p.hideBattery} onValueChange={(v) => patch({ hideBattery: v })} trackColor={{ true: colors.primary }} />
           </View>
           <View style={[st.toggle, { borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.glassStroke }]}>
             <View style={{ flex: 1 }}>
@@ -151,6 +172,7 @@ export default function GroupPrivacyScreen() {
               </Text>
             </View>
             <Switch
+              accessibilityLabel="Hide my speed"
               value={p.hideSpeed || p.precision === 'approximate'}
               disabled={p.precision === 'approximate'}
               onValueChange={(v) => patch({ hideSpeed: v })}
@@ -169,16 +191,21 @@ export default function GroupPrivacyScreen() {
                 settings above are kept for when you turn it off.
               </Text>
             </View>
-            <Switch value={p.invisible} onValueChange={(v) => patch({ invisible: v })} trackColor={{ true: colors.danger }} />
+            <Switch accessibilityLabel="Go invisible in this group" value={p.invisible} onValueChange={(v) => patch({ invisible: v })} trackColor={{ true: colors.danger }} />
           </View>
         </View>
 
         <Text style={[st.h, { color: colors.text }]}>Share for a while</Text>
         <View style={st.chips}>
           {DURATIONS.map((d) => {
-            const on = d.ms == null ? p.sharingUntil == null : false;
+            // Only the end time is stored, so the timed chips are derived from
+            // what is left: up to an hour reads as "1 hour", more as "8 hours".
+            const left = p.sharingUntil == null ? null : p.sharingUntil - Date.now();
+            const on = d.ms == null ? left == null
+              : left != null && left > 0 && (d.ms <= HOUR_MS ? left <= HOUR_MS : left > HOUR_MS);
             return (
               <TouchableOpacity key={d.label} onPress={() => startTemporary(d.ms)}
+                accessibilityRole="radio" accessibilityLabel={`Share ${d.label.toLowerCase()}`} accessibilityState={{ selected: on, checked: on }}
                 style={[st.chip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? brandAlpha(0.1) : 'transparent' }]}>
                 <Text style={{ color: on ? colors.primary : colors.text, fontSize: 12.5, fontWeight: on ? '700' : '500' }}>{d.label}</Text>
               </TouchableOpacity>
@@ -187,6 +214,7 @@ export default function GroupPrivacyScreen() {
         </View>
         {p.sharingUntil != null && (
           <TouchableOpacity
+            accessibilityRole="button"
             onPress={() => Alert.alert('Stop the timer?', 'You will keep sharing until you change it yourself.', [
               { text: 'Cancel', style: 'cancel' },
               { text: 'Stop timer', onPress: () => patch({ sharingUntil: null }) },

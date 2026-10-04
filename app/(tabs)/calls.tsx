@@ -81,7 +81,7 @@ export default function CallsScreen() {
     // network. It is already on disk, so the list is never blank waiting on a
     // request — and on an offline device or an unmigrated server, this is the
     // whole story and nothing below changes what's on screen.
-    getCallLog().then(l => { if (alive) setLog(l); });
+    getCallLog().then(l => { if (alive) setLog(l); }).catch(() => {});
 
     Promise.all([listChats(), getCachedUser(), fetchCallHistory(), getHiddenServerCalls()])
       .then(([chats, me, server, hidden]) => {
@@ -105,7 +105,7 @@ export default function CallsScreen() {
         if (server.length && me?.id) {
           getCallLog().then(local => {
             if (alive) setLog(mergeCallHistory(local, server, me.id, { get: (id) => byChat.get(id) }, hidden));
-          });
+          }).catch(() => {});
         }
       }).catch(() => {});
     return () => { alive = false; };
@@ -158,12 +158,13 @@ export default function CallsScreen() {
         { label: 'Voice call', icon: 'call-outline', onPress: () => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName, group: g.group }, 'audio') },
         { label: 'Video call', icon: 'videocam-outline', onPress: () => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName, group: g.group }, 'video') },
         { label: 'Call info', icon: 'information-circle-outline', onPress: () => setInfoGroup(g) },
-        // Confirmed like confirmClear below (2026-09-17). This is not a local
-        // hide: removeGroup also calls hideServerCalls, so it is a permanent
-        // server-side dismissal. The BULK clear asked; the single row did not.
+        // Confirmed like confirmClear below (2026-09-17). Both halves are
+        // device-local: the device log is deleted and server-synced rows are
+        // hidden on THIS device only (hideServerCalls, lib/callLog.ts), so the
+        // copy must not promise "all your devices".
         { label: 'Remove from log', icon: 'trash-outline', destructive: true, onPress: () => Alert.alert(
           'Remove from log?',
-          'This removes the call from your history on all your devices. It cannot be undone.',
+          'This removes the call from your call history on this device. It cannot be undone.',
           [{ text: 'Cancel', style: 'cancel' }, { text: 'Remove', style: 'destructive', onPress: () => removeGroup(g) }],
         ) },
       ],
@@ -202,9 +203,15 @@ export default function CallsScreen() {
     const photo = g.peerPhoto || photos.get(g.peerUid) || null;
     const dur = fmtDuration(latest.durationSec);
     return (
+      // Row tap opens call info (as WhatsApp does) rather than dialling: a
+      // stray tap while scrolling must not place a call. Calling stays one tap
+      // away on the explicit Call-back button.
       <TouchableOpacity style={S.row} activeOpacity={0.7}
-        onPress={() => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName, group: g.group }, latest.kind)}
-        onLongPress={() => onLongPress(g)} delayLongPress={300}>
+        onPress={() => setInfoGroup(g)}
+        onLongPress={() => onLongPress(g)} delayLongPress={300}
+        accessibilityRole="button"
+        accessibilityLabel={`${g.peerName}${count > 1 ? `, ${count} calls` : ''}, ${dirLabel(latest.direction)} ${latest.kind === 'video' ? 'video' : 'voice'} call, ${fmtWhen(latest.at)}`}
+        accessibilityHint="Shows call details. Long-press for more actions">
         <Avatar uri={photo && authHeader ? attachmentUrl(photo) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={g.peerName} size={52} ring />
         <View style={{ flex: 1 }}>
           <Text style={[S.name, missed && { color: colors.danger }]}>
@@ -218,10 +225,10 @@ export default function CallsScreen() {
           </View>
         </View>
         <View style={{ flexDirection: 'row', gap: 2 }}>
-          <TouchableOpacity onPress={() => setInfoGroup(g)} hitSlop={8} style={S.callBtn} accessibilityLabel="Call details">
+          <TouchableOpacity onPress={() => setInfoGroup(g)} hitSlop={8} style={S.callBtn} accessibilityRole="button" accessibilityLabel="Call details">
             <Ionicons name="information-circle-outline" size={22} color={colors.textDim} />
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName, group: g.group }, latest.kind)} hitSlop={8} style={S.callBtn} accessibilityLabel="Call back">
+          <TouchableOpacity onPress={() => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName, group: g.group }, latest.kind)} hitSlop={8} style={S.callBtn} accessibilityRole="button" accessibilityLabel={`${latest.kind === 'video' ? 'Video' : 'Voice'} call ${g.peerName}`}>
             <Ionicons name={latest.kind === 'video' ? 'videocam' : 'call'} size={22} color={colors.primary} />
           </TouchableOpacity>
         </View>
@@ -235,7 +242,7 @@ export default function CallsScreen() {
       <View style={S.header}>
         <Text style={S.title}>Calls</Text>
         {log.length > 0 && (
-          <TouchableOpacity onPress={confirmClear} hitSlop={8} accessibilityLabel="Clear call history">
+          <TouchableOpacity onPress={confirmClear} hitSlop={8} accessibilityRole="button" accessibilityLabel="Clear call history">
             <Ionicons name="trash-outline" size={22} color={colors.textDim} />
           </TouchableOpacity>
         )}
@@ -258,14 +265,14 @@ export default function CallsScreen() {
         />
       )}
 
-      <TouchableOpacity style={S.fab} activeOpacity={0.85} onPress={() => router.push('/contacts' as any)} accessibilityLabel="New call">
+      <TouchableOpacity style={S.fab} activeOpacity={0.85} onPress={() => router.push({ pathname: '/contacts', params: { mode: 'call' } } as any)} accessibilityRole="button" accessibilityLabel="New call">
         <Ionicons name="call" size={24} color="#fff" />
       </TouchableOpacity>
 
       {/* Call info — every call with this person */}
       <Modal visible={infoGroup != null} transparent animationType="slide" onRequestClose={() => setInfoGroup(null)}>
-        <Pressable style={S.infoBackdrop} onPress={() => setInfoGroup(null)}>
-          <Pressable style={S.infoSheet} onPress={() => {}}>
+        <Pressable style={S.infoBackdrop} onPress={() => setInfoGroup(null)} accessibilityRole="button" accessibilityLabel="Close call info">
+          <Pressable style={S.infoSheet} onPress={() => {}} accessibilityViewIsModal>
             <View style={S.grip} />
             {infoGroup && (
               <>
@@ -274,10 +281,10 @@ export default function CallsScreen() {
                   <Text style={S.infoName}>{infoGroup.peerName}</Text>
                 </View>
                 <View style={S.infoActions}>
-                  <TouchableOpacity style={S.infoAction} onPress={() => { const u = infoGroup; setInfoGroup(null); call({ chatId: u.entries[0].chatId, peerUid: u.peerUid, peerName: u.peerName, group: u.group }, 'audio'); }}>
+                  <TouchableOpacity style={S.infoAction} accessibilityRole="button" accessibilityLabel={`Voice call ${infoGroup.peerName}`} onPress={() => { const u = infoGroup; setInfoGroup(null); call({ chatId: u.entries[0].chatId, peerUid: u.peerUid, peerName: u.peerName, group: u.group }, 'audio'); }}>
                     <Ionicons name="call" size={22} color={colors.primary} /><Text style={S.infoActionTxt}>Voice</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={S.infoAction} onPress={() => { const u = infoGroup; setInfoGroup(null); call({ chatId: u.entries[0].chatId, peerUid: u.peerUid, peerName: u.peerName, group: u.group }, 'video'); }}>
+                  <TouchableOpacity style={S.infoAction} accessibilityRole="button" accessibilityLabel={`Video call ${infoGroup.peerName}`} onPress={() => { const u = infoGroup; setInfoGroup(null); call({ chatId: u.entries[0].chatId, peerUid: u.peerUid, peerName: u.peerName, group: u.group }, 'video'); }}>
                     <Ionicons name="videocam" size={22} color={colors.primary} /><Text style={S.infoActionTxt}>Video</Text>
                   </TouchableOpacity>
                 </View>

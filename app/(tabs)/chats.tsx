@@ -648,7 +648,11 @@ export default function ChatsScreen() {
         </TouchableOpacity>
       )}
 
-      {error && <View style={S.errorBar}><Text style={S.errorTxt}>{error}</Text></View>}
+      {error && (
+        <TouchableOpacity style={S.errorBar} onPress={onRefresh} disabled={refreshing} accessibilityRole="button" accessibilityLabel={`${error}. Tap to retry`}>
+          <Text style={S.errorTxt}>{error} · Tap to retry</Text>
+        </TouchableOpacity>
+      )}
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={S.folderScroll} contentContainerStyle={S.folderRow}>
         {FOLDERS.map(f => {
@@ -670,11 +674,16 @@ export default function ChatsScreen() {
       </ScrollView>
 
       {chats.length === 0 ? (
-        <View style={[S.center, { flex: 1, paddingHorizontal: 32 }]}>
+        // Refreshable, so an offline first launch with an empty cache can be
+        // pulled to retry instead of leaving the tab being the only recovery.
+        <ScrollView
+          contentContainerStyle={[S.center, { flexGrow: 1, paddingHorizontal: 32 }]}
+          refreshControl={<RefreshControl tintColor={colors.primary} refreshing={refreshing} onRefresh={onRefresh} />}
+        >
           <Text style={S.emptyTitle}>No chats yet</Text>
           <Text style={S.emptySub}>Tap the button below to start one.</Text>
-          <TouchableOpacity style={S.emptyBtn} onPress={onNewChat} activeOpacity={0.85}><Text style={S.emptyBtnTxt}>Start a chat</Text></TouchableOpacity>
-        </View>
+          <TouchableOpacity style={S.emptyBtn} onPress={onNewChat} activeOpacity={0.85} accessibilityRole="button"><Text style={S.emptyBtnTxt}>Start a chat</Text></TouchableOpacity>
+        </ScrollView>
       ) : visibleChats.length === 0 ? (
         <View style={[S.center, { flex: 1, paddingHorizontal: 32 }]}>
           <Text style={S.emptyTitle}>Nothing here</Text>
@@ -810,7 +819,7 @@ function SheetItem({ icon, label, onPress, danger }: { icon: any; label: string;
   const { colors } = useTheme();
   const S = useS();
   return (
-    <TouchableOpacity style={S.sheetItem} onPress={onPress} activeOpacity={0.7}>
+    <TouchableOpacity style={S.sheetItem} onPress={onPress} activeOpacity={0.7} accessibilityRole="button">
       <Ionicons name={icon} size={22} color={danger ? colors.danger : colors.text} />
       <Text style={[S.sheetItemTxt, danger && { color: colors.danger }]}>{label}</Text>
     </TouchableOpacity>
@@ -893,7 +902,23 @@ const ChatRow = memo(function ChatRow({
 
   return (
     <Swipeable ref={swipeRef} enabled={!selectMode} renderLeftActions={leftActions} renderRightActions={rightActions} overshootLeft={false} overshootRight={false} friction={2}>
-      <TouchableOpacity style={[S.row, isSelected && S.rowSelected]} onPress={onPress} onLongPress={onLongPress} delayLongPress={250} activeOpacity={0.7}>
+      <TouchableOpacity style={[S.row, isSelected && S.rowSelected]} onPress={onPress} onLongPress={onLongPress} delayLongPress={250} activeOpacity={0.7}
+        accessibilityRole="button"
+        // Name, preview, time and unread in one announcement; the swipe-only
+        // actions are offered as accessibility actions too.
+        accessibilityLabel={`${title}${chat.unreadCount > 0 ? `, ${chat.unreadCount} unread` : ''}${draftText ? ', draft' : ''}. ${preview}${time ? `. ${time}` : ''}`}
+        accessibilityState={selectMode ? { selected: !!isSelected } : undefined}
+        accessibilityHint={selectMode ? 'Toggles selection' : 'Opens the chat. Long-press for more options'}
+        accessibilityActions={selectMode ? undefined : [
+          { name: 'pin', label: 'Pin or unpin' },
+          { name: 'mute', label: 'Mute or unmute' },
+          { name: 'archive', label: 'Archive' },
+          { name: 'delete', label: 'Delete' },
+        ]}
+        onAccessibilityAction={(e) => {
+          const n = e.nativeEvent.actionName;
+          if (n === 'pin') onPin(); else if (n === 'mute') onMute(); else if (n === 'archive') onArchive(); else if (n === 'delete') onDelete();
+        }}>
         <TouchableOpacity style={S.avatarWrap} activeOpacity={0.7} onPress={onAvatarPress} accessibilityLabel="Open profile photo">
           <Avatar
             ring

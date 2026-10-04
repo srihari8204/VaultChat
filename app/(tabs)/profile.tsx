@@ -123,17 +123,15 @@ export default function ProfileScreen() {
 
   useEffect(() => { load(); }, [load]);
 
-  const onSave = useCallback(async () => {
+  // Saves ONE field. Sending all three meant saving the name also PUT an
+  // edited, unverified phone; a phone change goes through the SMS OTP below.
+  const onSave = useCallback(async (field: 'name' | 'status') => {
     if (saving) return;
     setSaving(true);
     try {
       const updated = await api<UserProfile>('/user/profile', {
         method: 'PUT',
-        json: {
-          name: name.trim(),
-          status: status.trim(),
-          phone: phone.trim() || undefined,
-        },
+        json: field === 'name' ? { name: name.trim() } : { status: status.trim() },
       });
       setProfile(updated);
     } catch (e: any) {
@@ -141,10 +139,14 @@ export default function ProfileScreen() {
     } finally {
       setSaving(false);
     }
-  }, [name, status, phone, saving]);
+  }, [name, status, saving]);
 
   // Inline per-row save (WhatsApp-style): commit then collapse the editor.
-  const saveField = useCallback(async () => { await onSave(); setEditing(null); }, [onSave]);
+  // The phone row only collapses: the number is saved by verifying it.
+  const saveField = useCallback(async () => {
+    if (editing === 'name' || editing === 'status') await onSave(editing);
+    setEditing(null);
+  }, [onSave, editing]);
 
   // ── Profile photo: pick → upload → PUT /user/profile { photoURL } ──
   const onChangePhoto = useCallback(async () => {
@@ -302,7 +304,8 @@ export default function ProfileScreen() {
 
       {/* Avatar with camera badge */}
       <View style={S.avatarWrap}>
-        <TouchableOpacity onPress={onChangePhoto} activeOpacity={0.85} disabled={photoBusy}>
+        <TouchableOpacity onPress={onChangePhoto} activeOpacity={0.85} disabled={photoBusy}
+          accessibilityRole="button" accessibilityLabel="Change profile photo" accessibilityState={{ busy: photoBusy, disabled: photoBusy }}>
           <View style={S.avatar}>
             {profile?.photoURL && authHeader ? (
               <Image source={{ uri: attachmentUrl(profile.photoURL), headers: { Authorization: authHeader } }} style={S.avatarImg} />
@@ -320,7 +323,12 @@ export default function ProfileScreen() {
           <Text style={S.emailDisplay}>{profile?.phone || profile?.email}</Text>
         )}
         {!!profile?.photoURL && (
-          <TouchableOpacity onPress={onRemovePhoto} disabled={photoBusy} hitSlop={8}>
+          <TouchableOpacity
+            onPress={() => Alert.alert('Remove profile photo?', 'People will see your initial instead.', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Remove', style: 'destructive', onPress: () => { onRemovePhoto(); } },
+            ])}
+            disabled={photoBusy} hitSlop={8} accessibilityRole="button">
             <Text style={S.removePhotoTxt}>Remove photo</Text>
           </TouchableOpacity>
         )}
@@ -368,8 +376,15 @@ export default function ProfileScreen() {
         <EditRow
           icon="call-outline" label="Phone" value={phone} placeholder="Add phone number"
           editing={editing === 'phone'} onEdit={() => setEditing('phone')}
-          onChangeText={setPhone} onSave={saveField} saving={saving} maxLength={20} keyboardType="phone-pad"
-          verified={verifyStep === 'done' || !!profile?.phone}
+          onChangeText={(v) => {
+            setPhone(v);
+            // A code was sent to the OLD number: editing it must not let that
+            // code verify the new one.
+            if (verifyStep !== 'idle') { setVerifyStep('idle'); setPhoneCode(''); }
+          }}
+          onSave={saveField} saving={saving} maxLength={20} keyboardType="phone-pad"
+          // Only the number the account actually has is verified — not an edit.
+          verified={!!profile?.phone && phone.trim() === String(profile.phone).trim()}
         />
       </View>
       <Text style={S.cardHint}>Your phone number is your account — it is how people find you and start a direct chat.</Text>
@@ -483,7 +498,8 @@ function EditRow({ icon, label, value, placeholder, editing, onEdit, onChangeTex
           </View>
         )}
       </View>
-      <TouchableOpacity onPress={editing ? onSave : onEdit} hitSlop={10} style={S.editPencil} disabled={saving} accessibilityLabel="Edit profile">
+      <TouchableOpacity onPress={editing ? onSave : onEdit} hitSlop={10} style={S.editPencil} disabled={saving}
+        accessibilityRole="button" accessibilityLabel={`${editing ? 'Save' : 'Edit'} ${label.toLowerCase()}`} accessibilityState={{ disabled: !!saving, busy: editing && !!saving }}>
         {editing && saving ? <ActivityIndicator size="small" color={colors.primary} /> : (
           <Ionicons name={editing ? 'checkmark' : 'pencil'} size={20} color={editing ? colors.primary : colors.textDim} />
         )}

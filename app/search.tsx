@@ -15,7 +15,7 @@ import { useTheme } from '../lib/theme';
 import { Avatar, AuroraBackground } from '../components/ui';
 import { AppText as Text } from '../components/ui/Text';
 import { attachmentUrl, listChats, chatTitle as chatDisplayName, type ChatSummary } from '../lib/chatService';
-import { searchAllMessages } from '../lib/localDb';
+import { searchAllMessages, getCachedChats } from '../lib/localDb';
 import { setPendingJump } from '../lib/chatJump';
 
 function useS() {
@@ -46,7 +46,11 @@ export default function SearchScreen() {
         const list = await listChats();
         if (cancel) return;
         setChats(list);
-      } catch {}
+      } catch {
+        // Offline: chat names still come from the device cache, as on the Chats tab.
+        const cached = await getCachedChats().catch(() => []);
+        if (!cancel) setChats((cached ?? []) as ChatSummary[]);
+      }
       finally { if (!cancel) setLoading(false); }
     })();
     return () => { cancel = true; };
@@ -57,8 +61,14 @@ export default function SearchScreen() {
     clearTimeout(debounce.current);
     const q = query.trim();
     if (q.length < 2) { setMsgs([]); return; }
-    debounce.current = setTimeout(() => { searchAllMessages(q, 50).then(setMsgs).catch(() => setMsgs([])); }, 220);
-    return () => clearTimeout(debounce.current);
+    // `stale` stops an older, slower search from overwriting a newer query's hits.
+    let stale = false;
+    debounce.current = setTimeout(() => {
+      searchAllMessages(q, 50)
+        .then((hits) => { if (!stale) setMsgs(hits); })
+        .catch(() => { if (!stale) setMsgs([]); });
+    }, 220);
+    return () => { stale = true; clearTimeout(debounce.current); };
   }, [query]);
 
   const chatTitle = useMemo(() => {
@@ -89,7 +99,7 @@ export default function SearchScreen() {
     <View style={S.screen}>
       <AuroraBackground />
       <View style={S.header}>
-        <TouchableOpacity accessibilityLabel="Go back" onPress={() => router.back()} hitSlop={10} style={S.backBtn} activeOpacity={0.7}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} hitSlop={10} style={S.backBtn} activeOpacity={0.7}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <TextInput
@@ -125,7 +135,8 @@ export default function SearchScreen() {
               const c = item as ChatSummary;
               const photoId = c.type === 'direct' ? c.peerPhotoURL : c.photoURL;
               return (
-                <TouchableOpacity style={S.row} onPress={() => openChat(c.id)} activeOpacity={0.7}>
+                <TouchableOpacity style={S.row} onPress={() => openChat(c.id)} activeOpacity={0.7}
+                  accessibilityRole="button" accessibilityLabel={`${titleOf(c)}, ${c.type === 'group' ? 'group' : 'direct chat'}${c.unreadCount > 0 ? `, ${c.unreadCount} unread` : ''}`}>
                   <Avatar uri={photoId && authHeader ? attachmentUrl(photoId) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={titleOf(c)} size={44} presence={c.type === 'direct' && c.peerOnline ? 'online' : null} ring />
                   <View style={{ flex: 1 }}>
                     <Text style={S.rowTitle} numberOfLines={1}>{titleOf(c)}</Text>
@@ -138,7 +149,8 @@ export default function SearchScreen() {
             const c = chatTitle.get(h.chatId);
             const photoId = c?.type === 'direct' ? c?.peerPhotoURL : c?.photoURL;
             return (
-              <TouchableOpacity style={S.row} onPress={() => openChat(h.chatId, h.id)} activeOpacity={0.7}>
+              <TouchableOpacity style={S.row} onPress={() => openChat(h.chatId, h.id)} activeOpacity={0.7}
+                accessibilityRole="button" accessibilityLabel={`Message in ${c ? titleOf(c) : 'chat'}: ${h.content ?? ''}`}>
                 <Avatar uri={photoId && authHeader ? attachmentUrl(photoId) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={c ? titleOf(c) : 'Chat'} size={44} ring />
                 <View style={{ flex: 1 }}>
                   <Text style={S.rowTitle} numberOfLines={1}>{c ? titleOf(c) : 'Chat'}</Text>

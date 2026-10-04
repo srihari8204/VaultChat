@@ -10,7 +10,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { KeyboardSafe } from '../components/ui';
 import {
   View, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
-  ActivityIndicator, Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -57,6 +57,8 @@ export default function GroupTasksScreen() {
   const [members, setMembers] = useState<CircleMember[]>([]);
   const [me, setMe] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // Rebuild failed: shown as an error, not as "Nothing yet".
+  const [failed, setFailed] = useState(false);
   const [title, setTitle] = useState('');
   const [dueMs, setDueMs] = useState<number | null>(null);
   const [assignee, setAssignee] = useState<string | null>(null);
@@ -75,10 +77,13 @@ export default function GroupTasksScreen() {
         let body = '';
         try { body = await decryptFromChat(groupId, m.senderId, m.content, m.id); } catch { continue; }
         const op = decodeOp(body);
-        if (op) ops.push(op);
+        // `by` travels inside the encrypted body and is not authenticated; the
+        // message sender is. Drop ops that claim another member's authorship.
+        if (op && op.by === String(m.senderId)) ops.push(op);
       }
       const folded = foldTasks(ops);
       setTasks(folded);
+      setFailed(false);
       // Reconcile OS reminders against the list we just rebuilt. Driven from
       // here rather than from the save handler because the list is a fold: a
       // due date moved on somebody else's phone arrives as a rebuild, not as a
@@ -87,6 +92,7 @@ export default function GroupTasksScreen() {
       syncTaskReminders(groupId, folded, u ? String(u.id) : null).catch(() => {});
     } catch {
       // Offline: keep whatever is already on screen rather than blanking it.
+      setFailed(true);
     } finally { setLoading(false); }
   }, [groupId]);
 
@@ -101,8 +107,8 @@ export default function GroupTasksScreen() {
     return () => { live = false; };
   }, [groupId, rebuild]));
 
-  /** Publish one event, then optimistically fold it in so the UI is instant. */
-  const publish = async (op: TaskOp) => {
+  /** Publish one event, then optimistically fold it in so the UI is instant. Resolves false on failure. */
+  const publish = async (op: TaskOp): Promise<boolean> => {
     setTasks((prev) => foldTasks([
       // Re-encode the current list as adds so the new op folds against it
       // without a round trip. The authoritative rebuild happens on next focus.
@@ -117,9 +123,11 @@ export default function GroupTasksScreen() {
     ]));
     try {
       await sendMessage(groupId, encodeOp(op));
+      return true;
     } catch (e: any) {
       Alert.alert('Not saved', e?.message ?? 'Could not reach the group. Try again.');
       rebuild();
+      return false;
     }
   };
 
@@ -128,11 +136,12 @@ export default function GroupTasksScreen() {
     if (!t || busy || !me) return;
     setBusy(true);
     const at = Date.now();
-    await publish({
+    const ok = await publish({
       k: 'add', id: newTaskId(), at, by: me, title: t,
       assignee, dueAt: dueMs == null ? null : endOfDay(at + dueMs),
     });
-    setTitle(''); setDueMs(null); setAssignee(null);
+    // Keep what was typed when the send failed, so Retry is one tap.
+    if (ok) { setTitle(''); setDueMs(null); setAssignee(null); }
     setBusy(false);
   };
 
@@ -171,7 +180,7 @@ export default function GroupTasksScreen() {
             returnKeyType="done" onSubmitEditing={addTask} maxLength={200}
           />
           {!!title.trim() && (
-            <TouchableOpacity accessibilityLabel="Add this task" onPress={addTask} disabled={busy}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Add this task" accessibilityState={{ disabled: busy || !me, busy }} onPress={addTask} disabled={busy || !me}>
               {busy ? <ActivityIndicator size="small" color={colors.primary} />
                 : <Ionicons name="arrow-forward-circle" size={26} color={colors.primary} />}
             </TouchableOpacity>
@@ -185,6 +194,7 @@ export default function GroupTasksScreen() {
                 const on = dueMs === d.ms;
                 return (
                   <TouchableOpacity key={d.label} onPress={() => setDueMs(d.ms)}
+                    accessibilityRole="radio" accessibilityLabel={`Due ${d.label}`} accessibilityState={{ selected: on, checked: on }}
                     style={[st.chip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? brandAlpha(0.1) : 'transparent' }]}>
                     <Text style={{ color: on ? colors.primary : colors.text, fontSize: 12 }}>{d.label}</Text>
                   </TouchableOpacity>
@@ -193,6 +203,7 @@ export default function GroupTasksScreen() {
             </View>
             <View style={st.chips}>
               <TouchableOpacity onPress={() => setAssignee(null)}
+                accessibilityRole="radio" accessibilityLabel="Assign to anyone" accessibilityState={{ selected: assignee == null, checked: assignee == null }}
                 style={[st.chip, { borderColor: assignee == null ? colors.primary : colors.border, backgroundColor: assignee == null ? brandAlpha(0.1) : 'transparent' }]}>
                 <Text style={{ color: assignee == null ? colors.primary : colors.text, fontSize: 12 }}>Anyone</Text>
               </TouchableOpacity>
@@ -200,6 +211,7 @@ export default function GroupTasksScreen() {
                 const on = assignee === m.id;
                 return (
                   <TouchableOpacity key={m.id} onPress={() => setAssignee(m.id)}
+                    accessibilityRole="radio" accessibilityLabel={`Assign to ${m.id === me ? 'me' : m.name}`} accessibilityState={{ selected: on, checked: on }}
                     style={[st.chip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? brandAlpha(0.1) : 'transparent' }]}>
                     <Text style={{ color: on ? colors.primary : colors.text, fontSize: 12 }} numberOfLines={1}>
                       {m.id === me ? 'Me' : m.name}
@@ -218,7 +230,12 @@ export default function GroupTasksScreen() {
           {loading && <ActivityIndicator size="small" color={colors.primary} />}
         </View>
 
-        {!loading && ordered.length === 0 && (
+        {!loading && ordered.length === 0 && failed && (
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Couldn't load tasks. Retry" onPress={() => { setLoading(true); rebuild(); }}>
+            <Text style={{ color: colors.danger, fontSize: 13.5 }}>Couldn’t load tasks. Tap to retry.</Text>
+          </TouchableOpacity>
+        )}
+        {!loading && ordered.length === 0 && !failed && (
           <Text style={{ color: colors.textDim, fontSize: 13.5 }}>
             Nothing yet. Anything you add here is shared with the group and stays encrypted.
           </Text>
@@ -229,7 +246,7 @@ export default function GroupTasksScreen() {
           const who = nameOf(t.assignee);
           return (
             <View key={t.id} style={[st.row, { borderColor: colors.glassStroke }]}>
-              <TouchableOpacity accessibilityLabel={t.done ? `Mark ${t.title} not done` : `Mark ${t.title} done`} onPress={() => toggle(t)} style={st.check} hitSlop={8}>
+              <TouchableOpacity accessibilityRole="checkbox" accessibilityState={{ checked: t.done }} accessibilityLabel={t.done ? `Mark ${t.title} not done` : `Mark ${t.title} done`} onPress={() => toggle(t)} style={st.check} hitSlop={8}>
                 <Ionicons
                   name={t.done ? 'checkmark-circle' : 'ellipse-outline'}
                   size={23}
@@ -253,7 +270,7 @@ export default function GroupTasksScreen() {
                   </Text>
                 )}
               </View>
-              <TouchableOpacity accessibilityLabel={`Delete the task ${t.title}`} onPress={() => remove(t)} style={{ padding: 6 }} hitSlop={6}>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Delete the task ${t.title}`} onPress={() => remove(t)} style={{ padding: 6 }} hitSlop={6}>
                 <Ionicons name="trash-outline" size={17} color={colors.textFaint} />
               </TouchableOpacity>
             </View>

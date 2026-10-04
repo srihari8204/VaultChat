@@ -43,6 +43,8 @@ export default function GroupNotesScreen() {
 
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
+  // First load failed with nothing to show: an error, not "No notes yet".
+  const [failed, setFailed] = useState(false);
   const [me, setMe] = useState<string | null>(null);
 
   const [editing, setEditing] = useState<Note | null>(null);
@@ -63,11 +65,16 @@ export default function GroupNotesScreen() {
         let body = '';
         try { body = await decryptFromChat(groupId, m.senderId, m.content, m.id); } catch { continue; }
         const op = decodeNoteOp(body);
-        if (op) ops.push(op);
+        // `by` is inside the encrypted body, so any member could write someone
+        // else's id there. The transport sender is authenticated: an op whose
+        // claimed author is not its sender is a forgery and is dropped.
+        if (op && op.by === String(m.senderId)) ops.push(op);
       }
       setNotes(foldNotes(ops));
+      setFailed(false);
     } catch {
       // Offline: keep what is on screen rather than blanking the list.
+      setFailed(true);
     } finally { setLoading(false); }
   }, [groupId]);
 
@@ -81,8 +88,8 @@ export default function GroupNotesScreen() {
     return () => { live = false; };
   }, [rebuild]));
 
-  /** Publish one event and fold it in locally so the UI is instant. */
-  const publish = async (op: NoteOp) => {
+  /** Publish one event and fold it in locally so the UI is instant. Resolves false on failure. */
+  const publish = async (op: NoteOp): Promise<boolean> => {
     setNotes((prev) => {
       const replay: NoteOp[] = prev.map((n) => ({
         k: 'add', id: n.id, at: n.createdAt, by: n.createdBy, title: n.title, body: n.body,
@@ -97,9 +104,11 @@ export default function GroupNotesScreen() {
     });
     try {
       await sendMessage(groupId, encodeNoteOp(op));
+      return true;
     } catch (e: any) {
       Alert.alert('Not saved', e?.message ?? 'Could not reach the group.');
       rebuild();
+      return false;
     }
   };
 
@@ -111,6 +120,7 @@ export default function GroupNotesScreen() {
     if (!t || busy || !me) return;
     setBusy(true);
     const at = Date.now();
+    let ok = true;
     if (editing) {
       // Send only what actually changed, so a title-only edit cannot clobber a
       // body someone else edited meanwhile — that is the point of field-level
@@ -118,11 +128,13 @@ export default function GroupNotesScreen() {
       const op: NoteOp = { k: 'edit', id: editing.id, at, by: me };
       if (t !== editing.title) op.title = t;
       if (draftBody !== editing.body) op.body = draftBody;
-      if (op.title !== undefined || op.body !== undefined) await publish(op);
+      if (op.title !== undefined || op.body !== undefined) ok = await publish(op);
     } else {
-      await publish({ k: 'add', id: newNoteId(), at, by: me, title: t, body: draftBody });
+      ok = await publish({ k: 'add', id: newNoteId(), at, by: me, title: t, body: draftBody });
     }
-    setCreating(false); setEditing(null); setBusy(false);
+    setBusy(false);
+    // A failed send keeps the sheet (and the draft) open so nothing typed is lost.
+    if (ok) { setCreating(false); setEditing(null); }
   };
 
   const togglePin = (n: Note) => {
@@ -147,7 +159,7 @@ export default function GroupNotesScreen() {
         headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */
         title: 'Notes', headerTitleAlign: 'center',
         headerRight: () => (
-          <TouchableOpacity onPress={openNew} accessibilityLabel="New note" style={{ paddingHorizontal: 8 }}>
+          <TouchableOpacity onPress={openNew} accessibilityRole="button" accessibilityLabel="New note" style={{ paddingHorizontal: 8 }}>
             <Ionicons name="add" size={24} color={colors.primary} />
           </TouchableOpacity>
         ),
@@ -155,6 +167,15 @@ export default function GroupNotesScreen() {
 
       {loading ? (
         <View style={st.center}><ActivityIndicator color={colors.primary} /></View>
+      ) : ordered.length === 0 && failed ? (
+        <View style={[st.center, { padding: 34 }]}>
+          <Ionicons name="cloud-offline-outline" size={30} color={colors.textFaint} />
+          <Text style={{ color: colors.text, fontWeight: '700', marginTop: 10 }}>Couldn’t load notes</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry loading notes" onPress={() => { setLoading(true); rebuild(); }}
+            style={[st.btn, { backgroundColor: colors.primary, paddingHorizontal: 22 }]}>
+            <Text style={st.btnTxt}>Retry</Text>
+          </TouchableOpacity>
+        </View>
       ) : ordered.length === 0 ? (
         <View style={[st.center, { padding: 34 }]}>
           <Ionicons name="document-text-outline" size={30} color={colors.textFaint} />
@@ -167,6 +188,7 @@ export default function GroupNotesScreen() {
         <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
           {ordered.map((n) => (
             <TouchableOpacity key={n.id} onPress={() => openEdit(n)} activeOpacity={0.75}
+              accessibilityRole="button" accessibilityLabel={`${n.title}${n.pinned ? ', pinned' : ''}. Edit note`}
               style={[st.card, { backgroundColor: colors.glassSoft, borderColor: n.pinned ? colors.primary : colors.border }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Text style={{ color: colors.text, fontWeight: '700', fontSize: 15, flex: 1 }} numberOfLines={1}>
@@ -218,8 +240,9 @@ export default function GroupNotesScreen() {
                 placeholderTextColor={colors.textFaint} style={[st.input, { color: colors.text, height: '100%' }]} />
             </View>
 
-            <TouchableOpacity onPress={save} disabled={!draftTitle.trim() || busy}
-              style={[st.btn, { backgroundColor: draftTitle.trim() && !busy ? colors.primary : colors.border }]}>
+            <TouchableOpacity onPress={save} disabled={!draftTitle.trim() || busy || !me}
+              accessibilityRole="button" accessibilityState={{ disabled: !draftTitle.trim() || busy || !me, busy }}
+              style={[st.btn, { backgroundColor: draftTitle.trim() && !busy && me ? colors.primary : colors.border }]}>
               {busy ? <ActivityIndicator color="#fff" />
                 : <><Ionicons name="checkmark" size={18} color="#fff" /><Text style={st.btnTxt}>{editing ? 'Save' : 'Add note'}</Text></>}
             </TouchableOpacity>

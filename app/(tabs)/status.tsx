@@ -101,7 +101,7 @@ export default function StatusScreen() {
   // own puzzle would be a chore, not a feature.
   const [gate, setGate] = useState<GateDraft>({ kind: 'none' });
 
-  useEffect(() => { AsyncStorage.getItem(RECENT_EMOJI_KEY).then(v => { try { if (v) setRecentEmojis(JSON.parse(v)); } catch {} }); }, []);
+  useEffect(() => { AsyncStorage.getItem(RECENT_EMOJI_KEY).then(v => { try { if (v) setRecentEmojis(JSON.parse(v)); } catch {} }).catch(() => {}); }, []);
   const addEmoji = useCallback((e: string) => {
     setStoryText(t => (t + e).slice(0, 700));
     setRecentEmojis(prev => {
@@ -112,7 +112,7 @@ export default function StatusScreen() {
   }, []);
   const [muted,      setMuted]      = useState<Set<string>>(new Set());
 
-  useEffect(() => { AsyncStorage.getItem(MUTED_KEY).then(v => { try { if (v) setMuted(new Set(JSON.parse(v))); } catch {} }); }, []);
+  useEffect(() => { AsyncStorage.getItem(MUTED_KEY).then(v => { try { if (v) setMuted(new Set(JSON.parse(v))); } catch {} }).catch(() => {}); }, []);
   const toggleMute = useCallback((userId: string, name: string) => {
     const isMuted = muted.has(userId);
     Alert.alert(isMuted ? `Unmute ${name}?` : `Mute ${name}?`, isMuted ? 'Their updates move back to the top.' : 'Their updates move to Muted updates.', [
@@ -159,7 +159,16 @@ export default function StatusScreen() {
   useEffect(() => {
     let off: (() => void) | null = null; let cancel = false;
     (async () => {
-      try { const s = await getSocket(); const onPosted = () => load(); s.on('story_posted', onPosted); if (!cancel) off = () => s.off('story_posted', onPosted); } catch {}
+      // Attach only after the cancel check (as chats.tsx does): attaching first
+      // leaked a listener whenever the effect was torn down while getSocket()
+      // was still pending, because `off` was never assigned for it.
+      try {
+        const s = await getSocket();
+        if (cancel) return;
+        const onPosted = () => load();
+        s.on('story_posted', onPosted);
+        off = () => s.off('story_posted', onPosted);
+      } catch {}
     })();
     return () => { cancel = true; if (off) off(); };
   }, [load]);
@@ -237,6 +246,7 @@ export default function StatusScreen() {
       }
     }
     setPosting(true);
+    let posted = 0;
     try {
       for (const a of previewAssets) {
         const cap = a.caption.trim() || undefined;
@@ -291,11 +301,22 @@ export default function StatusScreen() {
           const up = await uploadAttachment(uri, a.filename, a.mime, { purpose: 'story' });
           await addStory(up.id, a.type, cap, plainGate(gate));
         }
+        // Drop each asset from the batch the moment it is posted, so Retry
+        // after a mid-batch failure sends only what is left — never a repeat.
+        posted++;
+        setPreviewAssets(prev => prev.filter(p => p.uri !== a.uri));
       }
       setPreviewAssets([]); setPreviewIdx(0);
       await load();
     } catch (e: any) {
-      Alert.alert('Could not post story', e?.message ?? 'Try again');
+      setPreviewIdx(0);
+      if (posted > 0) load();
+      Alert.alert(
+        'Could not post story',
+        posted > 0
+          ? `${posted} posted. ${e?.message ?? 'The rest failed'} — tap Post to retry the remaining ones.`
+          : e?.message ?? 'Try again',
+      );
     } finally {
       setPosting(false);
     }

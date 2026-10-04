@@ -100,6 +100,9 @@ export default function TabLayout() {
   const c = useColors();
   const styles = useStyles(c);
   const insets = useSafeAreaInsets();
+  // The badge is drawn inside the icon, which a screen reader does not read:
+  // put the count in the tab's own label.
+  const unread = useUnreadTotal();
   const tabBar = [
     styles.tabBar,
     { bottom: Math.max(insets.bottom, 10) + 12 },
@@ -119,7 +122,7 @@ export default function TabLayout() {
         tabBarBackground: () => <GlassView kind="chrome" highlight style={styles.tabBarGlass} />,
       }}
     >
-      <Tabs.Screen name="chats"   options={{ title: 'Chats',   tabBarIcon: ({ focused }) => <TabIcon tab="chats"   label="Chats"   focused={focused} /> }} />
+      <Tabs.Screen name="chats"   options={{ title: 'Chats',   tabBarAccessibilityLabel: unread > 0 ? `Chats, ${unread} unread` : 'Chats', tabBarIcon: ({ focused }) => <TabIcon tab="chats"   label="Chats"   focused={focused} /> }} />
       <Tabs.Screen name="status"  options={{ title: 'Status',  tabBarIcon: ({ focused }) => <TabIcon tab="status"  label="Status"  focused={focused} /> }} />
       {/* Center: Mini Apps — prominent raised button */}
       {/* The ONLY item that fills the bar's full (raised) height: its disc is

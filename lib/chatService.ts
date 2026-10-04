@@ -1746,8 +1746,20 @@ export async function addBookmark(
   return res;
 }
 
-export async function removeBookmark(id: string): Promise<void> {
+/**
+ * Remove a bookmark. Pass the bookmarked message's id so its sealed local
+ * snapshot (cacheBookmarkPlaintext) goes too — otherwise an un-bookmarked
+ * message's plaintext would outlive the bookmark on this device.
+ */
+export async function removeBookmark(id: string, messageId?: number | null): Promise<void> {
   await api(`/user/bookmarks/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (messageId && messageId > 0) {
+    try {
+      const { getLocalDb } = await import('./localDb');
+      const db = await getLocalDb();
+      await db.runAsync(`DELETE FROM kv WHERE k = ?`, [bookmarkKey(messageId)]);
+    } catch { /* best-effort: the server bookmark is already gone */ }
+  }
 }
 
 // ─── Stories (24-hour ephemeral posts) ──────────────────────────────
@@ -2667,8 +2679,11 @@ export interface Community { id: string; name: string; description: string | nul
 export interface CommunityGroup { id: string; name: string; photoURL: string | null; isAnnouncement: boolean; members: number; }
 export interface CommunityDetail { id: string; name: string; description: string | null; photoURL: string | null; isOwner: boolean; groups: CommunityGroup[]; }
 
+// Throws on failure (no `catch { return [] }`): the only caller keeps its
+// cached list on error, and an empty array here would overwrite that cache.
 export async function listCommunities(): Promise<Community[]> {
-  try { const r = await api<{ communities: Community[] }>('/communities'); return r.communities || []; } catch { return []; }
+  const r = await api<{ communities: Community[] }>('/communities');
+  return r.communities || [];
 }
 export async function createCommunity(name: string, description?: string): Promise<{ id: string; announcementChatId: string }> {
   return api('/communities', { method: 'POST', json: { name, description } });
@@ -2727,9 +2742,17 @@ export async function forwardMessage(
   source: { id: number; chatId: string; senderId: string; type: Message['type']; content: string | null; meta?: any },
   targetChatId: string,
 ): Promise<Message> {
+  // View-once / invisible-ink content is never forwarded. Stripping only the
+  // flag would re-send the protected body as an ordinary, permanent message,
+  // so refuse outright (the UI hides Forward for these; this is the backstop).
+  if (source.meta?.viewOnce || source.meta?.invisibleInk) {
+    throw new Error('View-once and invisible-ink messages cannot be forwarded.');
+  }
+  // A sender-local file path means nothing on another device; never send it.
+  const { localUri: _localUri, viewOnce: _viewOnce, invisibleInk: _invisibleInk, ...meta } = source.meta ?? {};
   return sendMessage(targetChatId, source.content ?? '', source.type, {
     meta: {
-      ...(source.meta ?? {}),
+      ...meta,
       forwardedFrom: { messageId: source.id, chatId: source.chatId, senderId: source.senderId },
       // AUDIT F10. How many hops this has made. Read from the SOURCE message's
       // meta, so a chain keeps counting instead of resetting to 1 at every

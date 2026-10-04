@@ -19,7 +19,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { KeyboardSafe } from '../components/ui';
 import {
   View, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
-  ActivityIndicator, Platform, Image,
+  ActivityIndicator, Image,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -29,10 +29,11 @@ import { AppText as Text } from '../components/ui/Text';
 import { brandAlpha } from '../constants/theme';
 import {
   createInvitation, listInvitations, resendInvitation, revokeInvitation, cancelInvitation,
-  inviteCandidates, pendingMembers, approveMember, rejectMember,
+  inviteCandidates, pendingMembers, approveMember, rejectMember, attachmentUrl,
   type Invitation, type InvitationStatus, type InviteCandidate, type PendingMember,
 } from '../lib/chatService';
 import { initialOf } from '../lib/format';
+import { useAuthHeader } from '../hooks/useAuthHeader';
 
 const STATUS_TONE: Record<InvitationStatus, 'good' | 'warn' | 'bad' | 'mute'> = {
   joined: 'good', accepted: 'warn', pending: 'warn',
@@ -61,6 +62,7 @@ const SEARCH_DEBOUNCE_MS = 300;
 
 export default function GroupInvitesScreen() {
   const { colors } = useTheme();
+  const authHeader = useAuthHeader();
   const params = useLocalSearchParams<{ chatId?: string; name?: string }>();
   const chatId = String(params.chatId || '');
   const groupName = String(params.name || 'this group');
@@ -189,9 +191,10 @@ export default function GroupInvitesScreen() {
     [sent],
   );
 
+  // photoURL is an attachment id behind auth (users.photo_url), as in app/group-info.tsx.
   const avatar = (name: string | null, photoURL: string | null, size = 36) => (
-    photoURL
-      ? <Image source={{ uri: photoURL }} style={{ width: size, height: size, borderRadius: size / 2 }} />
+    photoURL && authHeader
+      ? <Image source={{ uri: attachmentUrl(photoURL), headers: { Authorization: authHeader } }} style={{ width: size, height: size, borderRadius: size / 2 }} />
       : (
         <View style={[st.avatar, { width: size, height: size, borderRadius: size / 2, backgroundColor: brandAlpha(0.18) }]}>
           <Text style={{ color: colors.primary, fontWeight: '800', fontSize: size * 0.4 }}>

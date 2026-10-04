@@ -75,67 +75,70 @@ export default function GroupInsightsScreen() {
     let live = true;
     (async () => {
       if (!groupId) { setLoading(false); return; }
-      const u = await getCurrentUserAsync().catch(() => null);
-      const myId = u ? String(u.id) : null;
-
-      const g = await getGroup(groupId);
-      // Untyped legacy groups keep their previous openness rather than being
-      // silently tightened on upgrade — and a group whose permissions have
-      // never been CACHED is unknown, not denied (2026-09-17). The registry
-      // only learns permissions from a successful getChat, so a migrated
-      // circle, an unvisited space and every group read offline had an absent
-      // list; treating that as an empty permission set locked this screen down
-      // to "showing only your own activity" for people who own the circle.
-      // See historyAccess() for the three cases.
-      const allowed = historyAccess(g) !== 'denied';
-
-      // Withhold the LOAD, not just the computation (2026-09-17). getTrack with
-      // no userId returns EVERY member's positions, and `allowed` gated only the
-      // summarise() below — so a denied viewer's device had already been handed
-      // the whole group's track before anything was filtered. Scope the read to
-      // your own id instead: your own positions are the one reading that needs
-      // no permission. Fails closed when the id is unknown.
-      const [mem, track] = await Promise.all([
-        circleMembers(groupId).catch(() => [] as CircleMember[]),
-        allowed ? getTrack(groupId, { from: range.from, to: range.to })
-          : myId ? getTrack(groupId, { from: range.from, to: range.to, userId: myId })
-            : [],
-      ]);
-      await loadAlerts();
-      const alerts = selectAlerts(groupId, 'all');
-
-      if (!live) return;
-      setMe(myId);
-      setMayViewOthers(allowed);
-      setMembers(mem);
-      // Without the permission, only your own figures are computed at all —
-      // filtering at render would still have built everyone else's numbers.
-      const ids = allowed ? mem.map((m) => m.id) : (myId ? [myId] : []);
-      setInsights(summarise(ids, track, alerts, range));
-
-      // Trip history is a FOLD over the group thread's own announcements plus
-      // the local alert inbox — nothing new is stored and nothing is fetched
-      // for it beyond messages this device already syncs.
+      // try/finally: a rejection from getTrack/getGroup/loadAlerts used to leave
+      // the spinner up for good.
       try {
-        const msgs = await unionWithLocalHistoryAsc(
-          groupId, await getMessages(groupId, { limit: 300 }), 1200);
-        const announces: TripAnnounce[] = [];
-        for (const m of msgs) {
-          const a = announceFromMessage(m);
-          if (a?.trip) {
-            announces.push({
-              id: a.trip.id,
-              destinationName: a.trip.destinationName,
-              startedBy: a.trip.startedBy,
-              startedAt: a.trip.startedAt,
-              leaderId: a.trip.leaderId ?? null,
-            });
-          }
-        }
-        if (live) setTrips(foldTripHistory(announces, alerts, range));
-      } catch { /* offline: the rest of the screen still works */ }
+        const u = await getCurrentUserAsync().catch(() => null);
+        const myId = u ? String(u.id) : null;
 
-      setLoading(false);
+        const g = await getGroup(groupId);
+        // Untyped legacy groups keep their previous openness rather than being
+        // silently tightened on upgrade — and a group whose permissions have
+        // never been CACHED is unknown, not denied (2026-09-17). The registry
+        // only learns permissions from a successful getChat, so a migrated
+        // circle, an unvisited space and every group read offline had an absent
+        // list; treating that as an empty permission set locked this screen down
+        // to "showing only your own activity" for people who own the circle.
+        // See historyAccess() for the three cases.
+        const allowed = historyAccess(g) !== 'denied';
+
+        // Withhold the LOAD, not just the computation (2026-09-17). getTrack with
+        // no userId returns EVERY member's positions, and `allowed` gated only the
+        // summarise() below — so a denied viewer's device had already been handed
+        // the whole group's track before anything was filtered. Scope the read to
+        // your own id instead: your own positions are the one reading that needs
+        // no permission. Fails closed when the id is unknown.
+        const [mem, track] = await Promise.all([
+          circleMembers(groupId).catch(() => [] as CircleMember[]),
+          allowed ? getTrack(groupId, { from: range.from, to: range.to })
+            : myId ? getTrack(groupId, { from: range.from, to: range.to, userId: myId })
+              : [],
+        ]);
+        await loadAlerts();
+        const alerts = selectAlerts(groupId, 'all');
+
+        if (!live) return;
+        setMe(myId);
+        setMayViewOthers(allowed);
+        setMembers(mem);
+        // Without the permission, only your own figures are computed at all —
+        // filtering at render would still have built everyone else's numbers.
+        const ids = allowed ? mem.map((m) => m.id) : (myId ? [myId] : []);
+        setInsights(summarise(ids, track, alerts, range));
+
+        // Trip history is a FOLD over the group thread's own announcements plus
+        // the local alert inbox — nothing new is stored and nothing is fetched
+        // for it beyond messages this device already syncs.
+        try {
+          const msgs = await unionWithLocalHistoryAsc(
+            groupId, await getMessages(groupId, { limit: 300 }), 1200);
+          const announces: TripAnnounce[] = [];
+          for (const m of msgs) {
+            const a = announceFromMessage(m);
+            if (a?.trip) {
+              announces.push({
+                id: a.trip.id,
+                destinationName: a.trip.destinationName,
+                startedBy: a.trip.startedBy,
+                startedAt: a.trip.startedAt,
+                leaderId: a.trip.leaderId ?? null,
+              });
+            }
+          }
+          if (live) setTrips(foldTripHistory(announces, alerts, range));
+        } catch { /* offline: the rest of the screen still works */ }
+      } catch { /* nothing loaded: the screen's empty state applies */ }
+      finally { if (live) setLoading(false); }
     })();
     return () => { live = false; };
   }, [groupId, range, reload]));

@@ -4,9 +4,9 @@
 // group. List your communities → open one → see its groups → tap to chat.
 
 import { HEADER_TOP, SCREEN_BOTTOM } from '../constants/layout';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  View, ScrollView, FlatList, TouchableOpacity, StyleSheet, Modal, TextInput, Alert, ActivityIndicator,
+  View, ScrollView, FlatList, TouchableOpacity, StyleSheet, Modal, TextInput, Alert, ActivityIndicator, BackHandler,
 } from 'react-native';
 import { useRouter, useFocusEffect, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -29,6 +29,8 @@ export default function CommunitiesScreen() {
   const [list, setList] = useState<Community[]>([]);
   const [detail, setDetail] = useState<CommunityDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  // Set when the network refresh failed; the cached list (if any) stays shown.
+  const [loadError, setLoadError] = useState(false);
   // Single name/desc modal, reused for "new community" and "new group".
   const [modal, setModal] = useState<null | 'community' | 'group'>(null);
   const [name, setName] = useState('');
@@ -37,16 +39,26 @@ export default function CommunitiesScreen() {
 
   const loadList = useCallback(async () => {
     // Local-first: paint cached list instantly, then refresh in background.
-    const cached = await readCache<Community[]>('communities');
-    if (cached) { setList(cached); setLoading(false); }
+    try {
+      const cached = await readCache<Community[]>('communities');
+      if (cached) { setList(cached); setLoading(false); }
+    } catch { /* unreadable cache: fall through to the network */ }
     try {
       const l = await listCommunities();
       setList(l);
+      setLoadError(false);
       writeCache('communities', l);
-    } catch { /* keep cached list for offline read */ }
+    } catch { setLoadError(true); /* keep cached list for offline read */ }
     finally { setLoading(false); }
   }, []);
   useFocusEffect(useCallback(() => { if (!detail) loadList(); }, [detail, loadList]));
+
+  // Detail is in-screen state, not a route: Android back returns to the list.
+  useEffect(() => {
+    if (!detail) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => { setDetail(null); return true; });
+    return () => sub.remove();
+  }, [detail]);
 
   const openCommunity = useCallback(async (id: string) => {
     // Local-first: paint cached detail instantly, else show spinner.
@@ -108,7 +120,7 @@ export default function CommunitiesScreen() {
             </View>
           }
           renderItem={({ item: g }) => (
-            <TouchableOpacity style={S.row} activeOpacity={0.7} onPress={() => router.push({ pathname: '/chat', params: { id: g.id } } as any)}>
+            <TouchableOpacity style={S.row} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`${g.name}, ${g.isAnnouncement ? 'announcements' : `${g.members} member${g.members === 1 ? '' : 's'}`}`} onPress={() => router.push({ pathname: '/chat', params: { id: g.id } } as any)}>
               <View style={[S.groupIcon, g.isAnnouncement && { backgroundColor: colors.primary }]}>
                 <Ionicons name={g.isAnnouncement ? 'megaphone' : 'people-outline'} size={20} color={g.isAnnouncement ? '#fff' : colors.primary} />
               </View>
@@ -120,10 +132,13 @@ export default function CommunitiesScreen() {
             </TouchableOpacity>
           )}
           ListFooterComponent={
-            <TouchableOpacity style={S.addRow} activeOpacity={0.7} onPress={() => { setName(''); setModal('group'); }}>
-              <View style={S.addIcon}><Ionicons name="add" size={22} color={colors.primary} /></View>
-              <Text style={S.addTxt}>New group</Text>
-            </TouchableOpacity>
+            // Only the owner can add groups (server-side rule mirrored by isOwner).
+            detail.isOwner ? (
+              <TouchableOpacity style={S.addRow} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="New group in this community" onPress={() => { setName(''); setModal('group'); }}>
+                <View style={S.addIcon}><Ionicons name="add" size={22} color={colors.primary} /></View>
+                <Text style={S.addTxt}>New group</Text>
+              </TouchableOpacity>
+            ) : null
           }
         />
         {nameModal()}
@@ -142,14 +157,26 @@ export default function CommunitiesScreen() {
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="New community" onPress={() => { setName(''); setDesc(''); setModal('community'); }} style={S.hBtn} hitSlop={8}><Ionicons name="add" size={24} color={colors.text} /></TouchableOpacity>
       </View>
 
+      {loadError && !loading && list.length > 0 && (
+        <TouchableOpacity style={S.errBar} accessibilityRole="button" accessibilityLabel="Couldn't refresh communities. Showing saved list. Tap to retry" onPress={loadList}>
+          <Text style={S.errTxt}>Couldn’t refresh — showing saved list. Tap to retry.</Text>
+        </TouchableOpacity>
+      )}
       {loading ? (
         <View style={S.center}><ActivityIndicator color={colors.primary} size="large" /></View>
+      ) : list.length === 0 && loadError ? (
+        <ScrollView contentContainerStyle={S.center}>
+          <Ionicons name="cloud-offline-outline" size={56} color={colors.textDim} />
+          <Text style={S.emptyTitle}>Couldn’t load communities</Text>
+          <Text style={S.emptySub}>Check your connection and try again.</Text>
+          <TouchableOpacity style={S.cta} accessibilityRole="button" accessibilityLabel="Retry loading communities" onPress={() => { setLoading(true); loadList(); }}><Text style={S.ctaTxt}>Retry</Text></TouchableOpacity>
+        </ScrollView>
       ) : list.length === 0 ? (
         <ScrollView contentContainerStyle={S.center}>
           <Ionicons name="people-circle-outline" size={56} color={colors.textDim} />
           <Text style={S.emptyTitle}>No communities yet</Text>
           <Text style={S.emptySub}>Communities bring related groups together under one roof.</Text>
-          <TouchableOpacity style={S.cta} onPress={() => { setName(''); setDesc(''); setModal('community'); }}><Text style={S.ctaTxt}>New community</Text></TouchableOpacity>
+          <TouchableOpacity style={S.cta} accessibilityRole="button" onPress={() => { setName(''); setDesc(''); setModal('community'); }}><Text style={S.ctaTxt}>New community</Text></TouchableOpacity>
         </ScrollView>
       ) : (
         <FlatList
@@ -157,7 +184,7 @@ export default function CommunitiesScreen() {
           keyExtractor={c => c.id}
           contentContainerStyle={S.listContent}
           renderItem={({ item: c }) => (
-            <TouchableOpacity style={S.row} activeOpacity={0.7} onPress={() => openCommunity(c.id)}>
+            <TouchableOpacity style={S.row} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`${c.name}, ${c.groupCount} group${c.groupCount === 1 ? '' : 's'}`} onPress={() => openCommunity(c.id)}>
               <View style={S.commIconSm}><Ionicons name="people" size={22} color="#fff" /></View>
               <View style={{ flex: 1 }}>
                 <Text style={S.rowName} numberOfLines={1}>{c.name}</Text>
@@ -184,8 +211,8 @@ export default function CommunitiesScreen() {
               <TextInput style={[S.modalInput, { minHeight: 60, textAlignVertical: 'top' }]} value={desc} onChangeText={setDesc} placeholder="Description (optional)" placeholderTextColor={colors.textDim} multiline maxLength={512} />
             )}
             <View style={S.modalBtns}>
-              <TouchableOpacity onPress={() => setModal(null)} style={S.modalBtn}><Text style={S.modalCancel}>Cancel</Text></TouchableOpacity>
-              <TouchableOpacity onPress={submitModal} disabled={!name.trim() || busy} style={[S.modalBtn, S.modalBtnPrimary, (!name.trim() || busy) && { opacity: 0.5 }]}>
+              <TouchableOpacity accessibilityRole="button" onPress={() => setModal(null)} style={S.modalBtn}><Text style={S.modalCancel}>Cancel</Text></TouchableOpacity>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Create" accessibilityState={{ disabled: !name.trim() || busy, busy }} onPress={submitModal} disabled={!name.trim() || busy} style={[S.modalBtn, S.modalBtnPrimary, (!name.trim() || busy) && { opacity: 0.5 }]}>
                 {busy ? <ActivityIndicator color="#fff" /> : <Text style={S.modalCreate}>Create</Text>}
               </TouchableOpacity>
             </View>
@@ -220,6 +247,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   addIcon:  { width: 44, height: 44, borderRadius: 22, borderWidth: 1.5, borderColor: c.primary, alignItems: 'center', justifyContent: 'center' },
   addTxt:   { color: c.primary, fontSize: 16, fontWeight: '600' },
 
+  errBar:   { marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 12, backgroundColor: c.glassSoft, borderWidth: StyleSheet.hairlineWidth, borderColor: c.danger },
+  errTxt:   { color: c.danger, fontSize: 13, fontWeight: '600', textAlign: 'center' },
   emptyTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
   emptySub: { color: c.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20 },
   cta:      { marginTop: 8, backgroundColor: c.primary, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 14 },

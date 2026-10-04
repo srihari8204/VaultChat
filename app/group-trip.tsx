@@ -10,7 +10,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { KeyboardSafe } from '../components/ui';
 import {
   View, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
-  ActivityIndicator, Platform,
+  ActivityIndicator,
 } from 'react-native';
 import * as Location from 'expo-location';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
@@ -63,8 +63,8 @@ export default function GroupTripScreen() {
       if (!live) return;
       const myId = u ? String(u.id) : null;
       setMe(myId);
-      circleMembers(groupId).then((m) => live && setMembers(m)).catch(() => {});
       if (!groupId || !myId) return;
+      circleMembers(groupId).then((m) => live && setMembers(m)).catch(() => {});
       const off = await subscribeTrip(
         groupId, myId,
         (e) => {
@@ -110,8 +110,11 @@ export default function GroupTripScreen() {
     try {
       let dest: { lat: number; lng: number } | null = null;
       const m = q.match(COORD_RE);
-      if (m) dest = { lat: Number(m[1]), lng: Number(m[2]) };
-      else {
+      if (m) {
+        // Out-of-range numbers are not coordinates; they fall through to "Not found".
+        const lat = Number(m[1]), lng = Number(m[2]);
+        if (Math.abs(lat) <= 90 && Math.abs(lng) <= 180) dest = { lat, lng };
+      } else {
         const hit = await Location.geocodeAsync(q);
         if (hit[0]) dest = { lat: hit[0].latitude, lng: hit[0].longitude };
       }
@@ -144,14 +147,21 @@ export default function GroupTripScreen() {
   const leave = () => {
     Alert.alert('Leave the trip?', 'You stop sharing your ETA. The trip continues for everyone else.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Leave', style: 'destructive', onPress: async () => { await leaveTrip(); setTrip(null); setPings([]); } },
+      { text: 'Leave', style: 'destructive', onPress: async () => {
+        try { await leaveTrip(); setTrip(null); setPings([]); }
+        catch (e: any) { Alert.alert('Could not leave', e?.message ?? 'Try again.'); }
+      } },
     ]);
   };
 
   const end = () => {
     Alert.alert('End the trip?', 'The trip is over for everyone in the group.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'End trip', style: 'destructive', onPress: async () => { await endTrip(); setTrip(null); setPings([]); } },
+      { text: 'End trip', style: 'destructive', onPress: async () => {
+        // Pass the trip on screen: after a restart it is not in tripSession's memory.
+        try { await endTrip(trip); setTrip(null); setPings([]); }
+        catch (e: any) { Alert.alert('Could not end the trip', e?.message ?? 'Check your connection and try again.'); }
+      } },
     ]);
   };
 
@@ -178,6 +188,7 @@ export default function GroupTripScreen() {
                 autoCapitalize="none" returnKeyType="go" onSubmitEditing={begin} />
             </View>
             <TouchableOpacity onPress={() => setLead((v) => !v)}
+              accessibilityRole="checkbox" accessibilityLabel="Everyone follows my route" accessibilityState={{ checked: lead }}
               style={[st.lead, { borderColor: lead ? colors.primary : colors.border, backgroundColor: lead ? colors.primary + '14' : 'transparent' }]}>
               <Ionicons name={lead ? 'checkbox' : 'square-outline'} size={19} color={lead ? colors.primary : colors.textFaint} />
               <View style={{ flex: 1 }}>
@@ -189,8 +200,9 @@ export default function GroupTripScreen() {
               </View>
             </TouchableOpacity>
 
-            <TouchableOpacity onPress={begin} disabled={!where.trim() || busy}
-              style={[st.btn, { backgroundColor: where.trim() && !busy ? colors.primary : colors.border }]}>
+            <TouchableOpacity onPress={begin} disabled={!where.trim() || busy || !me}
+              accessibilityRole="button" accessibilityState={{ disabled: !where.trim() || busy || !me, busy }}
+              style={[st.btn, { backgroundColor: where.trim() && !busy && me ? colors.primary : colors.border }]}>
               {busy ? <ActivityIndicator color="#fff" />
                 : <><Ionicons name="navigate" size={18} color="#fff" /><Text style={st.btnTxt}>Start trip</Text></>}
             </TouchableOpacity>
@@ -223,18 +235,18 @@ export default function GroupTripScreen() {
             </View>
 
             <View style={st.actions}>
-              <TouchableOpacity onPress={join} style={[st.action, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
+              <TouchableOpacity onPress={join} accessibilityRole="button" style={[st.action, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
                 <Ionicons name="navigate" size={18} color={colors.primary} />
                 <Text style={[st.actionTxt, { color: colors.text }]}>Navigate</Text>
               </TouchableOpacity>
               {/* The starter ends it for everyone; anyone else can only leave. */}
               {trip.startedBy === me ? (
-                <TouchableOpacity onPress={end} style={[st.action, { borderColor: colors.danger, backgroundColor: colors.danger + '12' }]}>
+                <TouchableOpacity onPress={end} accessibilityRole="button" style={[st.action, { borderColor: colors.danger, backgroundColor: colors.danger + '12' }]}>
                   <Ionicons name="flag-outline" size={18} color={colors.danger} />
                   <Text style={[st.actionTxt, { color: colors.danger }]}>End trip</Text>
                 </TouchableOpacity>
               ) : (
-                <TouchableOpacity onPress={leave} style={[st.action, { borderColor: colors.danger, backgroundColor: colors.danger + '12' }]}>
+                <TouchableOpacity onPress={leave} accessibilityRole="button" style={[st.action, { borderColor: colors.danger, backgroundColor: colors.danger + '12' }]}>
                   <Ionicons name="exit-outline" size={18} color={colors.danger} />
                   <Text style={[st.actionTxt, { color: colors.danger }]}>Leave</Text>
                 </TouchableOpacity>

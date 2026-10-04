@@ -25,6 +25,8 @@
 // Pure — no react-native imports — so the self-check runs under tsx:
 //   npx tsx lib/groups/calendar.ts
 
+import type { Task } from './tasks';
+
 export type Recurrence = 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly';
 
 /** The decrypted event. Everything here except the month bucket is E2EE at rest. */
@@ -178,6 +180,28 @@ export function monthBounds(ts: number): { from: number; to: number } {
 /** When a reminder should fire, or null if the event has none. */
 export function reminderAt(o: Occurrence): number | null {
   return o.event.remindMin == null ? null : o.startsAt - o.event.remindMin * 60_000;
+}
+
+/** How far ahead calendar reminders are booked; a later sync books the rest. */
+export const REMINDER_HORIZON_MS = 30 * 86_400_000;
+
+/**
+ * Occurrences as items for the reminder reconciler (lib/groups/reminders.ts).
+ * A shared event reminds every member, so each item targets `me`. The id is
+ * per occurrence, so every repeat of a recurring event gets its own reminder,
+ * and a moved or retitled event is re-booked by the reconciler's diff.
+ */
+export function eventReminderItems(occ: Occurrence[], me: string): Task[] {
+  const out: Task[] = [];
+  for (const o of occ) {
+    const at = reminderAt(o);
+    if (at == null) continue;
+    out.push({
+      id: `${o.event.id}@${o.startsAt}`, title: o.event.title, assignee: me, dueAt: at,
+      done: false, updatedAt: 0, createdAt: 0, createdBy: o.event.createdBy, doneBy: null,
+    });
+  }
+  return out;
 }
 
 // ── self-check ──

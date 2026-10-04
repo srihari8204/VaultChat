@@ -52,6 +52,7 @@ import { unionWithLocalHistory } from '../lib/messageHistory';
 import SharedMediaThumb from '../components/chat/SharedMediaThumb';
 import { AuroraBackground } from '../components/ui';
 import { permissionDenied } from '../lib/permissionDenied';
+import { memberActions } from '../lib/groups/permissions';
 
 function useS() {
   const { colors } = useTheme();
@@ -74,6 +75,10 @@ export default function GroupInfoScreen() {
   const authHeader = useAuthHeader();
 
   const [loading,   setLoading]   = useState(true);
+  // First load failed with no cache: an error screen with Retry and Back.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // Rename / description save in flight (double-submit guard).
+  const [saving,    setSaving]    = useState(false);
   const [renaming,  setRenaming]  = useState(false);
   const [nameDraft, setNameDraft] = useState('');
   const [photoBusy, setPhotoBusy] = useState(false);
@@ -119,10 +124,13 @@ export default function GroupInfoScreen() {
       setChat(c);
       setMeId(me?.id ?? null);
       setNameDraft(c.name ?? '');
+      setLoadError(null);
       if (chatId) writeCache<ChatDetail>(cacheKey, c);
     } catch (e: any) {
       // Keep painted cache on error; only surface failure when nothing is shown.
-      if (!painted) Alert.alert('Could not load group', e?.message ?? 'Try again');
+      // Rendered as a screen (not an Alert) so there is a Back and a Retry —
+      // the bare spinner used to trap the user.
+      if (!painted) setLoadError(e?.message ?? 'Check your connection and try again.');
     } finally {
       if (!painted) setLoading(false);
     }
@@ -161,28 +169,32 @@ export default function GroupInfoScreen() {
   const isAdmin = myRole === 'admin' || myRole === 'owner';
 
   const onRename = useCallback(async () => {
-    if (!chat || !isAdmin) return;
+    if (!chat || !isAdmin || saving) return;
     const n = nameDraft.trim();
     if (!n || n === chat.name) { setRenaming(false); return; }
+    setSaving(true);
     try {
       await updateChat(chat.id, { name: n });
       patchChat(prev => ({ ...prev, name: n }));
     } catch (e: any) {
       Alert.alert('Rename failed', e?.message ?? 'Try again');
     } finally {
+      setSaving(false);
       setRenaming(false);
     }
-  }, [chat, isAdmin, nameDraft]);
+  }, [chat, isAdmin, nameDraft, saving, patchChat]);
 
   const onSaveDesc = useCallback(async () => {
+    if (saving) return;
     if (!chat || !isAdmin) { setEditingDesc(false); return; }
     const d = descDraft.trim();
+    setSaving(true);
     try {
       await updateChat(chat.id, { description: d });
       patchChat(prev => ({ ...prev, description: d || null }));
     } catch (e: any) { Alert.alert('Could not save', e?.message ?? 'Try again'); }
-    finally { setEditingDesc(false); }
-  }, [chat, isAdmin, descDraft]);
+    finally { setSaving(false); setEditingDesc(false); }
+  }, [chat, isAdmin, descDraft, saving, patchChat]);
 
   const onChangePhoto = useCallback(async () => {
     if (!chat || !isAdmin || photoBusy) return;
@@ -210,10 +222,11 @@ export default function GroupInfoScreen() {
     } finally {
       setPhotoBusy(false);
     }
-  }, [chat, isAdmin, photoBusy]);
+  }, [chat, isAdmin, photoBusy, patchChat]);
 
   const onRemoveMember = useCallback((m: ChatMember) => {
-    if (!chat || !isAdmin) return;
+    // Gated where the button is drawn (memberActions); the server re-checks.
+    if (!chat) return;
     Alert.alert(
       'Remove from group?',
       `${m.name || m.email || 'This user'} will no longer be a member.`,
@@ -233,7 +246,7 @@ export default function GroupInfoScreen() {
         },
       ],
     );
-  }, [chat, isAdmin]);
+  }, [chat, patchChat]);
 
   const onLeave = useCallback(() => {
     if (!chat || !meId) return;
@@ -288,8 +301,33 @@ export default function GroupInfoScreen() {
     );
   }
 
+  if (!loading && !chat && loadError) {
+    return (
+      <View style={[S.screen, S.center]}>
+        <AuroraBackground />
+        <Text style={{ color: colors.text, fontSize: 16, fontWeight: '700', marginBottom: 6 }}>Couldn’t load this group</Text>
+        <Text style={{ color: colors.textDim, fontSize: 13, textAlign: 'center', marginBottom: 16, paddingHorizontal: 32 }}>{loadError}</Text>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry loading the group" onPress={() => { setLoadError(null); load(); }} style={S.saveBtn}>
+          <Text style={S.saveBtnTxt}>Retry</Text>
+        </TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} activeOpacity={0.8} style={{ marginTop: 16, padding: 8 }}>
+          <Text style={{ color: colors.primary, fontSize: 15, fontWeight: '700' }}>Go back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   if (loading || !chat) {
-    return <View style={[S.screen, S.center]}><ActivityIndicator color={colors.primary} size="large" /></View>;
+    return (
+      <View style={[S.screen, S.center]}>
+        <View style={[S.header, { position: 'absolute', top: 0, left: 0, right: 0 }]}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
+            <Ionicons name="arrow-back" size={24} color={colors.text} />
+          </TouchableOpacity>
+        </View>
+        <ActivityIndicator color={colors.primary} size="large" accessibilityLabel="Loading group" />
+      </View>
+    );
   }
 
   const activeMembers = chat.members.filter(m => !m.leftAt);
@@ -301,14 +339,16 @@ export default function GroupInfoScreen() {
   return (
     <ScrollView style={S.screen} contentContainerStyle={{ paddingBottom: 64 }}>
       <View style={S.header}>
-        <TouchableOpacity accessibilityLabel="Go back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.titleBar}>Group info</Text>
       </View>
 
       <View style={S.heroWrap}>
-        <TouchableOpacity onPress={onChangePhoto} disabled={!isAdmin || photoBusy} activeOpacity={0.85}>
+        <TouchableOpacity onPress={onChangePhoto} disabled={!isAdmin || photoBusy} activeOpacity={0.85}
+          accessibilityRole={isAdmin ? 'button' : 'image'} accessibilityLabel={isAdmin ? 'Change group photo' : 'Group photo'}
+          accessibilityState={isAdmin ? { busy: photoBusy, disabled: photoBusy } : undefined}>
           <View style={S.hero}>
             {chat.photoURL && authHeader ? (
               <Image
@@ -337,12 +377,14 @@ export default function GroupInfoScreen() {
               maxLength={100}
               onSubmitEditing={onRename}
             />
-            <TouchableOpacity onPress={onRename} style={S.saveBtn}>
-              <Text style={S.saveBtnTxt}>Save</Text>
+            <TouchableOpacity onPress={onRename} disabled={saving} style={[S.saveBtn, saving && { opacity: 0.6 }]}
+              accessibilityRole="button" accessibilityLabel="Save group name" accessibilityState={{ disabled: saving, busy: saving }}>
+              {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={S.saveBtnTxt}>Save</Text>}
             </TouchableOpacity>
           </View>
         ) : (
-          <TouchableOpacity disabled={!isAdmin} onPress={() => setRenaming(true)} activeOpacity={isAdmin ? 0.7 : 1}>
+          <TouchableOpacity disabled={!isAdmin} onPress={() => setRenaming(true)} activeOpacity={isAdmin ? 0.7 : 1}
+            accessibilityRole={isAdmin ? 'button' : 'header'} accessibilityLabel={isAdmin ? `${chat.name || 'Untitled group'}. Rename group` : chat.name || 'Untitled group'}>
             <Text numberOfLines={1} style={S.groupName}>{chat.name || 'Untitled group'}</Text>
           </TouchableOpacity>
         )}
@@ -363,12 +405,17 @@ export default function GroupInfoScreen() {
               maxLength={512}
               autoFocus
             />
-            <TouchableOpacity onPress={onSaveDesc} style={S.saveBtn}><Text style={S.saveBtnTxt}>Save</Text></TouchableOpacity>
+            <TouchableOpacity onPress={onSaveDesc} disabled={saving} style={[S.saveBtn, saving && { opacity: 0.6 }]}
+              accessibilityRole="button" accessibilityLabel="Save description" accessibilityState={{ disabled: saving, busy: saving }}>
+              {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={S.saveBtnTxt}>Save</Text>}
+            </TouchableOpacity>
           </View>
         ) : (
           <TouchableOpacity
             disabled={!isAdmin}
             activeOpacity={isAdmin ? 0.7 : 1}
+            accessibilityRole={isAdmin ? 'button' : undefined}
+            accessibilityHint={isAdmin ? 'Edit the group description' : undefined}
             onPress={() => { setDescDraft(chat.description ?? ''); setEditingDesc(true); }}
           >
             <Text style={S.label}>DESCRIPTION</Text>
@@ -380,7 +427,7 @@ export default function GroupInfoScreen() {
       </View>
 
       {isAdmin && (
-        <TouchableOpacity style={S.addBtn} onPress={onAddMember} activeOpacity={0.85}>
+        <TouchableOpacity style={S.addBtn} onPress={onAddMember} activeOpacity={0.85} accessibilityRole="button">
           <Ionicons name="person-add-outline" size={18} color={colors.primary} />
           <Text style={S.addBtnTxt}>Add member</Text>
         </TouchableOpacity>
@@ -391,6 +438,7 @@ export default function GroupInfoScreen() {
         <TouchableOpacity
           style={S.navRow}
           activeOpacity={0.7}
+          accessibilityRole="button"
           onPress={() => router.push({ pathname: '/group-calls', params: { chatId: chat.id, groupName: chat.name ?? 'Group' } } as any)}
         >
           <Ionicons name="call-outline" size={22} color={colors.text} style={S.navIcon} />
@@ -407,6 +455,7 @@ export default function GroupInfoScreen() {
         <TouchableOpacity
           style={S.navRow}
           activeOpacity={0.7}
+          accessibilityRole="button"
           onPress={() => router.push({ pathname: '/media-gallery', params: { chatId: chat.id } } as any)}
         >
           <Ionicons name="images-outline" size={22} color={colors.text} style={S.navIcon} />
@@ -432,6 +481,36 @@ export default function GroupInfoScreen() {
         )}
       </View>
 
+      {/* Shared tools. These screens take only the group id and run on the
+          group's own message thread / calendar endpoint, so they work for any
+          group, not just a Family Space. Location tools (trip, insights,
+          location privacy) stay in Family Space, where location is shared. */}
+      <View style={S.section}>
+        <Text style={S.label}>SHARED</Text>
+        {([
+          { path: '/group-calendar', icon: 'calendar-outline', title: 'Shared calendar', sub: 'Events everyone in the group can see' },
+          { path: '/group-notes', icon: 'document-text-outline', title: 'Shared notes', sub: 'Lists and notes, encrypted end to end' },
+          { path: '/group-tasks', icon: 'checkbox-outline', title: 'Shared tasks', sub: 'To-dos with due dates and reminders' },
+        ] as const).map(t => (
+          <TouchableOpacity
+            key={t.path}
+            style={S.navRow}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={t.title}
+            accessibilityHint={t.sub}
+            onPress={() => router.push({ pathname: t.path, params: { groupId: chat.id, name: chat.name ?? 'Group' } } as any)}
+          >
+            <Ionicons name={t.icon} size={22} color={colors.text} style={S.navIcon} />
+            <View style={{ flex: 1 }}>
+              <Text style={S.navTitle}>{t.title}</Text>
+              <Text style={S.navSub}>{t.sub}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
+          </TouchableOpacity>
+        ))}
+      </View>
+
       {/* Live Chat Viewers (#58) — share whether you're currently viewing this chat */}
       <View style={S.section}>
         <Text style={S.label}>PRIVACY</Text>
@@ -442,6 +521,7 @@ export default function GroupInfoScreen() {
             <Text style={S.navSub}>Let members see when you’re viewing this chat now</Text>
           </View>
           <Switch
+            accessibilityLabel="Share my viewing status"
             value={shareViewing}
             onValueChange={toggleShareViewing}
             trackColor={{ true: colors.primary, false: colors.border }}
@@ -456,6 +536,7 @@ export default function GroupInfoScreen() {
           <TouchableOpacity
             style={S.navRow}
             activeOpacity={0.7}
+            accessibilityRole="button"
             onPress={() => router.push({ pathname: '/group-admin', params: { chatId: chat.id, groupName: chat.name ?? '' } } as any)}
           >
             <Ionicons name="shield-checkmark-outline" size={22} color={colors.text} style={S.navIcon} />
@@ -468,6 +549,7 @@ export default function GroupInfoScreen() {
           <TouchableOpacity
             style={S.navRow}
             activeOpacity={0.7}
+            accessibilityRole="button"
             onPress={() => router.push({ pathname: '/invite-link', params: { chatId: chat.id, groupName: chat.name ?? '' } } as any)}
           >
             <Ionicons name="link-outline" size={22} color={colors.text} style={S.navIcon} />
@@ -507,7 +589,10 @@ export default function GroupInfoScreen() {
             <MemberRow
               member={m}
               meId={meId}
-              isAdmin={isAdmin}
+              canRemove={memberActions({
+                actorRole: myRole ?? 'member', targetRole: m.role, isMe: m.userId === meId,
+                typed: !!chat.groupType, permissions: chat.permissions,
+              }).canRemove}
               authHeader={authHeader}
               onRemove={() => onRemoveMember(m)}
             />
@@ -515,7 +600,7 @@ export default function GroupInfoScreen() {
         />
       </View>
 
-      <TouchableOpacity style={S.leaveBtn} onPress={onLeave} activeOpacity={0.85}>
+      <TouchableOpacity style={S.leaveBtn} onPress={onLeave} activeOpacity={0.85} accessibilityRole="button">
         <Text style={S.leaveTxt}>Leave group</Text>
       </TouchableOpacity>
     </ScrollView>
@@ -523,18 +608,18 @@ export default function GroupInfoScreen() {
 }
 
 function MemberRow({
-  member, meId, isAdmin, authHeader, onRemove,
+  member, meId, canRemove, authHeader, onRemove,
 }: {
   member:     ChatMember;
   meId:       string | null;
-  isAdmin:    boolean;
+  /** From memberActions (lib/groups/permissions.ts), the check group-admin/group-members use. */
+  canRemove:  boolean;
   authHeader: string | null;
   onRemove:   () => void;
 }) {
   const S = useS();
-  const { colors } = useTheme();
   const isMe = member.userId === meId;
-  const showRemove = isAdmin && !isMe && member.role !== 'owner';
+  const showRemove = canRemove;
   const letter = initialOf(member.name, member.email);
   // A member with no name and no email used to be shown as eight hex digits of
   // their user id — which reads as a bug, not as a person. Email is optional now,
@@ -570,7 +655,7 @@ function MemberRow({
         )}
       </View>
       {showRemove && (
-        <TouchableOpacity onPress={onRemove} style={S.removeBtn} activeOpacity={0.7}>
+        <TouchableOpacity onPress={onRemove} style={S.removeBtn} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`Remove ${display} from the group`}>
           <Text style={S.removeBtnTxt}>Remove</Text>
         </TouchableOpacity>
       )}

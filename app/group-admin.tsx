@@ -3,14 +3,10 @@
  *
  * Scoped to what the backend actually persists today:
  *   - Group Info: rename the group (admin/owner only) via PATCH /chats/:id
- *   - Members: per-member role + actions via /chats/:id/members*
- *       • promote member → admin / demote admin → member (owner-gated)
- *       • remove member (admin/owner)
- *
- * Permission-matrix, slow-mode and moderation toggles from the old Firebase
- * screen are intentionally omitted: there are no Postgres tables backing them
- * yet, so rendering fake switches would be dishonest. They return when the
- * backend grows the tables to support them.
+ *   - Send/media/add policies, slow mode, anti-spam and join approval
+ *   - Members: per-member role + remove via /chats/:id/members*, gated by the
+ *     same rank check as app/group-members.tsx (memberActions in
+ *     lib/groups/permissions.ts, mirroring the server).
  */
 
 import { brandAlpha, type Palette } from '../constants/theme';
@@ -31,6 +27,7 @@ import {
 import { AuroraBackground } from '../components/ui';
 import { HEADER_TOP } from '../constants/layout';
 import { initialOf } from '../lib/format';
+import { memberActions, ROLE_LABELS as GROUP_ROLE_LABELS, type GroupRole } from '../lib/groups/permissions';
 
 type Policy = 'everyone' | 'admins';
 
@@ -41,8 +38,6 @@ type Policy = 'everyone' | 'admins';
 // HEADER_TOP is the live binding and already carries the gap the `+ 8` added
 // (2026-09-17).
 
-type Role = 'owner' | 'admin' | 'member';
-
 const SLOW_OPTS = [
   { label: 'Off', value: 0 },
   { label: '10s', value: 10 },
@@ -51,7 +46,6 @@ const SLOW_OPTS = [
   { label: '5m', value: 300 },
   { label: '15m', value: 900 },
 ];
-const ROLE_LABELS: Record<Role, string> = { owner: 'Owner', admin: 'Admin', member: 'Member' };
 
 function useS() {
   const { colors } = useTheme();
@@ -65,7 +59,11 @@ export default function GroupAdminScreen() {
   const { chatId, groupName: initialName } = useLocalSearchParams<{ chatId: string; groupName: string }>();
 
   const [myId, setMyId] = useState('');
-  const [myRole, setMyRole] = useState<Role>('member');
+  const [myRole, setMyRole] = useState<GroupRole>('member');
+  const [typed, setTyped] = useState(false);
+  const [perms, setPerms] = useState<string[]>([]);
+  // Load failed: say so with Retry instead of "No members." and member-only controls.
+  const [loadFailed, setLoadFailed] = useState(false);
   const [groupName, setGroupName] = useState(initialName || 'Group');
   const [savedName, setSavedName] = useState(initialName || 'Group');
   const [members, setMembers] = useState<ChatMember[]>([]);
@@ -93,7 +91,10 @@ export default function GroupAdminScreen() {
       const active = chat.members.filter(m => !m.leftAt);
       setMembers(active);
       setMyId(me?.id ?? '');
-      setMyRole((chat.myRole as Role) ?? 'member');
+      setMyRole((chat.myRole as GroupRole) ?? 'member');
+      setTyped(!!chat.groupType);
+      setPerms((chat.permissions ?? []) as string[]);
+      setLoadFailed(false);
       setSlowMode(chat.slowModeSeconds ?? 0);
       setSendPolicy((chat.sendPolicy as Policy) ?? 'everyone');
       setMediaPolicy((chat.mediaPolicy as Policy) ?? 'everyone');
@@ -103,6 +104,7 @@ export default function GroupAdminScreen() {
       if (chat.approveMembers) listJoinRequests(chatId).then(setJoinReqs).catch(() => {});
       if (chat.name) { setGroupName(chat.name); setSavedName(chat.name); }
     } catch (e: any) {
+      setLoadFailed(true);
       flash('err', e?.message ?? 'Failed to load group');
     } finally {
       setLoading(false);
@@ -192,14 +194,14 @@ export default function GroupAdminScreen() {
     </View>
   );
 
-  const changeRole = async (m: ChatMember, role: 'admin' | 'member') => {
+  const changeRole = async (m: ChatMember, role: Exclude<GroupRole, 'owner'>) => {
     setRoleMenuUid(null);
     if (m.role === role) return;
     const prev = members;
     setMembers(list => list.map(x => x.userId === m.userId ? { ...x, role } : x));
     try {
       await setMemberRole(chatId!, m.userId, role);
-      flash('ok', `${m.name || 'Member'} is now ${ROLE_LABELS[role]}`);
+      flash('ok', `${m.name || 'Member'} is now ${GROUP_ROLE_LABELS[role]}`);
     } catch (e: any) {
       setMembers(prev);
       flash('err', e?.message ?? 'Role change failed');
@@ -360,47 +362,63 @@ export default function GroupAdminScreen() {
         {/* Members */}
         <View style={s.section}>
           <Text style={s.sectionTitle}>Members ({members.length})</Text>
-          {members.length === 0 && (
+          {members.length === 0 && loadFailed && (
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Couldn't load members. Retry" onPress={() => { setLoading(true); load(); }}>
+              <Text style={[s.hint, { textAlign: 'center', marginVertical: 16, color: colors.danger }]}>Couldn’t load members. Tap to retry.</Text>
+            </TouchableOpacity>
+          )}
+          {members.length === 0 && !loadFailed && (
             <Text style={[s.hint, { textAlign: 'center', marginVertical: 16 }]}>No members.</Text>
           )}
           {members.map(m => {
-            const role = (m.role as Role) ?? 'member';
+            const role = (m.role as GroupRole) ?? 'member';
             const isMe = m.userId === myId;
             const label = m.name || m.email || m.userId.slice(0, 8);
-            // Admins can manage non-owner members other than themselves.
-            const canManage = isAdmin && role !== 'owner' && !isMe;
+            // The same rank-aware check as /group-members (and the server): an
+            // admin cannot touch a peer admin, nobody touches the owner.
+            const acts = memberActions({ actorRole: myRole, targetRole: role, isMe, typed, permissions: perms });
+            const roleOptions = acts.roles.filter((r): r is Exclude<GroupRole, 'owner'> => r !== 'owner');
+            const canEditRole = roleOptions.length > 0;
             return (
               <View key={m.userId}>
                 <TouchableOpacity
                   style={s.memberRow}
-                  activeOpacity={canManage ? 0.6 : 1}
-                  onPress={() => canManage && setRoleMenuUid(roleMenuUid === m.userId ? null : m.userId)}
+                  activeOpacity={canEditRole ? 0.6 : 1}
+                  disabled={!canEditRole}
+                  accessibilityRole={canEditRole ? 'button' : undefined}
+                  accessibilityLabel={`${label}${isMe ? ' (you)' : ''}, ${GROUP_ROLE_LABELS[role] ?? m.role}`}
+                  accessibilityHint={canEditRole ? 'Shows role options' : undefined}
+                  accessibilityState={canEditRole ? { expanded: roleMenuUid === m.userId } : undefined}
+                  onPress={() => setRoleMenuUid(roleMenuUid === m.userId ? null : m.userId)}
                 >
                   <View style={s.avatar}><Text style={s.avatarText}>{initialOf(label)}</Text></View>
                   <View style={{ flex: 1 }}>
                     <Text style={s.memberName} numberOfLines={1}>{label}{isMe ? ' (You)' : ''}</Text>
-                    <Text style={s.roleBadgeText}>{ROLE_LABELS[role]}</Text>
+                    <Text style={s.roleBadgeText}>{GROUP_ROLE_LABELS[role] ?? m.role}</Text>
                   </View>
-                  {canManage && (
-                    <TouchableOpacity accessibilityLabel={`Remove ${label} from the group`} onPress={() => removeMember(m)} style={s.removeBtn} hitSlop={8}>
+                  {acts.canRemove && (
+                    <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Remove ${label} from the group`} onPress={() => removeMember(m)} style={s.removeBtn} hitSlop={8}>
                       <Ionicons name="close-circle" size={22} color={colors.danger} />
                     </TouchableOpacity>
                   )}
                 </TouchableOpacity>
 
-                {roleMenuUid === m.userId && canManage && (
+                {roleMenuUid === m.userId && canEditRole && (
                   <View style={s.roleMenu}>
-                    {(['admin', 'member'] as const).map(r => (
+                    {roleOptions.map(r => (
                       <TouchableOpacity
                         key={r}
                         style={[s.roleOption, role === r && s.roleOptionActive]}
                         onPress={() => changeRole(m, r)}
+                        accessibilityRole="radio"
+                        accessibilityLabel={role === r ? GROUP_ROLE_LABELS[r] : `Make ${GROUP_ROLE_LABELS[r]}`}
+                        accessibilityState={{ selected: role === r, checked: role === r }}
                       >
                         {role === r && (
                           <Ionicons name="checkmark" size={14} color={colors.primary} style={{ marginRight: 6 }} />
                         )}
                         <Text style={[s.roleOptionText, role === r && { color: colors.primary }]}>
-                          {role === r ? ROLE_LABELS[r] : `Make ${ROLE_LABELS[r]}`}
+                          {role === r ? GROUP_ROLE_LABELS[r] : `Make ${GROUP_ROLE_LABELS[r]}`}
                         </Text>
                       </TouchableOpacity>
                     ))}

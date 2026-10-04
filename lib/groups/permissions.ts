@@ -263,6 +263,47 @@ export function seatsRemaining(activeMembers: number, maxMembers: number): numbe
   return activeMembers >= maxMembers ? 0 : maxMembers - activeMembers;
 }
 
+/** Roles the role endpoint accepts. Untyped legacy groups keep their two-role world. */
+const TYPED_ASSIGNABLE: GroupRole[] = ['admin', 'moderator', 'member', 'guest'];
+const UNTYPED_ASSIGNABLE: GroupRole[] = ['admin', 'member'];
+
+export interface MemberActions {
+  /** Roles the actor may set on this member (may include the current one). */
+  roles: GroupRole[];
+  canRemove: boolean;
+  canTransfer: boolean;
+}
+
+/**
+ * The ONE client check for "what may I do to this member row", shared by
+ * app/group-admin.tsx and app/group-members.tsx. Mirrors the server's member
+ * role PATCH and member DELETE handlers: the actor needs remove_members (for
+ * an untyped group the server reads that as "is admin or owner", chatsMem.can),
+ * then the rank rules above decide whether THIS member is theirs to touch.
+ * Presentation only — the server re-checks every call.
+ */
+export function memberActions(a: {
+  actorRole: string;
+  targetRole: string;
+  isMe: boolean;
+  /** true for a typed group (chat.groupType set). */
+  typed: boolean;
+  /** The caller's resolved permissions from GET /chats/:id. */
+  permissions: readonly string[] | null | undefined;
+}): MemberActions {
+  const mayManage = a.typed
+    ? (a.permissions ?? []).includes('remove_members')
+    : a.actorRole === 'owner' || a.actorRole === 'admin';
+  if (a.isMe) return { roles: [], canRemove: false, canTransfer: false };
+  return {
+    roles: mayManage
+      ? (a.typed ? TYPED_ASSIGNABLE : UNTYPED_ASSIGNABLE).filter((r) => canManageRole(a.actorRole, a.targetRole, r))
+      : [],
+    canRemove: mayManage && canRemoveMember(a.actorRole, a.targetRole),
+    canTransfer: canTransferOwnership(a.actorRole, a.targetRole),
+  };
+}
+
 // ── self-check ──
 if (require.main === module) {
   const famDefaults = {

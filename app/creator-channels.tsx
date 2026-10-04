@@ -7,11 +7,18 @@
 // is one real channels surface and no fabricated monetization.
 
 import { useEffect } from 'react';
-import { View } from 'react-native';
+import { ActivityIndicator, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useTheme } from '../lib/theme';
 
 export default function CreatorChannelsRedirect() {
   const router = useRouter();
+  const { colors } = useTheme();
   useEffect(() => { router.replace('/broadcast' as any); }, [router]);
-  return <View />;
+  // Themed, not a bare <View />, so the redirect never flashes an unthemed blank screen.
+  return (
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg }}>
+      <ActivityIndicator color={colors.primary} accessibilityLabel="Opening channels" />
+    </View>
+  );
 }

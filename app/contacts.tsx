@@ -8,16 +8,18 @@
 //   4. POST /contacts/match — get the subset already on crazzychat
 //   5. Render two sections:
 //       * "On crazzychat"  — tap → opens or creates a direct chat
+//         (with `?mode=call`, from the Calls tab: tap → voice or video call)
 //       * "Invite to crazzychat" — fires the OS share sheet with an invite link
 //
-// Privacy: raw phone numbers never leave the device. Only SHA-256 hashes go
-// over the wire, and the server only sees hashes for users who opted in to
-// `discoverable=TRUE`.
+// Privacy: numbers are sent as UNSALTED SHA-256 hashes. That hides them from
+// casual reading but not from anyone who enumerates the (small) phone-number
+// space, so do not describe this as "numbers never leave the device". The
+// server only matches users who opted in to `discoverable=TRUE`.
 
 import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import * as Contacts from 'expo-contacts';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -70,11 +72,16 @@ export default function ContactsScreen() {
   const { colors } = useTheme();
   const S = useS();
   const router = useRouter();
+  // 'call' when opened from the Calls tab's "New call": a match places a call
+  // instead of opening a chat.
+  const callMode = useLocalSearchParams<{ mode?: string }>().mode === 'call';
   const [permission, setPermission]   = useState<'unknown' | 'granted' | 'denied'>('unknown');
   const [scanning,   setScanning]     = useState(false);
   const [matched,    setMatched]      = useState<MatchedRow[]>([]);
   const [invite,     setInvite]       = useState<InviteRow[]>([]);
   const [error,      setError]        = useState<string | null>(null);
+  // Permanently denied: "Try again" cannot re-prompt, so offer Settings instead.
+  const [blocked,    setBlocked]      = useState(false);
   const [openingId,  setOpeningId]    = useState<string | null>(null);
   // Hashing is one async digest PER PHONE NUMBER, so a 1000-contact book is
   // minutes of work behind a spinner that never moves. Count it out loud.
@@ -88,6 +95,7 @@ export default function ContactsScreen() {
       const { status, canAskAgain } = await Contacts.requestPermissionsAsync();
       if (status !== 'granted') {
         setPermission('denied');
+        setBlocked(!canAskAgain);
         if (!canAskAgain) {
           setError('Permission was denied. Enable Contacts access in system settings to find friends.');
         }
@@ -133,12 +141,14 @@ export default function ContactsScreen() {
 
       // Server match in chunks of 1000 to stay well under the 5000 cap
       const results: MatchedContact[] = [];
+      let chunkFailed = false;
       for (let i = 0; i < hashes.length; i += 1000) {
         const chunk = hashes.slice(i, i + 1000);
         try {
           const partial = await matchContacts(chunk);
           results.push(...partial);
         } catch (err: any) {
+          chunkFailed = true;
           console.warn('[contacts] match chunk failed:', err?.message);
         }
       }
@@ -166,7 +176,10 @@ export default function ContactsScreen() {
       matchedRows.sort((a, b) => (a.contactName || '').localeCompare(b.contactName || ''));
 
       setMatched(matchedRows);
-      setInvite(inviteRows);
+      // A failed chunk means we do not know who is on the app: listing those
+      // contacts under "Invite" would be wrong, so show the error instead.
+      setInvite(chunkFailed ? [] : inviteRows);
+      if (chunkFailed) setError("Couldn't check all your contacts — you may be offline. Tap refresh to try again.");
     } catch (e: any) {
       setError(e?.message ?? 'Contact scan failed');
     } finally {
@@ -177,17 +190,34 @@ export default function ContactsScreen() {
 
   useEffect(() => { scan(); }, [scan]);
 
-  const openChat = useCallback(async (m: MatchedRow) => {
+  const openChat = useCallback(async (m: MatchedRow, call?: 'voice' | 'video') => {
+    if (openingId) return;
     setOpeningId(m.id);
     try {
       const res = await createDirectChat({ userId: m.id });
-      router.replace({ pathname: '/chat', params: { id: res.id } } as any);
+      if (call) {
+        // Same params the Calls tab uses to redial (calls.tsx `call`).
+        router.replace({
+          pathname: call === 'video' ? '/videocall' : '/voicecall',
+          params: { chatId: res.id, peerUid: m.id, peerName: m.contactName || m.name || 'crazzychat user' },
+        } as any);
+      } else {
+        router.replace({ pathname: '/chat', params: { id: res.id } } as any);
+      }
     } catch (e: any) {
-      Alert.alert('Could not open chat', e?.message ?? 'Try again');
+      Alert.alert(call ? 'Could not start the call' : 'Could not open chat', e?.message ?? 'Try again');
     } finally {
       setOpeningId(null);
     }
-  }, [router]);
+  }, [router, openingId]);
+
+  const pickCall = useCallback((m: MatchedRow) => {
+    Alert.alert(`Call ${m.contactName || m.name || 'this contact'}`, undefined, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Voice', onPress: () => openChat(m, 'voice') },
+      { text: 'Video', onPress: () => openChat(m, 'video') },
+    ]);
+  }, [openChat]);
 
   const sendInvite = useCallback(async (row: InviteRow) => {
     const message = `Hey, I'm on crazzychat — encrypted messaging without the noise. Try it: ${INVITE_URL}`;
@@ -217,7 +247,10 @@ export default function ContactsScreen() {
       const m: MatchedRow = item;
       const initial = initialOf(m.contactName, m.name);
       return (
-        <TouchableOpacity style={S.row} onPress={() => openChat(m)} activeOpacity={0.7} disabled={openingId === m.id}>
+        <TouchableOpacity style={S.row} onPress={() => (callMode ? pickCall(m) : openChat(m))} activeOpacity={0.7} disabled={openingId === m.id}
+          accessibilityRole="button"
+          accessibilityLabel={`${m.contactName || m.name || 'crazzychat user'}. ${callMode ? 'Call' : 'Message'}`}
+          accessibilityState={{ busy: openingId === m.id }}>
           <View style={[S.avatar, S.avatarOnApp]}><Text style={S.avatarTxt}>{initial}</Text></View>
           <View style={S.rowBody}>
             <Text style={S.rowName} numberOfLines={1}>{m.contactName || m.name || 'crazzychat user'}</Text>
@@ -225,14 +258,15 @@ export default function ContactsScreen() {
           </View>
           {openingId === m.id
             ? <ActivityIndicator color={colors.primary} />
-            : <Text style={S.action}>Message →</Text>}
+            : <Text style={S.action}>{callMode ? 'Call' : 'Message →'}</Text>}
         </TouchableOpacity>
       );
     }
     const r: InviteRow = item;
     const initial = initialOf(r.contactName);
     return (
-      <TouchableOpacity style={S.row} onPress={() => sendInvite(r)} activeOpacity={0.7}>
+      <TouchableOpacity style={S.row} onPress={() => sendInvite(r)} activeOpacity={0.7}
+        accessibilityRole="button" accessibilityLabel={`${r.contactName}. Invite to crazzychat`}>
         <View style={[S.avatar, S.avatarInvite]}><Text style={S.avatarTxt}>{initial}</Text></View>
         <View style={S.rowBody}>
           <Text style={S.rowName} numberOfLines={1}>{r.contactName}</Text>
@@ -259,11 +293,11 @@ export default function ContactsScreen() {
     <View style={S.screen}>
       <AuroraBackground />
       <View style={S.header}>
-        <TouchableOpacity accessibilityLabel="Go back" onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={S.title}>Contacts</Text>
-        <TouchableOpacity accessibilityLabel="Refresh contacts" onPress={scan} disabled={scanning} style={S.refreshBtn} activeOpacity={0.7}>
+        <Text style={S.title}>{callMode ? 'New call' : 'Contacts'}</Text>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Refresh contacts" onPress={scan} disabled={scanning} style={S.refreshBtn} activeOpacity={0.7}>
           {scanning ? <Text style={S.refreshTxt}>…</Text> : <Ionicons name="refresh" size={22} color={colors.primary} />}
         </TouchableOpacity>
       </View>
@@ -284,8 +318,8 @@ export default function ContactsScreen() {
           <Text style={S.icon}>📇</Text>
           <Text style={S.heading}>Contacts permission needed</Text>
           <Text style={S.sub}>{error ?? 'Allow crazzychat to read your contacts so you can find friends who are on the app.'}</Text>
-          <TouchableOpacity style={S.ctaBtn} onPress={scan} activeOpacity={0.85}>
-            <Text style={S.ctaTxt}>Try again</Text>
+          <TouchableOpacity style={S.ctaBtn} onPress={blocked ? () => { Linking.openSettings().catch(() => {}); } : scan} activeOpacity={0.85} accessibilityRole="button">
+            <Text style={S.ctaTxt}>{blocked ? 'Open settings' : 'Try again'}</Text>
           </TouchableOpacity>
         </View>
       )}

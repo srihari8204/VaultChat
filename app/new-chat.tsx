@@ -1,14 +1,14 @@
 // app/new-chat.tsx — WhatsApp-style "New chat": a search bar, action rows
 // (New group / New community / New contact), then your contacts list inline
-// (tap to open). Phone-number add + invite-link join live under "New contact"
-// and a footer row. Full address-book discovery stays on /contacts.
+// (tap to open). Phone-number add lives under "New contact". Full address-book
+// discovery stays on /contacts.
 
 import { useAuthHeader } from '../hooks/useAuthHeader';
 import { HEADER_TOP } from '../constants/layout';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, FlatList, Platform,
+  ActivityIndicator, Alert, FlatList,
   StyleSheet, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,6 +17,7 @@ import { useTheme } from '../lib/theme';
 import { AppText as Text, Avatar, AuroraBackground, KeyboardSafe } from '../components/ui';
 import { PhoneField, toE164 } from '../components/auth/PhoneField';
 import { createDirectChat, listChats, attachmentUrl, setDisappearing, type ChatSummary } from '../lib/chatService';
+import { getCachedChats } from '../lib/localDb';
 
 type Contact = { chatId: string; userId: string; name: string; photoURL: string | null; online: boolean };
 
@@ -40,7 +41,14 @@ export default function NewChatScreen() {
   // Set the timer, THEN open. If it fails the chat still opens — but as a
   // normal one, so say so rather than letting someone believe a conversation
   // disappears when it will not. That belief is the whole point of the feature.
+  // One open at a time: a double tap must not push the chat twice.
+  const opening = useRef(false);
   const openWithTtl = async (chatId: string, replace = false) => {
+    if (opening.current) return;
+    opening.current = true;
+    try { await openInner(chatId, replace); } finally { opening.current = false; }
+  };
+  const openInner = async (chatId: string, replace: boolean) => {
     if (ttlSeconds) {
       try {
         await setDisappearing(chatId, ttlSeconds);
@@ -59,6 +67,8 @@ export default function NewChatScreen() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const authHeader = useAuthHeader();
   const [loadingList, setLoadingList] = useState(true);
+  // listChats failed: the list (if any) is from the device cache.
+  const [listError, setListError] = useState(false);
 
   // "New contact" inline add
   const [addOpen, setAddOpen] = useState(false);
@@ -67,26 +77,38 @@ export default function NewChatScreen() {
   const [adding, setAdding] = useState(false);
   const e164 = toE164(dialCode, national);
 
+  const loadContacts = useCallback(async (isCancelled: () => boolean = () => false) => {
+    setLoadingList(true);
+    try {
+      let list: ChatSummary[];
+      try {
+        list = await listChats();
+        setListError(false);
+      } catch {
+        // Offline: fall back to the cached chat list (as the Chats tab does)
+        // and say so, instead of claiming there are no contacts.
+        setListError(true);
+        list = ((await getCachedChats().catch(() => [])) ?? []) as ChatSummary[];
+      }
+      if (isCancelled()) return;
+      const seen = new Set<string>();
+      const out: Contact[] = [];
+      for (const c of list) {
+        if (c.type === 'direct' && c.peerUserId && !seen.has(c.peerUserId)) {
+          seen.add(c.peerUserId);
+          out.push({ chatId: c.id, userId: c.peerUserId, name: c.peerName || 'crazzychat user', photoURL: c.peerPhotoURL ?? null, online: !!c.peerOnline });
+        }
+      }
+      out.sort((a, b) => a.name.localeCompare(b.name));
+      setContacts(out);
+    } finally { if (!isCancelled()) setLoadingList(false); }
+  }, []);
+
   useEffect(() => {
     let cancel = false;
-    (async () => {
-      try {
-        const list = await listChats();
-        if (cancel) return;
-        const seen = new Set<string>();
-        const out: Contact[] = [];
-        for (const c of list as ChatSummary[]) {
-          if (c.type === 'direct' && c.peerUserId && !seen.has(c.peerUserId)) {
-            seen.add(c.peerUserId);
-            out.push({ chatId: c.id, userId: c.peerUserId, name: c.peerName || 'crazzychat user', photoURL: c.peerPhotoURL ?? null, online: !!c.peerOnline });
-          }
-        }
-        out.sort((a, b) => a.name.localeCompare(b.name));
-        setContacts(out);
-      } catch {} finally { if (!cancel) setLoadingList(false); }
-    })();
+    loadContacts(() => cancel);
     return () => { cancel = true; };
-  }, []);
+  }, [loadContacts]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -105,7 +127,7 @@ export default function NewChatScreen() {
   };
 
   const ActionRow = ({ icon, title, onPress }: { icon: any; title: string; onPress: () => void }) => (
-    <TouchableOpacity style={S.action} onPress={onPress} activeOpacity={0.7}>
+    <TouchableOpacity style={S.action} onPress={onPress} activeOpacity={0.7} accessibilityRole="button">
       <View style={S.actionIcon}><Ionicons name={icon} size={22} color="#fff" /></View>
       <Text style={S.actionTitle}>{title}</Text>
     </TouchableOpacity>
@@ -117,7 +139,7 @@ export default function NewChatScreen() {
     <KeyboardSafe style={S.screen} >
       <AuroraBackground />
       <View style={S.header}>
-        <TouchableOpacity accessibilityLabel="Go back" onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title}>{ttlSeconds ? 'Temporary chat' : 'New chat'}</Text>
@@ -142,7 +164,7 @@ export default function NewChatScreen() {
           style={S.searchInput}
           value={query}
           onChangeText={setQuery}
-          placeholder="Search name or number"
+          placeholder="Search name"
           placeholderTextColor={colors.textDim}
           autoCorrect={false}
         />
@@ -157,28 +179,37 @@ export default function NewChatScreen() {
         ListHeaderComponent={
           searching ? null : (
             <View>
-              <ActionRow icon="people" title="New group" onPress={() => router.push('/create-group' as any)} />
-              <ActionRow icon="people-circle" title="New community" onPress={() => router.push('/communities' as any)} />
+              {/* Group, community and address book do not carry the TTL, so in
+                  temporary mode they would quietly make a NORMAL chat. Hidden. */}
+              {!ttlSeconds && <ActionRow icon="people" title="New group" onPress={() => router.push('/create-group' as any)} />}
+              {!ttlSeconds && <ActionRow icon="people-circle" title="New community" onPress={() => router.push('/communities' as any)} />}
               <ActionRow icon="person-add" title="New contact" onPress={() => setAddOpen(v => !v)} />
 
               {addOpen && (
                 <View style={S.addBox}>
                   <PhoneField dialCode={dialCode} national={national} onChange={(d, n) => { setDialCode(d); setNational(n); }} />
-                  <TouchableOpacity style={[S.cta, !e164 && S.ctaOff]} onPress={startByPhone} disabled={!e164 || adding} activeOpacity={0.85}>
+                  <TouchableOpacity style={[S.cta, !e164 && S.ctaOff]} onPress={startByPhone} disabled={!e164 || adding} activeOpacity={0.85}
+                    accessibilityRole="button" accessibilityState={{ disabled: !e164 || adding, busy: adding }}>
                     {adding ? <ActivityIndicator color="#fff" /> : <Text style={S.ctaTxt}>Start chat</Text>}
                   </TouchableOpacity>
                   <Text style={S.hint}>The number must belong to someone on crazzychat.</Text>
                 </View>
               )}
 
-              <ActionRow icon="book" title="Find from address book" onPress={() => router.push('/contacts' as any)} />
+              {!ttlSeconds && <ActionRow icon="book" title="Find from address book" onPress={() => router.push('/contacts' as any)} />}
 
+              {listError && (
+                <TouchableOpacity onPress={() => loadContacts()} accessibilityRole="button" accessibilityLabel="Couldn't refresh contacts. Tap to retry">
+                  <Text style={[S.hint, { color: colors.danger, marginHorizontal: 16 }]}>Couldn&apos;t refresh — showing saved contacts. Tap to retry.</Text>
+                </TouchableOpacity>
+              )}
               <Text style={S.sectionLabel}>CONTACTS ON CRAZZYCHAT</Text>
             </View>
           )
         }
         renderItem={({ item }) => (
-          <TouchableOpacity style={S.row} activeOpacity={0.7} onPress={() => openWithTtl(item.chatId)}>
+          <TouchableOpacity style={S.row} activeOpacity={0.7} onPress={() => openWithTtl(item.chatId)}
+            accessibilityRole="button" accessibilityLabel={`${item.name}${item.online ? ', online' : ''}`}>
             <Avatar uri={item.photoURL && authHeader ? attachmentUrl(item.photoURL) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={item.name} size={46} presence={item.online ? 'online' : null} ring />
             <View style={{ flex: 1 }}>
               <Text style={S.rowName} numberOfLines={1}>{item.name}</Text>

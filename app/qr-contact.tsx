@@ -7,7 +7,7 @@
 import { HEADER_TOP } from '../constants/layout';
 import { brandAlpha, type Palette } from '../constants/theme';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Share } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Share, Linking } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import QRCode from 'react-native-qrcode-svg';
@@ -15,6 +15,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useTheme } from '../lib/theme';
 import { getMyProfile, resolveVaultId, createDirectChat } from '../lib/chatService';
 import { AuroraBackground } from '../components/ui';
+import { parseVaultIdPayload } from '../lib/vaultIdLink';
 
 function useS() {
   const { colors } = useTheme();
@@ -57,19 +58,14 @@ export default function QRContactScreen() {
     } catch { /* user cancelled */ }
   };
 
-  const parseVaultId = (data: string): string => {
-    if (data.startsWith('vaultchat://add/')) return data.replace('vaultchat://add/', '').split('/')[0];
-    if (data.includes('/add/')) return data.split('/add/')[1].split('/')[0];
-    if (data.startsWith('@')) return data.slice(1);
-    return data.trim();
-  };
 
   const handleScan = useCallback(async ({ data }: { data: string }) => {
     if (scanned || processing) return;
     setScanned(true);
     setProcessing(true);
     try {
-      const vaultId = parseVaultId(data);
+      // Only our own payloads (lib/vaultIdLink.ts); any other QR is "not ours".
+      const vaultId = parseVaultIdPayload(data);
       if (!vaultId) { Alert.alert('Invalid', 'Not a crazzychat QR code.'); setScanned(false); return; }
       if (vaultId === myVaultId) { Alert.alert('That’s you', "That's your own QR code!"); setScanned(false); return; }
 
@@ -110,10 +106,12 @@ export default function QRContactScreen() {
       </View>
 
       <View style={s.tabs}>
-        <TouchableOpacity style={[s.tab, tab === 'my' && s.tabActive]} onPress={() => setTab('my')}>
+        <TouchableOpacity style={[s.tab, tab === 'my' && s.tabActive]} onPress={() => setTab('my')}
+          accessibilityRole="tab" accessibilityState={{ selected: tab === 'my' }}>
           <Text style={[s.tabTxt, tab === 'my' && s.tabTxtActive]}>My QR</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[s.tab, tab === 'scan' && s.tabActive]} onPress={() => { setTab('scan'); setScanned(false); }}>
+        <TouchableOpacity style={[s.tab, tab === 'scan' && s.tabActive]} onPress={() => { setTab('scan'); setScanned(false); }}
+          accessibilityRole="tab" accessibilityState={{ selected: tab === 'scan' }}>
           <Text style={[s.tabTxt, tab === 'scan' && s.tabTxtActive]}>Scan</Text>
         </TouchableOpacity>
       </View>
@@ -127,14 +125,15 @@ export default function QRContactScreen() {
               <View style={s.qrCard}>
                 <Text style={s.qrName}>{myName}</Text>
                 <Text style={s.qrId}>@{myVaultId || '…'}</Text>
-                <View style={s.qrBox}>
+                <View style={s.qrBox} accessible={!!myVaultId} accessibilityRole="image" accessibilityLabel={myVaultId ? `Your QR code, VaultID ${myVaultId}` : undefined}>
                   {myVaultId
                     ? <QRCode value={qrData} size={200} backgroundColor="#FFFFFF" color="#0A0A0F" />
                     : <Text style={{ color: colors.textDim }}>No VaultID yet</Text>}
                 </View>
                 <Text style={s.qrHint}>Show this to add you on crazzychat</Text>
               </View>
-              <TouchableOpacity style={[s.shareBtn, { flexDirection: 'row', alignItems: 'center', gap: 8 }]} onPress={handleShare} disabled={!myVaultId}>
+              <TouchableOpacity style={[s.shareBtn, { flexDirection: 'row', alignItems: 'center', gap: 8 }]} onPress={handleShare} disabled={!myVaultId}
+                accessibilityRole="button" accessibilityState={{ disabled: !myVaultId }}>
                 <Ionicons name="share-outline" size={16} color={colors.primary} />
                 <Text style={s.shareTxt}>Share my VaultID</Text>
               </TouchableOpacity>
@@ -148,8 +147,10 @@ export default function QRContactScreen() {
           ) : !permission.granted ? (
             <View style={s.noPerm}>
               <Text style={s.noPermTxt}>Camera permission is required to scan QR codes.</Text>
-              <TouchableOpacity style={s.shareBtn} onPress={requestPermission}>
-                <Text style={s.shareTxt}>Grant Permission</Text>
+              {/* A permanent denial cannot re-prompt; send the user to Settings. */}
+              <TouchableOpacity style={s.shareBtn} accessibilityRole="button"
+                onPress={permission.canAskAgain ? requestPermission : () => { Linking.openSettings().catch(() => {}); }}>
+                <Text style={s.shareTxt}>{permission.canAskAgain ? 'Grant Permission' : 'Open settings'}</Text>
               </TouchableOpacity>
             </View>
           ) : (
@@ -165,7 +166,7 @@ export default function QRContactScreen() {
                 <Text style={s.scanHint}>{processing ? 'Processing…' : 'Point camera at a crazzychat QR code'}</Text>
               </View>
               {scanned && !processing && (
-                <TouchableOpacity style={[s.shareBtn, { position: 'absolute', bottom: 40, alignSelf: 'center' }]} onPress={() => setScanned(false)}>
+                <TouchableOpacity style={[s.shareBtn, { position: 'absolute', bottom: 40, alignSelf: 'center' }]} onPress={() => setScanned(false)} accessibilityRole="button">
                   <Text style={s.shareTxt}>Scan Again</Text>
                 </TouchableOpacity>
               )}

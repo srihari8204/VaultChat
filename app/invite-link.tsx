@@ -41,7 +41,8 @@ export default function InviteLinkScreen() {
   const [qrCode, setQrCode] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!chatId) { setLoading(false); return; }
+    // A missing id used to render an empty list, indistinguishable from "no links".
+    if (!chatId) { setError('This screen did not say which group to show.'); setLoading(false); return; }
     try { setLinks(await listInviteLinks(chatId)); setError(null); }
     catch (e: any) { setError(e?.message ?? 'Failed to load links'); }
     finally { setLoading(false); }
@@ -49,8 +50,20 @@ export default function InviteLinkScreen() {
 
   useEffect(() => { load(); }, [load]);
 
-  const createLink = async (hours: number) => {
-    if (!chatId) return;
+  const createLink = async (hours: number, confirmed = false) => {
+    if (!chatId || creating) return;
+    // A permanent link is a credential that never expires and lets anyone in.
+    if (hours <= 0 && !confirmed) {
+      Alert.alert(
+        'Create a permanent link?',
+        'Anyone who gets this link can join until you revoke it. A link with an expiry is safer.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Create permanent link', style: 'destructive', onPress: () => { createLink(hours, true); } },
+        ],
+      );
+      return;
+    }
     setCreating(true);
     try {
       const link = await createInviteLink(chatId, { expiresInHours: hours });
@@ -115,12 +128,18 @@ export default function InviteLinkScreen() {
           </View>
         </View>
 
-        {error && <View style={s.errorBar}><Text style={s.errorTxt}>{error}</Text></View>}
+        {error && (
+          <TouchableOpacity style={s.errorBar} onPress={() => { if (chatId) { setLoading(true); load(); } }} disabled={!chatId}
+            accessibilityRole={chatId ? 'button' : 'text'} accessibilityLabel={chatId ? `${error}. Tap to retry` : error}>
+            <Text style={s.errorTxt}>{error}{chatId ? ' Tap to retry.' : ''}</Text>
+          </TouchableOpacity>
+        )}
 
         <Text style={s.sectionTitle}>CREATE NEW LINK</Text>
         <View style={s.createRow}>
           {EXPIRY_OPTS.map(opt => (
-            <TouchableOpacity key={opt.label} style={s.createOpt} onPress={() => createLink(opt.hours)} disabled={creating}>
+            <TouchableOpacity key={opt.label} style={s.createOpt} onPress={() => createLink(opt.hours)} disabled={creating || !chatId}
+              accessibilityRole="button" accessibilityLabel={`Create ${opt.label.toLowerCase()} link`} accessibilityState={{ disabled: creating || !chatId }}>
               <Text style={s.createOptTxt}>{opt.label}</Text>
             </TouchableOpacity>
           ))}
@@ -144,19 +163,19 @@ export default function InviteLinkScreen() {
                 </View>
                 {!item.revoked && (
                   <View style={s.linkBtns}>
-                    <TouchableOpacity style={s.linkBtn} onPress={() => copyLink(item.code)}>
+                    <TouchableOpacity style={s.linkBtn} accessibilityRole="button" onPress={() => copyLink(item.code)}>
                       <Ionicons name="copy-outline" size={15} color={colors.text} />
                       <Text style={s.linkBtnTxt}>Copy</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={s.linkBtn} onPress={() => shareLink(item.code)}>
+                    <TouchableOpacity style={s.linkBtn} accessibilityRole="button" onPress={() => shareLink(item.code)}>
                       <Ionicons name="share-social-outline" size={15} color={colors.text} />
                       <Text style={s.linkBtnTxt}>Share</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={s.linkBtn} onPress={() => setQrCode(item.code)}>
+                    <TouchableOpacity style={s.linkBtn} accessibilityRole="button" onPress={() => setQrCode(item.code)}>
                       <Ionicons name="qr-code-outline" size={15} color={colors.text} />
                       <Text style={s.linkBtnTxt}>QR</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={s.linkBtn} onPress={() => revoke(item)}>
+                    <TouchableOpacity style={s.linkBtn} accessibilityRole="button" onPress={() => revoke(item)}>
                       <Ionicons name="trash-outline" size={15} color={colors.danger} />
                       <Text style={[s.linkBtnTxt, { color: colors.danger }]}>Revoke</Text>
                     </TouchableOpacity>
@@ -172,13 +191,13 @@ export default function InviteLinkScreen() {
       {/* QR for an invite link — scannable from the other device's camera */}
       <Modal visible={qrCode != null} transparent animationType="fade" onRequestClose={() => setQrCode(null)}>
         <View style={s.qrBackdrop}>
-          <View style={s.qrCard}>
+          <View style={s.qrCard} accessibilityViewIsModal>
             <Text style={s.qrTitle}>Scan to join {groupName || 'group'}</Text>
-            <View style={s.qrBox}>
+            <View style={s.qrBox} accessible accessibilityRole="image" accessibilityLabel={`QR code for the invite link vaultchat.app/join/${qrCode ?? ''}`}>
               {qrCode && <QRCode value={JOIN_BASE + qrCode} size={220} backgroundColor="#FFFFFF" color="#0A0A0F" />}
             </View>
             <Text style={s.qrCode} numberOfLines={1}>vaultchat.app/join/{qrCode}</Text>
-            <TouchableOpacity style={s.qrClose} onPress={() => setQrCode(null)}>
+            <TouchableOpacity style={s.qrClose} onPress={() => setQrCode(null)} accessibilityRole="button">
               <Text style={s.qrCloseTxt}>Close</Text>
             </TouchableOpacity>
           </View>

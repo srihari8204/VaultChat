@@ -88,7 +88,7 @@ export default function VerifyContactScreen() {
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10}>
           <Ionicons name="chevron-back" size={26} color={colors.text} />
         </TouchableOpacity>
-        <Text style={S.title}>Verify {peerName}</Text>
+        <Text style={[S.title, { flexShrink: 1, textAlign: 'center' }]} numberOfLines={1}>Verify {peerName}</Text>
         <View style={{ width: 26 }} />
       </View>
 
@@ -101,6 +101,9 @@ export default function VerifyContactScreen() {
           <View style={S.card}>
             <Ionicons name="information-circle" size={28} color={colors.textDim} />
             <Text style={S.unavailable}>{state.reason}</Text>
+            <TouchableOpacity onPress={load} accessibilityRole="button" accessibilityLabel="Try again" style={{ padding: 10 }}>
+              <Text style={{ color: colors.primary, fontWeight: '700' }}>Try again</Text>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -108,7 +111,8 @@ export default function VerifyContactScreen() {
           <>
             <View style={S.card}>
               <Text style={S.numberLabel}>Safety number</Text>
-              <Text style={S.number}>{formatSafetyNumber(state.number)}</Text>
+              {/* Read in five-digit groups, not as one 60-digit number. */}
+              <Text style={S.number} accessibilityLabel={`Safety number: ${formatSafetyNumber(state.number).split(/\s+/).join(', ')}`}>{formatSafetyNumber(state.number)}</Text>
             </View>
 
             <Text style={S.explain}>
@@ -123,6 +127,9 @@ export default function VerifyContactScreen() {
               onPress={toggleVerified}
               disabled={saving}
               activeOpacity={0.85}
+              accessibilityRole="switch"
+              accessibilityLabel="Mark as verified"
+              accessibilityState={{ checked: verified, busy: saving, disabled: saving }}
             >
               {saving ? (
                 <ActivityIndicator size="small" color={verified ? '#fff' : colors.primary} />

@@ -4,81 +4,131 @@
 //   vaultchat://add/<vaultId>/<encodedName>
 // Expo Router maps that URL onto this catch-all route, so scanning the QR with
 // the OS camera — or tapping a shared link — opens the app straight here. We
-// resolve the VaultID to a real user (GET /user/by-vault/:id), open (or create)
-// the direct chat, and replace into it. Same path the in-app scanner uses, so
-// external and in-app scans behave identically.
+// resolve the VaultID to a real user (GET /user/by-vault/:id), then ASK before
+// opening (or creating) the direct chat — the same "Contact found → Open chat"
+// step the in-app scanner shows (qr-contact.tsx). A link anyone can send must
+// not create a chat on its own.
 
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { type Palette } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
 import { createDirectChat, getMyProfile, resolveVaultId } from '../../lib/chatService';
 import { AuroraBackground } from '../../components/ui';
+import { AppText as Text } from '../../components/ui/Text';
 
 function useS() {
   const { colors } = useTheme();
   return useMemo(() => makeStyles(colors), [colors]);
 }
 
+/** A malformed `%` sequence must not throw during render. */
+function safeDecode(s: string): string {
+  try { return decodeURIComponent(s); } catch { return s; }
+}
+
+type Phase =
+  | { k: 'resolving' }
+  | { k: 'confirm'; userId: string; name: string }
+  | { k: 'opening'; userId: string; name: string }
+  | { k: 'error'; msg: string; retry: boolean };
+
 export default function AddByVaultIdScreen() {
   const { colors } = useTheme();
   const S = useS();
   const router = useRouter();
   const { segments } = useLocalSearchParams<{ segments?: string | string[] }>();
-  const [error, setError] = useState<string | null>(null);
+  const [phase, setPhase] = useState<Phase>({ k: 'resolving' });
   const ran = useRef(false);
 
   // First path segment is the VaultID; a second (optional) is a display name
   // hint we only use for the resolving label until the server name comes back.
   const parts = Array.isArray(segments) ? segments : segments ? [segments] : [];
   const vaultId = (parts[0] ?? '').replace(/^@/, '').trim();
-  const nameHint = parts[1] ? decodeURIComponent(parts[1]) : '';
+  const nameHint = parts[1] ? safeDecode(parts[1]) : '';
+
+  const resolve = useCallback(async () => {
+    if (!vaultId) { setPhase({ k: 'error', msg: 'This link is missing a VaultID.', retry: false }); return; }
+    setPhase({ k: 'resolving' });
+    try {
+      const me = await getMyProfile();
+      if (me.vaultId && me.vaultId.replace(/^@/, '') === vaultId) {
+        setPhase({ k: 'error', msg: "That's your own VaultID.", retry: false });
+        return;
+      }
+      const peer = await resolveVaultId(vaultId);
+      setPhase({ k: 'confirm', userId: peer.userId, name: peer.name || `@${vaultId}` });
+    } catch (e: any) {
+      if (e?.status === 404) setPhase({ k: 'error', msg: `No crazzychat user found for @${vaultId}.`, retry: false });
+      else if (e?.status === 401) setPhase({ k: 'error', msg: 'Sign in first, then open this link again.', retry: false });
+      else setPhase({ k: 'error', msg: e?.message ?? 'Could not look up this contact.', retry: true });
+    }
+  }, [vaultId]);
 
   useEffect(() => {
     if (ran.current) return;
     ran.current = true;
-    (async () => {
-      if (!vaultId) { setError('This link is missing a VaultID.'); return; }
-      try {
-        const me = await getMyProfile();
-        if (me.vaultId && me.vaultId.replace(/^@/, '') === vaultId) {
-          setError("That's your own VaultID.");
-          return;
-        }
-        const peer = await resolveVaultId(vaultId);
-        const { id } = await createDirectChat({ userId: peer.userId });
-        router.replace({
-          pathname: '/chat',
-          params: { id, peerUid: peer.userId, peerName: peer.name || vaultId },
-        } as any);
-      } catch (e: any) {
-        const msg = e?.status === 404
-          ? `No crazzychat user found for @${vaultId}.`
-          : e?.status === 401
-            ? 'Sign in first, then open this link again.'
-            : (e?.message ?? 'Could not open this contact.');
-        setError(msg);
-      }
-    })();
-  }, [vaultId, router]);
+    resolve();
+  }, [resolve]);
+
+  const openChat = useCallback(async () => {
+    if (phase.k !== 'confirm') return;
+    const { userId, name } = phase;
+    setPhase({ k: 'opening', userId, name });
+    try {
+      const { id } = await createDirectChat({ userId });
+      router.replace({ pathname: '/chat', params: { id, peerUid: userId, peerName: name } } as any);
+    } catch (e: any) {
+      setPhase({ k: 'error', msg: e?.message ?? 'Could not open this chat.', retry: true });
+    }
+  }, [phase, router]);
+
+  const goChats = () => router.replace('/(tabs)/chats');
 
   return (
     <View style={[S.screen, S.center]}>
       <AuroraBackground />
-      {error ? (
+      {phase.k === 'error' ? (
         <>
           <Text style={S.icon}>🔗</Text>
-          <Text style={S.title}>Couldn’t add contact</Text>
-          <Text style={S.sub}>{error}</Text>
-          <TouchableOpacity style={S.btn} onPress={() => router.replace('/(tabs)/chats')} activeOpacity={0.85}>
-            <Text style={S.btnTxt}>Go to Chats</Text>
+          <Text style={S.title} accessibilityRole="header">Couldn’t add contact</Text>
+          <Text style={S.sub}>{phase.msg}</Text>
+          {phase.retry && (
+            <TouchableOpacity style={S.btn} onPress={resolve} activeOpacity={0.85} accessibilityRole="button">
+              <Text style={S.btnTxt}>Try again</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={phase.retry ? S.ghost : S.btn} onPress={goChats} activeOpacity={0.85} accessibilityRole="button">
+            <Text style={phase.retry ? S.ghostTxt : S.btnTxt}>Go to Chats</Text>
+          </TouchableOpacity>
+        </>
+      ) : phase.k === 'confirm' || phase.k === 'opening' ? (
+        <>
+          <Text style={S.title} accessibilityRole="header">Contact found</Text>
+          <Text style={S.sub}>Start a chat with {phase.name}?</Text>
+          <TouchableOpacity
+            style={[S.btn, phase.k === 'opening' && { opacity: 0.6 }]}
+            onPress={openChat}
+            disabled={phase.k === 'opening'}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel={`Open chat with ${phase.name}`}
+            accessibilityState={{ busy: phase.k === 'opening', disabled: phase.k === 'opening' }}
+          >
+            {phase.k === 'opening' ? <ActivityIndicator color="#fff" /> : <Text style={S.btnTxt}>Open chat</Text>}
+          </TouchableOpacity>
+          <TouchableOpacity style={S.ghost} onPress={goChats} disabled={phase.k === 'opening'} activeOpacity={0.85} accessibilityRole="button">
+            <Text style={S.ghostTxt}>Cancel</Text>
           </TouchableOpacity>
         </>
       ) : (
         <>
           <ActivityIndicator color={colors.primary} size="large" />
-          <Text style={S.sub}>Adding {nameHint || `@${vaultId}`}…</Text>
+          <Text style={S.sub}>Looking up {nameHint || `@${vaultId}`}…</Text>
+          <TouchableOpacity style={S.ghost} onPress={goChats} activeOpacity={0.85} accessibilityRole="button">
+            <Text style={S.ghostTxt}>Cancel</Text>
+          </TouchableOpacity>
         </>
       )}
     </View>
@@ -91,6 +141,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   icon:   { fontSize: 44, marginBottom: 4 },
   title:  { color: c.text, fontSize: 20, fontWeight: '800', textAlign: 'center' },
   sub:    { color: c.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20 },
-  btn:    { marginTop: 12, backgroundColor: c.primary, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 28 },
+  btn:    { marginTop: 12, backgroundColor: c.primary, borderRadius: 12, minHeight: 48, paddingVertical: 14, paddingHorizontal: 28, alignItems: 'center', justifyContent: 'center' },
   btnTxt: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  ghost:  { minHeight: 44, paddingVertical: 10, paddingHorizontal: 20, alignItems: 'center', justifyContent: 'center' },
+  ghostTxt: { color: c.textDim, fontSize: 15, fontWeight: '600' },
 });

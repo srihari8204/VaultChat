@@ -19,15 +19,38 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import {
   planReminders, reminderText,
-  type ScheduledReminder,
+  type ScheduledReminder, type PlannedReminder,
 } from './reminders';
 import type { Task } from './tasks';
 
 const KEY = (groupId: string) => `vc_group_task_reminders_${groupId}`;
+// Calendar event reminders reuse the same reconciler with their own bookkeeping,
+// so a task sync never sees (and cancels) an event reminder, or vice versa.
+const EVENT_KEY = (groupId: string) => `vc_group_event_reminders_${groupId}`;
 
-async function loadBooked(groupId: string): Promise<ScheduledReminder[]> {
+/** What differs between the task and calendar-event reminders. */
+interface ReminderKind {
+  key: string;
+  text: (r: PlannedReminder) => { title: string; body: string };
+  data: (itemId: string) => Record<string, string>;
+}
+
+const TASK_KIND = (groupId: string): ReminderKind => ({
+  key: KEY(groupId),
+  text: reminderText,
+  data: (id) => ({ chatId: groupId, taskId: id, type: 'task_reminder' }),
+});
+
+const EVENT_KIND = (groupId: string): ReminderKind => ({
+  key: EVENT_KEY(groupId),
+  // Same lock-screen rule as tasks: the event title, never the group's name.
+  text: (r) => ({ ...reminderText(r), title: 'Upcoming event' }),
+  data: (id) => ({ chatId: groupId, eventId: id, type: 'event_reminder' }),
+});
+
+async function loadBooked(key: string): Promise<ScheduledReminder[]> {
   try {
-    const raw = await AsyncStorage.getItem(KEY(groupId));
+    const raw = await AsyncStorage.getItem(key);
     const parsed = raw ? JSON.parse(raw) : [];
     return Array.isArray(parsed) ? parsed : [];
   } catch {
@@ -38,8 +61,8 @@ async function loadBooked(groupId: string): Promise<ScheduledReminder[]> {
   }
 }
 
-async function saveBooked(groupId: string, rs: ScheduledReminder[]): Promise<void> {
-  try { await AsyncStorage.setItem(KEY(groupId), JSON.stringify(rs)); }
+async function saveBooked(key: string, rs: ScheduledReminder[]): Promise<void> {
+  try { await AsyncStorage.setItem(key, JSON.stringify(rs)); }
   catch { /* a failed write costs a duplicate reminder, never a lost task */ }
 }
 
@@ -61,8 +84,30 @@ export async function syncTaskReminders(
   now: number = Date.now(),
 ): Promise<{ booked: number; cancelled: number }> {
   if (!groupId || !me) return { booked: 0, cancelled: 0 };
+  return reconcile(TASK_KIND(groupId), tasks, me, now);
+}
 
-  const booked = await loadBooked(groupId);
+/**
+ * The same reconciliation for shared-calendar reminders. `items` comes from
+ * `eventReminderItems` (lib/groups/calendar.ts) over the upcoming horizon.
+ */
+export async function syncEventReminders(
+  groupId: string,
+  items: Task[],
+  me: string | null,
+  now: number = Date.now(),
+): Promise<{ booked: number; cancelled: number }> {
+  if (!groupId || !me) return { booked: 0, cancelled: 0 };
+  return reconcile(EVENT_KIND(groupId), items, me, now);
+}
+
+async function reconcile(
+  kind: ReminderKind,
+  tasks: Task[],
+  me: string,
+  now: number,
+): Promise<{ booked: number; cancelled: number }> {
+  const booked = await loadBooked(kind.key);
   const plan = planReminders(tasks, booked, me, now);
   if (plan.cancel.length === 0 && plan.schedule.length === 0) {
     return { booked: 0, cancelled: 0 };
@@ -83,13 +128,13 @@ export async function syncTaskReminders(
     let notifId = '';
     if (granted) {
       try {
-        const { title, body } = reminderText(r);
+        const { title, body } = kind.text(r);
         notifId = await Notifications.scheduleNotificationAsync({
           content: {
             title, body,
             // The root tap handler routes on chatId; a group's task thread IS
             // its chat, so tapping the reminder lands in the right place.
-            data: { chatId: groupId, taskId: r.taskId, type: 'task_reminder' },
+            data: kind.data(r.taskId),
           },
           trigger: {
             type: Notifications.SchedulableTriggerInputTypes.DATE,
@@ -101,15 +146,17 @@ export async function syncTaskReminders(
     kept.push({ ...r, notifId });
   }
 
-  await saveBooked(groupId, kept);
+  await saveBooked(kind.key, kept);
   return { booked: plan.schedule.length, cancelled: plan.cancel.length };
 }
 
-/** Drop every reminder for a group — used when leaving it. */
+/** Drop every task and event reminder for a group — used when leaving it. */
 export async function clearTaskReminders(groupId: string): Promise<void> {
-  for (const b of await loadBooked(groupId)) {
-    if (!b.notifId) continue;
-    try { await Notifications.cancelScheduledNotificationAsync(b.notifId); } catch { /* already gone */ }
+  for (const key of [KEY(groupId), EVENT_KEY(groupId)]) {
+    for (const b of await loadBooked(key)) {
+      if (!b.notifId) continue;
+      try { await Notifications.cancelScheduledNotificationAsync(b.notifId); } catch { /* already gone */ }
+    }
+    try { await AsyncStorage.removeItem(key); } catch { /* best effort */ }
   }
-  try { await AsyncStorage.removeItem(KEY(groupId)); } catch { /* best effort */ }
 }
