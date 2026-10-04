@@ -3,16 +3,16 @@
 //
 // The export used to be built as ONE string (up to 100k messages) and then
 // written; that string, the raw list and the decrypted list sat in memory
-// together. Here each chunk is decrypted (`prepare`) and its lines appended as
-// it is built, so only one chunk's plaintext exists at a time, and a cancelled
-// export stops between chunks (and after each decrypt) and removes its file.
+// together. Here chunks arrive one at a time, each is decrypted (`prepare`) and
+// its lines appended as it is built, so only one chunk exists at a time, and a
+// cancelled export stops between chunks (and after each decrypt) and removes
+// its file.
 
 import * as RNFS from '@dr.pogodin/react-native-fs';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { Share } from 'react-native';
 
-const CHUNK = 500;
 // Exports are written into their own cache folder, so a sweep can remove every
 // leftover without guessing at names.
 const EXPORT_DIR = `${RNFS.CachesDirectoryPath}/chat-export`;
@@ -38,35 +38,42 @@ export class ExportCancelled extends Error {
   constructor() { super('Export cancelled'); }
 }
 
-/** Write head + one line per item + tail to a new cache file. Returns its file:// URI. */
+/**
+ * Write head + one line per item + tail(count) to a new cache file. Returns its
+ * file:// URI and the number of lines written. `chunks` arrive in order (for a
+ * chat export, lib/messageHistory streams them from the server and the cache),
+ * so no more than one chunk is held, raw or prepared.
+ */
 export async function writeExportFile<T>(
-  name: string, head: string, items: readonly T[], line: (item: T) => string, tail: string,
+  name: string, head: string, chunks: AsyncIterable<T[]>, line: (item: T) => string, tail: (count: number) => string,
   opts: {
     cancelled: () => boolean; onProgress?: (written: number) => void;
     /** Turns a chunk (in order) into what `line` prints — e.g. decrypts it. */
     prepare?: (chunk: T[]) => Promise<T[]>;
   },
-): Promise<string> {
+): Promise<{ uri: string; count: number }> {
   await RNFS.mkdir(EXPORT_DIR).catch(() => {});
   const path = `${EXPORT_DIR}/${name}`;
   await RNFS.writeFile(path, head, 'utf8');
+  let count = 0;
   try {
-    for (let i = 0; i < items.length; i += CHUNK) {
+    for await (const raw of chunks) {
       if (opts.cancelled()) throw new ExportCancelled();
-      const raw = items.slice(i, i + CHUNK);
       const chunk = opts.prepare ? await opts.prepare(raw) : raw;
       if (opts.cancelled()) throw new ExportCancelled();
       let buf = '';
       for (const it of chunk) buf += line(it);
       await RNFS.appendFile(path, buf, 'utf8');
-      opts.onProgress?.(Math.min(i + CHUNK, items.length));
+      count += chunk.length;
+      opts.onProgress?.(count);
     }
-    await RNFS.appendFile(path, tail, 'utf8');
+    if (opts.cancelled()) throw new ExportCancelled();
+    await RNFS.appendFile(path, tail(count), 'utf8');
   } catch (e) {
     await RNFS.unlink(path).catch(() => {});
     throw e;
   }
-  return `file://${path}`;
+  return { uri: `file://${path}`, count };
 }
 
 /**

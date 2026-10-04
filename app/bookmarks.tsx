@@ -36,7 +36,7 @@ import { readCache, writeCache } from '../lib/localCache';
 import { bookmarkBody, hasBodies, isProtectedMessage, withoutBodies } from '../lib/bookmarkBodies';
 import { setPendingJump } from '../lib/chatJump';
 import { isChatLocked } from '../lib/chatLock';
-import { visibleCachedChatIds } from '../lib/localDb';
+import { getCachedMessagesByIds, visibleCachedChatIds } from '../lib/localDb';
 import { AuroraBackground } from '../components/ui';
 import { AppText as Text } from '../components/ui/Text';
 import { userErrorText } from '../lib/userErrorText';
@@ -56,8 +56,15 @@ async function withBodies(rows: BookmarkRow[]): Promise<BookmarkRow[]> {
   const chatIds = [...new Set(rows.flatMap(b => (b.message ? [b.message.chatId] : [])))];
   const lockedIds = new Set<string>();
   const visible = await visibleCachedChatIds().catch(() => null);
+  // The server's meta is only the routing subset (lib/msgEnvelope
+  // META_PUBLIC_KEYS): it carries viewOnce but NOT invisibleInk, which rides
+  // inside the ciphertext. So the protected check also reads this phone's
+  // decrypted copy of each message, where both flags are.
+  const localMeta = new Map<number, unknown>();
   await Promise.all(chatIds.map(async id => {
     if (visible === null || !visible.has(id) || await isChatLocked(id).catch(() => true)) lockedIds.add(id);
+    const ids = rows.flatMap(b => (b.message?.chatId === id ? [Number(b.message.id)] : []));
+    for (const m of await getCachedMessagesByIds(id, ids).catch(() => [])) localMeta.set(m.id, m.meta);
   }));
   return Promise.all(rows.map(async (b) => {
     const id = Number(b.message?.id ?? 0);
@@ -65,7 +72,7 @@ async function withBodies(rows: BookmarkRow[]): Promise<BookmarkRow[]> {
     // Hidden AND purged: a view-once / ink snapshot from before Star stopped
     // taking them must not outlive the bubble. The bookmark itself stays.
     // Purged before the lock check, so a locked chat's snapshot goes too.
-    const isProtected = isProtectedMessage(b.message.meta);
+    const isProtected = isProtectedMessage(b.message.meta) || isProtectedMessage(localMeta.get(id));
     if (isProtected) void dropBookmarkPlaintext(id).catch(() => {});
     if (lockedIds.has(b.message.chatId)) return { ...b, message: { ...b.message, content: LOCKED_TEXT } };
     if (isProtected) return { ...b, message: { ...b.message, content: PROTECTED_TEXT } };

@@ -209,7 +209,7 @@ export default function ImportChatsScreen() {
         {stage === 'done' && outcome && (
           <Done
             s={s} colors={colors} outcome={outcome} peerName={peerName}
-            onOpen={() => router.replace({ pathname: '/chat' as any, params: { chatId } })}
+            onOpen={() => router.replace({ pathname: '/chat', params: { id: chatId } })}
             onRetry={() => setStage('pick-file')}
           />
         )}

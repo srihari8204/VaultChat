@@ -24,36 +24,10 @@ import { permissionDenied } from '../lib/permissionDenied';
 import { resolveScoped, SCOPED_DEFAULT } from '../lib/scopedChoice';
 import { replacedWallpaperFile } from '../lib/wallpaperFile';
 import { WALLPAPER_GLOBAL_KEY, wallpaperKey, type WallpaperConfig } from '../lib/chatWallpaperStore';
+// Fixed wallpaper content, not UI colour (see that file's header).
+import { GRADIENT_WALLPAPERS, SOLID_WALLPAPERS, wallpaperInk } from '../constants/wallpaperPalette';
 import type { EventArg, NavigationAction } from '@react-navigation/native';
 
-
-// WhatsApp-style solid wallpapers — a bright row then a dark row. These are
-// wallpaper content, not UI colour, so they stay fixed in both themes. The name
-// is what a screen reader announces (not the hex code).
-const SOLID_COLORS: { hex: string; name: string }[] = [
-  { hex: '#ECE5DD', name: 'Classic beige' }, { hex: '#E4DDD3', name: 'Sand' },
-  { hex: '#DCEAF5', name: 'Pale blue' },     { hex: '#EAF2E9', name: 'Mint' },
-  { hex: '#F5E6E8', name: 'Blush' },         { hex: '#E8EAF0', name: 'Cloud grey' },
-  { hex: '#F0E6D8', name: 'Cream' },         { hex: '#E6EEF5', name: 'Ice blue' },
-  { hex: '#FFFFFF', name: 'White' },         { hex: '#F6F7F9', name: 'Off-white' },
-  { hex: '#0B141A', name: 'Night' },         { hex: '#1F2C34', name: 'Slate' },
-  { hex: '#131C21', name: 'Charcoal' },      { hex: '#17212B', name: 'Ink blue' },
-  { hex: '#202C33', name: 'Graphite' },      { hex: '#0A0A0F', name: 'Black' },
-  { hex: '#102027', name: 'Deep teal' },     { hex: '#1A1A2E', name: 'Midnight blue' },
-  { hex: '#0B3D2E', name: 'Forest green' },  { hex: '#075E54', name: 'Teal green' },
-];
-
-const GRADIENT_PRESETS = [
-  { id: 'midnight',  name: 'Midnight',  colors: ['#0a0a2e', '#1a1a4e'] },
-  { id: 'ocean',     name: 'Ocean',     colors: ['#001427', '#003459'] },
-  { id: 'forest',    name: 'Forest',    colors: ['#0b1a0b', '#1a3a1a'] },
-  { id: 'teal',      name: 'Teal',      colors: ['#053b34', '#0b6b5b'] },
-  { id: 'sunset',    name: 'Sunset',    colors: ['#1a0a2e', '#2d1b4e', '#4a1942'] },
-  { id: 'arctic',    name: 'Arctic',    colors: ['#0a1628', '#0d2137'] },
-  { id: 'ember',     name: 'Ember',     colors: ['#1a0a00', '#2a1500'] },
-  { id: 'steel',     name: 'Steel',     colors: ['#0e1117', '#1a1e25'] },
-  { id: 'dawn',      name: 'Dawn',      colors: ['#dfe9f3', '#ffffff'] },
-];
 
 type Tab = 'solid' | 'gradient' | 'custom';
 
@@ -62,8 +36,8 @@ type Tab = 'solid' | 'gradient' | 'custom';
 function wallpaperName(w: WallpaperConfig | null): string {
   if (!w) return 'Default';
   if (w.type === 'image') return 'Photo';
-  if (w.type === 'gradient') return GRADIENT_PRESETS.find(g => g.id === w.value)?.name ?? 'Gradient';
-  return SOLID_COLORS.find(c => c.hex === w.value)?.name ?? 'Colour';
+  if (w.type === 'gradient') return GRADIENT_WALLPAPERS.find(g => g.id === w.value)?.name ?? 'Gradient';
+  return SOLID_WALLPAPERS.find(c => c.hex === w.value)?.name ?? 'Colour';
 }
 
 // The live preview behind the sample bubbles. Module scope, so the Image /
@@ -314,7 +288,7 @@ export default function ChatWallpaperScreen() {
                 ? <Ionicons name="checkmark" size={18} color={colors.primary} />
                 : <Text style={[s.defaultTileTxt, { color: colors.textDim }]}>Default</Text>}
             </TouchableOpacity>
-            {SOLID_COLORS.map(({ hex, name }) => {
+            {SOLID_WALLPAPERS.map(({ hex, name }) => {
               const on = selected?.type === 'solid' && selected.value === hex;
               return (
                 <TouchableOpacity accessibilityRole="radio" accessibilityLabel={`${name} wallpaper`} accessibilityState={{ checked: on }}
@@ -322,7 +296,7 @@ export default function ChatWallpaperScreen() {
                   onPress={() => pick({ type: 'solid', value: hex })}
                   style={[s.colorTile, { backgroundColor: hex }, on && s.tileSelected]}
                 >
-                  {on && <Ionicons name="checkmark" size={18} color={colors.primary} />}
+                  {on && <Ionicons name="checkmark" size={18} color={wallpaperInk([hex])} />}
                 </TouchableOpacity>
               );
             })}
@@ -331,12 +305,12 @@ export default function ChatWallpaperScreen() {
 
         {tab === 'gradient' && (
           <View style={s.gradientGrid}>
-            {GRADIENT_PRESETS.map(g => {
+            {GRADIENT_WALLPAPERS.map(g => {
               const on = selected?.type === 'gradient' && selected.value === g.id;
               return (
                 <TouchableOpacity key={g.id} onPress={() => pick({ type: 'gradient', value: g.id, colors: g.colors })} activeOpacity={0.8} accessibilityRole="radio" accessibilityLabel={`${g.name} gradient`} accessibilityState={{ checked: on }}>
                   <LinearGradient colors={g.colors as [string, string, ...string[]]} style={[s.gradientTile, on && s.tileSelected]}>
-                    {on && <Ionicons name="checkmark-circle" size={22} color={colors.primary} />}
+                    {on && <Ionicons name="checkmark-circle" size={22} color={wallpaperInk(g.colors)} />}
                   </LinearGradient>
                   <Text numberOfLines={1} style={s.gradientLabel}>{g.name}</Text>
                 </TouchableOpacity>

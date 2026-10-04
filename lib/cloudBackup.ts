@@ -474,7 +474,7 @@ async function buildEncryptedBackup(using?: SecretPair<E2EEHeader> | null): Prom
   //    Best-effort: a finance read must never sink a chat backup.
   let finance: any = null;
   try { finance = await buildFinanceBackup(await financeUserId()); }
-  catch (e) { console.warn('[backup] finance snapshot skipped:', (e as any)?.message); }
+  catch (e) { console.warn('[backup] finance snapshot skipped:', (e as Error)?.message); }
 
   // NOTE: no e2eeKeys. v2 bundles carried the identity + per-peer ratchets; v3
   // deliberately does not (see the header). Restores re-key instead.
@@ -545,7 +545,7 @@ async function applyEncryptedBackup(blob: string, userSecret?: string): Promise<
   // never costs the caller their restored messages.
   if (data.finance) {
     try { await restoreFinanceBackup(await financeUserId(), data.finance); }
-    catch (e) { console.warn('[backup] finance restore skipped:', (e as any)?.message); }
+    catch (e) { console.warn('[backup] finance restore skipped:', (e as Error)?.message); }
   }
   // Restored: this phone's backups now carry the user's history, so they may
   // replace the online copy again.

@@ -51,10 +51,16 @@ export function escHtml(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-export function exportTextHead(peerName: string, count: number, exportedAt: string): string {
+// The message count is in the TAIL, not the head: the export is streamed
+// (lib/messageHistory streamUnionWithLocalHistoryAsc), so the count is known
+// only once the last line is written.
+export function exportTextHead(peerName: string, exportedAt: string): string {
   return 'crazzychat Export - ' + peerName + '\n'
-    + 'Exported: ' + exportedAt + '\n'
-    + 'Messages: ' + count + '\n' + '='.repeat(50) + '\n\n';
+    + 'Exported: ' + exportedAt + '\n' + '='.repeat(50) + '\n\n';
+}
+
+export function exportTextTail(count: number): string {
+  return '\n' + '='.repeat(50) + '\n' + 'Messages: ' + count + '\n';
 }
 
 export function exportTextLine<M extends ExportMsg>(m: M, ctx: ExportLineCtx<M>): string {
@@ -63,7 +69,7 @@ export function exportTextLine<M extends ExportMsg>(m: M, ctx: ExportLineCtx<M>)
 }
 
 /** The exported HTML is a fixed dark document; `accent` is the brand accent hex. */
-export function exportHtmlHead(peerName: string, count: number, exportedAt: string, accent: string): string {
+export function exportHtmlHead(peerName: string, exportedAt: string, accent: string): string {
   let html = '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">';
   html += '<title>crazzychat Export</title><style>';
   html += 'body{font-family:-apple-system,Segoe UI,sans-serif;background:#0A0A0F;color:#fff;max-width:600px;margin:0 auto;padding:16px}';
@@ -75,9 +81,10 @@ export function exportHtmlHead(peerName: string, count: number, exportedAt: stri
   html += '.time{color:#666;font-size:10px;margin-top:4px;text-align:right}';
   html += '.sender{color:#06B6D4;font-size:11px;font-weight:700;margin-bottom:2px}';
   html += '.meta{color:#777;font-size:10px;font-style:italic}';
+  html += '.footer{text-align:center;color:#888;font-size:12px;padding:20px;border-top:1px solid #222;margin-top:20px}';
   html += '</style></head><body>';
   html += '<div class="header"><h1>crazzychat</h1><p>Chat with ' + escHtml(peerName) + '</p>';
-  html += '<p>' + count + ' messages | Exported ' + exportedAt + '</p></div>';
+  html += '<p>Exported ' + exportedAt + '</p></div>';
   return html;
 }
 
@@ -91,4 +98,6 @@ export function exportHtmlLine<M extends ExportMsg>(m: M, ctx: ExportLineCtx<M>)
   return html + '</div>';
 }
 
-export const EXPORT_HTML_TAIL = '</body></html>';
+export function exportHtmlTail(count: number): string {
+  return '<div class="footer">' + count + ' messages</div></body></html>';
+}

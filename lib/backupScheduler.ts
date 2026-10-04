@@ -161,7 +161,7 @@ export async function runScheduledBackupIfDue(): Promise<void> {
     // Ordered so the one that matters runs while the radio is known good.
     let ok = false;
     try { await uploadCloudBackup(); ok = true; } catch (e) {
-      console.warn('[backup] cloud upload failed:', (e as any)?.message);
+      console.warn('[backup] cloud upload failed:', (e as Error)?.message);
     }
     try { await writeLocalBackup(new Date()); ok = true; } catch {}
     try { await backupToGoogleDrive(false); ok = true; } catch {}

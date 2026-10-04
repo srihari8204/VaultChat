@@ -1,7 +1,7 @@
 // app/chat-export.tsx — Export Chat as Text/HTML (Postgres-backed).
 //
-// Pulls the full message history via GET /chats/:id/messages (keyset
-// pagination), unions it with the device's own history, decrypts it through
+// Streams the full message history via GET /chats/:id/messages (keyset
+// pagination, oldest first), merged with the device's own history, decrypts it through
 // the same hydrateMessages funnel the chat screen uses, formats it on-device,
 // and shares via the system sheet. The file is written to the cache directory
 // and deleted once the share sheet returns. Nothing leaves the device except
@@ -15,10 +15,11 @@ import { Ionicons } from '@expo/vector-icons';
 // BRAND_ACCENT styles the exported HTML file only (a fixed dark document), not the app UI.
 import { type Palette, BRAND_ACCENT } from '../constants/theme';
 import { useTheme } from '../lib/theme';
-import { getChat, getMessages, hydrateMessages, looksEncrypted, type Message } from '../lib/chatService';
-import { unionWithLocalHistoryAsc } from '../lib/messageHistory';
+import { getChat, hydrateMessages, looksEncrypted, normalizeMsgIds, type Message } from '../lib/chatService';
+import { api } from '../lib/api';
+import { streamUnionWithLocalHistoryAsc } from '../lib/messageHistory';
 import {
-  exportBody, exportHtmlHead, exportHtmlLine, exportTextHead, exportTextLine, EXPORT_HTML_TAIL, type ExportLineCtx,
+  exportBody, exportHtmlHead, exportHtmlLine, exportHtmlTail, exportTextHead, exportTextLine, exportTextTail, type ExportLineCtx,
 } from '../lib/chatExportFormat';
 import { ExportCancelled, shareExportFile, sweepExportFiles, writeExportFile } from '../components/chattools/chatExportFile';
 import { getCurrentUserAsync } from './(constants)/authService';
@@ -31,11 +32,12 @@ import { userErrorText } from '../lib/userErrorText';
 // implementation; the web app says so instead of failing on tap.
 const EXPORT_SUPPORTED = Platform.OS !== 'web';
 
-const PAGE = 200;
-const MAX_PAGES = 500;
+const PAGE = 200;    // server page (the server's cap)
+const CHUNK = 500;   // rows per decrypt + write step
 
-// Fetch every message (oldest→newest) by walking the keyset cursor, then
-// UNION the device's own cache.
+// The export streams oldest→newest: the server's history walked FORWARD by
+// keyset cursor, merged with the device's own cache
+// (lib/messageHistory streamUnionWithLocalHistoryAsc), one chunk at a time.
 //
 // The server is not the whole history. delete-on-delivery sets content = NULL
 // once every recipient acks, so an export built from /chats/:id/messages
@@ -43,32 +45,22 @@ const MAX_PAGES = 500;
 // is exactly where a silent omission is worst, because the user believes
 // they now hold a complete archive. The local cache still has those bodies.
 //
-// Server rows are E2EE envelopes. The union prefers our readable local copy
-// over an envelope (isCipher). Whatever is still an envelope is decrypted later,
-// one write chunk at a time, through hydrateMessages — the chat screen's decrypt
-// path (decryptChunk) — so the export never contains ciphertext (exportBody
-// also refuses to print it) and the whole history is never held decrypted.
-// `cancelled` is checked between pages, so Cancel (or leaving) stops the walk.
-async function fetchAll(
-  chatId: string,
-  on: { count: (n: number) => void; cancelled: () => boolean },
-): Promise<{ msgs: Message[]; truncated: boolean }> {
-  const all: Message[] = [];
-  let before: number | undefined;
-  let truncated = true;
-  for (let i = 0; i < MAX_PAGES; i++) {
-    if (on.cancelled()) throw new ExportCancelled();
-    const page = await getMessages(chatId, { before, limit: PAGE });
-    all.push(...page);
-    on.count(all.length);
-    if (page.length < PAGE) { truncated = false; break; }
-    before = page[page.length - 1].id; // oldest id in this (desc) page
-  }
-  if (on.cancelled()) throw new ExportCancelled();
-  const merged = await unionWithLocalHistoryAsc(chatId, all, undefined, looksEncrypted);
-  on.count(merged.length);
-  return { msgs: merged, truncated };
-}
+// Server rows are E2EE envelopes. The merge prefers our readable local copy
+// over an envelope (isCipher). Whatever is still an envelope is decrypted per
+// chunk through hydrateMessages — the chat screen's decrypt path
+// (decryptChunk) — so the export never contains ciphertext (exportBody also
+// refuses to print it). Neither the raw history nor its plaintext is ever held
+// whole, and there is no page cap: an old export stopped at the newest 100k.
+//
+// ?after=<id> answers ascending on both backends (the local-first delta sync);
+// absent or 0 means "newest page, descending", so the walk starts at -1. A
+// server that ignored it would make the stream throw, never mis-order a file.
+const serverPageAfter = (chatId: string) => async (after: number): Promise<Message[]> => {
+  const rows = await api<Message[]>(`/chats/${encodeURIComponent(chatId)}/messages?after=${after}&limit=${PAGE}`);
+  return Array.isArray(rows) ? rows.map(normalizeMsgIds) : rows;
+};
+const historyChunks = (chatId: string) =>
+  streamUnionWithLocalHistoryAsc(chatId, serverPageAfter(chatId), { page: CHUNK, isCipher: looksEncrypted });
 
 // One oldest→newest chunk through the chat's decrypt funnel. hydrateMessages
 // takes newest-first and decrypts oldest-first, so chunks in order keep the
@@ -96,7 +88,6 @@ export default function ChatExportScreen() {
 
   const [exporting, setExporting] = useState(false);
   const [progress, setProgress] = useState('');
-  const [msgCount, setMsgCount] = useState(0);
   // Synchronous re-entry guard: `exporting` state is only set after the
   // (async) lock/confirm gate, so a double tap could start two exports.
   const busyRef = useRef(false);
@@ -205,7 +196,7 @@ export default function ChatExportScreen() {
     );
   };
 
-  const guard = async (fn: (msgs: Message[], myId: string, onProgress: (written: number) => void) => Promise<void>) => {
+  const guard = async (fn: (myId: string, onProgress: (written: number) => void) => Promise<void>) => {
     if (!chatId) { Alert.alert('Export failed', 'Missing chat id.'); return; }
     if (busyRef.current) return;
     busyRef.current = true;
@@ -214,22 +205,14 @@ export default function ChatExportScreen() {
       if (!(await authorizeExport())) return;
       setExporting(true);
       setProgress('Fetching messages…');
-      setMsgCount(0);
       const me = await getCurrentUserAsync();
       try {
         const detail = await getChat(chatId);
         namesRef.current = new Map(detail.members.map(mm => [mm.userId, mm.name || mm.email || '']));
       } catch { namesRef.current = new Map(); }   // names are cosmetic; peerName is the fallback
-      const { msgs, truncated } = await fetchAll(chatId, { count: live(setMsgCount), cancelled });
-      // Say so BEFORE the file is shared, while the user can still decide.
-      if (truncated && !(await confirm(
-        'Export incomplete',
-        `Only the newest ${MAX_PAGES * PAGE} messages from the server can be included, plus older ones saved on this device. Export anyway?`,
-      ))) return;
       if (cancelled()) return;
-      live(setProgress)('Decrypting and writing ' + msgs.length + ' messages…');
-      await fn(msgs, me?.id ?? '', (n) => {
-        if (!cancelled()) live(setProgress)(`Decrypting and writing… ${n.toLocaleString()} of ${msgs.length.toLocaleString()}`);
+      await fn(me?.id ?? '', (n) => {
+        if (!cancelled()) live(setProgress)(`Decrypting and writing… ${n.toLocaleString()} messages so far`);
       });
       live(setProgress)('');
     } catch (e: any) {
@@ -242,20 +225,22 @@ export default function ChatExportScreen() {
     }
   };
 
-  const exportAsText = () => guard(async (msgs, myId, onProgress) => {
+  const exportAsText = () => guard(async (myId, onProgress) => {
     const ctx = lineCtx(myId);
-    const uri = await writeExportFile(
-      fileName(peerName, 'txt'), exportTextHead(peerName, msgs.length, new Date().toLocaleString()),
-      msgs, (m) => exportTextLine(m, ctx), '', { cancelled, onProgress, prepare: decryptChunk(chatId) },
+    const { uri } = await writeExportFile(
+      fileName(peerName, 'txt'), exportTextHead(peerName, new Date().toLocaleString()),
+      historyChunks(chatId), (m) => exportTextLine(m, ctx), exportTextTail,
+      { cancelled, onProgress, prepare: decryptChunk(chatId) },
     );
     await shareExportFile(uri, 'text/plain');
   });
 
-  const exportAsHTML = () => guard(async (msgs, myId, onProgress) => {
+  const exportAsHTML = () => guard(async (myId, onProgress) => {
     const ctx = lineCtx(myId);
-    const uri = await writeExportFile(
-      fileName(peerName, 'html'), exportHtmlHead(peerName, msgs.length, new Date().toLocaleString(), BRAND_ACCENT),
-      msgs, (m) => exportHtmlLine(m, ctx), EXPORT_HTML_TAIL, { cancelled, onProgress, prepare: decryptChunk(chatId) },
+    const { uri } = await writeExportFile(
+      fileName(peerName, 'html'), exportHtmlHead(peerName, new Date().toLocaleString(), BRAND_ACCENT),
+      historyChunks(chatId), (m) => exportHtmlLine(m, ctx), exportHtmlTail,
+      { cancelled, onProgress, prepare: decryptChunk(chatId) },
     );
     await shareExportFile(uri, 'text/html');
   });
@@ -305,7 +290,6 @@ export default function ChatExportScreen() {
           <View style={s.progressBox}>
             <ActivityIndicator color={colors.primary} />
             <Text style={s.progressTxt} accessibilityLiveRegion="polite">{progress}</Text>
-            {msgCount > 0 && <Text style={s.progressCount}>{msgCount} messages</Text>}
             <TouchableOpacity style={s.cancelBtn} onPress={() => { cancelRef.current = true; setProgress('Cancelling…'); }} accessibilityRole="button" accessibilityLabel="Cancel export">
               <Text style={s.cancelTxt}>Cancel</Text>
             </TouchableOpacity>
@@ -374,7 +358,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   exportDesc: { color: c.textDim, fontSize: 12, marginTop: 2 },
   progressBox: { alignItems: 'center', padding: 20, marginTop: 10 },
   progressTxt: { color: c.textDim, fontSize: 13, marginTop: 8 },
-  progressCount: { color: c.textFaint, fontSize: 11, marginTop: 4 },
   cancelBtn: { minHeight: 44, minWidth: 120, marginTop: 8, paddingHorizontal: 20, alignItems: 'center', justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke },
   cancelTxt: { color: c.text, fontWeight: '700' },
   noteBox: { marginTop: 24, backgroundColor: c.glassSoft, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: c.glassStroke },
