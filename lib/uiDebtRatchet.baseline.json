@@ -1,0 +1,658 @@
+{
+ "app/(tabs)/_layout.tsx": {
+  "unroled": 0,
+  "hex": 7
+ },
+ "app/(tabs)/alerts.tsx": {
+  "unroled": 0,
+  "hex": 9
+ },
+ "app/(tabs)/calls.tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "app/(tabs)/chats.tsx": {
+  "unroled": 2,
+  "hex": 10
+ },
+ "app/(tabs)/mini.tsx": {
+  "unroled": 0,
+  "hex": 21
+ },
+ "app/(tabs)/profile.tsx": {
+  "unroled": 0,
+  "hex": 5
+ },
+ "app/(tabs)/status.tsx": {
+  "unroled": 0,
+  "hex": 20
+ },
+ "app/add/[...segments].tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "app/aiguardian.tsx": {
+  "unroled": 0,
+  "hex": 5
+ },
+ "app/app-lock.tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "app/blocked.tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "app/cache-cleanup.tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "app/call-reliability.tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "app/chat-export.tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "app/chat-themes.tsx": {
+  "unroled": 0,
+  "hex": 14
+ },
+ "app/chat-wallpaper.tsx": {
+  "unroled": 0,
+  "hex": 39
+ },
+ "app/chat.tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "app/communities.tsx": {
+  "unroled": 0,
+  "hex": 6
+ },
+ "app/contact-info.tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "app/contacts.tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "app/create-group.tsx": {
+  "unroled": 0,
+  "hex": 3
+ },
+ "app/delete-account.tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "app/docscanner.tsx": {
+  "unroled": 1,
+  "hex": 15
+ },
+ "app/emergency-sos.tsx": {
+  "unroled": 0,
+  "hex": 7
+ },
+ "app/encrypted-notes.tsx": {
+  "unroled": 0,
+  "hex": 22
+ },
+ "app/eye-check.tsx": {
+  "unroled": 0,
+  "hex": 18
+ },
+ "app/family-add.tsx": {
+  "unroled": 0,
+  "hex": 3
+ },
+ "app/family-member.tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "app/family-places.tsx": {
+  "unroled": 0,
+  "hex": 4
+ },
+ "app/family-setup.tsx": {
+  "unroled": 0,
+  "hex": 5
+ },
+ "app/family.tsx": {
+  "unroled": 0,
+  "hex": 7
+ },
+ "app/file-preview.tsx": {
+  "unroled": 0,
+  "hex": 17
+ },
+ "app/file-viewer.tsx": {
+  "unroled": 0,
+  "hex": 49
+ },
+ "app/finance/chitti/[id].tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "app/finance/customer.tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "app/finance/emi.tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "app/finance/index.tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "app/finance/interest.tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "app/finance/ledger/[id].tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "app/games.tsx": {
+  "unroled": 0,
+  "hex": 4
+ },
+ "app/group-admin.tsx": {
+  "unroled": 1,
+  "hex": 4
+ },
+ "app/group-calendar.tsx": {
+  "unroled": 0,
+  "hex": 3
+ },
+ "app/group-call-active.tsx": {
+  "unroled": 0,
+  "hex": 22
+ },
+ "app/group-calls.tsx": {
+  "unroled": 0,
+  "hex": 4
+ },
+ "app/group-create.tsx": {
+  "unroled": 0,
+  "hex": 12
+ },
+ "app/group-info.tsx": {
+  "unroled": 0,
+  "hex": 8
+ },
+ "app/group-invitations.tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "app/group-invites.tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "app/group-join.tsx": {
+  "unroled": 0,
+  "hex": 4
+ },
+ "app/group-notes.tsx": {
+  "unroled": 0,
+  "hex": 3
+ },
+ "app/group-trip.tsx": {
+  "unroled": 0,
+  "hex": 3
+ },
+ "app/i/[token].tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "app/image-editor.tsx": {
+  "unroled": 0,
+  "hex": 17
+ },
+ "app/incoming-call.tsx": {
+  "unroled": 0,
+  "hex": 4
+ },
+ "app/invite-link.tsx": {
+  "unroled": 0,
+  "hex": 3
+ },
+ "app/join/[code].tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "app/live-view.tsx": {
+  "unroled": 0,
+  "hex": 64
+ },
+ "app/live.tsx": {
+  "unroled": 0,
+  "hex": 11
+ },
+ "app/live/join/[code].tsx": {
+  "unroled": 0,
+  "hex": 3
+ },
+ "app/location-lock.tsx": {
+  "unroled": 0,
+  "hex": 3
+ },
+ "app/location.tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "app/lock-settings.tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "app/media-gallery.tsx": {
+  "unroled": 0,
+  "hex": 3
+ },
+ "app/media-viewer.tsx": {
+  "unroled": 0,
+  "hex": 14
+ },
+ "app/mpin-recover.tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "app/navigate.tsx": {
+  "unroled": 0,
+  "hex": 5
+ },
+ "app/network-test.tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "app/new-chat.tsx": {
+  "unroled": 0,
+  "hex": 3
+ },
+ "app/notification-sounds.tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "app/notifications.tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "app/offline-mode.tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "app/onboard-profile.tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "app/onboard-security.tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "app/onboard-success.tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "app/onboard.tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "app/permissions.tsx": {
+  "unroled": 0,
+  "hex": 3
+ },
+ "app/qr-contact.tsx": {
+  "unroled": 0,
+  "hex": 5
+ },
+ "app/restore-backup.tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "app/shop-book.tsx": {
+  "unroled": 0,
+  "hex": 3
+ },
+ "app/space-admin.tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "app/space-checkin.tsx": {
+  "unroled": 0,
+  "hex": 3
+ },
+ "app/space-devices.tsx": {
+  "unroled": 0,
+  "hex": 5
+ },
+ "app/space-incidents.tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "app/space-leave.tsx": {
+  "unroled": 0,
+  "hex": 4
+ },
+ "app/space-ops-map.tsx": {
+  "unroled": 0,
+  "hex": 4
+ },
+ "app/space-overview.tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "app/space-people.tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "app/space-roster.tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "app/space-run-driver.tsx": {
+  "unroled": 0,
+  "hex": 7
+ },
+ "app/space-runs-admin.tsx": {
+  "unroled": 0,
+  "hex": 4
+ },
+ "app/space-tasks.tsx": {
+  "unroled": 0,
+  "hex": 7
+ },
+ "app/space-transport.tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "app/space-visitors.tsx": {
+  "unroled": 0,
+  "hex": 5
+ },
+ "app/story-viewer.tsx": {
+  "unroled": 1,
+  "hex": 22
+ },
+ "app/trusted-contacts.tsx": {
+  "unroled": 0,
+  "hex": 3
+ },
+ "app/vault.tsx": {
+  "unroled": 1,
+  "hex": 0
+ },
+ "app/verify-contact.tsx": {
+  "unroled": 0,
+  "hex": 3
+ },
+ "app/video-player.tsx": {
+  "unroled": 0,
+  "hex": 4
+ },
+ "app/videocall.tsx": {
+  "unroled": 1,
+  "hex": 7
+ },
+ "app/vision-comfort.tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "app/voicecall.tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "app/whiteboard.tsx": {
+  "unroled": 0,
+  "hex": 14
+ },
+ "components/CallBar.tsx": {
+  "unroled": 0,
+  "hex": 4
+ },
+ "components/ChainLinkIcon.tsx": {
+  "unroled": 1,
+  "hex": 2
+ },
+ "components/ConnectionBanner.tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "components/ErrorBoundary.tsx": {
+  "unroled": 0,
+  "hex": 5
+ },
+ "components/FormattingToolbar.tsx": {
+  "unroled": 3,
+  "hex": 0
+ },
+ "components/GifPicker.tsx": {
+  "unroled": 2,
+  "hex": 3
+ },
+ "components/InvisibleInk.tsx": {
+  "unroled": 0,
+  "hex": 4
+ },
+ "components/MediaMessage.tsx": {
+  "unroled": 1,
+  "hex": 4
+ },
+ "components/NetworkBanner.tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "components/PdfView.tsx": {
+  "unroled": 0,
+  "hex": 4
+ },
+ "components/ProgressRing.tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "components/ProtectedMediaView.tsx": {
+  "unroled": 0,
+  "hex": 5
+ },
+ "components/ReactionPicker.tsx": {
+  "unroled": 2,
+  "hex": 1
+ },
+ "components/SmartReplyBar.tsx": {
+  "unroled": 1,
+  "hex": 2
+ },
+ "components/TermsGate.tsx": {
+  "unroled": 0,
+  "hex": 17
+ },
+ "components/TransferProgress.tsx": {
+  "unroled": 1,
+  "hex": 5
+ },
+ "components/UpdateGate.tsx": {
+  "unroled": 0,
+  "hex": 9
+ },
+ "components/VoiceRecorder.tsx": {
+  "unroled": 3,
+  "hex": 4
+ },
+ "components/WritingAssistant.tsx": {
+  "unroled": 3,
+  "hex": 2
+ },
+ "components/call/CallChatSheet.tsx": {
+  "unroled": 0,
+  "hex": 6
+ },
+ "components/call/CallControlButton.tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "components/call/CallExtras.tsx": {
+  "unroled": 0,
+  "hex": 4
+ },
+ "components/chat/ChatLockGate.tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "components/chat/ChatModals.tsx": {
+  "unroled": 4,
+  "hex": 0
+ },
+ "components/chat/Composer.tsx": {
+  "unroled": 0,
+  "hex": 5
+ },
+ "components/chat/MediaCaptionPreview.tsx": {
+  "unroled": 0,
+  "hex": 12
+ },
+ "components/chat/MessageBubble.tsx": {
+  "unroled": 11,
+  "hex": 11
+ },
+ "components/chat/SharedMediaThumb.tsx": {
+  "unroled": 1,
+  "hex": 1
+ },
+ "components/chat/ViewerStack.tsx": {
+  "unroled": 1,
+  "hex": 1
+ },
+ "components/family/AnnouncementSheet.tsx": {
+  "unroled": 0,
+  "hex": 3
+ },
+ "components/family/CheckinSheet.tsx": {
+  "unroled": 0,
+  "hex": 5
+ },
+ "components/family/CrashCountdown.tsx": {
+  "unroled": 0,
+  "hex": 3
+ },
+ "components/family/FamilyMap.tsx": {
+  "unroled": 0,
+  "hex": 14
+ },
+ "components/family/NavigationLayer.tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "components/family/SelectedMemberSheet.tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "components/games/Chess.tsx": {
+  "unroled": 1,
+  "hex": 37
+ },
+ "components/games/HistorySheet.tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "components/games/Ludo.tsx": {
+  "unroled": 0,
+  "hex": 13
+ },
+ "components/games/Rummy.tsx": {
+  "unroled": 0,
+  "hex": 25
+ },
+ "components/games/TicTacToe.tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "components/games/feedback.tsx": {
+  "unroled": 2,
+  "hex": 4
+ },
+ "components/games/ui.tsx": {
+  "unroled": 0,
+  "hex": 11
+ },
+ "components/nav/NavMap.tsx": {
+  "unroled": 0,
+  "hex": 4
+ },
+ "components/shopbook/catalog.tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "components/shopbook/checkout.tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "components/shopbook/customerViews.tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "components/shopbook/invoices.tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "components/shopbook/orders.tsx": {
+  "unroled": 0,
+  "hex": 5
+ },
+ "components/shopbook/products.tsx": {
+  "unroled": 0,
+  "hex": 7
+ },
+ "components/shopbook/reports.tsx": {
+  "unroled": 0,
+  "hex": 4
+ },
+ "components/shopbook/settings.tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "components/shopbook/shared.tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "components/shopbook/verification.tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "components/spaces/Donut.tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "components/spaces/ShiftSheet.tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "components/spaces/SpaceLinksSheet.tsx": {
+  "unroled": 0,
+  "hex": 2
+ },
+ "components/status/GateChallenge.tsx": {
+  "unroled": 0,
+  "hex": 7
+ },
+ "components/status/PuzzleBoard.tsx": {
+  "unroled": 1,
+  "hex": 0
+ },
+ "components/ui/AuroraBackground.tsx": {
+  "unroled": 0,
+  "hex": 19
+ },
+ "components/ui/Avatar.tsx": {
+  "unroled": 0,
+  "hex": 1
+ },
+ "components/ui/Button.tsx": {
+  "unroled": 0,
+  "hex": 4
+ },
+ "components/ui/GlassChip.tsx": {
+  "unroled": 0,
+  "hex": 1
+ }
+}
