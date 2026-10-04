@@ -60,10 +60,16 @@ async function main() {
   assert.equal(CL.verifyPin(again, '2222'), false);
   await waitFor('the failure streak', () => stored('c1').failN === 2);
   assert.equal(JSON.parse(store.get(KEY)!).c1.failN, 2, 'the streak is stored on the lock');
-  assert.ok(CL.pinRetryAfterMs(again) > 0, 'a backoff is owed');
-  assert.equal(CL.verifyPin(again, '4321'), false, 'even the right PIN waits out the backoff');
-  const fresh = (await CL.getLock('c1'))!;
-  assert.ok(CL.pinRetryAfterMs(fresh) > 0, 'leaving and coming back does not reset it');
+  // Two failures owe a 1 s wait. Pin the clock just after the last failure so
+  // a slow run (scrypt under a loaded test suite) cannot outlive the window.
+  const realNow = Date.now;
+  Date.now = () => again.failAt! + 10;
+  try {
+    assert.ok(CL.pinRetryAfterMs(again) > 0, 'a backoff is owed');
+    assert.equal(CL.verifyPin(again, '4321'), false, 'even the right PIN waits out the backoff');
+    const fresh = (await CL.getLock('c1'))!;
+    assert.ok(CL.pinRetryAfterMs(fresh) > 0, 'leaving and coming back does not reset it');
+  } finally { Date.now = realNow; }
 
   // New locks are salted from the start; isChatLocked reads the table.
   await CL.setChatLock('c2', 'New', 'pin', 0, '8642');
