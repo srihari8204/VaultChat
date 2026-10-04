@@ -1,6 +1,8 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import * as Sentry from '@sentry/react-native';
+// A plain constant (constants/theme imports nothing): no context is read here.
+import { FALLBACK_GROUND } from '../constants/theme';
 
 interface Props {
   children: React.ReactNode;
@@ -59,7 +61,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
 export default ErrorBoundary;
 
 const s = StyleSheet.create({
-  wrap:   { flex: 1, backgroundColor: '#03030E', alignItems: 'center', justifyContent: 'center', padding: 32 },
+  wrap:   { flex: 1, backgroundColor: FALLBACK_GROUND, alignItems: 'center', justifyContent: 'center', padding: 32 },
   title:  { color: '#FF3C6E', fontSize: 20, fontWeight: 'bold', marginBottom: 12, textAlign: 'center' },
   msg:    { color: '#888', fontSize: 14, textAlign: 'center', lineHeight: 22, marginBottom: 24 },
   btn:    { backgroundColor: '#00E5FF', borderRadius: 10, paddingHorizontal: 24, paddingVertical: 12 },

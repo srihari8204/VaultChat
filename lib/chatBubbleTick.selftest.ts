@@ -12,7 +12,8 @@
 // A custom bubble colour (lib/chatBubbleTheme BUBBLE_THEMES) gets its own inks
 // (components/chat/bubbleFillInk): checked here for EVERY preset, in normal and
 // high contrast — body and meta text >= 4.5:1, read tick >= 3:1 with a hue
-// apart from the meta ink the sent / delivered ticks use.
+// apart from the meta ink the sent / delivered ticks use. The theme's own
+// bubbleMetaOut (time text on the default fill) is text too: >= 4.5:1.
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -50,6 +51,9 @@ for (const [scheme, p] of Object.entries(PALETTES)) {
   const [r, g, b] = over(p.tickRead, fill);
   const chroma = Math.max(r, g, b) - Math.min(r, g, b);
   assert.ok(chroma >= 100, `${scheme}: read tick has no clear hue (chroma ${chroma.toFixed(0)}) — it would read as the white meta line`);
+  // The time / sent / delivered ink is text: 4.5:1 on the fill.
+  const meta = contrast(p.bubbleMetaOut, fill);
+  assert.ok(meta >= 4.5, `${scheme}: bubbleMetaOut ${p.bubbleMetaOut} on ${fill} is ${meta.toFixed(2)}:1 (< 4.5:1)`);
   console.log(`${scheme}: tickRead ${p.tickRead} on ${fill} = ${onFill.toFixed(2)}:1; delivered ink ${p.bubbleMetaOut} = ${contrast(p.bubbleMetaOut, fill).toFixed(2)}:1; high-contrast ink ${p.bubbleOutText} = ${contrast(p.bubbleOutText, fill).toFixed(2)}:1`);
 }
 // Presets read from source: lib/chatBubbleTheme.ts imports AsyncStorage.
@@ -71,4 +75,11 @@ for (const [id, fill] of presets) {
     if (!hc) console.log(`${tag}: text ${text.toFixed(2)}:1, meta ${ink.meta} ${meta.toFixed(2)}:1, read ${ink.tickRead} ${read.toFixed(2)}:1`);
   }
 }
+// The theme picker (app/chat-themes.tsx) previews with lib/chatBubbleTheme
+// idealText: it must pick the same ink as the chat (fillInks), not a
+// brightness cut-off that put white on Emerald at 2.54:1.
+assert.ok(/export function idealText\(hex: string\): string \{\s*return fillInks\(hex\)\.text;/.test(themeSrc),
+  'lib/chatBubbleTheme idealText delegates to fillInks(hex).text');
+assert.ok(/const mineMeta = current\.color \? fillInks\(current\.color\)\.meta : colors\.bubbleMetaOut;/
+  .test(readFileSync('app/chat-themes.tsx', 'utf8')), 'the picker previews the time text in the chat\'s own meta ink');
 console.log('chatBubbleTick: ok');

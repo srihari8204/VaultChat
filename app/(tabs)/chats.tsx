@@ -249,9 +249,7 @@ export default function ChatsScreen() {
         // stays, offline) for exactly the chats you just finished reading.
         try {
           const { readPointers } = await import('../../lib/receipts');
-          // `as any` is a no-op (getCachedChats returns any[]) kept because
-          // lib/chatUnreadCursor.selftest.ts pins this exact line.
-          applyLocalReadPointers(cached as any, await readPointers());
+          applyLocalReadPointers(cached, await readPointers());
         } catch {}
         if (!cancel && cached.length) {
           setChats(cached); setLoading(false);

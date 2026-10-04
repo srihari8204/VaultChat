@@ -4,6 +4,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { resolveScoped } from './scopedChoice';
+import { fillInks } from '../components/chat/bubbleFillInk';
 
 export const BUBBLE_KEY = 'vc_bubble_color_';
 export const GLOBAL_BUBBLE = 'vc_global_bubble';
@@ -26,17 +27,14 @@ export const BUBBLE_THEMES: BubbleTheme[] = [
   { id: 'slate',   name: 'Slate',   color: '#334155' },
 ];
 
-// Ink for text on a user-picked bubble colour. Chosen against that colour, not
-// the app theme, so these stay fixed in light and dark.
-export const BUBBLE_INK_DARK = '#111B21';
-export const BUBBLE_INK_LIGHT = '#FFFFFF';
-
-/** Legible text (dark/light ink) for a given background — matches chat.tsx idealText. */
+/**
+ * Ink for text on a user-picked bubble colour: the dark or light ink with the
+ * higher WCAG contrast (components/chat/bubbleFillInk), chosen against that
+ * colour, not the app theme — the same ink the chat paints (chatStyles
+ * idealText). A perceived-brightness cut-off put white on Emerald at 2.54:1.
+ */
 export function idealText(hex: string): string {
-  const h = hex.replace('#', '');
-  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
-  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  return lum > 0.6 ? BUBBLE_INK_DARK : BUBBLE_INK_LIGHT;
+  return fillInks(hex).text;
 }
 
 // Bubble colors chosen for a chat. Returns null for "Default" so chat.tsx keeps

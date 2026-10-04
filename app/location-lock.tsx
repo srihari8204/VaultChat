@@ -20,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import notifee from '@notifee/react-native';
 import { useTheme } from '../lib/theme';
+import { userErrorText } from '../lib/userErrorText';
 import { permissionDenied } from '../lib/permissionDenied';
 import { ALARM } from '../lib/lock/alarmPalette';
 import { typedCoords } from '../lib/nav/urlCoords';
@@ -41,7 +42,6 @@ const MODES: { key: LockMode; label: string; icon: keyof typeof Ionicons.glyphMa
   { key: 'custom', label: 'Custom', icon: 'options' },
 ];
 
-const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message) || fallback;
 
 /** Test Alarm, saying so when the alarm sound could not play. */
 function testAlarmAndSay() {
@@ -97,7 +97,7 @@ export default function LocationLockScreen() {
     restoreLock().catch((e: unknown) => {
       // Silence here meant a lock that might not be monitoring while the
       // screen looked normal. Say so; the background service may still run.
-      Alert.alert('Location Lock', `Couldn’t resume monitoring: ${errText(e, 'unknown error')}. Check location permission and GPS.`);
+      Alert.alert('Location Lock', `Couldn’t resume monitoring. ${userErrorText(e, 'Check location permission and GPS.')}`);
     });
     (async () => {
       try {
@@ -147,7 +147,7 @@ export default function LocationLockScreen() {
 
   const setMode = (mode: LockMode) => {
     setLockSettings({ mode }).then(() => applyAlertSettings()).catch((e: unknown) => {
-      Alert.alert('Mode not saved', `${errText(e, 'Could not save the lock mode')}. The new mode applies now but will not survive an app restart.`);
+      Alert.alert('Mode not saved', `${userErrorText(e, 'Could not save the lock mode.')} The new mode applies now but will not survive an app restart.`);
     });
   };
 
@@ -203,7 +203,7 @@ export default function LocationLockScreen() {
     } catch (e: unknown) {
       // armLock can reject (e.g. no GPS fix in time) — that used to vanish,
       // leaving the user believing the spot was locked.
-      Alert.alert('Could not lock', errText(e, 'Could not read your position. Check GPS and try again.'));
+      Alert.alert('Could not lock', userErrorText(e, 'Could not read your position. Check GPS and try again.'));
     } finally { setArming(false); }
   };
 

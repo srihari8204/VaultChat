@@ -81,7 +81,7 @@
  },
  "app/videocall.tsx": {
   "unroled": 1,
-  "hex": 2
+  "hex": 1
  },
  "app/whiteboard.tsx": {
   "unroled": 0,
@@ -101,7 +101,7 @@
  },
  "components/ErrorBoundary.tsx": {
   "unroled": 0,
-  "hex": 5
+  "hex": 4
  },
  "components/NetworkBanner.tsx": {
   "unroled": 0,

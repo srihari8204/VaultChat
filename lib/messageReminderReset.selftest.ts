@@ -13,7 +13,10 @@ assert.equal(isMessageReminderRequest({ content: { body: MESSAGE_REMINDER_BODY, 
 assert.equal(isMessageReminderRequest({ content: null }), false);
 assert.equal(isMessageReminderRequest({}), false);
 // The screen must schedule with the shared constant, and offer the reset.
-const src = readFileSync('app/message-reminder.tsx', 'utf8');
-assert.ok(/body:\s*MESSAGE_REMINDER_BODY/.test(src), 'reminders are scheduled with MESSAGE_REMINDER_BODY');
+// app/message-reminder.tsx was split: its list and stored list live in
+// components/chattools, so the screen and its parts are read as one source.
+const REMINDER_FILES = ['app/message-reminder.tsx', 'components/chattools/RemindersList.tsx', 'components/chattools/reminderStore.ts'];
+const src = REMINDER_FILES.map(f => readFileSync(f, 'utf8')).join('\n');
+assert.ok(/body:\s*MESSAGE_REMINDER_BODY/.test(readFileSync('app/message-reminder.tsx', 'utf8')), 'reminders are scheduled with MESSAGE_REMINDER_BODY');
 assert.ok(/isMessageReminderRequest/.test(src) && /Clear reminders/.test(src), 'list offers Clear reminders');
 console.log('messageReminderReset selftest: ok');

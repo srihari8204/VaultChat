@@ -33,6 +33,7 @@ import {
 } from '../lib/chatService';
 import { getScheduledCopy, deleteScheduledCopy, pruneScheduledCopies } from '../lib/scheduledLocalCopy';
 import { isChatLocked } from '../lib/chatLock';
+import { visibleCachedChatIds } from '../lib/localDb';
 import { AuroraBackground } from '../components/ui';
 import { AppText as Text } from '../components/ui/Text';
 import { userErrorText } from '../lib/userErrorText';
@@ -43,17 +44,20 @@ const SERVER_LIST_LIMIT = 200;
 
 const withoutContent = (rows: ScheduledMessageRow[]) => rows.map(r => ({ ...r, content: null }));
 
-/** Shown instead of the preview of a message scheduled into a locked chat. */
+/** Shown instead of the preview of a message scheduled into a locked or hidden chat. */
 const LOCKED_TEXT = '🔒 Locked chat';
 
 // The server holds E2E ciphertext; show the sender's own local plaintext copy,
 // and never the ciphertext itself. A locked chat's preview is not shown here
 // without unlocking it; an unreadable lock table counts as locked, as in
-// bookmarks and reminders.
+// bookmarks and reminders. A hidden (PIN-gated) chat is masked the same way:
+// only chats the main list may show (visibleCachedChatIds) are shown, and an
+// unreadable chat table masks all.
 async function withLocalCopies(rows: ScheduledMessageRow[]): Promise<ScheduledMessageRow[]> {
   const lockedIds = new Set<string>();
+  const visible = await visibleCachedChatIds().catch(() => null);
   await Promise.all([...new Set(rows.map(r => r.chatId))].map(async id => {
-    if (await isChatLocked(id).catch(() => true)) lockedIds.add(id);
+    if (visible === null || !visible.has(id) || await isChatLocked(id).catch(() => true)) lockedIds.add(id);
   }));
   return Promise.all(rows.map(async r => {
     if (lockedIds.has(r.chatId)) return { ...r, content: LOCKED_TEXT };

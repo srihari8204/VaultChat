@@ -9,6 +9,7 @@ import { Stack, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../lib/theme';
+import { userErrorText } from '../../lib/userErrorText';
 import type { Palette } from '../../constants/theme';
 import { ALARM } from '../../lib/lock/alarmPalette';
 import { type LatLng } from '../../lib/nav/geo';
@@ -33,7 +34,6 @@ const STATE_LABEL: Record<string, string> = {
   safe: 'SAFE', warning: 'NEAR BOUNDARY', atLimit: 'AT LIMIT', outside: 'OUTSIDE',
 };
 
-const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message) || fallback;
 
 /** Ask for background protection and say so when it is refused (same copy as
  *  the settings switch); a refusal used to leave the user with no feedback.
@@ -41,7 +41,7 @@ const errText = (e: unknown, fallback: string) => (e instanceof Error && e.messa
 export function askKillSafe() {
   enableKillSafe()
     .then((r) => { if (r !== 'on') Alert.alert(KILL_SAFE_REFUSED[r].title, KILL_SAFE_REFUSED[r].body); })
-    .catch((e: unknown) => Alert.alert('Background tracking', errText(e, 'Could not turn on background tracking. Try again.')));
+    .catch((e: unknown) => Alert.alert('Background tracking', userErrorText(e, 'Could not turn on background tracking. Try again.')));
 }
 
 /** Re-renders itself every second; the screen around it does not. The 1 s
@@ -72,7 +72,7 @@ export default function LockActiveFace({ myPos }: { myPos: LatLng | null }) {
     Alert.alert('Unlock location?', 'Monitoring stops and this session is saved to history.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Unlock', style: 'destructive', onPress: () => {
-        unlockLock().catch((e: unknown) => Alert.alert('Could not unlock', `${errText(e, 'Unknown error')}. Monitoring is still on; try again.`));
+        unlockLock().catch((e: unknown) => Alert.alert('Could not unlock', `Monitoring is still on. ${userErrorText(e, 'Try again.')}`));
       } },
     ]);
   };
@@ -86,7 +86,7 @@ export default function LockActiveFace({ myPos }: { myPos: LatLng | null }) {
       await navigateBackToLock(costing);
       router.push('/navigate');
     } catch (e: unknown) {
-      Alert.alert('Navigate back', errText(e, 'Could not plan a route back to the locked spot.'));
+      Alert.alert('Navigate back', userErrorText(e, 'Could not plan a route back to the locked spot.'));
     } finally { setPlanning(null); }
   };
 

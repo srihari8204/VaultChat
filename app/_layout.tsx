@@ -594,6 +594,11 @@ function RootLayoutInner() {
           .then(m => m.startSecurityMonitoring()).catch(() => {});
         import('../services/cache/cacheManager')
           .then(m => m.maybeAutoClean()).catch(() => {});
+        // A chat export killed mid-write leaves a PLAINTEXT file in the cache
+        // folder; remove it now instead of when the export screen next opens.
+        // Deletes files only (reads no content), so it needs no unlock.
+        import('../components/chattools/chatExportFile')
+          .then(m => m.sweepExportFiles()).catch(() => {});
       }
     });
 

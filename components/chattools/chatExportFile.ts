@@ -21,7 +21,8 @@ const LEGACY_PREFIX = 'crazzychat_';   // older builds wrote to the cache root
 /**
  * Remove plaintext export files a crash or a killed app left behind (a thrown
  * error already removes its own; a process death does not). Call it when no
- * export is running — app/chat-export does on open.
+ * export is running — app/chat-export does on open, and app/_layout once per
+ * cold start (deferred until after first interactions).
  */
 export async function sweepExportFiles(): Promise<void> {
   await RNFS.unlink(EXPORT_DIR).catch(() => {});

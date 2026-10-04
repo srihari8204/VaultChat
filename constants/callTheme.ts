@@ -28,6 +28,8 @@ export const CALL = {
   badgeScrim: 'rgba(0,0,0,0.55)',     // behind a small badge on a tile
   shareTint:  'rgba(157,110,255,0.30)', // "X is sharing" banner (lavender)
   pill:       'rgba(255,255,255,0.16)', // small chip on the dark surface
+  swatchIdle:     'rgba(255,255,255,0.05)', // filter swatch with no colour of its own ("None")
+  swatchIdleEdge: 'rgba(255,255,255,0.4)',  // its outline, so the empty swatch still shows
 };
 
 // Text over live video needs a shadow to stay legible on bright frames.

@@ -12,6 +12,7 @@ import { View, Text, TouchableOpacity, StyleSheet, FlatList, Alert, ActivityIndi
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
+import { userErrorText } from '../lib/userErrorText';
 import { tint } from '../lib/tintColor';
 import { readCache, writeCache } from '../lib/localCache';
 import { listTrustedContacts, addTrustedContact, removeTrustedContact, type TrustedContact } from '../lib/chatService';
@@ -21,7 +22,6 @@ import { isVaultId } from '../lib/vaultIdLink';
 
 const MAX_TRUSTED = 3;
 const CACHE_KEY = 'trusted-contacts';
-const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message) || fallback;
 
 function useS() {
   const { colors } = useTheme();
@@ -93,7 +93,7 @@ export default function TrustedContactsScreen() {
       setSearchId(''); setAdding(false);
       Alert.alert('Added', `${added.name || id} is now a trusted contact.`);
     } catch (e: unknown) {
-      if (mounted.current) Alert.alert('Could not add', errText(e, 'Try again'));
+      if (mounted.current) Alert.alert('Could not add', userErrorText(e, 'Try again'));
     } finally {
       addInFlight.current = false;
       if (mounted.current) setSearching(false);
@@ -113,7 +113,7 @@ export default function TrustedContactsScreen() {
           if (!mounted.current) return;
           setTrusted(cur => (cur.some(t => t.userId === c.userId) ? cur
             : [...cur.slice(0, Math.max(0, at)), c, ...cur.slice(Math.max(0, at))]));
-          Alert.alert('Could not remove', errText(e, 'Try again'));
+          Alert.alert('Could not remove', userErrorText(e, 'Try again'));
         }
       } },
     ]);

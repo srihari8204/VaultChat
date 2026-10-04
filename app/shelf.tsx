@@ -6,6 +6,7 @@
 // the shelf opens instantly, works offline, and needs no server support. It is
 // exactly as complete as the cache — which is the honest behaviour, and why the
 // empty state says so rather than pretending the account has no files.
+// Locked and hidden chats are left out (their file names are their content).
 //
 // Pins live in the localDb kv table, not on the server: "keep this at the top of
 // my shelf" is a per-device view preference, not shared state.
@@ -20,6 +21,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../lib/theme';
 import { type Palette, brandAlpha } from '../constants/theme';
 import { getMeta, listAllAttachments, setMeta } from '../lib/localDb';
+import { isLockedIn, lockedChatIds } from '../lib/lockedChats';
 import {
   classify, countsByKind, formatSize, queryShelf,
   type ShelfFile, type ShelfKind, type ShelfSort,
@@ -88,8 +90,11 @@ export default function ShelfScreen() {
   const load = useCallback(async () => {
     const editsAtStart = pinEdits.current;
     try {
-      const [rows, pinRaw, me] = await Promise.all([
-        listAllAttachments(), getMeta(PINS_KEY), getCurrentUserAsync().catch(() => null),
+      // listAllAttachments already skips hidden chats; a locked chat's file
+      // names stay off the shelf too (lockedChatIds: null = unreadable lock
+      // table, so every chat counts as locked — fail closed).
+      const [rows, pinRaw, me, locked] = await Promise.all([
+        listAllAttachments(), getMeta(PINS_KEY), getCurrentUserAsync().catch(() => null), lockedChatIds(),
       ]);
       let pinList: string[] = [];
       try { pinList = pinRaw ? JSON.parse(pinRaw) : []; } catch { /* corrupt pins: start empty */ }
@@ -97,7 +102,7 @@ export default function ShelfScreen() {
       const pinned = stale ? pinsRef.current : new Set<string>(pinList);
       if (!stale) setPins(pinned);
       setMyId(me?.id != null ? String(me.id) : null);
-      setFiles(rows.filter(shelfListable).map(r => ({
+      setFiles(rows.filter(r => shelfListable(r) && !isLockedIn(locked, r.chatId)).map(r => ({
         ...r,
         kind: classify(r.filename, r.mime),
         pinned: pinned.has(r.attachmentId),
@@ -242,7 +247,7 @@ export default function ShelfScreen() {
               </Text>
               <Text style={S.emptyBody}>
                 {files.length === 0
-                  ? 'The shelf is built from chats cached on this device, so files appear here as you open the chats that contain them.'
+                  ? 'The shelf is built from chats cached on this device, so files appear here as you open the chats that contain them. Files from locked and hidden chats are not shown.'
                   : 'Try a different filter or search.'}
               </Text>
             </View>

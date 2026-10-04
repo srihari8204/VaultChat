@@ -230,7 +230,7 @@ check(
 );
 check(
   'the cold-start cached paint applies them too',
-  /applyLocalReadPointers\(cached as any, await readPointers\(\)\)/.test(CHATS),
+  /applyLocalReadPointers\(cached, await readPointers\(\)\)/.test(CHATS),
   'lib/localDb.cacheChatDetail rewrites a chat’s cached row from the ChatDetail '
     + 'fetched when the chat is OPENED — i.e. with its pre-read unreadCount — so '
     + 'without this the badge returns on every cold start.',

@@ -39,7 +39,8 @@ changes the app was blocked on (commit `3353236`, `vaultchat-backend-go` plus mi
 ## 2. Phase 1 — security and data loss
 
 - [x] 2.1 Vault accepts the 4–8 digit Device PIN. Vault key v2: a random key wrapped under the
-      PIN with a per-install salt; v1 files still open; a PIN change re-wraps.
+      PIN with a per-install salt; v1 files still open; a PIN change re-wraps (staged; commits
+      only after the PIN is saved — `lib/vaultKeyStore.selftest.ts`).
       `lib/vaultCrypto.selftest.ts` proves both formats survive a PIN change — **written**
 - [x] 2.2 Relock on resume (`components/ResumeLock`, mounted in `app/_layout.tsx`) — **written**;
       **device-verified: no**

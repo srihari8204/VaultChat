@@ -30,13 +30,27 @@ const check = (name: string, ok: boolean, detail = '') => {
 
 console.log('\nChat list resync\n');
 
+// A listener may be attached with s.on(...) on the current socket, or with
+// lib/socket's addPersistentListener(...), which re-arms it on every new socket
+// (e.g. after a failed sign-out replaced it). The persistent form must keep its
+// unsubscribe and call it, as s.off(...) is called for the plain form.
+const persistentUnsub = (ev: string) =>
+  new RegExp(`(?:const|let)\\s+(\\w+)\\s*=\\s*addPersistentListener\\(\\s*'${ev}'\\s*,`).exec(SCREEN)?.[1] ?? null;
+const listens = (ev: string) =>
+  new RegExp(`s\\.on\\(\\s*'${ev}'\\s*,`).test(SCREEN) || persistentUnsub(ev) !== null;
+const detaches = (ev: string) => {
+  const unsub = persistentUnsub(ev);
+  return new RegExp(`s\\.off\\(\\s*'${ev}'\\s*,`).test(SCREEN)
+    || (unsub !== null && new RegExp(`\\b${unsub}\\(\\)`).test(SCREEN));
+};
+
 // ── recovery after a dropped socket ───────────────────────────────────
 check("refetches on socket 'connect' (i.e. after any reconnect)",
-  /s\.on\(\s*'connect'\s*,/.test(SCREEN),
+  listens('connect'),
   "no 'connect' listener — anything missed while offline stays missed");
 
 check('...and detaches it on unmount, like every other listener here',
-  /s\.off\(\s*'connect'\s*,/.test(SCREEN),
+  detaches('connect'),
   'listener leaks across remounts');
 
 // ── recovery after the process was frozen ─────────────────────────────
@@ -51,7 +65,7 @@ check('AppState is actually imported',
   /import\s*\{[^}]*\bAppState\b[^}]*\}\s*from\s*'react-native'/s.test(SCREEN));
 
 // ── the triggers that were already there must stay ────────────────────
-check("still refetches on 'new_message'", /s\.on\(\s*'new_message'\s*,/.test(SCREEN));
+check("still refetches on 'new_message'", listens('new_message'));
 check('still refetches on focus', /useFocusEffect\(/.test(SCREEN));
 
 // ── and the refetch must be the coalesced one ─────────────────────────

@@ -131,6 +131,14 @@ export const APPS_DISC_GRADIENT = {
 /** Glyph on the Apps disc, both themes: ≥3:1 (graphics) on every gradient stop. */
 export const APPS_DISC_INK = '#FFFFFF';
 
+/**
+ * The ground of components/ErrorBoundary's fallback, fixed dark in both
+ * schemes: it renders after the tree threw (possibly ThemeProvider), so it
+ * reads no palette. components/finance/FinanceErrorBoundary puts its Leave
+ * button on the same ground (re-exported by constants/financeTheme).
+ */
+export const FALLBACK_GROUND = '#03030E';
+
 /** Drop shadow under the floating tab bar (both appearances). */
 export const TAB_BAR_SHADOW = '#05030D';
 
@@ -213,7 +221,7 @@ export const AuroraDark: Palette = {
   bubbleInText:  'rgba(255,255,255,0.96)',
   bubbleOutText: '#FFFFFF',
   bubbleMetaIn:  'rgba(255,255,255,0.62)',
-  bubbleMetaOut: 'rgba(255,255,255,0.70)',
+  bubbleMetaOut: 'rgba(255,255,255,0.85)',   // time text on bubbleOut: 5.02:1 (0.70 was 3.90:1)
   tickRead:      '#7CFFB2',   // read ✓✓ on bubbleOut: 5.07:1 on the fill, a mint hue apart from the white meta line
   headerBar:     '#12101A',
 

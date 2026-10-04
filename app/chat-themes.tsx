@@ -17,7 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
 import { AuroraBackground } from '../components/ui';
-import { tint } from '../lib/tintColor';
+import { fillInks } from '../components/chat/bubbleFillInk';
 import { BUBBLE_KEY, BUBBLE_THEMES, GLOBAL_BUBBLE, idealText } from '../lib/chatBubbleTheme';
 
 export default function ChatThemesScreen() {
@@ -98,8 +98,8 @@ export default function ChatThemesScreen() {
   const current = BUBBLE_THEMES.find(t => t.id === effectiveId) || BUBBLE_THEMES[0];
   const mineBg = current.color ?? colors.bubbleOut;
   const mineText = current.color ? idealText(current.color) : colors.bubbleOutText;
-  // Meta (time, ticks) is the bubble's own ink, dimmed.
-  const mineMeta = current.color ? tint(mineText, 0.6) : colors.bubbleMetaOut;
+  // Meta (time, ticks): the same ink the chat paints on this fill (>= 4.5:1).
+  const mineMeta = current.color ? fillInks(current.color).meta : colors.bubbleMetaOut;
 
   return (
     <View style={s.root}>

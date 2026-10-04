@@ -81,6 +81,9 @@ check('localDb warmup is deferred and dynamically imported',
 check('PDF thumbnail host is loaded after interactions',
   !layout.includes("import { PdfThumbnailerHost } from '../components/PdfThumbnailer'") &&
   layout.indexOf("import('../components/PdfThumbnailer')") > deferredAt);
+check('leftover chat-export sweep is deferred and dynamically imported',
+  !layout.includes("from '../components/chattools/chatExportFile'") &&
+  layout.indexOf("import('../components/chattools/chatExportFile')") > deferredAt);
 check('scheduled runner stays off the static root import graph',
   !layout.includes("from '../lib/scheduledRunner'") &&
   layout.includes("import('../lib/scheduledRunner')"));

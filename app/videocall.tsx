@@ -508,7 +508,7 @@ function VideoCallEngine() {
                 accessibilityState={{ checked: filter === opt.id }}
               >
                 <View style={[S.filterSwatch,
-                  opt.matrix ? { backgroundColor: opt.swatch } : { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.4)' },
+                  opt.matrix ? { backgroundColor: opt.swatch } : { backgroundColor: CALL.swatchIdle, borderColor: CALL.swatchIdleEdge },
                   filter === opt.id && { borderColor: CALL.text }]} />
                 <Text style={[S.filterLabel, filter === opt.id && S.filterLabelActive]}>{opt.label}</Text>
               </TouchableOpacity>
@@ -1068,8 +1068,8 @@ function VideoCallLegacy() {
                     S.filterSwatch,
                     opt.matrix
                       ? { backgroundColor: opt.swatch }
-                      : { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.4)' },
-                    filter === opt.id && { borderColor: '#FFFFFF' },
+                      : { backgroundColor: CALL.swatchIdle, borderColor: CALL.swatchIdleEdge },
+                    filter === opt.id && { borderColor: CALL.text },
                   ]}
                 />
                 <Text style={[S.filterLabel, filter === opt.id && S.filterLabelActive]}>{opt.label}</Text>

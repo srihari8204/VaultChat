@@ -24,6 +24,7 @@ import {
   StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import { useTheme } from '../lib/theme';
+import { userErrorText } from '../lib/userErrorText';
 import { tint } from '../lib/tintColor';
 import { sendMessage } from '../lib/chatService';
 import { emit } from '../lib/socket';
@@ -48,7 +49,6 @@ function fmtClock(s: number): string {
   return `${m}:${String(sec).padStart(2, '0')}`;
 }
 
-const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message) || fallback;
 
 function useS() {
   const { colors } = useTheme();
@@ -156,7 +156,7 @@ export default function LocationScreen() {
       await sendMessage(chatId, payload, 'location');
       router.back();
     } catch (e: unknown) {
-      Alert.alert('Could not send', errText(e, 'Try again'));
+      Alert.alert('Could not send', userErrorText(e, 'Try again'));
     } finally {
       setSending(false);
     }
@@ -210,7 +210,7 @@ export default function LocationScreen() {
           lat: loc.coords.latitude, lng: loc.coords.longitude, address, live: true, lk: liveKey, until,
         }), 'location');
       } catch (e: unknown) {
-        Alert.alert('Could not start', errText(e, 'Try again'));
+        Alert.alert('Could not start', userErrorText(e, 'Try again'));
         return;
       }
       sessionRef.current = true;
@@ -248,7 +248,7 @@ export default function LocationScreen() {
         if (!mountedRef.current) { sub.remove(); stopLive(); return; }
         watchRef.current = sub;
       } catch (e: unknown) {
-        Alert.alert('Could not start', errText(e, 'Try again'));
+        Alert.alert('Could not start', userErrorText(e, 'Could not follow your location. Check location permission and GPS, then try again.'));
         stopLive();
         return;
       }

@@ -36,11 +36,12 @@ import { readCache, writeCache } from '../lib/localCache';
 import { bookmarkBody, hasBodies, isProtectedMessage, withoutBodies } from '../lib/bookmarkBodies';
 import { setPendingJump } from '../lib/chatJump';
 import { isChatLocked } from '../lib/chatLock';
+import { visibleCachedChatIds } from '../lib/localDb';
 import { AuroraBackground } from '../components/ui';
 import { AppText as Text } from '../components/ui/Text';
 import { userErrorText } from '../lib/userErrorText';
 
-/** Shown instead of the body of a bookmark from a locked chat. */
+/** Shown instead of the body of a bookmark from a locked or hidden chat. */
 const LOCKED_TEXT = '🔒 Locked chat';
 /** Shown instead of the body of a view-once or Invisible Ink message. */
 const PROTECTED_TEXT = '🔒 Protected message';
@@ -48,12 +49,15 @@ const PROTECTED_TEXT = '🔒 Protected message';
 // Fill each row's body from the sealed local snapshot (or a non-ciphertext
 // server body). Rows whose body is unreadable show their type label instead.
 // A locked chat's body is not shown here without unlocking it; an unreadable
-// lock table counts as locked (lib/chatLock fails closed).
+// lock table counts as locked (lib/chatLock fails closed). A hidden (PIN-gated)
+// chat is masked the same way: only chats the main list may show
+// (visibleCachedChatIds) are shown, and an unreadable chat table masks all.
 async function withBodies(rows: BookmarkRow[]): Promise<BookmarkRow[]> {
   const chatIds = [...new Set(rows.flatMap(b => (b.message ? [b.message.chatId] : [])))];
   const lockedIds = new Set<string>();
+  const visible = await visibleCachedChatIds().catch(() => null);
   await Promise.all(chatIds.map(async id => {
-    if (await isChatLocked(id).catch(() => true)) lockedIds.add(id);
+    if (visible === null || !visible.has(id) || await isChatLocked(id).catch(() => true)) lockedIds.add(id);
   }));
   return Promise.all(rows.map(async (b) => {
     const id = Number(b.message?.id ?? 0);
