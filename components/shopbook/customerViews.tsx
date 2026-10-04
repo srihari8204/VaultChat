@@ -15,6 +15,7 @@ import { C, s } from './theme';
 import { loadErrText, SubHeader, Chip, openDirections, InfoRow, Empty } from './shared';
 import { Catalog } from './catalog';
 import { CartView } from './checkout';
+import { permissionDenied } from '../../lib/permissionDenied';
 
 /** Unwrap an expo-location result to a usable pair, or null.
  *  Rejects (0,0): that is what a failed fix serialises to, not a place anyone
@@ -102,8 +103,13 @@ export function FindShops({ onOpen, favIds, onToggleFav, favErr, onRetryFavs, on
   /** Ask for location because the user asked for it — from the hint below. */
   const enableLocation = useCallback(async () => {
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') return;   // refused: the screen already works without it
+      const { status, canAskAgain } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        // The user asked for this, so a refusal the OS won't re-prompt for gets
+        // a way to Settings; the screen still works without distances.
+        if (!canAskAgain) permissionDenied('Location is off', 'Allow location in Settings to see how far each shop is.', canAskAgain);
+        return;
+      }
       const c = await positionOf(Location.getLastKnownPositionAsync())
         ?? await positionOf(Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }));
       if (!c) return;
