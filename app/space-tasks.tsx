@@ -32,7 +32,7 @@ import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 import { circleMembers } from '../lib/family/circle';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // The app's one cross-platform date picker (shared with finance).
-import { useDatePicker } from '../components/finance/useDatePicker';
+import { useDatePicker } from '../components/ui/useDatePicker';
 import type { CircleMember } from '../lib/family/types';
 
 /** Due choices, as whole local days from today. The due instant is the END of

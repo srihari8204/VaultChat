@@ -47,7 +47,7 @@ import ChatDoorButton from '../components/spaces/ChatDoorButton';
 // The app's one cross-platform date+time picker (native dialog on Android,
 // inline sheet on iOS). Shared with finance; nothing in it is finance-specific
 // beyond its sheet colours.
-import { useDatePicker } from '../components/finance/useDatePicker';
+import { useDatePicker } from '../components/ui/useDatePicker';
 
 /** One stop as the editor holds it: its OLD server id (null when new) plus the
  *  fields the server stores. See lib/spaces/runPlan.ts for why the old id matters. */

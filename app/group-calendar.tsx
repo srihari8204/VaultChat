@@ -33,7 +33,7 @@ import {
 } from '../lib/groups/calendar';
 import { syncEventReminders } from '../lib/groups/taskReminders';
 import { KeyboardSafe } from '../components/ui';
-import { useDatePicker } from '../components/finance/useDatePicker';
+import { useDatePicker } from '../components/ui/useDatePicker';
 
 const REPEATS: { key: Recurrence; label: string }[] = [
   { key: 'none', label: 'Once' },

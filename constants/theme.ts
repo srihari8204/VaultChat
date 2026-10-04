@@ -77,6 +77,15 @@ export interface Palette {
    * the active app theme. Used by mixed-material previews and handoff sheets.
    */
   brandOnLight: string;
+  /**
+   * Text/icon colour ON a solid `primary` / `danger` fill (buttons, badges).
+   * Not always white: white on the dark scheme's #1777FE is 4.11:1 and on
+   * #EF4444 3.76:1 — under AA 4.5:1 — so dark uses the splash night ink.
+   */
+  onPrimary: string;
+  onDanger: string;
+  /** Amber warning text/icon on this scheme's normal surfaces (AA 4.5:1). */
+  warning: string;
 }
 
 // ─── Single source of truth for the brand ACCENT ────────────────────
@@ -199,6 +208,13 @@ export const AuroraDark: Palette = {
   accentDeep:  '#1552E0',
   accentOn:    '#7FB6FF',
   brandOnLight:'#1552E0',
+  // White, as every solid button already uses. Below AA for small text in dark
+  // (4.11:1 on #1777FE, 3.76:1 on #EF4444); BRAND_NIGHT '#010628' would pass
+  // (4.83 / 5.27:1) but restyles every dark-mode button — a design decision
+  // left open in 2026-10-04_fix_status.md §5.
+  onPrimary:   '#FFFFFF',
+  onDanger:    '#FFFFFF',
+  warning:     '#F59E0B',   // ≥7.44:1 on bg/card/surfaceSolid/surface/glass
 };
 
 export const AuroraLight: Palette = {
@@ -238,6 +254,9 @@ export const AuroraLight: Palette = {
   accentDeep:  '#1552E0',
   accentOn:    '#1552E0',
   brandOnLight:'#1552E0',
+  onPrimary:   '#FFFFFF',   // 6.33:1 on #1552E0
+  onDanger:    '#FFFFFF',   // 6.57:1 on #B42318
+  warning:     '#93370D',   // ≥4.83:1 on bg/card/surfaceSolid/surface (spaces' warnText)
 };
 
 /** The static default palette (dark). Existing screens import this directly. */

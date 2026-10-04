@@ -38,7 +38,7 @@ import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 import { ymd, dayOffset, allowanceBody, ALLOWANCE_KINDS, type AllowanceKind } from '../lib/spaces/leave';
 import { parseDay } from '../lib/spaces/runPlan';
 // The app's one cross-platform date picker (shared with finance).
-import { useDatePicker } from '../components/finance/useDatePicker';
+import { useDatePicker } from '../components/ui/useDatePicker';
 
 const KINDS = ['casual', 'sick', 'privilege', 'unpaid', 'other'];
 

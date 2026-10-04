@@ -67,6 +67,9 @@ export const BIZ: Palette = {
   accentDeep:  '#1677FF',
   accentOn:    '#7DD3FC',
   brandOnLight:'#1552E0',
+  onPrimary:   '#FFFFFF',   // as today; see constants/theme.ts AuroraDark note
+  onDanger:    '#FFFFFF',
+  warning:     '#F59E0B',   // = BIZ_WARN; 9.21:1 on bg, 7.21:1 on surfaceSolid
 };
 
 // The design system's status colors that Palette has no slot for. Fixed by

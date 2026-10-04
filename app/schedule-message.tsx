@@ -18,7 +18,7 @@ import { scheduleEncryptedMessage } from '../lib/chatService';
 import { putScheduledCopy } from '../lib/scheduledLocalCopy';
 import { AuroraBackground, KeyboardSafe } from '../components/ui';
 // Cross-platform picker (Android dialogs, iOS inline sheet); shared, not finance-specific in behaviour.
-import { useDatePicker } from '../components/finance/useDatePicker';
+import { useDatePicker } from '../components/ui/useDatePicker';
 
 const QUICK_TIMES: { label: string; mins: number }[] = [
   { label: 'In 30 min',      mins: 30 },
