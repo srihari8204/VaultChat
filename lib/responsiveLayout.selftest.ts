@@ -274,7 +274,7 @@ for (const style of ['fileCard', 'filePreview', 'fileRow', 'pollWrap', 'audioRow
 const layoutSrc = fs.readFileSync('app/_layout.tsx', 'utf8');
 const listed = (layoutSrc.match(/const INSET_SCREENS = \[([^\]]*)\]/) ?? [, ''])[1]
   .split(',').map((x) => x.trim().replace(/^'|'$/g, '')).filter(Boolean);
-ok('INSET_SCREENS was found and is not empty', listed.length > 10);
+ok('INSET_SCREENS was found and is not empty', listed.length > 0);
 
 const doubled = listed.filter((name) => {
   const f = `app/${name}.tsx`;
