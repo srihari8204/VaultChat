@@ -90,7 +90,8 @@ export default function GroupInsightsScreen() {
         // be asked it throws, and the catch below shows "Couldn't load" with
         // Retry: neither a false "your role can't see this" nor everyone's track.
         const g = await groupWithHistoryAccess(groupId);
-        const allowed = historyAccess(g) === 'allowed';
+        // Resolved above: never 'unknown' here, so this withholds on 'denied' only.
+        const allowed = historyAccess(g) !== 'denied';
 
         // Withhold the LOAD, not just the computation (2026-09-17). getTrack with
         // no userId returns EVERY member's positions, and `allowed` gated only the
