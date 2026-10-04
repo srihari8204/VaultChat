@@ -21,7 +21,7 @@ import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
 import { getMedia } from '../lib/mediaStore';
 import { verifyMedia, formatReport, cancelSampling, type VaultCheckReport } from '../lib/vaultcheck';
-import { userErrorText } from '../lib/userErrorText';
+import { VaultCheckMessage, vaultCheckErrorText } from '../lib/vaultcheck/checkError';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
 // Colours are palette ROLES so they keep contrast in both themes: success,
@@ -73,14 +73,14 @@ export default function VaultCheckScreen() {
         // Resolve to a local file first — VaultCheck never uploads the media,
         // so everything below works on bytes already on this device.
         const id = typeof attachmentId === 'string' ? attachmentId : '';
-        if (!id) throw new Error('No media was given to check.');
+        if (!id) throw new VaultCheckMessage('No media was given to check.');
         const local = await getMedia(id, {
           kind,
           isMine: isMine === '1',
           mime: mime ? String(mime) : undefined,
           filename: filename ? String(filename) : undefined,
         });
-        if (!local) throw new Error('Could not locate the media on this device');
+        if (!local) throw new VaultCheckMessage('Could not locate the media on this device.');
         const key = `${local}|${kind}`;
         let run = inflight.current?.key === key ? inflight.current.p : null;
         if (!run) {
@@ -90,12 +90,13 @@ export default function VaultCheckScreen() {
           run = p;
         }
         const timeout = new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error('The check is taking too long. It is still running on this device — Try again to keep waiting for it, or try a shorter clip.')), CHECK_TIMEOUT_MS);
+          timer = setTimeout(() => reject(new VaultCheckMessage('The check is taking too long. It is still running on this device — Try again to keep waiting for it, or try a shorter clip.')), CHECK_TIMEOUT_MS);
         });
         const r = await Promise.race([run, timeout]);
         if (!cancelled) setReport(r);
       } catch (e: unknown) {
-        if (!cancelled) setError(userErrorText(e, 'Verification failed. Try again.'));
+        // The screen's own copy (above) is shown as is; anything else is fixed text.
+        if (!cancelled) setError(vaultCheckErrorText(e));
       } finally {
         clearInterval(tick);
         if (timer) clearTimeout(timer);

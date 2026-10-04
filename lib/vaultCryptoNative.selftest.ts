@@ -10,6 +10,7 @@
 //     with the same header nonce are byte-identical files,
 //   • a wrong key, a moved file and a flipped bit fail on the native path too,
 //   • a native module that is missing or disagrees with @noble is not used,
+//     including one that is wrong only on a full 1 MiB chunk,
 //   • progress and cancel still work on the native path,
 //   • the in-app speed test reports both ciphers,
 //   • the key record's async open/seal (PBKDF2 off the JS thread) read and
@@ -126,6 +127,16 @@ async function withFixedNonce<T>(fn: () => Promise<T>): Promise<T> {
   const acceptsAnything = { ...native, open: (_k: Uint8Array, _iv: Uint8Array, _a: Uint8Array, ct: Uint8Array) => ct.slice(0, ct.length - 16) };
   assert.equal(verifiedChunkCipher(acceptsAnything), null, 'a cipher that does not check the tag is not used');
   assert.equal(verifiedChunkCipher(jsChunkCipher), jsChunkCipher);
+  // A fault that shows only on a full 1 MiB chunk (same length, so the
+  // on-disk length check would pass) is caught by the gate, on either side.
+  const flipBig = (b: Uint8Array) => { if (b.length > 1 << 16) { const c = b.slice(); c[c.length >> 1] ^= 1; return c; } return b; };
+  assert.equal(verifiedChunkCipher({ ...native, seal: (k, iv, a, pt) => flipBig(native.seal(k, iv, a, pt)) }), null,
+    'a seal that is wrong only on large chunks is not used');
+  assert.equal(verifiedChunkCipher({ ...native, open: (k, iv, a, ct) => flipBig(native.open(k, iv, a, ct)) }), null,
+    'an open that is wrong only on large chunks is not used');
+  const lengths: number[] = [];
+  verifiedChunkCipher({ ...native, seal: (k, iv, a, pt) => { lengths.push(pt.length); return native.seal(k, iv, a, pt); } });
+  assert.ok(lengths.includes(V3_CHUNK), 'the gate seals one full chunk');
 
   // Key records: async and sync PBKDF2 are interchangeable.
   const keys = newVaultKeys('2468');

@@ -7,7 +7,7 @@
 // the user can do; nothing here deletes a key or a file. The wrong-old-PIN
 // limit is kept by lib/vaultKeyStore in storage, so re-locking does not reset it.
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Modal, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { AppText as Text } from '../ui/Text';
 import { PinPad } from '../PinPad';
@@ -52,14 +52,19 @@ export function VaultKeyPanel({ hasKeys, miss, lockedArchives, indexDamaged, key
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [trying, setTrying] = useState(false);
+  // The latch is a ref: PinPad fires onComplete on the last digit and onSubmit
+  // on ✓, and `trying` (state) lets both through in one frame — each would
+  // spend one of the stored old-PIN tries.
+  const tryingRef = useRef(false);
 
   // An old PIN can open the current record (PIN reset) or an archived one.
   const canTryOld = (!hasKeys && miss === 'pin') || lockedArchives > 0;
   if (hasKeys && lockedArchives === 0 && !indexDamaged) return null;
 
   const submit = async (v: string) => {
-    if (trying) return;
+    if (tryingRef.current) return;
     if (!isPinFormat(v)) { setError(`Enter the ${PIN_MIN}–${PIN_MAX} digit PIN you used before.`); return; }
+    tryingRef.current = true;
     setTrying(true);
     try {
       const n = await onTryOldPin(v);
@@ -76,7 +81,7 @@ export function VaultKeyPanel({ hasKeys, miss, lockedArchives, indexDamaged, key
       // Fixed text: a storage error's own message is not for people.
       setError(e instanceof OldPinLimitError ? e.message : 'Could not check that PIN. Try again.');
       setPin('');
-    } finally { setTrying(false); }
+    } finally { tryingRef.current = false; setTrying(false); }
   };
 
   const damagedNote = indexDamaged

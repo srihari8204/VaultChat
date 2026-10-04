@@ -389,7 +389,7 @@ export default function VaultFeaturesScreen() {
           <LinkRow icon="lock-closed-outline" title="Vault" desc="Encrypted files, stored on this phone only"
             onPress={() => router.push('/vault')} styles={styles} c={c} />
           <Text style={[styles.sectionDesc, { marginTop: 6, marginBottom: 10 }]}>
-            How fast this phone encrypts vault files (large videos take longer on a slower one).
+            Shows how fast this phone encrypts files as it adds them to the Vault, so you know roughly how long a large video will take. It runs in memory: no file is read or saved.
           </Text>
           <CipherSpeedTest />
         </View>

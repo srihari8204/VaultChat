@@ -3,7 +3,7 @@
 // checked by services/security/pinStore, which also runs the brute-force
 // backoff; the screen gets the verified PIN through onUnlock.
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, TouchableOpacity, View, Vibration } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -32,9 +32,13 @@ export function PinGate({ onUnlock }: { onUnlock: (pin: string) => Promise<void>
     return () => { live = false; };
   }, []));
 
+  // A ref, not `busy`: PinPad's onComplete and onSubmit can both fire in one
+  // frame, and each verify counts against pinStore's back-off.
+  const checking = useRef(false);
   const submit = async (v: string) => {
-    if (busy) return;
+    if (checking.current) return;
     if (!isPinFormat(v)) { setError(`Enter your ${PIN_MIN}–${PIN_MAX} digit Device PIN.`); return; }
+    checking.current = true;
     setBusy(true);
     try {
       // pinStore verifies against the scrypt record (and migrates a legacy value
@@ -48,7 +52,12 @@ export function PinGate({ onUnlock }: { onUnlock: (pin: string) => Promise<void>
         ? `Too many attempts. Try again in ${Math.ceil(wait / 1000)} s.`
         : 'Incorrect PIN. Try again.');
       setPin('');
+    } catch {
+      // Fixed copy: a keystore error's own text is not for people.
+      setError('Could not check your PIN. Try again.');
+      setPin('');
     } finally {
+      checking.current = false;
       setBusy(false);
     }
   };

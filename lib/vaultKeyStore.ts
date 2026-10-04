@@ -30,6 +30,9 @@
 //     there), the next unlock opens the staged copy with the new PIN and
 //     finishes the move. A staged copy names the record it was made from (its
 //     iv), so a leftover copy can never replace a record that changed since.
+//     Until it is moved, the next PIN change finishes it first, and "Try an
+//     old PIN" accepts the PIN it was staged under (rerate7/J K1), so the PIN
+//     just before always recovers the key.
 //   • A damaged archive index never blocks anything: the names still readable
 //     in it are used, a copy of it is kept aside, and the screen is told.
 
@@ -66,7 +69,10 @@ async function readRecord(name: string = KEY): Promise<VaultKeyRecord | null | u
 
 /** The archive names in a stored index. A damaged index is not an error: the
  *  names still readable in it are returned with `damaged`, so no path is
- *  blocked and no archive it still names is lost. */
+ *  blocked and no archive it still names is lost. A name cut short inside its
+ *  digits is kept as it reads (SecureStore cannot list its keys, so the full
+ *  name cannot be recovered here); unlock does not count a name with no
+ *  stored record as locked, and the damaged index is kept aside as it was. */
 export function parseArchiveIndex(raw: string | null): { names: string[]; damaged: boolean } {
   if (!raw) return { names: [], damaged: false };
   try {
@@ -108,17 +114,26 @@ async function moveStaged(name: string, next: VaultKeyRecord): Promise<void> {
   await SecureStore.deleteItemAsync(stagedName(name)).catch(() => {});
 }
 
+/** The keys `pin` opens at `name`: the live record `rec`, else the copy a PIN
+ *  change staged from it (`staged` is that copy, not yet moved into place). */
+async function openLiveOrStaged(
+  name: string, rec: VaultKeyRecord | null | undefined, pin: string,
+): Promise<{ keys: VaultKeys; staged: VaultKeyRecord | null } | null> {
+  const keys = await openVaultKeysAsync(pin, rec);
+  if (keys) return { keys, staged: null };
+  const next = await stagedFor(name, rec);
+  const staged = await openVaultKeysAsync(pin, next);
+  return staged && next ? { keys: staged, staged: next } : null;
+}
+
 /** Open `rec` (stored at `name`) with `pin`. When it does not open but a
  *  PIN change staged a copy of it that does, the PIN change got as far as
  *  saving the PIN: finish it, and use the staged copy even if the move fails. */
 async function openOrFinish(name: string, rec: VaultKeyRecord | null | undefined, pin: string): Promise<VaultKeys | null> {
-  const keys = await openVaultKeysAsync(pin, rec);
-  if (keys) return keys;
-  let next: VaultKeyRecord | null = null;
-  try { next = await stagedFor(name, rec); } catch { return null; }
-  const staged = await openVaultKeysAsync(pin, next);
-  if (staged && next) await moveStaged(name, next).catch(() => { /* the next unlock tries again */ });
-  return staged;
+  let r: Awaited<ReturnType<typeof openLiveOrStaged>> = null;
+  try { r = await openLiveOrStaged(name, rec, pin); } catch { return null; }
+  if (r?.staged) await moveStaged(name, r.staged).catch(() => { /* the next unlock tries again */ });
+  return r?.keys ?? null;
 }
 
 /**
@@ -180,18 +195,28 @@ async function openArchives(pin: string): Promise<{ opened: VaultKeys[]; locked:
   let locked = 0;
   for (const name of index.names) {
     let keys: VaultKeys | null = null;
-    try { keys = await openOrFinish(name, await readRecord(name), pin); } catch { /* unreadable: counts as locked */ }
+    try {
+      const rec = await readRecord(name);
+      // Listed but not stored (a name a damaged index cut short, or a value
+      // the keystore dropped): no PIN opens it, so it is not offered as
+      // locked. The name stays listed; nothing is removed from the index.
+      if (rec === undefined) continue;
+      keys = await openOrFinish(name, rec, pin);
+    } catch { /* unreadable: counts as locked */ }
     if (keys) opened.push(keys); else locked++;
   }
   return { opened, locked, damaged: index.damaged };
 }
 
 /** Re-seal the record at `name` from `fromPin` to `toPin` when `fromPin` opens
- *  it. Returns whether it did. Throws when SecureStore fails. */
+ *  it — or opens the copy an unfinished PIN change staged from it (the same
+ *  key, so `fromPin` is then the PIN that change set). Returns whether it did.
+ *  Throws when SecureStore fails. */
 async function rewrapOne(name: string, fromPin: string, toPin: string): Promise<boolean> {
-  const keys = await openVaultKeysAsync(fromPin, await readRecord(name));
-  if (!keys) return false;
-  await SecureStore.setItemAsync(name, JSON.stringify(await sealVaultKeysAsync(toPin, keys)));
+  const opened = await openLiveOrStaged(name, await readRecord(name), fromPin);
+  if (!opened) return false;
+  await SecureStore.setItemAsync(name, JSON.stringify(await sealVaultKeysAsync(toPin, opened.keys)));
+  if (opened.staged) await SecureStore.deleteItemAsync(stagedName(name)).catch(() => { /* inert: it names the old iv */ });
   return true;
 }
 
@@ -222,10 +247,14 @@ export async function stageVaultRewrap(oldPin: string, newPin: string): Promise<
   try {
     const { names } = await readArchiveIndex();
     for (const name of [KEY, ...names]) {
-      const rec = await readRecord(name);
-      const keys = await openVaultKeysAsync(oldPin, rec);
-      if (!keys || !rec) continue;
-      const s: StagedRecord = { rec: await sealVaultKeysAsync(newPin, keys), from: rec.iv };
+      let rec = await readRecord(name);
+      const opened = await openLiveOrStaged(name, rec, oldPin);
+      if (!opened || !rec) continue;
+      // An earlier PIN change saved `oldPin` but did not move this copy into
+      // place (its commit failed, or the app died): finish that first, as an
+      // unlock would. If the move fails this change stops, nothing staged.
+      if (opened.staged) { await moveStaged(name, opened.staged); rec = opened.staged; }
+      const s: StagedRecord = { rec: await sealVaultKeysAsync(newPin, opened.keys), from: rec.iv };
       staged.push(name);
       await SecureStore.setItemAsync(stagedName(name), JSON.stringify(s));
     }
@@ -292,6 +321,8 @@ export async function oldVaultPinTries(now: number = Date.now()): Promise<{ left
   return { left, waitMs: left > 0 ? 0 : at + OLD_PIN_WAIT_MS - now };
 }
 
+let oldPinQueue: Promise<unknown> = Promise.resolve();
+
 /**
  * "Try an old PIN": every record (the current one and the archived ones) that
  * `pin` — the current, verified Device PIN — cannot open but `oldPin` can is
@@ -301,7 +332,15 @@ export async function oldVaultPinTries(now: number = Date.now()): Promise<{ left
  * The try is counted BEFORE it runs (so quitting mid-try still counts) and the
  * count resets when one succeeds; throws OldPinLimitError at the limit.
  */
-export async function tryOldVaultPin(oldPin: string, pin: string, now: number = Date.now()): Promise<number> {
+export function tryOldVaultPin(oldPin: string, pin: string, now: number = Date.now()): Promise<number> {
+  // One at a time: two tries running together would both read the same count
+  // and each store n+1 (rerate7/J flaw 2), and would re-wrap the same records.
+  const run = oldPinQueue.then(() => tryOldVaultPinNow(oldPin, pin, now));
+  oldPinQueue = run.catch(() => {});
+  return run;
+}
+
+async function tryOldVaultPinNow(oldPin: string, pin: string, now: number): Promise<number> {
   if (oldPin === pin) return 0;
   const tries = await oldVaultPinTries(now);
   if (tries.left <= 0) throw new OldPinLimitError(tries.waitMs);
@@ -309,7 +348,7 @@ export async function tryOldVaultPin(oldPin: string, pin: string, now: number = 
   let recovered = 0;
   const { names } = await readArchiveIndex();
   for (const name of [KEY, ...names]) {
-    if (await openVaultKeysAsync(pin, await readRecord(name))) continue;
+    if (await openOrFinish(name, await readRecord(name), pin)) continue;
     if (await rewrapOne(name, oldPin, pin)) recovered++;
   }
   if (recovered > 0) await SecureStore.deleteItemAsync(OLD_PIN_TRIES_KEY).catch(() => {});

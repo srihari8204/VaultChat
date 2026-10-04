@@ -12,6 +12,7 @@ import { useTheme } from '../../lib/theme';
 import { PIN_MAX, PIN_MIN } from '../../services/security/pinFormat';
 import type { Note } from './notesModel';
 import { useNotesStyles } from './notesStyles';
+import { MEDIA_INK } from '../../constants/mediaChrome';
 
 /**
  * The screen gate: the server-verified sign-in MPIN, 4–8 digits.
@@ -97,8 +98,8 @@ export function ImageViewerModal({ uri, onClose }: { uri: string | null; onClose
       <View style={s.imgViewer}>
         {uri && <Image source={{ uri }} style={s.imgViewerImg} resizeMode="contain" accessibilityLabel="Attached image" />}
         <TouchableOpacity style={s.imgViewerClose} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close image">
-          {/* Fixed white: this viewer is always dark behind the photo. */}
-          <Text style={{ color: 'white', fontSize: 16, fontWeight: '700' }}>Close</Text>
+          {/* Fixed ink (constants/mediaChrome): this viewer is always dark behind the photo. */}
+          <Text style={{ color: MEDIA_INK, fontSize: 16, fontWeight: '700' }}>Close</Text>
         </TouchableOpacity>
       </View>
     </Modal>

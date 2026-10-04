@@ -26,11 +26,9 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-import * as DocumentPicker from 'expo-document-picker';
-import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import { clearVaultKeyCache, VaultCancelledError, type VaultKeys } from '../lib/vaultCrypto';
+import { clearVaultKeyCache, VaultCancelledError, VaultCopyError, vaultErrorText, type VaultKeys } from '../lib/vaultCrypto';
 import { replaceVaultKeys, tryOldVaultPin, unlockVaultKeys, VaultNewKeyError, type VaultKeyMiss, type VaultUnlock } from '../lib/vaultKeyStore';
 import { holdAppSwitcherBlur } from '../lib/screenGuard';
 import { openVaultFileTo, scanVaultDir, sealFileToVault, sweepPartialSeals, type VaultDirScan } from '../components/vault/vaultFileIO';
@@ -38,10 +36,10 @@ import { VaultKeyPanel } from '../components/vault/VaultKeyPanel';
 import { VaultExportSheet } from '../components/vault/VaultExportSheet';
 import { makeStyles } from '../components/vault/vaultStyles';
 import { PinGate } from '../components/vault/VaultPinGate';
+import { pickVaultFile } from '../components/vault/pickVaultFile';
 import { File as FsFile } from 'expo-file-system';
 import * as RNFS from '@dr.pogodin/react-native-fs';
 import { useColors } from '../lib/theme';
-import { permissionDenied } from '../lib/permissionDenied';
 import { parseVaultManifest } from '../lib/vaultManifestParse';
 
 // ─────────────────────────────────────────────────────────────────
@@ -263,7 +261,7 @@ export default function VaultScreen() {
   };
 
   const saveManifest = async (updated: VaultFile[]) => {
-    if (manifestState !== 'ok') throw new Error('The vault file list did not load. Retry before changing it.');
+    if (manifestState !== 'ok') throw new VaultCopyError('The vault file list did not load. Retry before changing it.');
     await SecureStore.setItemAsync(MANIFEST_KEY, JSON.stringify(updated));
     filesRef.current = updated;
     setFiles(updated);
@@ -361,7 +359,7 @@ export default function VaultScreen() {
         setActiveTab('Documents');
       }
     } catch (e: unknown) {
-      Alert.alert('Not listed', e instanceof Error ? e.message : 'Try again.');
+      Alert.alert('Not listed', vaultErrorText(e, 'The files could not be added to the list. Try again.'));
     } finally {
       relisting.current = false;
       setRelistBusy(false);
@@ -407,7 +405,7 @@ export default function VaultScreen() {
       if (!run.o.cancelled) Alert.alert('Added to Vault', `${name} encrypted and stored.`);
     } catch (e: unknown) {
       if (e instanceof VaultCancelledError || run.o.cancelled) return;   // nothing was kept
-      Alert.alert('Not added', (e instanceof Error && e.message) || 'The file could not be encrypted. Try again.');
+      Alert.alert('Not added', vaultErrorText(e, 'The file could not be encrypted. Try again.'));
     } finally {
       if (op.current === run.o) op.current = null;
       setProgress(null);
@@ -426,56 +424,9 @@ export default function VaultScreen() {
   };
 
   const pickAndAdd = async () => {
-    if (activeTab === 'Photos') {
-      const { status, canAskAgain } = await withSystemUi(() => ImagePicker.requestMediaLibraryPermissionsAsync());
-      if (status !== 'granted') {
-        permissionDenied('Photo access needed', 'Allow gallery access to move a photo into the vault.', canAskAgain);
-        return;
-      }
-      const result = await withSystemUi(() => ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality:    0.85,
-      }));
-      if (!result.canceled && result.assets[0]) {
-        const asset = result.assets[0];
-        const name  = asset.fileName || `photo_${Date.now()}.jpg`;
-        await encryptAndSave(
-          asset.uri, name, asset.fileSize || 0, asset.mimeType || 'image/jpeg', 'Photos'
-        );
-      }
-    } else if (activeTab === 'Videos') {
-      const { status , canAskAgain } = await withSystemUi(() => ImagePicker.requestMediaLibraryPermissionsAsync());
-      if (status !== 'granted') {
-        permissionDenied('Photo access needed', 'Allow gallery access to move a video into the vault.', canAskAgain);
-        return;
-      }
-      const result = await withSystemUi(() => ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-      }));
-      if (!result.canceled && result.assets[0]) {
-        const asset = result.assets[0];
-        const name  = asset.fileName || `video_${Date.now()}.mp4`;
-        await encryptAndSave(
-          asset.uri, name, asset.fileSize || 0, asset.mimeType || 'video/mp4', 'Videos'
-        );
-      }
-    } else {
-      // Documents and Voice — use document picker
-      const result = await withSystemUi(() => DocumentPicker.getDocumentAsync({
-        multiple: false,
-        copyToCacheDirectory: true,
-      }));
-      if (!result.canceled && result.assets[0]) {
-        const asset = result.assets[0];
-        await encryptAndSave(
-          asset.uri,
-          asset.name,
-          asset.size || 0,
-          asset.mimeType || 'application/octet-stream',
-          activeTab,
-        );
-      }
-    }
+    const tab = activeTab;
+    const picked = await pickVaultFile(tab === 'Photos' ? 'photo' : tab === 'Videos' ? 'video' : 'document', withSystemUi);
+    if (picked) await encryptAndSave(picked.uri, picked.name, picked.size, picked.mimeType, tab);
   };
 
   // ── Decrypt and open file ─────────────────────────────────────
@@ -507,7 +458,7 @@ export default function VaultScreen() {
       }
     } catch (e: unknown) {
       if (!(e instanceof VaultCancelledError) && !run.o.cancelled) {
-        Alert.alert('Could not open', (e instanceof Error && e.message) || 'The file could not be decrypted.');
+        Alert.alert('Could not open', vaultErrorText(e, 'The file could not be decrypted. Try again.'));
       }
     } finally {
       // ponytail: deleted as soon as the share sheet returns. Android resolves
@@ -541,7 +492,7 @@ export default function VaultScreen() {
               const gone = encUriOf(file).split('/').pop()!.replace(/\.enc$/, '');
               setDiskScan(d => d && { ...d, ids: d.ids.filter(id => id !== gone) });
             } catch (e: unknown) {
-              Alert.alert('Not deleted', e instanceof Error ? e.message : 'The file could not be removed. Try again.');
+              Alert.alert('Not deleted', vaultErrorText(e, 'The file could not be removed. Try again.'));
             }
           },
         },
@@ -576,7 +527,7 @@ export default function VaultScreen() {
       setLastBackup(now);
       await SecureStore.setItemAsync('vault_last_backup', now).catch(() => {});
     } catch (e: unknown) {
-      Alert.alert('Export failed', e instanceof Error ? e.message : 'Try again.');
+      Alert.alert('Export failed', vaultErrorText(e, 'The list could not be shared. Try again.'));
     } finally {
       if (exportPath) await FileSystem.deleteAsync(exportPath, { idempotent: true }).catch(() => {});
       setLoading(false);

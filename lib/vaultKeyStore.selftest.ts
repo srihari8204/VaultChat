@@ -13,7 +13,10 @@
 //     in use; a failed move after the save is finished by the next unlock,
 //   • a damaged archive index blocks nothing and loses no name it still holds,
 //   • the wrong-old-PIN limit lives in storage, not in the screen,
-//   • a failed New key says whether an archive entry was written.
+//   • a failed New key says whether an archive entry was written,
+//   • K1 (rerate7/J): a copy an unfinished PIN change left staged is finished
+//     by the next change, and "Try an old PIN" accepts the PIN it was staged
+//     under; concurrent tries are counted one by one.
 
 import assert from 'node:assert/strict';
 
@@ -278,6 +281,64 @@ const same = (a: { dek: Uint8Array } | null | undefined, b: { dek: Uint8Array } 
   Date.now = realNow;
   assert.equal(store.get('vault_key_v2_prev_42'), 'older', 'the older archive is kept');
   assert.deepEqual(JSON.parse(store.get('vault_key_v2_archive')!), ['vault_key_v2_prev_42', 'vault_key_v2_prev_43']);
+
+  // ── K1 (rerate7/J_probe_staged): a copy an unfinished PIN change left ──
+  // P0 → P1 saved P1 but the copy was never moved (the app died), then
+  // P1 → P2 before the vault was opened: the second change finishes the first.
+  store.clear();
+  const s0 = (await ks.unlockVaultKeys(P0, none)).keys!;
+  await ks.stageVaultRewrap(P0, P1);
+  assert.equal(await ks.changePinWithVaultKeys(P1, P2, savePin), true);
+  assert.ok(same((await ks.unlockVaultKeys(P2, some)).keys, s0), 'the key opens with the PIN in use');
+  assert.deepEqual(staged(), [], 'nothing left staged');
+  // The same with an archive along.
+  k = await fresh();
+  await ks.stageVaultRewrap(P1, P2);
+  assert.equal(await ks.changePinWithVaultKeys(P2, P0, savePin), true);
+  assert.ok(await opensWith(P0, k), 'key and archive follow both changes');
+  // Finishing the earlier move fails: this change stops, nothing is lost.
+  store.clear();
+  const s1 = (await ks.unlockVaultKeys(P0, none)).keys!;
+  await ks.stageVaultRewrap(P0, P1);
+  failSet = (key) => key === 'vault_key_v2';
+  saved = null;
+  await assert.rejects(ks.changePinWithVaultKeys(P1, P2, savePin));
+  failSet = null;
+  assert.equal(saved, null, 'the PIN is not saved');
+  assert.ok(same((await ks.unlockVaultKeys(P1, some)).keys, s1), 'the PIN in use still opens it (and finishes the move)');
+  // The PIN was then reset WITHOUT a re-wrap (no change ran): "Try an old
+  // PIN" with the PIN just before (the staged one) recovers it in one try.
+  store.clear();
+  const s2 = (await ks.unlockVaultKeys(P0, none)).keys!;
+  await ks.stageVaultRewrap(P0, P1);
+  assert.equal((await ks.unlockVaultKeys(P2, some)).miss, 'pin');
+  const t1 = 5_000_000;
+  assert.equal(await ks.tryOldVaultPin(P1, P2, t1), 1, 'the PIN just before recovers the key');
+  assert.ok(same((await ks.unlockVaultKeys(P2, some)).keys, s2));
+  assert.deepEqual(staged(), [], 'the staged copy is dropped once used');
+  assert.equal((await ks.oldVaultPinTries(t1)).left, ks.OLD_PIN_TRIES, 'no try was spent');
+
+  // Two tries at once (a double keypad fire) are run one after the other, so
+  // both are counted.
+  store.clear();
+  await ks.unlockVaultKeys(P0, none);
+  await ks.replaceVaultKeys(P1);
+  assert.deepEqual(await Promise.all([ks.tryOldVaultPin('9999', P1, t1), ks.tryOldVaultPin('8888', P1, t1)]), [0, 0]);
+  assert.equal((await ks.oldVaultPinTries(t1)).left, ks.OLD_PIN_TRIES - 2, 'each try counted once');
+
+  // ── A damaged index that cuts a name short inside its digits ──────────
+  store.clear();
+  await ks.unlockVaultKeys(P0, none);
+  await ks.replaceVaultKeys(P1);
+  const real = (JSON.parse(store.get('vault_key_v2_archive')!) as string[])[0];
+  const cut = `["${real.slice(0, -3)}`;
+  store.set('vault_key_v2_archive', cut);
+  r = await ks.unlockVaultKeys(P1, some);
+  assert.equal(r.archiveIndexDamaged, true);
+  assert.equal(r.lockedArchives, 0, 'a listed name with no stored record is not offered as locked');
+  assert.deepEqual(JSON.parse(store.get('vault_key_v2_archive')!), [real.slice(0, -3)], 'the name is kept as it reads');
+  assert.ok([...store.entries()].some(([n, v]) => n.startsWith('vault_key_v2_archive_damaged_') && v === cut), 'the damaged index is kept aside');
+  assert.ok(store.has(real), 'the archive itself is untouched');
 
   console.log('vaultKeyStore.selftest: all checks passed');
 })().catch((e) => { console.error(e); process.exit(1); });

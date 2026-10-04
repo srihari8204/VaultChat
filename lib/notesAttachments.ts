@@ -2,15 +2,19 @@
 //
 // Each attachment's bytes are sealed with the notes DEK (lib/notesCrypto) and
 // written to <documentDirectory>/note_attachments/<id>.enc as a JSON envelope.
-// Nothing is ever written to disk in the clear. Opening decrypts to a temp file
-// in the cache directory (which the OS may purge) so an image can be previewed
-// or the file handed to the OS share sheet.
+// Nothing is stored on disk in the clear. Opening decrypts to a temp copy in
+// one cache folder (OPEN_DIR) so an image can be previewed or the file handed
+// to the OS share sheet; closeOpenedAttachments deletes that folder, and
+// app/encrypted-notes.tsx calls it when the viewer closes, when a share sheet
+// returns, when the notes lock or close, and when they open (a crash left one).
 
 import * as FileSystem from 'expo-file-system/legacy';
 import { Buffer } from 'buffer';
 import { decryptStringToBytes, encryptBytesToString } from './notesCrypto';
 
 const DIR = FileSystem.documentDirectory + 'note_attachments/';
+/** Decrypted copies being viewed or shared; nothing else is kept here. */
+const OPEN_DIR = FileSystem.cacheDirectory + 'notes_open/';
 
 export interface NoteAttachment {
   id: string;
@@ -44,18 +48,25 @@ export async function addAttachment(srcUri: string, name: string, mime: string):
   return { id, name, mime, size: bytes.length, createdAt: Date.now() };
 }
 
-// Decrypt to a temp cache file; returns its uri, or null if it can't be opened.
+// Decrypt to a temp copy in OPEN_DIR; returns its uri, or null if it can't be
+// opened. The caller deletes it with closeOpenedAttachments.
 export async function openAttachment(att: NoteAttachment): Promise<string | null> {
   try {
     const blob = await FileSystem.readAsStringAsync(DIR + att.id + '.enc', { encoding: FileSystem.EncodingType.UTF8 });
     const bytes = await decryptStringToBytes(blob);
     if (!bytes) return null;
-    const tmp = FileSystem.cacheDirectory + att.id + extFor(att.mime, att.name);
+    await FileSystem.makeDirectoryAsync(OPEN_DIR, { intermediates: true }).catch(() => { /* exists */ });
+    const tmp = OPEN_DIR + att.id + extFor(att.mime, att.name);
     await FileSystem.writeAsStringAsync(tmp, Buffer.from(bytes).toString('base64'), { encoding: FileSystem.EncodingType.Base64 });
     return tmp;
   } catch {
     return null;
   }
+}
+
+/** Delete every decrypted copy openAttachment made. Best effort, never throws. */
+export async function closeOpenedAttachments(): Promise<void> {
+  try { await FileSystem.deleteAsync(OPEN_DIR, { idempotent: true }); } catch { /* the next open or close tries again */ }
 }
 
 // Best-effort delete of the encrypted file (call when removing an attachment/note).

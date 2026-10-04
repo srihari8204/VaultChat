@@ -144,5 +144,17 @@ const only = (prefix: string) => [...disk.keys()].filter((k) => k.startsWith(pre
   assert.deepEqual(disk.get('file:///cache/o5'), new Uint8Array([0x78]));
   assert.equal(io.vaultFileIdOf(DIR + 'vault_a.enc'), 'vault_a');
 
+  // The screen shows only copy written for people (rerate7/J flaw 5): every
+  // failure above is a VaultCopyError; a library's own text gets the fallback.
+  const shown = async (p: Promise<unknown>) => { try { await p; return 'resolved'; } catch (e) { return vc.vaultErrorText(e, 'FALLBACK'); } };
+  disk.delete(SRC);
+  assert.match(await shown(io.sealFileToVault(keys, SRC, DIR + 'vault_x.enc', 5)), /no longer there/);
+  assert.match(await shown(io.sealFileToVault(null, SRC, DIR + 'vault_x.enc', 5)), /vault key is not open/);
+  assert.match(await shown(io.openVaultFileTo(keys, [], '1357', DIR + 'vault_c.enc', 'file:///cache/o6')), /another key/);
+  assert.match(await shown(io.openVaultFileTo(keys, [], '1357', DIR + 'vault_zz.enc', 'file:///cache/o6')), /missing from the vault folder/);
+  assert.equal(vc.vaultErrorText(new Error('setAAD failed (native call returned false)'), 'FALLBACK'), 'FALLBACK');
+  assert.equal(vc.vaultErrorText(new SyntaxError('Unexpected token'), 'FALLBACK'), 'FALLBACK');
+  assert.equal(vc.vaultErrorText('x', 'FALLBACK'), 'FALLBACK');
+
   console.log('vaultFileIO.selftest: all checks passed');
 })().catch((e) => { console.error(e); process.exit(1); });

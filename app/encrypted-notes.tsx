@@ -22,7 +22,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, TouchableOpacity, FlatList, TextInput, Alert, ScrollView, AppState } from 'react-native';
 import { AppText as Text } from '../components/ui/Text';
 import {
-  deleteAttachment, listAttachmentIds,
+  closeOpenedAttachments, deleteAttachment, listAttachmentIds,
 } from '../lib/notesAttachments';
 import { useTheme } from '../lib/theme';
 import { Stack, useRouter } from 'expo-router';
@@ -50,6 +50,7 @@ import { useNoteEditor } from '../components/notes/useNoteEditor';
 import { useNoteAttachments } from '../components/notes/useNoteAttachments';
 import { NoteEditorModal } from '../components/notes/NoteEditorModal';
 import { NotesBackupModal } from '../components/notes/NotesBackupModal';
+import { orphanAttachmentIds } from '../components/notes/noteOrphans';
 import {
   ImageViewerModal, LockChallengeModal, NotesPinGate, PasswordGeneratorModal, TrashModal,
 } from '../components/notes/NotesModals';
@@ -159,8 +160,9 @@ export default function EncryptedNotesScreen() {
       setGeneratedPass('');
       setPendingLock(null);
       setViewerImg(null);
+      closeOpenedAttachments();      // no decrypted copy outlives the lock
     });
-    return () => sub.remove();
+    return () => { sub.remove(); closeOpenedAttachments(); };
   }, []);
 
   // iOS: blur the switcher snapshot and the inactive screen while open.
@@ -266,7 +268,8 @@ export default function EncryptedNotesScreen() {
   loadNotesRef.current = loadNotes;
 
   // Nothing is read or decrypted until the PIN gate has opened.
-  useEffect(() => { if (gate === 'open') loadNotesRef.current(); }, [gate]);
+  // A decrypted copy a crash left behind is deleted before anything is opened.
+  useEffect(() => { if (gate === 'open') { closeOpenedAttachments(); loadNotesRef.current(); } }, [gate]);
 
   // What the editor opened with, to tell whether Cancel would discard anything.
   const edInitial = useRef('');
@@ -279,23 +282,32 @@ export default function EncryptedNotesScreen() {
 
   /** Reopen an unsaved draft sealed when the app last went to the background. */
   const offerDraft = async (list: Note[]) => {
-    const raw = await AsyncStorage.getItem(DRAFT_KEY).catch(() => null);
-    if (!raw) return;
+    // Delete every stored attachment no saved note (trash included), the
+    // draft being restored, or an editor still open references: the files of
+    // a draft that can never open, of a kept draft a newer one replaced, or of
+    // a draft the app was killed with. Best effort; nothing else is open now.
+    const sweep = async (keep: string[]) => {
+      try {
+        const stored = await listAttachmentIds();
+        for (const id of orphanAttachmentIds(stored, list, [...keep, ...(draftRef.current?.added ?? [])])) {
+          await deleteAttachment(id).catch(() => {});
+        }
+      } catch { /* the next open tries again */ }
+    };
+    // undefined = the read failed: a draft may be there, so nothing is swept.
+    const raw = await AsyncStorage.getItem(DRAFT_KEY).catch(() => undefined);
+    if (raw === undefined) return;
+    if (!raw) { await sweep([]); return; }
     let d: Draft | null;
     // The key could not be read right now (or is missing until a restore):
     // the draft and its attachments stay for the next open.
     try { d = await openDraft(raw); } catch { return; }
     // Removed only once its fate is known: opened, or known never to open.
     await AsyncStorage.removeItem(DRAFT_KEY).catch(() => {});
-    if (!d) {
-      // This device's key was read and the draft was not sealed under it (or
-      // is damaged), so the attachments only it pointed at can never be
-      // reached: delete every stored attachment no saved note (trash
-      // included) references. Nothing else is open now.
-      const used = new Set(list.flatMap(n => (n.attachments ?? []).map(a => a.id)));
-      for (const id of await listAttachmentIds()) if (!used.has(id)) await deleteAttachment(id);
-      return;
-    }
+    // This device's key was read; a draft not sealed under it (or damaged)
+    // can never be reached, so only the restored draft's files are kept.
+    await sweep(d ? (d.attachments ?? []).map(a => a.id) : []);
+    if (!d) return;
     const base = d.editId ? list.find(n => n.id === d.editId) ?? null : null;
     openWith(base, d, '');   // a restored draft is unsaved by definition
     Alert.alert('Unsaved note restored', 'You left the app while editing. Your changes were kept — save them or cancel to discard.');
@@ -673,7 +685,7 @@ export default function EncryptedNotesScreen() {
         onClose={() => setShowPassGen(false)}
       />
 
-      <ImageViewerModal uri={viewerImg} onClose={() => setViewerImg(null)} />
+      <ImageViewerModal uri={viewerImg} onClose={() => { setViewerImg(null); closeOpenedAttachments(); }} />
 
       <TrashModal
         visible={showTrash}

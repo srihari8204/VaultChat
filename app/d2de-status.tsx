@@ -1,17 +1,18 @@
 // app/d2de-status.tsx
-// Encryption status — which encryption layers THIS BUILD uses. It is a readout
-// of compile-time flags (services/d2deService.getD2DEStatus → E2EE_ENABLED), not
-// a live per-conversation check, and the copy says so. With E2EE on, it links
-// to a chosen direct chat's safety number (app/verify-contact), and the picker
-// shows each contact's live state (verified, not verified, code changed, no
-// E2EE yet), worked out as verify-contact does (lib/peerSafetyStatus).
+// Encryption status — which encryption layers THIS BUILD uses. The layer list
+// is a readout of compile-time flags (services/d2deService.getD2DEStatus →
+// E2EE_ENABLED), not a live check, and the copy says so. With E2EE on, the top
+// card also sums up the direct chats' live safety states (lib/peerSafetySummary)
+// and the screen links to a chosen chat's safety number (app/verify-contact);
+// the picker shows each contact's state (verified, not verified, code changed,
+// no E2EE yet), worked out as verify-contact does (lib/peerSafetyStatus).
 
 import { AppText as Text, AuroraBackground } from '../components/ui';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, View, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { Sheet, type SheetAction } from '../components/ui/Sheet';
 import { listChats } from '../lib/chatService';
 import { getD2DEStatus } from '../services/d2deService';
@@ -21,6 +22,7 @@ import { fetchIdentityKey, getVerifiedContacts, safetyFingerprint, verificationS
 import { checkKeyChange, getVerifiedFingerprint } from '../lib/keyChange';
 import { computeSafetyNumber } from '../services/security/safetyNumber';
 import { forEachLimited, peerSafetyLabel, type PeerSafetyStatus } from '../lib/peerSafetyStatus';
+import { peerSafetySummary } from '../lib/peerSafetySummary';
 
 type Peer = { id: string; name: string };
 
@@ -48,19 +50,22 @@ export default function D2DEStatusScreen() {
   const layers = getD2DEStatus();
   const active = layers.filter(l => l.active).length;
 
-  // Pick a direct chat, then compare its safety number (app/verify-contact
-  // needs a peer). Group chats have no single safety number. While the picker
-  // is open, each contact's state fills in beside its name.
+  // The direct chats (group chats have no single safety number) and each
+  // one's state, checked once when the screen opens: the top card sums them
+  // up, and the picker shows them beside each name before opening that chat's
+  // safety number (app/verify-contact needs a peer).
   const [peers, setPeers] = useState<Peer[] | null>(null);
+  const [peersFailed, setPeersFailed] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [states, setStates] = useState<Record<string, PeerSafetyStatus>>({});
   const [loadingPeers, setLoadingPeers] = useState(false);
-  // Bumped when the picker closes or the screen goes: the state checks stop.
-  const pickerRun = useRef(0);
-  useEffect(() => () => { pickerRun.current++; }, []);
-  const closePicker = () => { pickerRun.current++; setPeers(null); };
+  // Bumped when a new check starts or the screen goes: the older checks stop.
+  const checkRun = useRef(0);
+  useEffect(() => () => { checkRun.current++; }, []);
+  const closePicker = () => setPickerOpen(false);
 
   const checkStates = async (list: Peer[], run: number) => {
-    const live = () => pickerRun.current === run;
+    const live = () => checkRun.current === run;
     const put = (id: string, st: PeerSafetyStatus) => { if (live()) setStates((m) => ({ ...m, [id]: st })); };
     let myId = '';
     let myKey: string | null = null;
@@ -88,8 +93,8 @@ export default function D2DEStatusScreen() {
     }, () => !live());
   };
 
-  const pickContact = async () => {
-    if (loadingPeers) return;
+  /** Load the direct chats and start checking them; null when it failed. */
+  const loadPeers = async (): Promise<Peer[] | null> => {
     setLoadingPeers(true);
     try {
       const chats = await listChats();
@@ -100,20 +105,44 @@ export default function D2DEStatusScreen() {
         seen.add(ch.peerUserId);
         list.push({ id: ch.peerUserId, name: ch.peerName || 'this contact' });
       }
-      if (!list.length) {
-        Alert.alert('No direct chats yet', 'A safety number belongs to a one-to-one chat. Start one, then check it here.');
-        return;
-      }
-      const run = ++pickerRun.current;
+      const run = ++checkRun.current;
       setStates({});
       setPeers(list);
+      setPeersFailed(false);
       checkStates(list, run);
+      return list;
     } catch {
-      Alert.alert('Could not load your chats', 'Check your connection and try again.');
+      setPeersFailed(true);
+      return null;
     } finally { setLoadingPeers(false); }
   };
+  useEffect(() => { if (E2EE_ENABLED) loadPeers(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Back from a safety number: it may have just been verified, so check again.
+  const recheck = useRef(false);
+  useFocusEffect(useCallback(() => {
+    if (recheck.current) { recheck.current = false; loadPeers(); }
+  }, [])); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const actions: SheetAction[] = (peers ?? []).map((p) => {
+  const pickContact = async () => {
+    if (loadingPeers) return;
+    const list = peers ?? await loadPeers();
+    if (!list) {
+      Alert.alert('Could not load your chats', 'Check your connection and try again.');
+      return;
+    }
+    if (!list.length) {
+      Alert.alert('No direct chats yet', 'A safety number belongs to a one-to-one chat. Start one, then check it here.');
+      return;
+    }
+    setPickerOpen(true);
+  };
+
+  const summary = !E2EE_ENABLED ? null
+    : peers ? peerSafetySummary(peers.map((p) => states[p.id]).filter((x): x is PeerSafetyStatus => !!x), peers.length)
+    : peersFailed ? 'Your chats could not be checked. Check your connection, then tap Check a contact’s safety number.'
+    : 'Checking your direct chats…';
+
+  const actions: SheetAction[] = (pickerOpen ? peers ?? [] : []).map((p) => {
     const st = states[p.id];
     return {
       label: st ? `${p.name} · ${peerSafetyLabel(st)}` : `${p.name} · Checking…`,
@@ -121,6 +150,7 @@ export default function D2DEStatusScreen() {
       accessibilityLabel: `${p.name}, ${st ? peerSafetyLabel(st) : 'checking'}. Opens the safety number.`,
       onPress: () => {
         closePicker();
+        recheck.current = true;
         router.push({ pathname: '/verify-contact', params: { peerId: p.id, peerName: p.name } });
       },
     };
@@ -150,6 +180,8 @@ export default function D2DEStatusScreen() {
               : `${layers.length - active} layer${layers.length - active > 1 ? 's are' : ' is'} not switched on in this build.`
             }
           </Text>
+          {/* Live, unlike the flags above: the direct chats' safety states. */}
+          {summary ? <Text style={s.chatSummary}>{summary}</Text> : null}
         </View>
 
         {/* Layer cards */}
@@ -189,7 +221,7 @@ export default function D2DEStatusScreen() {
         <View style={{ height: 40 }} />
       </ScrollView>
       {/* A sibling of the ScrollView: a Modal is never scroll content. */}
-      <Sheet visible={!!peers} title="Whose safety number?" actions={actions} onClose={closePicker} />
+      <Sheet visible={pickerOpen} title="Whose safety number?" actions={actions} onClose={closePicker} />
       </View>
     </>
   );
@@ -203,6 +235,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   scoreBar:     { flexDirection: 'row', gap: 6, marginBottom: 12 },
   scoreSeg:     { flex: 1, height: 6, borderRadius: 3 },
   scoreNote:    { color: c.textDim, fontSize: 12, textAlign: 'center' },
+  chatSummary:  { color: c.text, fontSize: 13, fontWeight: '600', textAlign: 'center', marginTop: 10 },
   layerCard:    { backgroundColor: c.glassSoft, marginHorizontal: 16, marginBottom: 10, borderRadius: 12, padding: 16, borderLeftWidth: 3 },
   layerHeader:  { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginBottom: 6 },
   layerDot:     { width: 10, height: 10, borderRadius: 5 },

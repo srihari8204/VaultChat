@@ -31,6 +31,7 @@ import {
 import { SERVER_URL } from '../constants/server';
 import { initUsageCounter, setUsageCounterEnabled, usageCounterEnabled } from '../lib/usageCounter';
 import { api } from '../lib/api';
+import { userErrorText } from '../lib/userErrorText';
 import { profileFromProtobuf } from '../lib/userProfilePolicy';
 import { initialOf } from '../lib/format';
 import { getAutoDownload, setAutoDownload, type AutoDownloadPolicy } from '../lib/mediaPrefs';
@@ -102,7 +103,7 @@ export default function SettingsScreen() {
     setBlocksError(null);
     listBlocks()
       .then((b) => { if (!cancelled()) setBlocks(b); })
-      .catch((e: unknown) => { if (!cancelled()) setBlocksError((e as Error | undefined)?.message ?? 'Could not load blocked users'); });
+      .catch((e: unknown) => { if (!cancelled()) setBlocksError(userErrorText(e, 'Could not load blocked users')); });
   }, []);
 
   // Initial fetch — settings, blocks and profile in parallel, each settling on
@@ -113,7 +114,7 @@ export default function SettingsScreen() {
     setLoadError(null);
     getSettings()
       .then((s) => { if (!cancel) { savedPrefs.current = s; setSettings(s); } })
-      .catch((e: unknown) => { if (!cancel) setLoadError((e as Error | undefined)?.message ?? 'Could not load settings'); })
+      .catch((e: unknown) => { if (!cancel) setLoadError(userErrorText(e, 'Could not load settings')); })
       .finally(() => { if (!cancel) setLoading(false); });
     loadBlocks(() => cancel);
     api<{ name?: string; email?: string; status?: string; photoURL?: string }>(
@@ -144,7 +145,8 @@ export default function SettingsScreen() {
       savedPrefs.current = { ...savedPrefs.current, [k]: r.value };
     }
     if (r.status === 'failed' && mounted.current) {
-      Alert.alert('Save failed', r.error instanceof Error && r.error.message ? r.error.message : 'Try again');
+      // The server's own message passes through; a JS or network error's does not.
+      Alert.alert('Save failed', userErrorText(r.error, 'The setting could not be saved. Try again.'));
     }
   }, [saver]);
 
@@ -205,7 +207,7 @@ export default function SettingsScreen() {
         await FileSystem.deleteAsync(dest, { idempotent: true }).catch(() => {});
       }
     } catch (e: unknown) {
-      Alert.alert('Export failed', (e as Error | undefined)?.message ?? 'Try again');
+      Alert.alert('Export failed', userErrorText(e, 'Your data could not be exported. Try again.'));
     } finally {
       setExporting(false);
     }
@@ -232,7 +234,7 @@ export default function SettingsScreen() {
             await unblockUser(u.userId);
             setBlocks(prev => prev.filter(x => x.userId !== u.userId));
           } catch (e: unknown) {
-            Alert.alert('Could not unblock', (e as Error | undefined)?.message ?? 'Try again');
+            Alert.alert('Could not unblock', userErrorText(e, 'Try again'));
           } finally {
             setUnblocking(null);
           }

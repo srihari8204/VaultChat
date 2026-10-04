@@ -10,7 +10,7 @@
 import { Directory, File } from 'expo-file-system';
 import * as FileSystem from 'expo-file-system/legacy';
 import {
-  isV3, v3OpenStream, v3SealedSize, v3SealStream, vaultFileDecrypt, VaultKeyMissingError,
+  isV3, v3OpenStream, v3SealedSize, v3SealStream, vaultFileDecrypt, VaultCopyError, VaultKeyMissingError,
   type V3StreamOptions, type VaultKeys,
 } from '../../lib/vaultCrypto';
 
@@ -31,7 +31,7 @@ function reader(h: Handle) {
   return (n: number): Uint8Array => {
     h.offset = pos;
     const b = n === 0 ? new Uint8Array(0) : h.readBytes(n);
-    if (b.length !== n || (n > 0 && h.offset !== pos + n)) throw new Error('The file could not be read completely. Try again.');
+    if (b.length !== n || (n > 0 && h.offset !== pos + n)) throw new VaultCopyError('The file could not be read completely. Try again.');
     pos += n;
     return b;
   };
@@ -43,14 +43,14 @@ function writer(h: Handle) {
     if (b.length === 0) return;
     h.offset = pos;
     h.writeBytes(b);
-    if (h.offset !== pos + b.length) throw new Error('The file could not be written completely. Check the free space and try again.');
+    if (h.offset !== pos + b.length) throw new VaultCopyError('The file could not be written completely. Check the free space and try again.');
     pos += b.length;
   };
 }
 
 function sizeOf(h: Handle, f: File): number {
   const n = Number(h.size ?? f.size);
-  if (!Number.isFinite(n) || n < 0) throw new Error('The file size could not be read.');
+  if (!Number.isFinite(n) || n < 0) throw new VaultCopyError('The file size could not be read.');
   return n;
 }
 
@@ -72,7 +72,7 @@ export async function sealFileToVault(
   const src = new File(srcUri);
   // Android's File.open() is RandomAccessFile "rw": it would CREATE a vanished
   // source as an empty file, which would then be sealed as a 0-byte file.
-  if (!src.exists) throw new Error('The picked file is no longer there. Pick it again.');
+  if (!src.exists) throw new VaultCopyError('The picked file is no longer there. Pick it again.');
   const part = new File(destUri + PART);
   const name = destUri.split('/').pop() ?? '';
   const sh = src.open();
@@ -80,13 +80,13 @@ export async function sealFileToVault(
   let oh: Handle | null = null;
   try {
     const size = sizeOf(sh, src);
-    if (size === 0 && expectedSize > 0) throw new Error('The picked file could not be read (it is empty). Pick it again.');
+    if (size === 0 && expectedSize > 0) throw new VaultCopyError('The picked file could not be read (it is empty). Pick it again.');
     part.create({ intermediates: true, overwrite: true });
     oh = part.open();
     await v3SealStream(keys.dek, size, reader(sh), writer(oh), vaultFileIdOf(destUri), opts);
     oh.close(); oh = null;
     // Read the length back from disk before the file is listed.
-    if (new File(part.uri).size !== v3SealedSize(size)) throw new Error('The encrypted copy was not written completely. Check the free space and try again.');
+    if (new File(part.uri).size !== v3SealedSize(size)) throw new VaultCopyError('The encrypted copy was not written completely. Check the free space and try again.');
     part.rename(name);
     return size;
   } catch (e) {
@@ -109,7 +109,7 @@ export async function openVaultFileTo(
   keys: VaultKeys | null, older: VaultKeys[], pin: string, encUri: string, outUri: string, opts: V3StreamOptions = {},
 ): Promise<void> {
   const enc = new File(encUri);
-  if (!enc.exists) throw new Error('This file is missing from the vault folder.');
+  if (!enc.exists) throw new VaultCopyError('This file is missing from the vault folder.');
   const eh = enc.open();
   let v3 = false;
   try {
@@ -117,7 +117,7 @@ export async function openVaultFileTo(
     v3 = isV3(eh.readBytes(4));
     if (v3) {
       const deks = (keys ? [keys, ...older] : older).map((k) => k.dek);
-      if (!deks.length) throw new Error('The vault key could not be opened with this PIN.');
+      if (!deks.length) throw new VaultCopyError('The vault key could not be opened with this PIN.');
       const size = sizeOf(eh, enc);
       const out = new File(outUri);
       out.create({ intermediates: true, overwrite: true });

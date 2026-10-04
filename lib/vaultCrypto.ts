@@ -130,8 +130,19 @@ export function clearVaultKeyCache() { keyCache.clear(); }
 
 export interface VaultKeys { dek: Uint8Array; legacy: Uint8Array }
 
+/** An error whose message was written for the person using the vault, so a
+ *  screen may show it as is. Anything else (a library's, the OS's or a
+ *  keystore's own text) is replaced by the screen's fixed copy. */
+export class VaultCopyError extends Error {
+  constructor(message: string) { super(message); this.name = 'VaultCopyError'; }
+}
+/** What a vault screen shows for `e`: its own copy, else `fallback`. */
+export function vaultErrorText(e: unknown, fallback: string): string {
+  return e instanceof VaultCopyError ? e.message : fallback;
+}
+
 /** Thrown when a new file would have to be sealed without the vault key. */
-export class VaultKeyMissingError extends Error {
+export class VaultKeyMissingError extends VaultCopyError {
   constructor() {
     super('The vault key is not open, so new files cannot be added. Files already in the vault are not affected.');
     this.name = 'VaultKeyMissingError';
@@ -214,11 +225,11 @@ export function vaultFileDecrypt(keys: VaultKeys | null, pin: string, p: VaultFi
   const open = (key: Uint8Array) => new TextDecoder().decode(gcm(key, unb64(p.iv)).decrypt(unb64(p.ct)));
   const ring = keys ? [keys, ...older] : older;
   if (p.v === 2) {
-    if (!ring.length) throw new Error('The vault key could not be opened with this PIN.');
+    if (!ring.length) throw new VaultCopyError('The vault key could not be opened with this PIN.');
     for (const k of ring) {
       try { return open(k.dek); } catch { /* next */ }
     }
-    throw new Error('This file was sealed with another vault key. If you used a different PIN before, try it with "Try an old PIN".');
+    throw new VaultCopyError('This file was sealed with another vault key. If you used a different PIN before, try it with "Try an old PIN".');
   }
   // v1: sealed under whatever PIN was set when it was added. Lazy, so the
   // 100k-iteration derivation of the PIN just entered only runs when the
@@ -227,7 +238,7 @@ export function vaultFileDecrypt(keys: VaultKeys | null, pin: string, p: VaultFi
   for (const k of candidates) {
     try { return open(k()); } catch { /* next */ }
   }
-  throw new Error('This file was added under an earlier PIN and cannot be opened with this one.');
+  throw new VaultCopyError('This file was added under an earlier PIN and cannot be opened with this one.');
 }
 
 // ─── v3/v4: chunked, so a file is never held whole in memory (2026-10-04) ────
@@ -278,12 +289,12 @@ export function v3PlainSize(sealedSize: number): number {
   const body = sealedSize - V3_HEADER_BYTES;
   const n = Math.max(1, Math.ceil(body / (V3_CHUNK + V3_TAG)));
   const plain = body - n * V3_TAG;
-  if (body < V3_TAG || plain < 0 || plain > n * V3_CHUNK) throw new Error('This vault file is damaged (truncated).');
+  if (body < V3_TAG || plain < 0 || plain > n * V3_CHUNK) throw new VaultCopyError('This vault file is damaged (truncated).');
   return plain;
 }
 
 function v3Iv(header: Uint8Array, index: number, last: boolean): Uint8Array {
-  if (index >= V3_LAST) throw new Error('File too large for the vault format');
+  if (index >= V3_LAST) throw new VaultCopyError('File too large for the vault format');
   const iv = new Uint8Array(12);
   iv.set(header.subarray(4, 12), 0);
   new DataView(iv.buffer).setUint32(8, (index | (last ? V3_LAST : 0)) >>> 0);
@@ -366,20 +377,24 @@ export function nodeStyleChunkCipher(lib: GcmLib): ChunkCipher {
   };
 }
 
-/** `candidate` if it matches @noble on a fixed vector (both ways, a wrong tag
- *  rejected), else null. Any throw — a missing native module — is a no. */
+/** `candidate` if it matches @noble on fixed vectors (both ways, a wrong tag
+ *  rejected), else null. Any throw — a missing native module — is a no. The
+ *  last vector is one full 1 MiB chunk, the size every real seal uses, so a
+ *  fault that shows only on large buffers is caught here and not when the
+ *  file is next opened (rerate7/J flaw 4). chunkCipher() runs this once per
+ *  app session and keeps the answer. */
 export function verifiedChunkCipher(candidate: ChunkCipher): ChunkCipher | null {
   try {
     const key = new Uint8Array(32).map((_, i) => i * 7 + 1);
     const iv = new Uint8Array(12).map((_, i) => 0xa0 + i);
     const aad = join(V4_MAGIC, iv.subarray(0, 8), new TextEncoder().encode('kat-file-id'));
-    for (const len of [0, 1, 33]) {
-      const pt = new Uint8Array(len).map((_, i) => (i * 31 + 5) & 0xff);
+    for (const len of [0, 1, 33, V3_CHUNK]) {
+      const pt = new Uint8Array(len);
+      for (let i = 0; i < len; i++) pt[i] = (i * 31 + 5 + (i >>> 8)) & 0xff;
       const want = jsChunkCipher.seal(key, iv, aad, pt);
       const got = candidate.seal(key, iv, aad, pt);
-      if (got.length !== want.length || got.some((x, i) => x !== want[i])) return null;
-      const back = candidate.open(key, iv, aad, want);
-      if (back.length !== len || back.some((x, i) => x !== pt[i])) return null;
+      if (!sameBytes(got, want)) return null;
+      if (!sameBytes(candidate.open(key, iv, aad, want), pt)) return null;
       const bad = want.slice(); bad[bad.length - 1] ^= 1;
       let rejected = false;
       try { candidate.open(key, iv, aad, bad); } catch { rejected = true; }
@@ -391,8 +406,16 @@ export function verifiedChunkCipher(candidate: ChunkCipher): ChunkCipher | null 
   }
 }
 
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
 let chosenCipher: ChunkCipher | null = null;
-/** The chunk cipher this build uses: native when verified, else @noble (decided once). */
+/** The chunk cipher this build uses: native when verified, else @noble.
+ *  Decided on first use and kept for the session (the check above seals 1 MiB
+ *  once with @noble, which takes a moment on a phone). */
 export function chunkCipher(): ChunkCipher {
   if (!chosenCipher) {
     const native = typeof QC?.createCipheriv === 'function' && typeof QC?.createDecipheriv === 'function'
@@ -437,7 +460,7 @@ export async function v3SealStream(
     const last = i === n - 1;
     const want = last ? plainSize - i * V3_CHUNK : V3_CHUNK;
     const pt = await read(want);
-    if (pt.length !== want) throw new Error('The file changed while it was being added. Try again.');
+    if (pt.length !== want) throw new VaultCopyError('The file changed while it was being added. Try again.');
     await write(cipher.seal(dek, v3Iv(header, i, last), aad, pt));
     opts.onProgress?.(i + 1, n);
     if (!last) await yieldToUi();
@@ -456,7 +479,7 @@ export async function v3OpenStream(
 ): Promise<void> {
   const plainSize = v3PlainSize(sealedSize);
   const header = await read(V3_HEADER_BYTES);
-  if (header.length !== V3_HEADER_BYTES || !isV3(header)) throw new Error('Not a vault file');
+  if (header.length !== V3_HEADER_BYTES || !isV3(header)) throw new VaultCopyError('Not a vault file');
   const aad = v3Aad(header, fileId);
   const n = v3ChunkCount(plainSize);
   const cipher = opts.cipher ?? chunkCipher();
@@ -466,14 +489,14 @@ export async function v3OpenStream(
     const last = i === n - 1;
     const len = (last ? plainSize - i * V3_CHUNK : V3_CHUNK) + V3_TAG;
     const ct = await read(len);
-    if (ct.length !== len) throw new Error('This vault file is damaged (truncated).');
+    if (ct.length !== len) throw new VaultCopyError('This vault file is damaged (truncated).');
     const iv = v3Iv(header, i, last);
     let pt: Uint8Array | null = null;
     for (const k of dek ? [dek] : deks) {
       try { pt = cipher.open(k, iv, aad, ct); dek = k; break; } catch { /* next key */ }
     }
     if (!pt) {
-      throw new Error(i === 0
+      throw new VaultCopyError(i === 0
         ? 'This vault file could not be opened: it is damaged, was moved from another entry, or was sealed with another key.'
         : 'This vault file is damaged and could not be opened.');
     }

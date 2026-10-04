@@ -33,9 +33,12 @@ export function CipherSpeedTest() {
   const [failed, setFailed] = useState(false);
   const gone = useRef(false);
   useEffect(() => () => { gone.current = true; }, []);
+  // A ref, not `busy`: two taps in one frame would both pass a state check.
+  const running = useRef(false);
 
   const run = async () => {
-    if (busy) return;
+    if (running.current) return;
+    running.current = true;
     setBusy(true); setFailed(false); setResult(null);
     const cancelled = () => gone.current;
     try {
@@ -46,6 +49,7 @@ export function CipherSpeedTest() {
     } catch (e: unknown) {
       if (!(e instanceof VaultCancelledError) && !gone.current) setFailed(true);
     } finally {
+      running.current = false;
       if (!gone.current) setBusy(false);
     }
   };

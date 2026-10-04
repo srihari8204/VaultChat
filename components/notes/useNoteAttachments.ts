@@ -10,7 +10,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Sharing from 'expo-sharing';
 import {
-  addAttachment, isImage, openAttachment, type NoteAttachment,
+  addAttachment, closeOpenedAttachments, isImage, openAttachment, type NoteAttachment,
 } from '../../lib/notesAttachments';
 import { permissionDenied } from '../../lib/permissionDenied';
 
@@ -69,9 +69,17 @@ export function useNoteAttachments({ withSystemUi, setAttachments, onImage, canA
     try {
       const uri = await openAttachment(att);
       if (!uri) { Alert.alert('Could not open', 'This attachment is unavailable or corrupted.'); return; }
-      if (isImage(att)) { onImage(uri); return; }
-      if (await Sharing.isAvailableAsync()) await withSystemUi(() => Sharing.shareAsync(uri, { mimeType: att.mime, dialogTitle: att.name }));
-      else Alert.alert('Saved', 'Opened a decrypted copy.');
+      if (isImage(att)) { onImage(uri); return; }   // the viewer deletes it on close
+      try {
+        if (await Sharing.isAvailableAsync()) await withSystemUi(() => Sharing.shareAsync(uri, { mimeType: att.mime, dialogTitle: att.name }));
+        else Alert.alert('Cannot open', 'This device has no app to open the file with.');
+      } finally {
+        // ponytail: the decrypted copy goes as soon as the share sheet returns
+        // (as app/vault.tsx does). A target that reads the file lazily, after
+        // the sheet closes, would find it gone; keep it longer only if a device
+        // check shows one.
+        await closeOpenedAttachments();
+      }
     } catch (e: unknown) {
       Alert.alert('Could not open', messageOf(e, 'This attachment could not be opened. Try again.'));
     }
