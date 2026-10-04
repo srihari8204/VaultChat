@@ -62,6 +62,20 @@ async function main() {
     'a page that does not move past the cursor throws instead of looping');
   local = [];
   assert.deepEqual((await drain(exp.streamUnionWithLocalHistoryAsc!('c', async () => [], { page: 3 }))).length, 0, 'empty history: no chunks');
+  // A cache page that fails mid-walk fails the export; it is not "the end of local history".
+  local = [msg(1, 'a'), msg(2, 'b'), msg(3, 'c'), msg(4, 'd')];
+  let localReads = 0;
+  const flaky: any = {};
+  runInNewContext(compiled, { exports: flaky, require: () => ({
+    getCachedMessages: async () => local,
+    getCachedMessagesAfter: async (c: string, after: number, limit: number) => {
+      if (++localReads === 2) throw new Error('database is locked');
+      return localAfter(c, after, limit);
+    },
+  }), Map });
+  await assert.rejects(drain(flaky.streamUnionWithLocalHistoryAsc('c', async () => [], { page: 2 })), /database is locked/,
+    'a local read error mid-walk rejects the stream instead of silently dropping the rest');
+  local = [];
 
   // ── body text ──
   assert.equal(exportBody(msg(1, 'hi'), isCipher), 'hi');

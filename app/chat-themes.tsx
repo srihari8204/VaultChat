@@ -51,16 +51,19 @@ export default function ChatThemesScreen() {
 
   useEffect(() => {
     touched.current = false;
+    // A read that lands after the screen closed (or after the key changed) is dropped.
+    let alive = true;
     (async () => {
       try {
         const [saved, global] = await Promise.all([AsyncStorage.getItem(key), AsyncStorage.getItem(GLOBAL_BUBBLE)]);
-        if (touched.current) return;
+        if (!alive || touched.current) return;
         savedRef.current = saved;
         setStored(saved);
         setGlobalId(global);
         setLoadErr(false);
-      } catch { if (!touched.current) setLoadErr(true); }
+      } catch { if (alive && !touched.current) setLoadErr(true); }
     })();
+    return () => { alive = false; };
   }, [key, reloadKey]);
 
   // Saves on tap. Per-chat "Default" is stored explicitly (see lib/scopedChoice);

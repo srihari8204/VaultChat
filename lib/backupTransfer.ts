@@ -33,20 +33,64 @@ function timedOut(): Error {
   return err;
 }
 
+/** The person stopped the transfer (a `cancel` signal fired). Code BACKUP_CANCELLED. */
+export function transferCancelled(): Error {
+  const err: Error & { code?: string } = new Error('The backup upload was stopped.');
+  err.code = 'BACKUP_CANCELLED';
+  return err;
+}
+export function isTransferCancelled(e: unknown): boolean {
+  return (e as { code?: string } | null)?.code === 'BACKUP_CANCELLED';
+}
+
 /**
- * Run `work` with an AbortSignal that fires after `ms`, and reject at `ms` even
- * if `work` ignores the signal (a native call that cannot be aborted). Put the
- * body read inside `work`, so the deadline covers it too. The rejection's text
- * matches lib/userErrorText's connection copy.
+ * Run `work` with an AbortSignal that fires after `ms`, then WAIT for `work` to
+ * settle: the abort is what ends it. Rejecting at `ms` while the work ran on
+ * would release lib/cloudBackup's lock under an upload that could still land
+ * after the next holder's (lib/backupSecretSwitch createLock: the holder is
+ * never cut loose). React Native's fetch and lib/api settle as soon as they are
+ * aborted, so in practice this still returns at the deadline. Put the body
+ * read inside `work`, so the deadline covers it too. A late failure rejects
+ * with the timeout, whose text matches lib/userErrorText's connection copy; a
+ * late success is returned (the transfer did complete).
+ *
+ * Work that cannot be aborted must not run under it: use giveUpAfter, and
+ * only for a step that writes nothing.
+ *
+ * `cancel` lets a person stop the step (backup-e2ee's Stop): it aborts the
+ * work like the deadline does and rejects with BACKUP_CANCELLED.
  */
-export async function withDeadline<T>(ms: number, work: (signal: AbortSignal) => Promise<T>): Promise<T> {
+export async function withDeadline<T>(
+  ms: number, work: (signal: AbortSignal) => Promise<T>, cancel?: AbortSignal,
+): Promise<T> {
+  if (cancel?.aborted) throw transferCancelled();
   const ctl = new AbortController();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const expired = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => { ctl.abort(); reject(timedOut()); }, ms);
-  });
+  let expired = false;
+  const timer = setTimeout(() => { expired = true; ctl.abort(); }, ms);
+  // A person's Stop aborts the same way, and is waited for the same way.
+  const onCancel = () => ctl.abort();
+  cancel?.addEventListener('abort', onCancel);
   try {
-    return await Promise.race([work(ctl.signal), expired]);
+    return await work(ctl.signal);
+  } catch (e) {
+    throw expired ? timedOut() : cancel?.aborted ? transferCancelled() : e;
+  } finally {
+    clearTimeout(timer);
+    cancel?.removeEventListener('abort', onCancel);
+  }
+}
+
+/**
+ * Stop waiting for `work` after `ms` even though it keeps running — for a
+ * native call that takes no signal (a Google token refresh). Only for steps
+ * that WRITE NOTHING: whatever it returns late is dropped, and the caller,
+ * having failed, never uses it.
+ */
+export async function giveUpAfter<T>(ms: number, work: () => Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(timedOut()), ms); });
+  try {
+    return await Promise.race([work(), expired]);
   } finally {
     clearTimeout(timer);
   }

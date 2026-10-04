@@ -39,7 +39,7 @@ import { useTheme } from '../lib/theme';
 import { AuroraBackground } from '../components/ui';
 import {
   cloudBackupMeta, isSecretRequired, restoreCloudBackup, restoreFromGoogleDrive, type BackupMeta,
-  markRestoreDecisionPending, resolveRestoreDecision, hasRestoreDecisionFlag,
+  markRestoreDecisionPending, resolveRestoreDecision, hasRestoreDecisionFlag, restoreDecisionPending,
 } from '../lib/cloudBackup';
 import { markRestorePromptSeen } from '../lib/restoreGate';
 import { resetTo } from '../lib/authNav';
@@ -69,6 +69,9 @@ export default function RestoreBackupScreen() {
   const [meta, setMeta] = useState<BackupMeta | null>(null);
   const [busy, setBusy] = useState<null | 'cloud' | 'drive'>(null);
   const [restored, setRestored] = useState<number | null>(null);
+  // Restored from Google Drive: the account copy was not restored and may be
+  // newer, so automatic backup stays paused (lib/restoreDecision D2).
+  const [stillPaused, setStillPaused] = useState(false);
   // A restore can finish after the screen is gone (resetTo from elsewhere).
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
@@ -89,13 +92,13 @@ export default function RestoreBackupScreen() {
   // backup was found" for a dead connection invited the user to carry on and
   // lose a backup that exists; offer a retry instead.
   //
-  // A real "no backup" answer settles the restore decision: there is nothing
-  // for this phone's backups to replace.
+  // A real "no backup" answer may settle the restore decision — once a linked
+  // Google Drive has been asked too (lib/restoreDecision D3).
   const lookUp = useCallback(() => {
     setMeta(null);
     cloudBackupMeta()
       .then((m) => {
-        if (!m.exists && !m.unavailable) resolveRestoreDecision().catch(() => {});
+        if (!m.exists && !m.unavailable) restoreDecisionPending(m).catch(() => {});
         if (alive.current) setMeta(m);
       })
       .catch(() => { if (alive.current) setMeta({ exists: false, unavailable: true }); });
@@ -147,7 +150,9 @@ export default function RestoreBackupScreen() {
     try {
       const n = from === 'cloud' ? await restoreCloudBackup() : await restoreFromGoogleDrive();
       await markRestorePromptSeen();
+      const paused = from === 'drive' && await hasRestoreDecisionFlag().catch(() => true);
       if (!alive.current) return;
+      setStillPaused(paused);
       setRestored(n);
     } catch (e: any) {
       inFlight.current = false;
@@ -192,6 +197,9 @@ export default function RestoreBackupScreen() {
               : restored > 0
                 ? `${restored.toLocaleString()} message${restored === 1 ? '' : 's'} are back on this phone.`
                 : 'Your backup was applied.'}
+            {stillPaused
+              ? '\n\nThat was the Google Drive copy. The backup in your account may be newer, so automatic backup stays paused until you restore it or choose to replace it, from Settings → Chat backup.'
+              : ''}
           </Text>
           <TouchableOpacity style={S.cta} onPress={leave} activeOpacity={0.85} accessibilityRole="button">
             <Text style={S.ctaTxt}>Continue</Text>

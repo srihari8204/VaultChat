@@ -95,7 +95,16 @@ export default function HiddenChatsScreen() {
     });
     return () => sub.remove();
   }, [navigation, router]);
-  useEffect(() => (stage === 'list' ? holdAppSwitcherBlur() : undefined), [stage]);
+  // Held from the first unlock until this screen unmounts — NOT released by the
+  // relock. The relock runs on the same 'background' event iOS takes its
+  // switcher snapshot on, and a hidden chat can still be open above this
+  // screen (the grace above), so releasing there could let that snapshot be
+  // taken unblurred. While the PIN gate shows, the blur only hides the gate.
+  const blurRelease = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    if (stage === 'list' && !blurRelease.current) blurRelease.current = holdAppSwitcherBlur();
+  }, [stage]);
+  useEffect(() => () => { blurRelease.current?.(); blurRelease.current = null; }, []);
 
   if (stage === 'pin') {
     return <PinGate router={router} onPass={() => setStage('list')} />;

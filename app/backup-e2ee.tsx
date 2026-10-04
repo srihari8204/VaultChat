@@ -51,6 +51,10 @@ export default function BackupE2EEScreen() {
   const [keyNote, setKeyNote] = useState<'new' | 'unconfirmed' | 'serverOnly' | 'serverMaybe'>('new');
   const serverKey = keyNote === 'serverOnly' || keyNote === 'serverMaybe';
   const [busy, setBusy] = useState(false);
+  // A switch re-uploads the whole history: up to 45 min on a slow link
+  // (lib/backupTransfer). While it runs, this holds its Stop control.
+  const [upload, setUpload] = useState<AbortController | null>(null);
+  const startUpload = () => { const c = new AbortController(); setUpload(c); return { signal: c.signal }; };
   // Before leaving the show-once key: two of its groups, typed back.
   const [checkGroups, setCheckGroups] = useState<number[] | null>(null);
   const [checkTyped, setCheckTyped] = useState<string[]>([]);
@@ -186,10 +190,10 @@ export default function BackupE2EEScreen() {
         { text: switching ? 'Use password' : 'Turn on', style: 'destructive', onPress: async () => {
             setBusy(true);
             try {
-              await enableE2EEBackup('password', pw);
+              await enableE2EEBackup('password', pw, startUpload());
               setMode('password'); setStage('on'); setPw(''); setPw2('');
               Alert.alert(switching ? 'Password changed' : 'Encrypted backup is on', 'Your backups are now readable only with this password.');
-            } catch (e) { fail(e, 'password'); } finally { setBusy(false); }
+            } catch (e) { fail(e, 'password'); } finally { setBusy(false); setUpload(null); }
           } },
       ],
     );
@@ -204,9 +208,9 @@ export default function BackupE2EEScreen() {
         { text: 'Generate', style: 'destructive', onPress: async () => {
             setBusy(true);
             try {
-              const { recoveryKey: k } = await enableE2EEBackup('key');
+              const { recoveryKey: k } = await enableE2EEBackup('key', undefined, startUpload());
               setRecoveryKey(k ?? ''); setKeyNote('new'); setMode('key'); setCheckGroups(null); setStage('keyshown');
-            } catch (e) { fail(e, 'key'); } finally { setBusy(false); }
+            } catch (e) { fail(e, 'key'); } finally { setBusy(false); setUpload(null); }
           } },
       ],
     );
@@ -220,7 +224,7 @@ export default function BackupE2EEScreen() {
       { text: 'Turn off', style: 'destructive', onPress: async () => {
           setBusy(true);
           try {
-            await disableE2EEBackup();
+            await disableE2EEBackup(startUpload());
             setMode('account'); setStage('off');
           } catch (e: any) {
             // disableE2EEBackup keeps the secret on failure; show what the
@@ -248,10 +252,26 @@ export default function BackupE2EEScreen() {
             } else {
               Alert.alert('Could not turn this off', `Encrypted backup is still on. ${why}`);
             }
-          } finally { setBusy(false); }
+          } finally { setBusy(false); setUpload(null); }
         } },
     ],
   );
+
+  // No byte progress exists for an RN upload; say what is happening, how long
+  // it can take, and let the person stop it. Stopping is a failed switch like
+  // any other: the phone keeps its current secret and the copy says where the
+  // online copy was left.
+  const uploadNote = upload ? (
+    <View accessibilityLiveRegion="polite">
+      <Text style={s.hint}>
+        Uploading your backup again with the new encryption. On a large history this can take several
+        minutes — keep the app open.
+      </Text>
+      <TouchableOpacity style={s.linkRow} onPress={() => upload.abort()} accessibilityRole="button" accessibilityLabel="Stop the upload">
+        <Text style={s.link}>Stop</Text>
+      </TouchableOpacity>
+    </View>
+  ) : null;
 
   const header = (
     <>
@@ -412,6 +432,7 @@ export default function BackupE2EEScreen() {
             onPress={enablePassword}>
             {busy ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={s.primaryTxt}>{switching ? 'USE THIS PASSWORD' : 'TURN ON'}</Text>}
           </TouchableOpacity>
+          {uploadNote}
           <TouchableOpacity style={s.linkRow} accessibilityRole="button" onPress={() => { setPw(''); setPw2(''); setStage(switching ? 'on' : 'off'); }}>
             <Text style={s.link}>Cancel</Text>
           </TouchableOpacity>
@@ -456,6 +477,7 @@ export default function BackupE2EEScreen() {
             {busy ? <ActivityIndicator color={colors.danger} />
                   : <Text style={s.dangerTxt}>TURN OFF</Text>}
           </TouchableOpacity>
+          {uploadNote}
         </ScrollView>
       </View>
     );
@@ -488,6 +510,7 @@ export default function BackupE2EEScreen() {
             <Text style={s.secondaryTxt}>Use a 64-character key instead</Text>
           </>}
         </TouchableOpacity>
+        {uploadNote}
       </ScrollView>
     </View>
   );

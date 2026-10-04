@@ -130,7 +130,9 @@ export function isBackupBusy(e: unknown): boolean {
  * `fn` never runs — the queue moves on without it. The holder itself is never
  * cut loose (that would let its upload land after the next writer's): instead
  * every network step lib/cloudBackup runs under the lock has a deadline
- * (lib/backupTransfer), so a dead link fails the holder rather than hanging it.
+ * (lib/backupTransfer withDeadline), which aborts the step and waits for it to
+ * settle, so a dead link fails the holder rather than hanging it, and the lock
+ * moves on only once nothing of the holder's is still in flight.
  */
 export function createLock() {
   let tail: Promise<unknown> = Promise.resolve();
@@ -189,8 +191,9 @@ export function backupErrorText(e: unknown, fallback = 'Please try again.'): str
     return "This phone couldn't read your backup encryption settings, so nothing was uploaded. Try again, or restart the phone.";
   }
   if (x?.code === 'BACKUP_BUSY') return 'Another backup is still running on this phone. Try again in a few minutes.';
+  if (x?.code === 'BACKUP_CANCELLED') return 'You stopped the upload.';
   if (x?.code === 'BACKUP_RESTORE_PENDING') {
-    return "This phone hasn't restored the backup in your account yet, and backing up now would replace it, so nothing was uploaded. Restore it, or replace it, from Settings → Chat backup.";
+    return "This phone hasn't restored your online backup yet (or couldn't check for one), and backing up now could replace it, so nothing was uploaded. Restore it, or replace it, from Settings → Chat backup.";
   }
   if (x?.code === 'BACKUP_ADOPT_FAILED') {
     return "This phone couldn't save your backup password or key, so nothing was restored — its next backups would not have been end-to-end encrypted. Try again.";

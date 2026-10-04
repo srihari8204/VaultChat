@@ -16,7 +16,7 @@
 // signs in first, then calls these with `interactive` false.
 
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
-import { withDeadline, transferDeadlineMs, SMALL_REQUEST_MS } from './backupTransfer';
+import { withDeadline, giveUpAfter, transferDeadlineMs, SMALL_REQUEST_MS } from './backupTransfer';
 
 const SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
 const BACKUP_NAME = 'vaultchat-backup.vcbak';
@@ -57,9 +57,14 @@ export async function driveSignOut(): Promise<void> {
   try { await GoogleSignin.signOut(); } catch {}
 }
 
-/** A token without UI (silent refresh), within a deadline; interactive sign-in has none. */
+/**
+ * A token without UI (silent refresh), within a deadline; interactive sign-in
+ * has none. The native refresh takes no signal, so it is given up on rather
+ * than waited for (giveUpAfter): a token writes nothing, and a late one is
+ * never used.
+ */
 function tokenFor(interactive: boolean): Promise<string> {
-  return interactive ? getDriveToken(true) : withDeadline(SMALL_REQUEST_MS, () => getDriveToken(false));
+  return interactive ? getDriveToken(true) : giveUpAfter(SMALL_REQUEST_MS, () => getDriveToken(false));
 }
 
 async function findBackupFile(token: string): Promise<{ id: string; modifiedTime?: string; size?: string } | null> {
@@ -75,12 +80,22 @@ async function findBackupFile(token: string): Promise<{ id: string; modifiedTime
   });
 }
 
-export async function driveBackupMeta(): Promise<{ exists: boolean; modifiedTime?: string; size?: number }> {
+/**
+ * The Drive copy, if any. `unavailable` when a Google account IS linked but
+ * Drive could not be asked (offline, token refresh failed): NOT "no copy" —
+ * lib/restoreDecision keeps uploads paused on it. With no linked account (or
+ * no Google Play services) there is no Drive copy this phone can reach, and the
+ * answer is a plain `exists: false`.
+ */
+export async function driveBackupMeta(): Promise<{ exists: boolean; modifiedTime?: string; size?: number; unavailable?: true }> {
   try {
-    const token = await getDriveToken(false);
+    const token = await tokenFor(false);
     const f = await findBackupFile(token);
     return f ? { exists: true, modifiedTime: f.modifiedTime, size: Number(f.size) || 0 } : { exists: false };
-  } catch { return { exists: false }; }
+  } catch {
+    const linked = await getDriveEmail().catch(() => null);
+    return linked ? { exists: false, unavailable: true } : { exists: false };
+  }
 }
 
 /** Upload (or replace) the encrypted backup blob in the user's Drive appData. */

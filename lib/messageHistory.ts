@@ -87,8 +87,9 @@ export async function unionWithLocalHistoryAsc(
  * per-id rule as the union (pickRow). A source is finished only when it returns
  * an EMPTY page — a short page is not trusted to mean "the end", since a server
  * may cap `limit` below what was asked. A server page that is not ascending
- * and above the cursor (a server that ignored `after`) throws rather than
- * writing an export in the wrong order or missing rows.
+ * and above the cursor (a server that ignored `after`), or a cache page that
+ * cannot be read, throws rather than writing an export in the wrong order or
+ * missing rows.
  */
 export async function* streamUnionWithLocalHistoryAsc(
   chatId: string,
@@ -98,10 +99,13 @@ export async function* streamUnionWithLocalHistoryAsc(
   const page = opts.page ?? 200;
   type Src = { buf: Message[]; at: number; cursor: number; done: boolean; read: (after: number) => Promise<Message[]> };
   const server: Src = { buf: [], at: 0, cursor: -1, done: false, read: serverAfter };
-  // Same tolerance as the union: an unreadable cache contributes nothing.
+  // NOT the union's tolerance: a cache page that fails to read throws. Read as
+  // "no rows" it ended the local walk, so the export silently left out every
+  // local-only (retention-reclaimed) message after that page. An export that
+  // stops and says so beats a file that looks complete and is not.
   const local: Src = {
     buf: [], at: 0, cursor: Number.MIN_SAFE_INTEGER, done: !chatId,
-    read: (after) => getCachedMessagesAfter(chatId, after, page).catch(() => [] as Message[]),
+    read: (after) => getCachedMessagesAfter(chatId, after, page),
   };
   const head = async (src: Src): Promise<Message | undefined> => {
     if (src.at < src.buf.length) return src.buf[src.at];

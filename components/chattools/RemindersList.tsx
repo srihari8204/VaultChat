@@ -127,7 +127,14 @@ export default function RemindersList({ router }: { router: Router }) {
           <Text style={[S.rowPreview, (!texts[r.id] || texts[r.id] === PROTECTED_TEXT || texts[r.id] === LOCKED_TEXT) && S.previewMissing]} numberOfLines={2}>
             {texts[r.id] || 'Message reminder'}
           </Text>
-          <Text style={S.rowSub}>Tap to open the chat</Text>
+          {/* The stand-in fails closed: a chat this phone can't yet show (not in
+              the cached chat list — e.g. just after a reinstall) reads the same
+              as a locked or hidden one, so the row says why. */}
+          <Text style={S.rowSub}>
+            {texts[r.id] === LOCKED_TEXT
+              ? 'Text hidden: the chat is locked, hidden, or not loaded on this phone yet. Tap to open it.'
+              : 'Tap to open the chat'}
+          </Text>
         </View>
       </TouchableOpacity>
       <TouchableOpacity

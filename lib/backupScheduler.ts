@@ -30,10 +30,13 @@
 // the device holds, it may be under one the user never saw.
 //
 // A new phone that has not yet restored the account's backup, or chosen to
-// replace it, runs nothing (lib/cloudBackup's "restore decision pending"). A
-// fresh install is due at once (lastBackupAt 0), so without this a skipped
-// restore offer was followed within seconds by an upload of the near-empty
-// phone over the only server copy.
+// replace it, runs nothing (lib/restoreDecision, via lib/cloudBackup). A fresh
+// install is due at once (lastBackupAt 0), so without this a skipped restore
+// offer was followed within seconds by an upload of the near-empty phone over
+// the only server copy. That check does not depend on the restore screen
+// having been shown: an install that never settled the decision and never
+// completed a backup counts as undecided, so a failed launch check (which skips
+// the screen) still cannot let this run upload.
 
 import NetInfo from '@react-native-community/netinfo';
 import AsyncStorage from '@react-native-async-storage/async-storage';

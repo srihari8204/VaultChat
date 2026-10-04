@@ -58,8 +58,9 @@ import {
   switchBackupSecret, createLock, isBackupSwitchError, adoptRestoredSecret,
   type SecretPair, type SecretSlot, type PendingMarker,
 } from './backupSecretSwitch';
-import { withDeadline, transferDeadlineMs } from './backupTransfer';
-import { driveUpload, driveDownload, getDriveToken } from './googleDrive';
+import { withDeadline, transferDeadlineMs, transferCancelled } from './backupTransfer';
+import { driveUpload, driveDownload, getDriveToken, driveBackupMeta } from './googleDrive';
+import { restoreDecision, RESTORE_PENDING_KEY, RESTORE_SETTLED_KEY, type RestoredFrom } from './restoreDecision';
 // getCachedUser is what app/(constants)/authService's getCurrentUserAsync
 // returned anyway — it is a one-line passthrough to this. Taken directly, so
 // lib no longer reaches up into app (2026-09-17).
@@ -213,43 +214,49 @@ const INTERACTIVE_WAIT_MS = 20_000;
 
 // ── "Restore decision pending" ────────────────────────────────────────────
 // A new phone that has neither restored the account's backup nor been told,
-// plainly, that backing up will REPLACE it must not upload anything. Before
-// this, skipping the restore offer let the scheduler (due at once: a fresh
-// install has lastBackupAt 0) upload the near-empty phone over the only server
-// copy within seconds — while the offer said "Skipping changes nothing".
+// plainly, that backing up will REPLACE it must not upload anything. The rule
+// itself — derived for any install that never settled it, settled only by the
+// ACCOUNT copy, and asking a linked Google Drive too — is lib/restoreDecision
+// (pure, Node-tested). This wires it to AsyncStorage and the two lookups.
 //
-// app/restore-backup sets this when it is shown (a signed-in phone with no
-// history, lib/restoreGate). It is cleared by a successful restore (any
-// source), by the user choosing to replace the online copy (restore-backup's
-// "Start fresh", chat-backup's confirmed BACK UP), or once the server says
-// there is no backup to protect. Until then the scheduler skips its run and
-// every upload and secret switch refuses with BACKUP_RESTORE_PENDING. Writing
-// a local file is still allowed: it replaces nothing. Device-local, never in a
-// bundle.
-export const RESTORE_PENDING_KEY = 'vc_backup_restore_pending';
+// app/restore-backup marks it when shown; a never-settled install that has
+// never completed a backup counts as pending without that (the screen can be
+// skipped by a failed launch check). It is settled by restoring the account
+// copy, by the user choosing to replace it (restore-backup's "Start fresh",
+// chat-backup's confirmed Replace), or by an upload that ran after the check
+// said there was nothing to protect; the flag is also cleared once neither the
+// server nor a linked Drive holds a copy. A restore from Drive or a device
+// file keeps it pending. Until then the scheduler skips its run and every upload and
+// secret switch refuses with BACKUP_RESTORE_PENDING. Writing a local file is
+// still allowed: it replaces nothing.
+export { RESTORE_PENDING_KEY, RESTORE_SETTLED_KEY };
+const decision = restoreDecision({
+  storage: AsyncStorage,
+  accountCopy: cloudBackupMeta,
+  driveCopy: driveBackupMeta,
+});
 
 export async function markRestoreDecisionPending(): Promise<void> {
-  await AsyncStorage.setItem(RESTORE_PENDING_KEY, String(Date.now()));
+  await decision.markPending();
 }
-/** The user restored, or chose to replace the online copy. */
+/** The user chose to replace the online copy (or restored the account copy). Throws if not recorded. */
 export async function resolveRestoreDecision(): Promise<void> {
-  await AsyncStorage.removeItem(RESTORE_PENDING_KEY);
-}
-/** The flag alone (no network). An unreadable flag counts as set: fail closed. */
-export async function hasRestoreDecisionFlag(): Promise<boolean> {
-  try { return !!(await AsyncStorage.getItem(RESTORE_PENDING_KEY)); } catch { return true; }
+  await decision.settleAccount();
 }
 /**
- * True while uploads must wait for the user. Asks the server only when the flag
- * is set; a real "no backup" answer clears it (there is nothing to replace),
- * and a failed lookup keeps it.
+ * Local only (no network): might this phone still owe the user a decision?
+ * Fails closed. restoreDecisionPending gives the real answer.
  */
-export async function restoreDecisionPending(): Promise<boolean> {
-  if (!(await hasRestoreDecisionFlag())) return false;
-  const meta = await cloudBackupMeta();
-  if (meta.unavailable || meta.exists) return true;
-  await resolveRestoreDecision().catch(() => {});
-  return false;
+export async function hasRestoreDecisionFlag(): Promise<boolean> {
+  return decision.undecided();
+}
+/**
+ * True while uploads must wait for the user. Asks the server (pass `meta` when
+ * it was just looked up) and a linked Drive, only for an undecided phone; a
+ * real "no copy anywhere" clears the flag, a failed lookup keeps it.
+ */
+export async function restoreDecisionPending(meta?: BackupMeta): Promise<boolean> {
+  return decision.pending(meta);
 }
 async function assertRestoreDecided(): Promise<void> {
   if (await restoreDecisionPending()) {
@@ -304,7 +311,7 @@ export function confirmRecoveryKey(key: string): Promise<void> {
  * phone's history over it.
  */
 export function enableE2EEBackup(
-  mode: BackupMode, password?: string,
+  mode: BackupMode, password?: string, opts: { signal?: AbortSignal } = {},
 ): Promise<{ recoveryKey?: string }> {
   const userSecret = mode === 'key' ? generateRecoveryKey() : (password ?? '');
   if (mode === 'password') {
@@ -316,8 +323,10 @@ export function enableE2EEBackup(
     const header = newHeader(mode, mode === 'key' ? userSecret : undefined);
     const next: StoredE2EE = { secret: await backupSecretAsync(header, userSecret), header };
     if (mode === 'key') next.unconfirmed = true;
+    // Stopped before anything changed: nothing to report but that.
+    if (opts.signal?.aborted) throw transferCancelled();
     try {
-      await switchBackupSecret(e2eeSlot, pendingMarker, next, (using) => uploadCloudBackupUsing(using).then(() => {}));
+      await switchBackupSecret(e2eeSlot, pendingMarker, next, (using) => uploadCloudBackupUsing(using, stoppable(using, next, opts.signal)).then(() => {}));
     } catch (e) {
       if (mode === 'key' && isBackupSwitchError(e) && e.server !== 'prev') e.recoveryKey = userSecret;
       throw e;
@@ -335,11 +344,23 @@ export function enableE2EEBackup(
  * what the server copy is under. Refuses, like enableE2EEBackup, on a phone
  * that has not restored or replaced the account's backup.
  */
-export function disableE2EEBackup(): Promise<void> {
+export function disableE2EEBackup(opts: { signal?: AbortSignal } = {}): Promise<void> {
   // The decision check runs before the switch sets its marker (and, being a
   // server lookup, before the lock is taken).
-  return assertRestoreDecided().then(() =>
-    backupLock(() => switchBackupSecret(e2eeSlot, pendingMarker, null, (using) => uploadCloudBackupUsing(using).then(() => {})), INTERACTIVE_WAIT_MS));
+  return assertRestoreDecided().then(() => {
+    if (opts.signal?.aborted) throw transferCancelled();
+    return backupLock(() => switchBackupSecret(e2eeSlot, pendingMarker, null, (using) => uploadCloudBackupUsing(using, stoppable(using, null, opts.signal)).then(() => {})), INTERACTIVE_WAIT_MS);
+  });
+}
+
+/**
+ * The person may stop only the upload under the NEW pair. The switch's
+ * roll-back upload (under the previous pair, after the new one failed to
+ * store) puts the online copy back to one this phone can open, so it is never
+ * stoppable.
+ */
+function stoppable<P>(using: P, next: P, signal?: AbortSignal): AbortSignal | undefined {
+  return using === next ? signal : undefined;
 }
 
 /** Thrown by a restore that needs a secret this device does not hold. */
@@ -426,7 +447,7 @@ async function buildEncryptedBackup(using?: SecretPair<E2EEHeader> | null): Prom
   //    state — e.g. carrying the media-migration flag across would convince a
   //    device that still has a legacy external tree that it had already been
   //    drained, stranding those files outside the sandbox permanently.
-  const DEVICE_LOCAL_KEYS = new Set(['vc_media_migrated_v1', 'vc_restore_prompted', VISION_COMFORT_STORAGE_KEY, SWITCH_PENDING_KEY, RESTORE_PENDING_KEY]);
+  const DEVICE_LOCAL_KEYS = new Set(['vc_media_migrated_v1', 'vc_restore_prompted', VISION_COMFORT_STORAGE_KEY, SWITCH_PENDING_KEY, RESTORE_PENDING_KEY, RESTORE_SETTLED_KEY]);
   // ── Key material must not ride along in the blanket sweep ──────────────
   //
   // The exclusion documented above removed the e2eeKeys FIELD, and the identity
@@ -502,9 +523,10 @@ async function buildEncryptedBackup(using?: SecretPair<E2EEHeader> | null): Prom
 /**
  * Decrypt + apply a backup blob to local storage. Returns messages restored.
  * Callers hold backupLock, so a scheduled upload cannot commit while a restore
- * is half-applied.
+ * is half-applied. `from` is the copy applied: only the account copy settles
+ * the restore decision (lib/restoreDecision D2).
  */
-async function applyEncryptedBackup(blob: string, userSecret?: string): Promise<number> {
+async function applyEncryptedBackup(blob: string, userSecret: string | undefined, from: RestoredFrom): Promise<number> {
   // Decrypted in full before anything is written: a wrong key changes nothing.
   const { json, pair } = await decryptBlob(blob, userSecret);
   const data = JSON.parse(json);
@@ -547,9 +569,12 @@ async function applyEncryptedBackup(blob: string, userSecret?: string): Promise<
     try { await restoreFinanceBackup(await financeUserId(), data.finance); }
     catch (e) { console.warn('[backup] finance restore skipped:', (e as Error)?.message); }
   }
-  // Restored: this phone's backups now carry the user's history, so they may
-  // replace the online copy again.
-  await resolveRestoreDecision().catch(() => {});
+  // Restored the ACCOUNT copy: this phone's backups now carry that history, so
+  // they may replace it. A Drive or device-file copy may be older than the
+  // account copy (it is only reached when that one failed), so uploads stay
+  // paused until the user restores or replaces it. Best-effort either way: a
+  // failed write leaves the phone undecided, which pauses uploads.
+  await decision.restored(from).catch(() => {});
   return n;
 }
 
@@ -620,9 +645,11 @@ export function uploadCloudBackup(): Promise<{ messageCount: number; sizeBytes: 
 }
 
 async function uploadCloudBackupUsing(
-  using: SecretPair<E2EEHeader> | null | undefined,
+  using: SecretPair<E2EEHeader> | null | undefined, cancel?: AbortSignal,
 ): Promise<{ messageCount: number; sizeBytes: number }> {
+  if (cancel?.aborted) throw transferCancelled();
   const { blob, messageCount, sizeBytes } = await buildEncryptedBackup(using);
+  if (cancel?.aborted) throw transferCancelled();
   // Prefer direct-to-object-storage (presigned PUT) so the blob never passes
   // through the API/DB — no size cap, no server memory spike. Inline fallback
   // only when object storage is off.
@@ -638,14 +665,16 @@ async function uploadCloudBackupUsing(
       headers: { 'Content-Type': 'application/octet-stream' },
       body: blob,
       signal,
-    }));
+    }), cancel);
     if (!put.ok) throw new Error(`backup upload failed (${put.status})`);
     await api('/user/backup/commit', { method: 'POST', json: { key: presign.key, sizeBytes, messageCount } });
   } else {
     // A caller's signal replaces api()'s 30 s timeout, which a whole history
     // sent inline can legitimately exceed.
-    await withDeadline(deadline, (signal) => api('/user/backup', { method: 'PUT', json: { blob, sizeBytes, messageCount }, signal }));
+    await withDeadline(deadline, (signal) => api('/user/backup', { method: 'PUT', json: { blob, sizeBytes, messageCount }, signal }), cancel);
   }
+  // Every caller checked the decision first: the account now holds this phone's copy.
+  await decision.uploaded();
   return { messageCount, sizeBytes };
 }
 
@@ -663,7 +692,7 @@ export function restoreCloudBackup(userSecret?: string): Promise<number> {
       });
     }
     if (!blob) throw new Error('No backup found');
-    return applyEncryptedBackup(blob, userSecret);
+    return applyEncryptedBackup(blob, userSecret, 'account');
   }, INTERACTIVE_WAIT_MS);
 }
 
@@ -692,7 +721,7 @@ export async function restoreFromGoogleDrive(userSecret?: string): Promise<numbe
   return backupLock(async () => {
     const blob = await driveDownload(false);
     if (!blob) throw new Error('No backup found');
-    return applyEncryptedBackup(blob, userSecret);
+    return applyEncryptedBackup(blob, userSecret, 'drive');
   }, INTERACTIVE_WAIT_MS);
 }
 
@@ -748,7 +777,7 @@ export function restoreLocalBackup(path?: string, userSecret?: string): Promise<
     let p = path;
     if (!p) { const list = await listLocalBackups(); if (!list.length) throw new Error('No local backup found'); p = list[0].path; }
     const blob = await RNFS.readFile(p, 'utf8');
-    return applyEncryptedBackup(blob, userSecret);
+    return applyEncryptedBackup(blob, userSecret, 'local');
   }, INTERACTIVE_WAIT_MS);
 }
 

@@ -48,6 +48,11 @@ export default function InChatSearchScreen() {
   const [limit, setLimit] = useState(HIT_LIMIT);
   const onQuery = useCallback((t: string) => { setQuery(t); setLimit(HIT_LIMIT); }, []);
   const [results, setResults] = useState<InChatMessageHit[]>([]);
+  // The limit `results` were fetched with. The badge and the "Show more" footer
+  // read this, not `limit`: while the next page loads, `limit` is already
+  // bigger, and the footer (with its spinner) vanished and the badge read
+  // "80 results" until the page landed.
+  const [shownLimit, setShownLimit] = useState(HIT_LIMIT);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Bumped by Try again to re-run the same query.
@@ -114,7 +119,7 @@ export default function InChatSearchScreen() {
     debounce.current = setTimeout(async () => {
       try {
         const hits = await searchInChat(chatId, term, limit);
-        if (seq === reqSeq.current) { setResults(hits); setError(null); }
+        if (seq === reqSeq.current) { setResults(hits); setShownLimit(limit); setError(null); }
       } catch {
         // The local store failed (it is on-device, so not a network error);
         // the raw SQLite message means nothing to the user.
@@ -305,8 +310,8 @@ export default function InChatSearchScreen() {
         <View style={s.badgeRow}>
           <View style={s.badge}>
             <Text style={s.badgeText}>
-              {results.length >= limit
-                ? `Showing the first ${limit} matches — type more to narrow it`
+              {results.length >= shownLimit
+                ? `Showing the first ${shownLimit} matches — type more to narrow it`
                 : `${results.length} result${results.length !== 1 ? 's' : ''}`}
             </Text>
           </View>
@@ -347,7 +352,7 @@ export default function InChatSearchScreen() {
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
           ItemSeparatorComponent={ResultGap}
-          ListFooterComponent={results.length >= limit ? (
+          ListFooterComponent={results.length >= shownLimit ? (
             <TouchableOpacity
               style={s.moreBtn}
               onPress={() => setLimit(l => l + HIT_LIMIT)}

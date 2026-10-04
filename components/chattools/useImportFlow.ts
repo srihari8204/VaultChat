@@ -196,7 +196,7 @@ export function useImportFlow(initial: { chatId: string; peerName: string }) {
     await setMeta(SESSION_KEY(chatId), JSON.stringify({
       state: 'partial', source, at: new Date().toISOString(),
     })).catch(() => {});
-    setOutcome({ imported: doneRef.current, duplicates: 0, unsupported: 0,
+    setOutcome({ imported: doneRef.current, duplicates: 0, unsupported: 0, missingMedia: 0,
                  mediaCopied: 0, mediaSkipped: 0, partial: true });
     setStage('done');
   }, [chatId, source]);
@@ -305,7 +305,7 @@ export function useImportFlow(initial: { chatId: string; peerName: string }) {
       })).catch(() => {});
 
       setOutcome({
-        imported: inserted, duplicates: skipped, unsupported: parsed.unsupported + parsed.missingMedia,
+        imported: inserted, duplicates: skipped, unsupported: parsed.unsupported, missingMedia: parsed.missingMedia,
         mediaCopied, mediaSkipped, partial,
       });
       setStage('done');
@@ -323,7 +323,7 @@ export function useImportFlow(initial: { chatId: string; peerName: string }) {
             : 'Messages already imported are safe. Retrying will not duplicate them.',
       );
       setOutcome({ imported: doneRef.current, duplicates: 0, unsupported: parsed.unsupported,
-                   mediaCopied, mediaSkipped, partial: true });
+                   missingMedia: parsed.missingMedia, mediaCopied, mediaSkipped, partial: true });
       setStage('done');
     }
   }, [parsed, chat, chatId, peerName, source, loadChat, finishCancelled]);

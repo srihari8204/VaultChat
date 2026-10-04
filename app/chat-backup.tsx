@@ -8,7 +8,6 @@ import { HEADER_TOP } from '../constants/layout';
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator,
-  Modal, TextInput, Platform,
 } from 'react-native';
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,7 +18,7 @@ import {
   writeLocalBackup, restoreLocalBackup, listLocalBackups, type LocalBackup,
   uploadCloudBackup, restoreCloudBackup, cloudBackupMeta, type BackupMeta,
   getBackupMode, isSecretRequired, isBackupSettingsUnreadable, isWrongSecret,
-  hasRestoreDecisionFlag, resolveRestoreDecision, isRestorePending,
+  restoreDecisionPending, resolveRestoreDecision, isRestorePending,
 } from '../lib/cloudBackup';
 import { backupErrorText } from '../lib/backupSecretSwitch';
 import { driveBackupMeta, getDriveEmail, getDriveToken } from '../lib/googleDrive';
@@ -27,7 +26,7 @@ import {
   getBackupSettings, saveBackupSettings, markBackupDone, type BackupSettings,
 } from '../lib/backupScheduler';
 import { AuroraBackground } from '../components/ui';
-import { KeyboardSafe } from '../components/ui/KeyboardSafe';
+import { BackupSecretModal } from '../components/chattools/BackupSecretModal';
 
 const FREQ = [
   { id: 'manual', label: 'Off' },
@@ -47,6 +46,7 @@ const SOURCES: Source[] = ['cloud', 'drive', 'local'];
 const SOURCE_NAME: Record<Source, string> = { cloud: 'your account', drive: 'Google Drive', local: 'this device' };
 const restoreFrom = (src: Source, secret?: string) => (src === 'cloud' ? restoreCloudBackup(secret)
   : src === 'drive' ? restoreFromGoogleDrive(secret) : restoreLocalBackup(undefined, secret));
+const OLDER_SOURCES = SOURCES.filter((x) => x !== 'cloud');
 const isNoBackup = (e: any) => e?.message === 'No backup found' || e?.message === 'No local backup found';
 
 function fmt(ms: number | undefined | null): string {
@@ -74,13 +74,11 @@ export default function ChatBackupScreen() {
   // copy that asked: the typed secret is tried on that copy only.
   const [ask, setAsk] = useState<{ mode: 'password' | 'key'; from: Source } | null>(null);
   const askSecret = ask?.mode ?? null;
-  const [secretInput, setSecretInput] = useState('');
-  // The secret is masked by default (shoulder-surfing); Show reveals it to check a long key.
-  const [showSecret, setShowSecret] = useState(false);
   const [busy, setBusy] = useState<'backup' | 'restore' | 'signin' | null>(null);
-  // This phone has not restored the account's backup or chosen to replace it
-  // (lib/cloudBackup "restore decision pending"): automatic backups are paused
-  // so they cannot overwrite it, and BACK UP asks first.
+  // This phone has not restored the online backup or chosen to replace it
+  // (lib/restoreDecision): automatic backups are paused so they cannot
+  // overwrite it, and BACK UP asks first. Also true when that could not be
+  // checked (offline): the pause holds then too, so the notice must show.
   const [restorePending, setRestorePending] = useState(false);
 
   const [loadErr, setLoadErr] = useState(false);
@@ -97,9 +95,13 @@ export default function ChatBackupScreen() {
     driveBackupMeta().then(live(setDrive)).catch(() => {});
     getDriveEmail().then(live(setGEmail)).catch(() => {});
     listLocalBackups().then(live(setLocal)).catch(() => {});
-    cloudBackupMeta().then(live(setCloud)).catch(() => {});
     getBackupMode().then(live(setMode)).catch(() => { if (mounted.current) setMode('unknown'); });
-    hasRestoreDecisionFlag().then(live(setRestorePending)).catch(() => {});
+    // The same meta answers the decision (no second request); a real "no copy
+    // anywhere" clears it, a failed lookup keeps it.
+    cloudBackupMeta()
+      .then((m) => { live(setCloud)(m); return restoreDecisionPending(m); })
+      .then(live(setRestorePending))
+      .catch(() => { if (mounted.current) setRestorePending(true); });
   }, []);
 
   const connectGoogle = async () => {
@@ -127,16 +129,28 @@ export default function ChatBackupScreen() {
   };
 
   // An undecided phone (see restorePending) replaces the online copy only after
-  // the user is told so and agrees.
+  // the user is told so and agrees. Also offered after restoring an older copy.
   const onBackUp = () => {
-    if (!(restorePending && cloud.exists)) { runBackUp(); return; }
+    if (!restorePending) { runBackUp(); return; }
+    confirmReplace();
+  };
+  const confirmReplace = async () => {
     const what = [
       cloud.messageCount ? `${cloud.messageCount.toLocaleString()} messages` : '',
       cloud.updatedAt ? `from ${fmt(new Date(cloud.updatedAt).getTime())}` : '',
     ].filter(Boolean).join(', ');
+    const target = cloud.exists ? `the backup in your account${what ? ` (${what})` : ''}`
+      : "a backup that may be in your account or Google Drive (it couldn't rule one out)";
+    // Read now, not from state: a restore just before may have changed it.
+    // Never a silent end-to-end → account-key downgrade: an account-mode phone
+    // says what replacing an end-to-end encrypted copy costs.
+    const accountKey = (await getBackupMode().catch(() => null)) === 'account';
     Alert.alert(
       'Replace your online backup?',
-      `This phone hasn't restored the backup in your account${what ? ` (${what})` : ''}. Backing up now replaces it with this phone's chats, and that can't be undone.`,
+      `This phone hasn't restored ${target}. Backing up now replaces it with this phone's chats, and that can't be undone.`
+      + (accountKey
+        ? "\n\nThis phone backs up with your account's key. If the online backup is end-to-end encrypted, replacing it removes that protection — restore it instead to keep it."
+        : ''),
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Restore instead', onPress: onRestore },
@@ -168,7 +182,11 @@ export default function ChatBackupScreen() {
       try { await uploadCloudBackup(); cloudOk = true; } catch (e) { cloudErr = e; }
       const localOk = await writeLocalBackup(new Date()).then(() => true, () => false);
       let driveOk = false;
-      try { await backupToGoogleDrive(true); driveOk = true; } catch { /* not signed in / cancelled */ }
+      // A refused account upload means the online copies are protected: no
+      // Google sign-in sheet for a Drive upload that would be refused too.
+      if (!isRestorePending(cloudErr)) {
+        try { await backupToGoogleDrive(true); driveOk = true; } catch { /* not signed in / cancelled */ }
+      }
       // Only a real backup resets the due-timer, and only a real backup is
       // reported as one — telling someone they are covered when they are not is
       // worse than telling them nothing, because this is the copy they will
@@ -207,24 +225,39 @@ export default function ChatBackupScreen() {
     return t ? fmt(t) : null;
   };
 
-  const closeAsk = () => { setAsk(null); setSecretInput(''); setShowSecret(false); };
+  const closeAsk = () => setAsk(null);
+
+  // The account copy failed for a reason other than "there isn't one"
+  // (offline, timeout, another backup running). It may be the newest copy, so
+  // an older one is restored only when the user chooses it.
+  const offerOlderCopy = (e: unknown) => {
+    Alert.alert("Couldn't restore from your account",
+      `${backupErrorText(e)}\n\nTry again later, or restore an older copy from Google Drive or this device now. The copy in your account may be newer: until you restore or replace it, automatic backup stays paused on this phone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Restore older copy', onPress: () => { doRestore(undefined, undefined, OLDER_SOURCES); } },
+      ]);
+  };
 
   // `only`: retry the copy that asked for a secret, with the secret — never fall
-  // through to an older copy because the typed secret was wrong.
-  const doRestore = async (userSecret?: string, only?: Source) => {
+  // through to an older copy because the typed secret was wrong. `sources`: the
+  // copies to try, in order.
+  const doRestore = async (userSecret?: string, only?: Source, sources: Source[] = SOURCES) => {
     setBusy('restore');
     try {
       // "This backup needs a secret" is NOT a reason to try the next
-      // destination — the user is asked for it, for THAT copy. Any other
-      // failure (none there, offline) moves on to the next copy, and the result
-      // names which copy was applied, so an older one is never restored silently.
+      // destination — the user is asked for it, for THAT copy. "None here"
+      // moves on to the next copy. Any other failure of the account copy stops
+      // and asks (offerOlderCopy). The result names which copy was applied, so
+      // an older one is never restored silently.
       let n = 0;
       let from: Source | null = null;
       let lastErr: unknown = null;
-      for (const src of only ? [only] : SOURCES) {
+      for (const src of only ? [only] : sources) {
         try { n = await restoreFrom(src, userSecret); from = src; break; }
         catch (e) {
           if (isSecretRequired(e)) { setAsk({ mode: e.mode, from: src }); return; }
+          if (src === 'cloud' && !only && !isNoBackup(e)) { offerOlderCopy(e); return; }
           // Report the first real failure (offline, server), not a later "none here".
           if (!lastErr || isNoBackup(lastErr)) lastErr = e;
         }
@@ -235,17 +268,27 @@ export default function ChatBackupScreen() {
       // An end-to-end encrypted copy keeps this phone end-to-end encrypted
       // (lib/cloudBackup adopts the secret that opened it).
       const nowMode = await getBackupMode().catch(() => null);
+      // Only the account copy settles the restore decision (lib/restoreDecision):
+      // after an older copy, backups stay paused while the account copy exists
+      // or could not be checked.
+      const paused = from !== 'cloud' && await restoreDecisionPending().catch(() => true);
       refresh();
       // Restored rows go straight into the local store, which every chat reads
       // when it opens, and the Chats list re-reads itself on focus — so going
       // back to Chats shows them; no restart needed.
-      Alert.alert('Restore complete',
-        `${n} messages restored from ${SOURCE_NAME[from]}${when ? ` (backup from ${when})` : ''}.`
-        + (from !== 'cloud' ? ' The copy in your account could not be used.' : '')
-        + (nowMode === 'password' || nowMode === 'key' ? ' Backups from this phone stay end-to-end encrypted.' : ''), [
-          { text: 'Stay here', style: 'cancel' },
-          { text: 'Open chats', onPress: () => router.dismissTo('/(tabs)/chats') },
-        ]);
+      const done = `${n} messages restored from ${SOURCE_NAME[from]}${when ? ` (backup from ${when})` : ''}.`
+        + (nowMode === 'password' || nowMode === 'key' ? ' Backups from this phone stay end-to-end encrypted.' : '');
+      const openChats = { text: 'Open chats', onPress: () => router.dismissTo('/(tabs)/chats') };
+      if (paused) {
+        Alert.alert('Restored an older copy',
+          `${done}\n\nThe backup in your account wasn't restored and may be newer, so automatic backup is paused on this phone. Restore it when you can, or replace it with this phone's chats.`, [
+            { text: 'Not now', style: 'cancel' },
+            { text: 'Replace online copy', style: 'destructive', onPress: () => { confirmReplace(); } },
+            openChats,
+          ]);
+        return;
+      }
+      Alert.alert('Restore complete', done, [{ text: 'Stay here', style: 'cancel' }, openChats]);
     } catch (e: any) {
       // lib/cloudBackup marks a typed secret that did not open the copy (a
       // different key id, or AES-GCM refusing it) — anything else is reported
@@ -332,13 +375,14 @@ export default function ChatBackupScreen() {
             <Text style={s.timeVal}>{drive.modifiedTime ? fmt(new Date(drive.modifiedTime).getTime()) : 'Never'}</Text>
           </View>
 
-          {restorePending && cloud.exists && (
+          {restorePending && (
             <View style={s.notice}>
               <Ionicons name="pause-circle-outline" size={20} color={colors.warning} />
               <Text style={s.noticeTxt}>
-                Automatic backup is paused on this phone. It hasn&apos;t restored the backup in your account,
-                and backing up would replace it. Restore it below, or tap BACK UP to replace it with this
-                phone&apos;s chats.
+                {cloud.exists
+                  ? "Automatic backup is paused on this phone. It hasn't restored the backup in your account, and backing up would replace it."
+                  : "Automatic backup is paused on this phone. It hasn't restored an online backup, or couldn't check your account or Google Drive for one, and backing up could replace it."}
+                {" Restore it below, or tap BACK UP to replace it with this phone's chats."}
               </Text>
             </View>
           )}
@@ -433,67 +477,15 @@ export default function ChatBackupScreen() {
         </Text>
       </ScrollView>
 
-      {/* Restoring an end-to-end encrypted backup. Alert.prompt is iOS-only, and
-          this is exactly the moment a returning Android user hits — a fresh
-          install with their whole history behind one secret. */}
-      <Modal visible={askSecret !== null} transparent animationType="fade"
-             onRequestClose={closeAsk}>
-        <KeyboardSafe keyboardOnly>
-        <View style={s.modalWrap}>
-          <View style={s.modalCard}>
-            <Text style={s.modalTitle} accessibilityRole="header">
-              {askSecret === 'key' ? 'Enter your 64-character key' : 'Enter your backup password'}
-            </Text>
-            <Text style={s.modalBody}>
-              The copy in {ask ? SOURCE_NAME[ask.from] : 'your backup'} is end-to-end encrypted. It can only be
-              unlocked with the {askSecret === 'key' ? 'key' : 'password'} it was made with — if you have changed
-              it since, use the one you had then.
-            </Text>
-            <TextInput
-              style={[s.modalInput, askSecret === 'key' && s.modalInputMono, askSecret === 'key' && showSecret && s.modalInputTall]}
-              value={secretInput}
-              onChangeText={setSecretInput}
-              // secureTextEntry cannot be multiline, so the key wraps only when shown.
-              secureTextEntry={!showSecret}
-              autoFocus
-              multiline={askSecret === 'key' && showSecret}
-              importantForAutofill="no"
-              autoComplete="off"
-              placeholder={askSecret === 'key' ? '0000 0000 0000 …' : 'Password'}
-              placeholderTextColor={colors.textFaint}
-              autoCapitalize="none"
-              autoCorrect={false}
-              accessibilityLabel={askSecret === 'key' ? '64-character backup key' : 'Backup password'}
-            />
-            <TouchableOpacity
-              onPress={() => setShowSecret(v => !v)}
-              style={s.showBtn}
-              accessibilityRole="switch"
-              accessibilityLabel={askSecret === 'key' ? 'Show key' : 'Show password'}
-              accessibilityState={{ checked: showSecret }}>
-              <Ionicons name={showSecret ? 'eye-off-outline' : 'eye-outline'} size={18} color={colors.primary} />
-              <Text style={s.restoreLink}>{showSecret ? 'Hide' : 'Show'}</Text>
-            </TouchableOpacity>
-            <View style={s.modalBtns}>
-              <TouchableOpacity onPress={closeAsk} disabled={!!busy} style={s.modalBtn} accessibilityRole="button">
-                <Text style={s.modalCancel}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => doRestore(secretInput, ask?.from)}
-                disabled={!!busy || !secretInput.trim()}
-                style={s.modalBtn}
-                accessibilityRole="button"
-                accessibilityLabel="Unlock backup"
-                accessibilityState={{ disabled: !!busy || !secretInput.trim() }}>
-                {busy === 'restore'
-                  ? <ActivityIndicator color={colors.primary} />
-                  : <Text style={[s.modalOk, !secretInput.trim() && s.btnOff]}>UNLOCK</Text>}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-        </KeyboardSafe>
-      </Modal>
+      {/* Restoring an end-to-end encrypted backup: ask for its secret. */}
+      <BackupSecretModal
+        ask={ask}
+        sourceName={ask ? SOURCE_NAME[ask.from] : 'your backup'}
+        busy={!!busy}
+        unlocking={busy === 'restore'}
+        onCancel={closeAsk}
+        onUnlock={(secret) => doRestore(secret, ask?.from)}
+      />
     </View>
   );
 }
@@ -526,22 +518,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   optSub: { color: c.textFaint, fontSize: 12, lineHeight: 16, marginTop: 2 },
   note: { color: c.textFaint, fontSize: 12, lineHeight: 17, paddingHorizontal: 18, paddingTop: 18 },
 
-  // The theme's scrim dims whatever is behind the dialog.
-  modalWrap: { flex: 1, backgroundColor: c.scrim, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  modalCard: { width: '100%', maxWidth: 420, backgroundColor: c.bg, borderRadius: 14, padding: 20 },
-  modalTitle: { color: c.text, fontSize: 17, fontWeight: '700', marginBottom: 8 },
-  modalBody: { color: c.textDim, fontSize: 13, lineHeight: 19, marginBottom: 14 },
-  modalInput: {
-    color: c.text, fontSize: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke,
-    borderRadius: 10, paddingHorizontal: 14, paddingVertical: Platform.OS === 'ios' ? 14 : 10,
-  },
-  modalInputMono: { letterSpacing: 1, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
-  modalInputTall: { minHeight: 92, textAlignVertical: 'top' },
-  showBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', minHeight: 44 },
   loadBox: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },
   linkBtn: { paddingVertical: 10, paddingHorizontal: 10, minHeight: 44, justifyContent: 'center' },
-  modalBtns: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 12, marginTop: 18 },
-  modalBtn: { minHeight: 44, minWidth: 64, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center' },
-  modalCancel: { color: c.textDim, fontSize: 14, fontWeight: '700' },
-  modalOk: { color: c.primary, fontSize: 14, fontWeight: '800', letterSpacing: 0.5 },
 });

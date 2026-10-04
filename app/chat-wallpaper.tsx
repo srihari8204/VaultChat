@@ -93,9 +93,12 @@ export default function ChatWallpaperScreen() {
 
   useEffect(() => {
     touched.current = false;
+    // A read that lands after the screen closed (or after the key changed) is dropped.
+    let alive = true;
     (async () => {
       try {
         const [raw, globalRaw] = await Promise.all([AsyncStorage.getItem(storageKey), AsyncStorage.getItem(WALLPAPER_GLOBAL_KEY)]);
+        if (!alive) return;
         const loaded: WallpaperConfig | null = raw && raw !== SCOPED_DEFAULT ? JSON.parse(raw) : null;
         const inh = !!chatId && raw == null;
         if (chatId) {
@@ -104,8 +107,9 @@ export default function ChatWallpaperScreen() {
         setSavedJson(choiceJson(inh, loaded));
         setLoadErr(false);
         if (!touched.current) { setSelected(loaded); setInherit(inh); }
-      } catch { setLoadErr(true); }
+      } catch { if (alive) setLoadErr(true); }
     })();
+    return () => { alive = false; };
   }, [storageKey, chatId, reloadKey]);
 
   // Same model as everywhere else that edits before saving: leaving with an

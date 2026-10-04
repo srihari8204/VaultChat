@@ -356,13 +356,14 @@ const tick = () => new Promise((r) => setTimeout(r, 5));
     const apply = cb.slice(cb.indexOf('async function applyEncryptedBackup'), cb.indexOf('// ── Cloud (zero-knowledge'));
     assert.ok(apply.indexOf('adoptRestoredSecret(e2eeSlot, pair)') > 0
       && apply.indexOf('adoptRestoredSecret') < apply.indexOf('AsyncStorage.multiSet'), 'adopt before any write');
-    assert.ok(apply.includes('resolveRestoreDecision()'), 'a successful restore settles the decision');
+    // rerate7 D2: only the account copy settles it (lib/restoreDecision.selftest).
+    assert.ok(apply.includes('decision.restored(from)'), 'a successful restore records which copy it applied');
     // R1: the transfers under the lock have deadlines.
     const using = cb.slice(cb.indexOf('async function uploadCloudBackupUsing'), cb.indexOf('export function restoreCloudBackup'));
     assert.equal((using.match(/withDeadline\(/g) ?? []).length, 2, 'presigned PUT and inline PUT are bounded');
     assert.ok(!/await fetch\(/.test(using), 'no bare fetch under the lock');
     assert.ok(!/vaultEncrypt\(|vaultDecrypt\(/.test(cb), 'backups derive keys with the async KDF');
-    assert.ok(cb.includes('SWITCH_PENDING_KEY, RESTORE_PENDING_KEY]);'), 'neither marker ever rides along in a bundle');
+    assert.ok(cb.includes('SWITCH_PENDING_KEY, RESTORE_PENDING_KEY, RESTORE_SETTLED_KEY]);'), 'no marker ever rides along in a bundle');
   }
 
   // ── Key ids (the real lib/backupCrypto + lib/vaultCrypto) ──────────────

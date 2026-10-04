@@ -19,6 +19,12 @@
 //
 // Condition 2 is what makes this safe. A device with messages is not a new
 // phone, whatever any flag says.
+//
+// Every failure here SKIPS the offer, and that no longer exposes the backup.
+// Uploads are not gated on this screen having been shown: lib/restoreDecision
+// treats an install that never restored, never chose to replace the online
+// copy and never completed a backup as undecided, and keeps every upload
+// (scheduled or not) paused while the account or a linked Drive holds a copy.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 

@@ -12,6 +12,7 @@ import { Card, Button } from '../ui';
 import { tint } from '../../lib/tintColor';
 import type { WaMessage, WaFormat } from '../../lib/waImport';
 import type { ChatSummary } from '../../lib/chatService';
+import { importSkipNote } from './importSkipNote';
 
 /** How confident we are that this export belongs to the selected contact. */
 export type MatchLevel = 'phone' | 'name' | 'unverified';
@@ -31,6 +32,8 @@ export interface Parsed {
 
 export interface Outcome {
   imported: number; duplicates: number; unsupported: number;
+  /** Media the transcript names that the archive did not contain. */
+  missingMedia: number;
   mediaCopied: number; mediaSkipped: number; partial: boolean;
 }
 
@@ -219,6 +222,7 @@ export function Done({ s, colors, outcome, peerName, onOpen, onRetry }: {
   s: S; colors: Palette; outcome: Outcome; peerName: string;
   onOpen: () => void; onRetry: () => void;
 }) {
+  const skipped = importSkipNote(outcome);
   return (
     <View style={s.center}>
       <View style={[s.tick, outcome.partial && { borderColor: colors.primary }]}>
@@ -230,10 +234,13 @@ export function Done({ s, colors, outcome, peerName, onOpen, onRetry }: {
       <Card style={s.summary}>
         <Row s={s} k="Messages imported" v={outcome.imported.toLocaleString()} />
         <Row s={s} k="Duplicates skipped" v={outcome.duplicates.toLocaleString()} />
-        <Row s={s} k="Unsupported items" v={outcome.unsupported.toLocaleString()} />
+        <Row s={s} k="Lines not read" v={outcome.unsupported.toLocaleString()} />
         <Row s={s} k="Media copied" v={`${outcome.mediaCopied}${outcome.mediaSkipped ? ` (${outcome.mediaSkipped} too large)` : ''}`} />
+        {outcome.missingMedia > 0 && <Row s={s} k="Media not in the export" v={outcome.missingMedia.toLocaleString()} />}
         <Row s={s} k="Timestamps" v="Preserved as exported" />
       </Card>
+
+      {skipped && <Text style={s.note}>{skipped}</Text>}
 
       {outcome.partial && (
         <Text style={s.note}>
