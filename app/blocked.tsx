@@ -6,8 +6,13 @@
 // encryption keys have been permanently wiped" unconditionally, but
 // securityService only calls wipeAllKeys() on the `wipe` level. A `restrict`
 // user — blocked, keys intact — was told their data had been destroyed, which
-// is both false and the sort of thing someone acts on irreversibly. The verdict
-// now arrives as a `level` param and every claim below is branched on it.
+// is both false and the sort of thing someone acts on irreversibly. Every claim
+// below is branched on the verdict's level.
+//
+// THE VERDICT IS NOT A ROUTE PARAM. It used to be, so `vaultchat://blocked?
+// level=wipe` showed a fake "keys wiped" trap with Back disabled. The in-app
+// scan callers hold the report in lib/securityVerdict; a link opens the screen
+// but cannot set that, and gets the neutral "Nothing is blocked" view.
 
 import React, { useEffect, useState, useMemo } from 'react';
 import {
@@ -20,8 +25,8 @@ import {
   Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ThreatDetail } from '../services/securityService';
+import { useRouter } from 'expo-router';
+import { securityVerdict } from '../lib/securityVerdict';
 import type { Palette } from '../constants/theme';
 import { useColors } from '../lib/theme';
 import { HEADER_TOP } from '../constants/layout';
@@ -122,28 +127,17 @@ export default function BlockedScreen() {
   const c = useColors();
   const styles = useMemo(() => makeStyles(c), [c]);
   const router = useRouter();
-  const params = useLocalSearchParams<{ threats: string; level: string }>();
-  const [threats, setThreats] = useState<ThreatDetail[]>([]);
-  // The root layout only ever opens this screen with a `restrict` or `wipe`
-  // verdict. Opened any other way (a stale link, the old Privacy Dashboard
-  // "Blocked contacts" row) there is no verdict to enforce, so the screen must
-  // not hold the user hostage: Back works and an on-screen exit is shown.
-  const verdict = params.level === 'restrict' || params.level === 'wipe';
-  // Only a `wipe` verdict ran wipeAllKeys(). Anything else (including a missing
-  // param from an older navigation) left the keys alone, and saying otherwise
-  // would be the lie this screen shipped with.
-  const wiped = params.level === 'wipe';
+  // Only an in-app scan holds a `restrict` or `wipe` verdict. Opened any other
+  // way (a crafted or stale link) there is no verdict to enforce, so the screen
+  // must not hold the user hostage: Back works and an on-screen exit is shown.
+  const [held] = useState(securityVerdict);
+  const verdict = held !== null;
+  const threats = held?.threats ?? [];
+  // Only a `wipe` verdict ran wipeAllKeys(). A `restrict` left the keys alone,
+  // and saying otherwise would be the lie this screen shipped with.
+  const wiped = held?.level === 'wipe';
 
   useEffect(() => {
-    // Parse threats passed from _layout.tsx
-    if (params.threats) {
-      try {
-        setThreats(JSON.parse(params.threats));
-      } catch {
-        setThreats([]);
-      }
-    }
-
     // Block Android back button — user cannot navigate away from a verdict.
     if (!verdict) return;
     const handler = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -151,7 +145,7 @@ export default function BlockedScreen() {
     });
 
     return () => handler.remove();
-  }, [params.threats, verdict]);
+  }, [verdict]);
 
   const leave = () => {
     if (router.canGoBack()) router.back();

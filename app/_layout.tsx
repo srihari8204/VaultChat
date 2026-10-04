@@ -27,7 +27,7 @@ import '../lib/domExceptionPolyfill';
 
 import { Buffer } from 'buffer';
 
-import { Stack, usePathname, useRouter } from 'expo-router';
+import { Stack, useGlobalSearchParams, usePathname, useRouter, useSegments } from 'expo-router';
 import { type ComponentType, useEffect, useRef, useState } from 'react';
 import { setSecure } from '../lib/screenGuard';
 import { installAlertGuard } from '../lib/alertGuard';
@@ -78,8 +78,9 @@ import '../lib/family/background'; // registers the bg-location task — a headl
 import '../lib/lock/background';   // registers the Location Lock geofence task — same
                                    // rule: headless wakes need it defined at load
 import { getAccessToken, getLaunchSessionState } from '../lib/api';
-import { settleLaunchGate } from '../lib/launchGate';
-import { stashLaunchLink } from '../lib/pendingLink';
+import { launchAllowed, settleLaunchGate } from '../lib/launchGate';
+import { hrefWithQuery, openWhenUnlocked, stashLaunchLink } from '../lib/pendingLink';
+import { holdSecurityVerdict } from '../lib/securityVerdict';
 import { isMfaEnabled } from '../lib/mfa';
 import { E2EE_ENABLED, SCHEDULED_LOCAL } from '../constants/flags';
 import { mark } from '../lib/perf';
@@ -234,6 +235,14 @@ function RootLayoutInner() {
   const selfIdRef = useRef<string | null>(null);
   const router = useRouter();
   const pathname = usePathname();
+  // The launch URL WITH its query: usePathname() drops `?code=` and the like,
+  // and a stashed link must replay exactly as it was tapped.
+  const globalParams = useGlobalSearchParams();
+  const segments = useSegments();
+  const launchHref = hrefWithQuery(pathname, globalParams, segments);
+  /** Current route for the notification-tap gate; the boot effect outlives renders. */
+  const pathRef = useRef(pathname);
+  pathRef.current = pathname;
   const [launchGate, setLaunchGate] = useState<'checking' | 'allow' | '/onboard' | '/app-lock'>('checking');
   const [PdfHost, setPdfHost] = useState<ComponentType | null>(null);
 
@@ -264,17 +273,19 @@ function RootLayoutInner() {
     // that destination, with no new import on the cold-start path.
     //
     // Stashed only on the redirecting branches. A launch that is allowed
-    // through needs no help; it is already where it was going.
+    // through needs no help; it is already where it was going. `launchHref` is
+    // pathname plus query (lib/pendingLink.hrefWithQuery), so a broadcast
+    // invite's `?code=` survives the unlock.
     Promise.all([secure, getLaunchSessionState(), isMfaEnabled()])
       .then(([, session, mfaOn]) => {
         if (!live) return;
         if (!session.signedIn) {
-          stashLaunchLink(pathname);
+          stashLaunchLink(launchHref);
           settleLaunchGate(false);
           setLaunchGate('/onboard');
           router.replace('/onboard' as any);
         } else if (mfaOn || session.sealedLocked) {
-          stashLaunchLink(pathname);
+          stashLaunchLink(launchHref);
           settleLaunchGate(false);
           setLaunchGate('/app-lock');
           router.replace('/app-lock' as any);
@@ -288,7 +299,7 @@ function RootLayoutInner() {
         // The catch redirects too, so it must stash too. This branch is not
         // theoretical: a SecureStore read that throws lands here, and on some
         // Android skins that is the common cold-start failure.
-        stashLaunchLink(pathname);
+        stashLaunchLink(launchHref);
         settleLaunchGate(false);
         setLaunchGate('/onboard');
         router.replace('/onboard' as any);
@@ -314,6 +325,10 @@ function RootLayoutInner() {
   const [landed, setLanded] = useState(false);
   useEffect(() => {
     if (launchGate !== 'checking' && launchGate === pathname) setLanded(true);
+    // The security verdict replaces onto /blocked AFTER the gate's redirect,
+    // possibly before that redirect was seen here. /blocked shows no account
+    // content, so it lands the veil too rather than wedging it up.
+    if (launchGate !== 'checking' && pathname === '/blocked') setLanded(true);
   }, [launchGate, pathname]);
   const launchReady = launchGate === 'allow' || landed || launchGate === pathname;
   useEffect(() => {
@@ -370,12 +385,16 @@ function RootLayoutInner() {
     // so running it async (without gating the UI) is safe and WhatsApp-fast.
     if (Platform.OS !== 'web') {
       runSecurityCheck()
-        .then(report => {
+        .then(async report => {
           if (!report.clean) {
-            // `level` matters to the copy: only a `wipe` verdict actually
-            // destroyed keys. Without it /blocked told a `restrict` user their
-            // keys were gone when they were not.
-            router.replace({ pathname: '/blocked', params: { threats: JSON.stringify(report.threats), level: report.level } });
+            // /blocked reads the verdict from here, not from its params, so a
+            // crafted link cannot fake one (lib/securityVerdict.ts). `level`
+            // matters to the copy: only a `wipe` verdict destroyed keys.
+            holdSecurityVerdict(report);
+            // AFTER the launch gate: its replace('/onboard' | '/app-lock') would
+            // otherwise land on top of the verdict and hide it.
+            await launchAllowed;
+            router.replace('/blocked' as any);
           }
         })
         .catch(() => { /* fail open */ });
@@ -404,6 +423,21 @@ function RootLayoutInner() {
 
     // (attachTapHandler is wired below, after the call handlers are defined)
     let cleanupListeners = () => {};
+
+    // A NOTIFICATION TAP NEVER OPENS A SCREEN OVER THE LOCK.
+    //
+    // These taps used to router.push() as soon as they fired, racing the
+    // launch gate's replace('/app-lock' | '/onboard') on a cold start and
+    // ResumeLock's push('/app-lock') on resume — a chat could land ON TOP of
+    // the lock, and a cold-start push could keep the veil from ever latching
+    // down. Now they wait for the gate and any resume-lock decision, and are
+    // held for replay after unlock when either is locking (lib/pendingLink).
+    // Call routes are deliberately NOT gated: a ring must be answerable from
+    // the lock screen, as the OS full-screen call already is.
+    const openLink = ({ pathname: path, params }: { pathname: string; params?: Record<string, string> }) => {
+      void openWhenUnlocked(hrefWithQuery(path, params), launchAllowed, () => pathRef.current,
+        (href) => router.push(href as any)).catch(() => {});
+    };
 
     // Open the in-app ringing screen for a call. `offer` may be empty (push /
     // backgrounded) — incoming-call captures the caller's re-sent offer live.
@@ -665,12 +699,12 @@ function RootLayoutInner() {
         const ci = await getInitialCallIntent();
         if (ci?.action === 'open_chat' && ci.chatId) {
           // Native message-notification tap (F2 content-free doorbell).
-          router.push({ pathname: '/chat', params: { id: ci.chatId } } as any);
+          openLink({ pathname: '/chat', params: { id: ci.chatId } });
         } else if (ci?.action === 'open_game') {
           // VaultGames turn/invite tap. game+room are carried through so the
           // WebView opens the exact table the push was about — landing on the
           // hub instead would make the player hunt for their own game.
-          router.push({ pathname: '/games', params: { game: ci.game ?? '', room: ci.room ?? '' } } as any);
+          openLink({ pathname: '/games', params: { game: ci.game ?? '', room: ci.room ?? '' } });
         } else if (ci?.callId && ci.action !== 'open_calls') {
           // A GROUP ring answered from the lock screen must open the GROUP call.
           //
@@ -790,7 +824,7 @@ function RootLayoutInner() {
         // A family alert tapped while the app was killed opens that circle's
         // alerts, as a foreground tap does (lib/push.ts attachTapHandler).
         else if (initial?.notification?.data?.type === 'family-alert') {
-          router.push({ pathname: '/family-alerts' as any, params: { circleId: String(initial.notification.data.circleId ?? '') } });
+          openLink({ pathname: '/family-alerts', params: { circleId: String(initial.notification.data.circleId ?? '') } });
         }
       } catch {}
       const pending = consumePendingCall();   // chosen from a bg notification action
@@ -813,23 +847,25 @@ function RootLayoutInner() {
 
     if (Platform.OS !== 'web') {
       cleanupListeners = attachTapHandler(
-        (chatId) => { router.push({ pathname: '/chat', params: { id: chatId } } as any); },
+        (chatId) => { openLink({ pathname: '/chat', params: { id: chatId } }); },
         onCallNotification,
         // Membership pushes: an accepted member lands in the space, an invitee
         // lands on the invitation itself — never in a chat they cannot open.
         (event, chatId) => {
           if (event === 'member_approved' && chatId) {
-            router.push({ pathname: '/family', params: { groupId: chatId } } as any);
+            openLink({ pathname: '/family', params: { groupId: chatId } });
           } else {
-            router.push('/group-invitations' as any);
+            openLink({ pathname: '/group-invitations' });
           }
         },
         // A games turn push: land ON the table, not on the hub. An unknown game
         // or a blank room opens the hub, which is what /games does with params
         // it does not recognise anyway.
         (game, room) => {
-          router.push({ pathname: '/games', params: game && room ? { game, room } : {} } as any);
+          openLink({ pathname: '/games', params: game && room ? { game, room } : {} });
         },
+        // A family alert tapped while the app is open waits for any lock, like the rest.
+        (circleId) => { openLink({ pathname: '/family-alerts', params: { circleId } }); },
       );
     }
 

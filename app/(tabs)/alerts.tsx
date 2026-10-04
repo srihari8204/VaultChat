@@ -22,6 +22,7 @@ import {
   type AuditSeverity, type ChainStatus, type SecurityEvent,
 } from '../../services/security/auditChain';
 import { scanDeviceAndRecord } from '../../services/securityService';
+import { holdSecurityVerdict } from '../../lib/securityVerdict';
 import { AppText as Text } from '../../components/ui/Text';
 import { AuroraBackground } from '../../components/ui';
 
@@ -114,7 +115,9 @@ export default function AlertsScreen() {
     try {
       const report = await scanDeviceAndRecord();
       if (!report.clean) {
-        // Same routing as the launch scan in app/_layout.tsx.
+        // Same routing as the launch scan in app/_layout.tsx. /blocked reads the
+        // held verdict, not route params (a crafted link must not fake one).
+        holdSecurityVerdict(report);
         router.replace({ pathname: '/blocked', params: { threats: JSON.stringify(report.threats), level: report.level } } as any);
         return;
       }

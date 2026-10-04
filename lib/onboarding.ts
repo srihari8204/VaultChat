@@ -20,7 +20,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { gcm } from '@noble/ciphers/aes.js';
 import { randomBytes, bytesToHex } from '@noble/hashes/utils.js';
 import { Buffer } from 'buffer';
-import { api, setTokens, setCachedUser } from './api';
+import { api, getCachedUser, setTokens, setCachedUser } from './api';
 import { uploadAttachment } from './chatService';
 
 // ── In-memory onboarding store ──────────────────────────────────────────────
@@ -159,12 +159,19 @@ export async function setMpinRemote(userId: string, setupTicket: string, mpin: s
 }
 
 // Verifies MPIN, stores the issued JWTs, returns nothing (caller routes to chats).
+//
+// Also the RE-CHECK for an already signed-in user (app-lock, delete-account).
+// Writing `{ id }` there replaced the cached profile with a bare id — and if the
+// delete that followed failed, the device kept the stripped profile. Keep the
+// cached user when it is this same account; only a different (or no) account
+// is replaced.
 export async function verifyMpinRemote(userId: string, mpin: string): Promise<void> {
   const r = await api<{ accessToken: string; refreshToken: string }>('/auth/mpin/verify', {
     method: 'POST', json: { userId, mpin }, auth: false,
   });
   await setTokens(r.accessToken, r.refreshToken);
-  await setCachedUser({ id: userId });
+  const prev = await getCachedUser().catch(() => null);
+  await setCachedUser(prev?.id != null && String(prev.id) === String(userId) ? prev : { id: userId });
 }
 
 export async function configureMfa(enabled: boolean): Promise<void> {
@@ -210,7 +217,9 @@ export async function recoverMpin(userId: string, recoveryTicket: string, mpin: 
     method: 'POST', json: { userId, recoveryTicket, mpin }, auth: false,
   });
   await setTokens(r.accessToken, r.refreshToken);
-  await setCachedUser({ id: userId });
+  // Same rule as verifyMpinRemote: keep the cached profile when it is this account.
+  const prev = await getCachedUser().catch(() => null);
+  await setCachedUser(prev?.id != null && String(prev.id) === String(userId) ? prev : { id: userId });
 }
 
 export { msg as onboardingError };

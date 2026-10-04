@@ -12,6 +12,7 @@ import { useEffect } from "react";
 import { Image, StyleSheet, View } from "react-native";
 import { launchAllowed } from "../lib/launchGate";
 import { shouldCheckRestore } from "../lib/restoreGate";
+import { securityVerdict } from "../lib/securityVerdict";
 
 export default function IndexScreen() {
   useEffect(() => {
@@ -42,6 +43,8 @@ export default function IndexScreen() {
         // of the root's Promise.all — both redirect branches, the allow branch
         // and the catch — and a Promise.all has no fourth outcome.
         if (!(await launchAllowed)) return;
+        // The launch scan found a threat and is routing to /blocked: don't race it.
+        if (securityVerdict()) return;
 
         if (await shouldCheckRestore()) { router.replace("/restore-backup" as any); return; }
 

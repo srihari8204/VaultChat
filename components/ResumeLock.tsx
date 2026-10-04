@@ -9,6 +9,11 @@
 // Mounted once inside the root Stack's navigator context (see the P2 handoff).
 // app/app-lock reads `resume=1` to return to the screen underneath on unlock
 // instead of resetting to Chats.
+//
+// THE LOCK WINS OVER NOTIFICATION TAPS. A tap that brings the app forward is
+// routed on the same 'active' event; each resume's decision is published to
+// lib/pendingLink first, so app/_layout's taps wait for it and are held for
+// replay after unlock instead of landing on top of /app-lock.
 
 import { usePathname, useRouter } from 'expo-router';
 import { useEffect, useRef } from 'react';
@@ -16,10 +21,12 @@ import { AppState } from 'react-native';
 
 import { hasSession } from '../lib/api';
 import { isMfaEnabled } from '../lib/mfa';
+import { isLockOrAuthRoute, setResumeLockCheck } from '../lib/pendingLink';
 import { checkLockOnResume } from '../services/lockService';
 
-// Screens that are already a lock or are the sign-in flow itself.
-const EXEMPT = /^\/(app-lock|onboard[\w-]*|email-verify|mpin-entry|mpin-recover|blocked)?(\/|$)/;
+// Screens that are already a lock or are the sign-in flow itself, and the
+// launch splash ("/"), which hands off to the launch gate.
+const exempt = (path: string | null | undefined) => path === '/' || isLockOrAuthRoute(path);
 
 const lockApplies = async () => (await isMfaEnabled()) && (await hasSession().catch(() => false));
 
@@ -29,15 +36,22 @@ export function ResumeLock(): null {
   const pathRef = useRef(pathname);
   pathRef.current = pathname;
 
+  // Once the lock (or any auth route) is on screen, the route itself holds
+  // taps back; a stale "locking" decision would hold them after unlock too.
+  useEffect(() => {
+    if (isLockOrAuthRoute(pathname)) setResumeLockCheck(Promise.resolve(false));
+  }, [pathname]);
+
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
-      checkLockOnResume(state, lockApplies)
-        .then((lock) => {
-          if (lock && !EXEMPT.test(pathRef.current ?? '')) {
-            router.push({ pathname: '/app-lock', params: { resume: '1' } } as any);
-          }
-        })
-        .catch(() => { /* a failed check leaves the app as it is; cold launch still locks */ });
+      const lock = checkLockOnResume(state, lockApplies)
+        .then((l) => l && !exempt(pathRef.current))
+        // A failed check leaves the app as it is; cold launch still locks.
+        .catch(() => false);
+      if (state === 'active') setResumeLockCheck(lock);
+      lock.then((l) => {
+        if (l) router.push({ pathname: '/app-lock', params: { resume: '1' } } as any);
+      }).catch(() => {});
     });
     return () => sub.remove();
   }, [router]);

@@ -213,6 +213,7 @@ export function attachTapHandler(
   onCall?: (data: any, action: string) => void,
   onMembership?: (event: string, chatId: string) => void,
   onGame?: (game: string, room: string) => void,
+  onFamilyAlert?: (circleId: string) => void,
 ): () => void {
   const sub = Notifications.addNotificationResponseReceivedListener((response) => {
     const data: any = response.notification.request.content.data;
@@ -231,7 +232,10 @@ export function attachTapHandler(
   const offFamily = Platform.OS === 'web' ? () => {} : notifee.onForegroundEvent(({ type, detail }) => {
     const d: any = detail?.notification?.data;
     if (type !== EventType.PRESS || d?.type !== 'family-alert') return;
-    try { router.push({ pathname: '/family-alerts' as any, params: { circleId: String(d.circleId ?? '') } }); } catch {}
+    const circleId = String(d.circleId ?? '');
+    // The root passes a lock-aware opener; the direct push is only a fallback.
+    if (onFamilyAlert) { onFamilyAlert(circleId); return; }
+    try { router.push({ pathname: '/family-alerts' as any, params: { circleId } }); } catch {}
   });
   return () => { sub.remove(); offFamily(); };
 }

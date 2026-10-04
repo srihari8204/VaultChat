@@ -14,7 +14,11 @@
 import {
   clearLaunchLink,
   consumeLaunchLink,
+  hrefWithQuery,
+  isLockOrAuthRoute,
+  openWhenUnlocked,
   pathFromLaunchUrl,
+  setResumeLockCheck,
   stashLaunchLink,
 } from './pendingLink';
 
@@ -85,6 +89,78 @@ clearLaunchLink();
 ok('clear() drops it unread, so it cannot open under the next account',
   consumeLaunchLink() === null);
 
+// ── the query survives (broadcast invites carry ?code=) ─────────────────
+console.log('\nKeeping the query:');
+ok('pathname + query params -> one href',
+  hrefWithQuery('/broadcast', { code: 'AB12' }) === '/broadcast?code=AB12',
+  hrefWithQuery('/broadcast', { code: 'AB12' }));
+ok('no params -> the bare path', hrefWithQuery('/settings', {}) === '/settings');
+ok('values are encoded', hrefWithQuery('/chat', { id: 'a b&c' }) === '/chat?id=a%20b%26c',
+  hrefWithQuery('/chat', { id: 'a b&c' }));
+ok('a dynamic segment is already in the path, so it is not repeated',
+  hrefWithQuery('/join/XYZ', { code: 'XYZ', ref: 'qr' }, ['join', '[code]']) === '/join/XYZ?ref=qr',
+  hrefWithQuery('/join/XYZ', { code: 'XYZ', ref: 'qr' }, ['join', '[code]']));
+ok('a catch-all segment likewise',
+  hrefWithQuery('/add/a/b', { segments: ['a', 'b'] }, ['add', '[...segments]']) === '/add/a/b');
+ok('non-string route state (nested navigator params) is not a query',
+  hrefWithQuery('/x', { a: '1', params: { screen: 'y' } as any, n: undefined }) === '/x?a=1',
+  hrefWithQuery('/x', { a: '1', params: { screen: 'y' } as any, n: undefined }));
+ok('array query values repeat the key',
+  hrefWithQuery('/x', { t: ['1', '2'] }) === '/x?t=1&t=2');
+clearLaunchLink();
+stashLaunchLink(hrefWithQuery('/broadcast', { code: 'AB12' }));
+ok('and the stashed broadcast link replays WITH its code',
+  consumeLaunchLink() === '/broadcast?code=AB12');
+
+// ── notification taps vs the lock ────────────────────────────────────────
+async function taps() {
+  console.log('\nNotification taps never open over the lock:');
+  ok('lock and sign-in routes are recognised',
+    ['/app-lock', '/onboard', '/onboard-mpin', '/mpin-entry', '/mpin-recover', '/email-verify', '/blocked']
+      .every(isLockOrAuthRoute));
+  ok('ordinary screens and the splash are not',
+    !isLockOrAuthRoute('/chat') && !isLockOrAuthRoute('/(tabs)/chats') && !isLockOrAuthRoute('/'));
+  ok('"/app-lock-chats" is a feature screen, not the lock', !isLockOrAuthRoute('/app-lock-chats'));
+
+  const opened: string[] = [];
+  const open = (h: string) => { opened.push(h); };
+  clearLaunchLink();
+
+  await openWhenUnlocked('/chat?id=1', Promise.resolve(true), () => '/(tabs)/chats', open);
+  ok('unlocked + allowed: opened at once', opened.join() === '/chat?id=1' && consumeLaunchLink() === null);
+
+  opened.length = 0;
+  await openWhenUnlocked('/family-alerts?circleId=c', Promise.resolve(false), () => '/', open);
+  ok('cold start redirected to the lock/sign-in: held, not pushed',
+    opened.length === 0 && consumeLaunchLink() === '/family-alerts?circleId=c');
+
+  await openWhenUnlocked('/chat?id=2', Promise.resolve(true), () => '/app-lock', open);
+  ok('the lock is on screen: held', opened.length === 0 && consumeLaunchLink() === '/chat?id=2');
+
+  await openWhenUnlocked('/chat?id=3', Promise.resolve(true), () => '/blocked', open);
+  ok('a security verdict is on screen: held', opened.length === 0 && consumeLaunchLink() === '/chat?id=3');
+
+  // The resume race: the lock decision is still in flight when the tap routes.
+  let decide!: (v: boolean) => void;
+  setResumeLockCheck(new Promise<boolean>((r) => { decide = r; }));
+  const pendingTap = openWhenUnlocked('/chat?id=4', Promise.resolve(true), () => '/(tabs)/chats', open);
+  await Promise.resolve();
+  ok('a tap waits while the resume lock is deciding', opened.length === 0);
+  decide(true);
+  await pendingTap;
+  ok('…and is held when the lock goes up', opened.length === 0 && consumeLaunchLink() === '/chat?id=4');
+
+  setResumeLockCheck(Promise.resolve(false));
+  await openWhenUnlocked('/chat?id=5', Promise.resolve(true), () => '/(tabs)/chats', open);
+  ok('after unlock the decision is cleared and taps open again', opened.join() === '/chat?id=5');
+
+  opened.length = 0;
+  setResumeLockCheck(Promise.reject(new Error('SecureStore')));
+  await openWhenUnlocked('/chat?id=6', Promise.resolve(true), () => '/(tabs)/chats', open);
+  ok('a failed lock check does not strand taps', opened.join() === '/chat?id=6');
+  setResumeLockCheck(Promise.resolve(false));
+}
+
 // ── the wiring, pinned from source ───────────────────────────────────────
 // The behaviour above is worthless if resetTo stops calling it, so the call
 // sites are pinned too. Reading the file rather than importing it: authNav
@@ -104,8 +180,21 @@ console.log('\nThe wiring in app/_layout.tsx:');
 // Three redirecting branches: signed-out, locked, and the .catch(). All three
 // must stash, and the .catch() is the one most likely to be forgotten — it is
 // also the branch a SecureStore failure takes on the device this was found on.
-const stashes = (layout.match(/stashLaunchLink\(pathname\)/g) || []).length;
-ok(`every redirecting branch stashes (found ${stashes}, want >= 3)`, stashes >= 3);
+const stashes = (layout.match(/stashLaunchLink\(launchHref\)/g) || []).length;
+ok(`every redirecting branch stashes the href WITH its query (found ${stashes}, want >= 3)`, stashes >= 3);
+ok('…which is built from the global search params', /hrefWithQuery\(pathname, globalParams, segments\)/.test(layout));
+ok('notification taps go through the unlock gate, not a bare push',
+  /openWhenUnlocked\(/.test(layout)
+  && !/router\.push\(\{ pathname: '\/(chat|games|family|family-alerts)'/.test(layout)
+  && !/router\.push\('\/group-invitations'/.test(layout));
+const resume = fs.readFileSync(
+  require('node:path').join(__dirname, '..', 'components', 'ResumeLock.tsx'), 'utf8');
+ok('ResumeLock publishes each resume decision before acting on it',
+  /setResumeLockCheck\(lock\)/.test(resume));
+const appLock = fs.readFileSync(
+  require('node:path').join(__dirname, '..', 'app', 'app-lock.tsx'), 'utf8');
+ok('app-lock replays a held tap after a resume unlock',
+  /router\.back\(\);[\s\S]{0,400}consumeLaunchLink\(\)/.test(appLock));
 // The two guards this fix had to respect rather than loosen.
 // Needle assembled, not written out: this file is not scanned by those guards,
 // but spelling it here invites a copy-paste into one that is.
@@ -117,5 +206,7 @@ ok('and the gate still awaits exactly the three things the splash waits on',
 ok('the allowed branch does NOT stash — expo-router routes that URL itself',
   /settleLaunchGate\(true\);\s*\n\s*setLaunchGate\('allow'\);/.test(layout));
 
-console.log(failures ? `\n${failures} FAILED` : '\nall passed');
-process.exit(failures ? 1 : 0);
+taps().then(() => {
+  console.log(failures ? `\n${failures} FAILED` : '\nall passed');
+  process.exit(failures ? 1 : 0);
+});

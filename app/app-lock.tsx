@@ -8,8 +8,8 @@
 // failure with a user-chosen re-login escape — never a silent bounce to
 // /onboard, which would look like the app forgot the account.
 
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Animated, BackHandler, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
@@ -19,6 +19,7 @@ import { promptBiometricUnlock } from '../lib/mfa';
 import { verifyMpinRemote, onboardingError } from '../lib/onboarding';
 import { AppText as Text, AuroraBackground, KeyboardSafe } from '../components/ui';
 import { resetTo } from '../lib/authNav';
+import { consumeLaunchLink } from '../lib/pendingLink';
 
 export default function AppLock() {
   const { colors } = useTheme();
@@ -38,8 +39,14 @@ export default function AppLock() {
   const doShake = () => { shake.setValue(0); Animated.sequence([12, -12, 8, -8, 0].map(t => Animated.timing(shake, { toValue: t, duration: 55, useNativeDriver: true }))).start(); };
 
   const enter = () => {
-    if (resume === '1' && router.canGoBack()) router.back();
-    else resetTo('/(tabs)/chats');
+    if (resume === '1' && router.canGoBack()) {
+      router.back();
+      // A notification tapped while this lock was up was held, not opened over
+      // it (lib/pendingLink.openWhenUnlocked) — open it now, above the screen
+      // the user returns to. The cold path replays it inside resetTo instead.
+      const held = consumeLaunchLink();
+      if (held) router.push(held as any);
+    } else resetTo('/(tabs)/chats');
   };
 
   // BACK MUST NOT WALK AROUND THE LOCK.
@@ -51,10 +58,13 @@ export default function AppLock() {
   // swaps only the TOP entry, so whatever screen the user was on is still
   // underneath, and one press of BACK put them back inside the app they had
   // just been locked out of. Consume back only in that case.
-  useEffect(() => {
+  //
+  // Only while THIS screen is focused: "Forgot MPIN?" pushes /mpin-recover on
+  // top, and a listener left registered underneath swallowed Back there too.
+  useFocusEffect(useCallback(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => router.canGoBack());
     return () => sub.remove();
-  }, [router]);
+  }, [router]));
 
   useEffect(() => { getCachedUser().then(u => setUserId(u?.id ?? null)).catch(() => setUserId(null)); }, []);
   useEffect(() => {

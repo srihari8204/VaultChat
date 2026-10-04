@@ -41,9 +41,11 @@ let pending: string | null = null;
 export function pathFromLaunchUrl(url: string | null | undefined): string | null {
   if (!url) return null;
   // ALREADY A PATH. This is the normal case: app/_layout.tsx hands us
-  // usePathname(), because expo-router has already resolved the launch URL by
-  // the time the gate's effect runs. Full URLs are still accepted so the
-  // function stays usable from anywhere (and testable without a router).
+  // usePathname() + its query (hrefWithQuery below), because expo-router has
+  // already resolved the launch URL by the time the gate's effect runs, and
+  // notification taps hand us the href they would have pushed. Full URLs are
+  // still accepted so the function stays usable from anywhere (and testable
+  // without a router).
   if (url.startsWith('/')) {
     const p = url.split('#')[0];
     return p === '/' || p === '' ? null : p;
@@ -85,4 +87,67 @@ export function consumeLaunchLink(): string | null {
 /** Drop it unread — for a sign-out, where the pending link is no longer theirs. */
 export function clearLaunchLink(): void {
   pending = null;
+}
+
+/**
+ * `pathname` plus the QUERY of the route it names, as one replayable href.
+ *
+ * usePathname() carries no query, so a stashed `vaultchat://broadcast?code=X`
+ * came back after unlock as a bare "/broadcast" and the invite code was gone.
+ * The root layout passes useGlobalSearchParams() and useSegments() here.
+ * Dynamic-segment params (`[code]`, `[...segments]`) are already IN the path,
+ * so they are skipped rather than repeated as `?code=`.
+ */
+export function hrefWithQuery(
+  pathname: string,
+  params: Record<string, string | string[] | undefined> | null | undefined,
+  segments: readonly string[] = [],
+): string {
+  const inPath = new Set(segments.map(s => /^\[(?:\.\.\.)?(.+)\]$/.exec(s)?.[1]).filter(Boolean));
+  // Strings only: route state can also carry nested-navigator objects
+  // (`params`), which are not part of any URL.
+  const q = Object.entries(params ?? {})
+    .filter(([k]) => !inPath.has(k))
+    .flatMap(([k, v]) => (Array.isArray(v) ? v : [v]).filter(x => typeof x === 'string')
+      .map(x => `${encodeURIComponent(k)}=${encodeURIComponent(x as string)}`))
+    .join('&');
+  return q ? `${pathname}?${q}` : pathname;
+}
+
+// ── Notification taps while the app is locked ─────────────────────────────
+//
+// A notification tap used to router.push() its screen whenever it fired. On a
+// cold start that raced the launch gate's replace('/app-lock' | '/onboard'), and
+// on resume it raced components/ResumeLock's push('/app-lock') — either way a
+// chat or family-alert screen could land ON TOP of the lock or sign-in. Taps now
+// go through openWhenUnlocked: opened only once nothing is locking, otherwise
+// held in the same slot as a launch link and replayed after unlock
+// (lib/authNav.resetTo on the cold path, app/app-lock's enter() on resume).
+
+/** Routes that are a lock, a verdict, or the sign-in flow: nothing opens over them. */
+const LOCK_OR_AUTH = /^\/(app-lock|onboard[\w-]*|email-verify|mpin-entry|mpin-recover|blocked)(\/|$)/;
+export function isLockOrAuthRoute(path: string | null | undefined): boolean {
+  return LOCK_OR_AUTH.test(path ?? '');
+}
+
+/** The in-flight resume-lock decision; true = the lock is going up. */
+let resumeLock: Promise<boolean> = Promise.resolve(false);
+/** components/ResumeLock publishes each resume's decision before acting on it. */
+export function setResumeLockCheck(check: Promise<boolean>): void {
+  resumeLock = check.catch(() => false);
+}
+
+/**
+ * Open `href` once the launch gate has allowed this launch and no resume lock
+ * is deciding or showing; otherwise hold it for replay after unlock.
+ */
+export async function openWhenUnlocked(
+  href: string,
+  launch: Promise<boolean>,
+  currentPath: () => string | null | undefined,
+  open: (href: string) => void,
+): Promise<void> {
+  const [allowed, relocking] = await Promise.all([launch, resumeLock]);
+  if (allowed && !relocking && !isLockOrAuthRoute(currentPath())) open(href);
+  else stashLaunchLink(href);
 }
