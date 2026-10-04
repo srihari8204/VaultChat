@@ -539,8 +539,12 @@ export function orderStamp(iso: string, now: Date = new Date()): string {
 //   new_order, alternative_decision, order_cancelled → the owner's order
 //   alternative                                      → the customer's order
 //   return_requested                                 → the owner's returns list
-//   order_status → whichever side is open: the server sends it to the customer
-//     on every move and to the owner only for collected / not collected.
+//   order_status → the side the server addressed it to. The server sends it
+//     to the customer on every move and to the owner only for completed
+//     (the customer collected) / not_collected, so:
+//       data.side 'owner' | 'customer' (when the server tags it) → that side;
+//       any other status → the customer (only customers receive those);
+//       completed / not_collected untagged → the side that is open.
 // A return decision opens the customer's order once the server includes its
 // orderId; today it does not, so that row (like payments, reminders and shop
 // news) has no screen to open and is not offered as a link.
@@ -550,6 +554,8 @@ export type NotificationTarget =
 
 const OWNER_ORDER_EVENTS = new Set(['new_order', 'alternative_decision', 'order_cancelled']);
 const CUSTOMER_ORDER_EVENTS = new Set(['alternative', 'return_approved', 'return_rejected']);
+// The only order_status values the server also sends to the shop owner.
+const OWNER_ORDER_STATUSES = new Set(['completed', 'not_collected']);
 
 export function notificationTarget(
   n: { event?: string; data?: Record<string, unknown> | null },
@@ -563,7 +569,15 @@ export function notificationTarget(
   if (!orderId) return null;
   if (OWNER_ORDER_EVENTS.has(event)) return { kind: 'order', side: 'owner', orderId };
   if (CUSTOMER_ORDER_EVENTS.has(event)) return { kind: 'order', side: 'customer', orderId };
-  if (event === 'order_status') return { kind: 'order', side: mode, orderId };
+  if (event === 'order_status') {
+    if (data.side === 'owner' || data.side === 'customer') return { kind: 'order', side: data.side, orderId };
+    if (!OWNER_ORDER_STATUSES.has(String(data.status ?? ''))) return { kind: 'order', side: 'customer', orderId };
+    // ponytail: today's server sends the same completed / not_collected row to
+    // both sides untagged, so only the open side is left to go on. Replace once
+    // the server adds `side` to order_status data (sbNotify calls in
+    // vaultchat-backend-go routes/shopbook.go and shopbook_jobs.go).
+    return { kind: 'order', side: mode, orderId };
+  }
   return null;
 }
 

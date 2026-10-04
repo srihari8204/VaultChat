@@ -5,8 +5,11 @@
 <!-- Content-Security-Policy: script-src allows ONLY this page's one inline script, pinned by its SHA-256.
      After editing that script, recompute the hash, e.g.
      python3 -c "import re,hashlib,base64,sys;s=open(sys.argv[1]).read();print(base64.b64encode(hashlib.sha256(re.findall(r'<script>(.*?)</script>',s,re.S)[-1].encode()).digest()).decode())" FILE
-     The page refuses to run its script until the hash matches. frame-ancestors cannot be set from a meta tag: send it as a header. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-vtZ4NWLY3XuBmBctDaiTGrr0cKncE5VRLPgvt2/+fJI='; style-src 'unsafe-inline'; font-src 'self'; connect-src https: http://localhost:* http://127.0.0.1:*; img-src data:; base-uri 'none'; form-action 'none'" />
+     The page refuses to run its script until the hash matches. frame-ancestors cannot be set from a meta tag: send it as a header.
+     style-src likewise pins the ONE style element (no style="" attributes anywhere; script code may still set
+     el.style.* through the CSSOM, which CSP allows). After editing the stylesheet, recompute with the same command,
+     replacing script by style in both tags; an unmatched hash leaves the page unstyled. admin/adminPages.selftest.ts checks both. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-jmQ2vnTRzPTdX0ThePVOflMGEyw7S3iM5il6yo3dYFY='; style-src 'sha256-pVEvHfamtkZcOlhrc5sUFOX/XkIkdAHI9cjL7yTnukQ='; font-src 'self'; connect-src https: http://localhost:* http://127.0.0.1:*; img-src data:; base-uri 'none'; form-action 'none'" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="dark light" />
 <title>crazzychat · Admin Console</title>
@@ -66,6 +69,9 @@
   .logo .dot{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,var(--gold-fill),#A8761F);display:grid;place-items:center;color:#1a1305;font-weight:800;font-family:var(--head)}
   .logo h1{font-size:18px;margin:0;font-weight:700}
   .muted{color:var(--sub);font-size:12.5px}
+  /* Former style="" attributes: the CSP pins this stylesheet's hash instead of
+     allowing inline styles, so markup carries classes only. */
+  .mt-12{margin-top:12px} .mt-14{margin-top:14px} .card.wide{max-width:520px}
   .field{margin-top:14px}
   .field label{display:block;font-size:11px;color:var(--sub);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px}
   .btn{background:linear-gradient(135deg,var(--gold-fill),#C9942F);color:#1a1305;font-weight:800;border-radius:11px;padding:12px 16px;width:100%;margin-top:18px;font-size:14px}
@@ -154,7 +160,7 @@
     </div>
     <button class="btn" id="loginBtn">Connect</button>
     <div id="loginErr" class="err-box hide"></div>
-    <div class="muted" style="margin-top:14px">Key is kept in <b>sessionStorage</b> only — cleared when the tab closes.</div>
+    <div class="muted mt-14">Key is kept in <b>sessionStorage</b> only — cleared when the tab closes.</div>
   </div>
 </div>
 
@@ -215,7 +221,7 @@
     <!-- Broadcast -->
     <section class="panel" data-panel="broadcast" id="panel-broadcast" role="tabpanel" aria-labelledby="tab-broadcast">
       <h2 class="sec-h">Broadcast announcement</h2>
-      <div class="card" style="max-width:520px">
+      <div class="card wide">
         <div class="field"><label for="bcType">Type</label>
           <select id="bcType"><option value="info">info</option><option value="update">update</option><option value="warning">warning</option><option value="maintenance">maintenance</option></select>
         </div>
@@ -223,7 +229,7 @@
           <textarea id="bcText" rows="4" placeholder="Sent to every connected client via system:announcement"></textarea>
         </div>
         <button class="btn" id="bcSend">Send to all online</button>
-        <div id="bcResult" class="muted" style="margin-top:12px" role="status" aria-live="polite"></div>
+        <div id="bcResult" class="muted mt-12" role="status" aria-live="polite"></div>
       </div>
     </section>
 
@@ -257,7 +263,13 @@
 (function(){
   "use strict";
   // ── State ──────────────────────────────────────────────────
-  const SS = window.sessionStorage;
+  // sessionStorage can throw (blocked site data, some private modes). Then the
+  // key is simply not kept, and the page still works for this visit.
+  const SS = {
+    getItem: k => { try{ return window.sessionStorage.getItem(k); }catch{ return null; } },
+    setItem: (k,v) => { try{ window.sessionStorage.setItem(k,v); }catch{} },
+    removeItem: k => { try{ window.sessionStorage.removeItem(k); }catch{} },
+  };
   let SERVER = SS.getItem('vc_admin_srv') || 'https://api.corefinite.com';
   let KEY    = SS.getItem('vc_admin_key') || '';
   let socket = null, dashTimer = null, logPaused = false, logBuf = 0;
@@ -312,12 +324,17 @@
   };
   $('#adminKey').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#loginBtn').click(); });
 
-  $('#logoutBtn').onclick = ()=>{
+  // Back to the login card. With a reason (a refused key), it is shown there.
+  function signOut(reason){
     if(socket){ try{socket.disconnect();}catch{} socket=null; }
     if(dashTimer){ clearInterval(dashTimer); dashTimer=null; }
     SS.removeItem('vc_admin_key');           // drop the key
     KEY=''; $('#app').classList.add('hide'); $('#login').classList.remove('hide'); $('#adminKey').value='';
-  };
+    const errEl = $('#loginErr');
+    errEl.textContent = reason || ''; errEl.classList.toggle('hide', !reason);
+    if(reason) $('#adminKey').focus();
+  }
+  $('#logoutBtn').onclick = ()=>signOut();
 
   // ── Tabs ───────────────────────────────────────────────────
   const TABS = [
@@ -417,13 +434,17 @@
   function mix(node,t){const w=el('span');w.appendChild(node);w.appendChild(document.createTextNode(t));return w;}
 
   // ── Users ──────────────────────────────────────────────────
+  // Latest request wins: two quick Next/Search presses used to let an older
+  // page land last, under the newer page's count.
+  let userSeq = 0, msgSeq = 0;
   async function loadUsers(){
-    const tb=$('#userTable tbody');
+    const tb=$('#userTable tbody'); const seq=++userSeq;
     tb.innerHTML='<tr><td colspan="6" class="empty">Loading…</td></tr>';
     try{
       const qp = new URLSearchParams({limit:USER_LIMIT,offset:userOffset});
       if(userQ) qp.set('q',userQ);
       const d = await api('/api/admin/users?'+qp.toString());
+      if(seq!==userSeq) return;
       userTotal=d.total; tb.innerHTML='';
       if(!d.users.length){ tb.innerHTML='<tr><td colspan="6" class="empty">No users</td></tr>'; }
       d.users.forEach(u=>{
@@ -439,19 +460,23 @@
       });
       $('#userCount').textContent = (userTotal? (userOffset+1)+'–'+Math.min(userOffset+USER_LIMIT,userTotal)+' of '+userTotal : '0');
       $('#userPrev').disabled = userOffset<=0; $('#userNext').disabled = userOffset+USER_LIMIT>=userTotal;
-    }catch(e){ tb.innerHTML='<tr><td colspan="6" class="empty">'+esc(e.message)+'</td></tr>'; }
+    }catch(e){ if(seq===userSeq) tb.innerHTML='<tr><td colspan="6" class="empty">'+esc(e.message)+'</td></tr>'; }
   }
   function cell(t){const td=el('td');td.textContent=t;return td;}
   $('#userSearchBtn').onclick=()=>{ userQ=$('#userSearch').value.trim(); userOffset=0; loadUsers(); };
   $('#userSearch').addEventListener('keydown',e=>{ if(e.key==='Enter') $('#userSearchBtn').click(); });
   $('#userPrev').onclick=()=>{ userOffset=Math.max(0,userOffset-USER_LIMIT); loadUsers(); };
-  $('#userNext').onclick=()=>{ userOffset+=USER_LIMIT; loadUsers(); };
+  // Bounded by the known total, so a second press before the page arrives
+  // cannot step past the last page.
+  $('#userNext').onclick=()=>{ if(userOffset+USER_LIMIT>=userTotal) return; userOffset+=USER_LIMIT; loadUsers(); };
 
   // ── Messages ───────────────────────────────────────────────
   async function loadMessages(){
-    const tb=$('#msgTable tbody'); tb.innerHTML='<tr><td colspan="6" class="empty">Loading…</td></tr>';
+    const tb=$('#msgTable tbody'); const seq=++msgSeq;
+    tb.innerHTML='<tr><td colspan="6" class="empty">Loading…</td></tr>';
     try{
       const d = await api('/api/admin/messages?limit='+($('#msgLimit').value||50));
+      if(seq!==msgSeq) return;
       tb.innerHTML='';
       if(!d.messages.length){ tb.innerHTML='<tr><td colspan="6" class="empty">No messages</td></tr>'; }
       d.messages.forEach(m=>{
@@ -464,7 +489,7 @@
         tr.appendChild(cell(fmtDate(m.createdAt)));
         tb.appendChild(tr);
       });
-    }catch(e){ tb.innerHTML='<tr><td colspan="6" class="empty">'+esc(e.message)+'</td></tr>'; }
+    }catch(e){ if(seq===msgSeq) tb.innerHTML='<tr><td colspan="6" class="empty">'+esc(e.message)+'</td></tr>'; }
   }
   function mono(t){const td=el('td','mono');td.textContent=t;return td;}
   $('#msgRefresh').onclick=loadMessages; $('#msgLimit').onchange=loadMessages;
@@ -618,7 +643,15 @@
             headers: { 'x-admin-key': KEY, 'accept': 'text/event-stream' },
             signal: ac.signal, cache: 'no-store'
           });
-          if(res.status === 401) throw new Error('401 — invalid admin key');
+          // A refused key will not start working on a retry: stop the loop
+          // and send the operator back to the login card instead of retrying
+          // with backoff forever.
+          if(res.status === 401){
+            if(stopped || socket !== self) return;
+            stopped = true; setStatus('off');
+            signOut('The server refused the admin key (401). Enter it again.');
+            return;
+          }
           if(!res.ok || !res.body) throw new Error('HTTP ' + res.status);
 
           setStatus('on'); logEvent('conn','connect','sse ' + SERVER);

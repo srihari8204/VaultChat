@@ -8,6 +8,9 @@
 // 3. The pure helpers inside the pages behave: logs.html highlights against
 //    the raw text (a filter such as "lt" must not split &lt;), and
 //    shopbook.html's entitlement expiry check.
+// 4. A page whose style-src pins a hash instead of 'unsafe-inline' (index.html)
+//    pins its ONE <style> element, and carries no style="" attribute anywhere.
+// 5. shopbook.html asks for notes in inline forms: no prompt() is left.
 //
 // Run: npx tsx admin/adminPages.selftest.ts
 import assert from 'node:assert/strict';
@@ -34,6 +37,16 @@ function inlineScript(page: string, html: string): string {
   assert.ok(!/<[^>]*\son[a-z]+\s*=/i.test(markup), `${page}: inline on*= handler in markup`);
   assert.ok(!/<[a-z][^<>`]*\son[a-z]+\s*=/i.test(body), `${page}: on*= handler in a script template`);
   assert.ok(!/javascript:/i.test(live), `${page}: javascript: URL`);
+  const styleSrc = /style-src ([^;"]*)/.exec(live);
+  if (styleSrc && !/unsafe-inline/.test(styleSrc[1])) {
+    const styles = [...live.matchAll(/<style\b([^>]*)>([\s\S]*?)<\/style>/gi)];
+    assert.equal(styles.length, 1, `${page}: expected exactly one <style> element`);
+    const stylePins = [...styleSrc[1].matchAll(/'sha256-([^']+)'/g)].map((m) => m[1]);
+    const styleHash = crypto.createHash('sha256').update(styles[0][2], 'utf8').digest('base64');
+    assert.deepEqual(stylePins, [styleHash], `${page}: style-src pins ${stylePins.join(',')} but the stylesheet hashes to ${styleHash} — re-pin it`);
+    const noStyle = live.replace(/<style\b[\s\S]*?<\/style>/gi, '');
+    assert.ok(!/\sstyle\s*=/i.test(noStyle), `${page}: a style="" attribute is blocked by the pinned style-src`);
+  }
   return body;
 }
 
@@ -87,6 +100,15 @@ for (const page of ['index.html', 'logs.html', 'shopbook.html']) scripts[page] =
   assert.ok(expiry('pro', '2026-10-03', today, false).error, 'the past is refused');
   assert.ok(expiry('pro', '2027-02-30', today, false).error, 'an impossible date is refused');
   assert.ok(expiry('pro', '31/12/2026', today, false).error, 'only YYYY-MM-DD');
+  assert.ok(!/\bprompt\(/.test(s.replace(/\/\/.*$/gm, '')), 'shopbook.html: notes use the inline form, not prompt()');
+  assert.ok(/CONFIRM_DELAY_MS\) return;/.test(s), 'shopbook.html: a Confirm right after Review is ignored');
 }
 
-console.log('adminPages selftest: 3 pages hash-pinned, no inline handlers; log highlight and entitlement expiry OK');
+// ── logs.html: the status live region is written only when it changes ──
+{
+  const s = scripts['logs.html'];
+  assert.ok(/if \(\$\('statustxt'\)\.textContent !== msg\)/.test(fnSource(s, 'setConnected')), 'logs.html: setConnected rewrites the status every poll');
+  assert.ok(!/(?<!window\[area\]\.)\b(localStorage|sessionStorage)\.(get|set|remove)Item/.test(s), 'logs.html: storage outside the guarded helpers');
+}
+
+console.log('adminPages selftest: 3 pages hash-pinned (index.html style too), no inline handlers or prompt(); log highlight, status and entitlement expiry OK');

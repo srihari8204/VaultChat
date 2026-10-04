@@ -27,7 +27,8 @@ import { t, useShopBookLang, initShopBookLang } from '../lib/shopbookI18n';
 import { C, s, applyScheme } from '../components/shopbook/theme';
 import { loadErrText, TabBar } from '../components/shopbook/shared';
 import { FindShops, ProductSearch, ShopFlow, CustomerProfile, NotificationCenter } from '../components/shopbook/customerViews';
-import { MyOrders, OrderTrack, OwnerOrders, OwnerOrderDetail, ReturnsScreen } from '../components/shopbook/orders';
+import { MyOrders, OrderTrack, OwnerOrders, ReturnsScreen } from '../components/shopbook/orders';
+import { OwnerOrderDetail } from '../components/shopbook/orderDetail';
 import { CustomerLedgerView, OwnerKhata } from '../components/shopbook/ledger';
 import { OwnerDashboard, OwnerPlans, OwnerReports } from '../components/shopbook/reports';
 import { OwnerProducts, PurchasesScreen, OwnerCoupons, OwnerSuppliers } from '../components/shopbook/products';
@@ -330,21 +331,35 @@ function OwnerApp({ me, open, onOpened }: {
     );
   }
 
+  // An order or the returns list opened from the inbox (or the returns list
+  // from the dashboard).
+  const opened = !shop ? null
+    : orderOpen ? <OwnerOrderDetail orderId={orderOpen} onBack={() => setOrderOpen(null)} />
+    : sub === 'returns' ? <ReturnsScreen currency={shop.currency} onBack={() => setSub(null)} />
+    : null;
+
   // No shop yet → force settings/create.
   if (!shop || settings) {
+    // Something opened from the inbox shows OVER Shop Settings. Settings stays
+    // mounted, hidden, so its unsaved edits survive and Back returns to them;
+    // before, the opened order rendered behind Settings and never showed.
     return (
-      <ShopSettings shop={shop} me={me}
-        onSaved={(sh) => { setShop((prev) => ({ ...sh, plan: prev?.plan ?? 'free' })); setSettings(false); }}
-        onCancel={shop ? () => setSettings(false) : undefined}
-      />
+      <>
+        {opened}
+        <View style={{ flex: 1, display: opened ? 'none' : 'flex' }}>
+          <ShopSettings shop={shop} me={me}
+            onSaved={(sh) => { setShop((prev) => ({ ...sh, plan: prev?.plan ?? 'free' })); setSettings(false); }}
+            onCancel={shop ? () => setSettings(false) : undefined}
+          />
+        </View>
+      </>
     );
   }
 
-  if (orderOpen) return <OwnerOrderDetail orderId={orderOpen} onBack={() => setOrderOpen(null)} />;
+  if (opened) return opened;
   if (sub === 'coupons') return <OwnerCoupons currency={shop.currency} onBack={() => setSub(null)} />;
   if (sub === 'suppliers') return <OwnerSuppliers onBack={() => setSub(null)} />;
   if (sub === 'purchases') return <PurchasesScreen currency={shop.currency} onBack={() => { setSub(null); load(); }} />;
-  if (sub === 'returns') return <ReturnsScreen currency={shop.currency} onBack={() => setSub(null)} />;
   if (sub === 'audit') return <AuditScreen onBack={() => setSub(null)} />;
   if (sub === 'verify') return <VerificationScreen onBack={() => { setSub(null); load(); }} />;
   if (sub === 'plans') return <OwnerPlans plan={shop.plan} requestedAt={proRequestedAt} onBack={() => setSub(null)} onChanged={() => { setSub(null); load(); }} />;

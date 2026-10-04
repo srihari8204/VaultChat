@@ -2,7 +2,7 @@
 // Split out of app/shop-book.tsx on 2026-10-04 and edited since (fixes are
 // logged per round). Palette and styles come from ./theme.
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { KeyboardSafe } from '../ui';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,6 +28,9 @@ export function BillScreen({ orderId, onBack }: { orderId: string; onBack: () =>
   const [bill, setBill] = useState<SB.Bill | null>(null);
   const [busy, setBusy] = useState(false);
   const [qtyDraft, setQtyDraft] = useState<Record<string, string>>({});
+  // Packed quantities blurred while another edit is in flight. They are sent
+  // together as soon as that edit settles, instead of being dropped.
+  const [queuedQty, setQueuedQty] = useState<string[]>([]);
   const [discount, setDiscount] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const [addName, setAddName] = useState('');
@@ -50,6 +53,23 @@ export function BillScreen({ orderId, onBack }: { orderId: string; onBack: () =>
     catch (e: any) { Alert.alert('Could not update the bill', e?.message ?? 'Try again'); }
     finally { setBusy(false); }
   };
+
+  // Flush the queued quantities once the in-flight edit settles. Each draft is
+  // re-read here, so a box edited again while it waited sends its latest value;
+  // a draft cleared or no longer valid in the meantime is skipped.
+  useEffect(() => {
+    if (busy || queuedQty.length === 0) return;
+    const lines = queuedQty
+      .filter((id) => qtyDraft[id] != null && isBlankOrNonNegative(qtyDraft[id]))
+      .map((id) => ({ id, fulfilledQty: qtyDraft[id].trim() === '' ? null : num(qtyDraft[id]) }));
+    const rest = { ...qtyDraft };
+    for (const l of lines) delete rest[l.id];
+    setQueuedQty([]);
+    setQtyDraft(rest);
+    if (lines.length) void patch({ lines });
+  // patch and qtyDraft are read at flush time on purpose; the flush is driven by busy/queue only.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busy, queuedQty]);
 
   const money = (n: number) => formatMoney(n, bill?.currency ?? '₹');
 
@@ -148,8 +168,7 @@ export function BillScreen({ orderId, onBack }: { orderId: string; onBack: () =>
                     onChangeText={(v) => setQtyDraft({ ...qtyDraft, [l.id]: v })}
                     onBlur={() => {
                       const raw = qtyDraft[l.id];
-                      // Busy: keep the draft on screen instead of dropping it.
-                      if (raw == null || busy) return;
+                      if (raw == null) return;
                       // Empty clears back to "as requested" rather than zero —
                       // a blank box must never silently mean "packed nothing".
                       // Neither may GARBAGE (2026-09-17): num() coerces it to 0,
@@ -168,6 +187,12 @@ export function BillScreen({ orderId, onBack }: { orderId: string; onBack: () =>
                           `"${raw.trim()}" is not a packed quantity. Use digits only — 1200 or 1,200 both work — or clear the box to pack the full ordered quantity. It cannot be negative.`);
                         return;
                       }
+                      // Another edit is in flight: queue this one; it is sent
+                      // when that settles (the effect above), not dropped.
+                      if (busy) {
+                        if (!queuedQty.includes(l.id)) setQueuedQty([...queuedQty, l.id]);
+                        return;
+                      }
                       void patch({ lines: [{ id: l.id, fulfilledQty: raw.trim() === '' ? null : num(raw) }] });
                       const { [l.id]: _done, ...rest } = qtyDraft;
                       setQtyDraft(rest);
@@ -179,6 +204,9 @@ export function BillScreen({ orderId, onBack }: { orderId: string; onBack: () =>
                     <Ionicons name="trash-outline" size={18} color={C.danger} />
                   </TouchableOpacity>
                 </View>
+              )}
+              {queuedQty.includes(l.id) && (
+                <Text style={s.cardSub} accessibilityLiveRegion="polite">Saving after the current change…</Text>
               )}
               {l.removed && bill.editable && (
                 <TouchableOpacity onPress={() => patch({ lines: [{ id: l.id, removed: false }] })} hitSlop={12}

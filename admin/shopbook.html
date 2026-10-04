@@ -6,7 +6,7 @@
      After editing that script, recompute the hash, e.g.
      python3 -c "import re,hashlib,base64,sys;s=open(sys.argv[1]).read();print(base64.b64encode(hashlib.sha256(re.findall(r'<script>(.*?)</script>',s,re.S)[-1].encode()).digest()).decode())" FILE
      The page refuses to run its script until the hash matches. frame-ancestors cannot be set from a meta tag: send it as a header. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-H3SOMKGG0RLFyyJvVItFP2GbZUBD+K1bZexYnhgVXsc='; style-src 'unsafe-inline'; connect-src https: http://localhost:* http://127.0.0.1:*; img-src data:; base-uri 'none'; form-action 'none'" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-6Dnm3V/P4gk2FPmZ9nctzCR3JSKTFhwtSW13Uw3Atao='; style-src 'unsafe-inline'; connect-src https: http://localhost:* http://127.0.0.1:*; img-src data:; base-uri 'none'; form-action 'none'" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="dark light" />
 <title>Shop Book · Admin</title>
@@ -43,6 +43,8 @@
   button{cursor:pointer;border:none;border-radius:9px;padding:9px 14px;font-weight:700;font-size:13px;background:var(--green-fill);color:var(--on-green)}
   button.ghost{background:var(--panel2);color:var(--txt);border:1px solid var(--line2)}
   button.danger{background:var(--danger-fill);color:#fff}
+  /* The filter a section is showing (aria-pressed is set by pressFilter). */
+  button.ghost[aria-pressed="true"]{border-color:var(--green);color:var(--green);box-shadow:inset 0 0 0 1px var(--green)}
   .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:14px 0}
   .bar input{flex:1;min-width:180px}
   .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
@@ -89,17 +91,17 @@ An admin can decide a shop's standing here; a shop's money has no endpoint and n
 
   <h2>Shop approvals</h2>
   <div class="bar">
-    <button class="ghost" data-act="shops" data-filter="pending">Pending only</button>
-    <button class="ghost" data-act="shops" data-filter="all">All shops</button>
+    <button class="ghost" data-act="shops" data-filter="pending" aria-pressed="true">Pending only</button>
+    <button class="ghost" data-act="shops" data-filter="all" aria-pressed="false">All shops</button>
   </div>
   <div id="shops"></div>
 
   <h2>Verification queue</h2>
   <p class="muted">Documents open in a link that expires in fifteen minutes — the reviewer gets access, not a copy.</p>
   <div class="bar">
-    <button class="ghost" data-act="verifications" data-filter="pending_review">Pending review</button>
-    <button class="ghost" data-act="verifications" data-filter="verified">Verified</button>
-    <button class="ghost" data-act="verifications" data-filter="all">All</button>
+    <button class="ghost" data-act="verifications" data-filter="pending_review" aria-pressed="true">Pending review</button>
+    <button class="ghost" data-act="verifications" data-filter="verified" aria-pressed="false">Verified</button>
+    <button class="ghost" data-act="verifications" data-filter="all" aria-pressed="false">All</button>
   </div>
   <div id="verifications"></div>
 
@@ -107,8 +109,8 @@ An admin can decide a shop's standing here; a shop's money has no endpoint and n
   <p class="muted">A verified shop's pin is fixed because customers walk to it. Compare the two addresses before approving —
     an approval moves the pin customers are given.</p>
   <div class="bar">
-    <button class="ghost" data-act="locations" data-filter="pending">Pending</button>
-    <button class="ghost" data-act="locations" data-filter="all">All</button>
+    <button class="ghost" data-act="locations" data-filter="pending" aria-pressed="true">Pending</button>
+    <button class="ghost" data-act="locations" data-filter="all" aria-pressed="false">All</button>
   </div>
   <div id="locations"></div>
 
@@ -157,6 +159,26 @@ function toast(t){ const m=$('msg'); m.textContent=t; m.style.opacity=1; clearTi
 
 // The filter each section last showed, so a reload after an action keeps it.
 const view = { shops: 'pending', verifications: 'pending_review', locations: 'pending' };
+// Show which filter is active: the matching button is pressed, the others not.
+function pressFilter(act, filter){
+  document.querySelectorAll(`button[data-act="${act}"][data-filter]`)
+    .forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.filter === filter)));
+}
+// Storage can throw (blocked site data, some private modes); the page must
+// work without it, it only remembers the API base.
+function remember(k, v){ try { localStorage.setItem(k, v); } catch { /* not remembered */ } }
+function recall(k){ try { return localStorage.getItem(k); } catch { return null; } }
+// Server timestamps (ISO) in the reader's local format; anything else as sent.
+const when = (iso) => { const t = Date.parse(iso); return esc(Number.isFinite(t) ? new Date(t).toLocaleString() : iso); };
+// After a list re-renders, focus would fall to <body>: put it back on the
+// control that started the action (found again in the new markup) or, if that
+// row has gone (e.g. a rejected shop leaving the Pending list), on the section.
+function refocus(selector, section){
+  const el = document.querySelector(selector);
+  if (el) { el.focus(); return; }
+  const sec = $(section);
+  if (sec) { sec.setAttribute('tabindex', '-1'); sec.focus(); }
+}
 
 async function api(path, opts={}) {
   const res = await fetch($('base').value.replace(/\/+$/,'') + path, {
@@ -189,7 +211,7 @@ async function loadAll(){
     await loadStats();
   } catch (e) { toast('❌ ' + e.message); return; }
   $('app').classList.remove('hide');
-  localStorage.setItem('sb_admin_base', base);
+  remember('sb_admin_base', base);
   // allSettled: one failing section must not hide the others.
   await Promise.allSettled([
     loadShops(view.shops), loadCountries(), loadCategories(),
@@ -212,6 +234,7 @@ const shopNames = new Map();   // id → name, for confirmation prompts
 
 function loadShops(filter){
   view.shops = filter;
+  pressFilter('shops', filter);
   return section('shops', async () => {
     const { shops } = await api('/api/admin/shopbook/shops?filter=' + encodeURIComponent(filter));
     shops.forEach((sh) => shopNames.set(sh.id, sh.name));
@@ -242,13 +265,14 @@ async function approve(id, verified, badgeOnly){
       (verified ? ' with the verified badge.' : '.');
   if (!confirm(question)) return;
   try { await api(`/api/admin/shopbook/shops/${encodeURIComponent(id)}/approve`, { method:'POST', body: JSON.stringify({ approved: true, verified }) });
-    toast('Saved'); loadShops(view.shops); loadStats().catch(() => {}); } catch(e){ toast('❌ ' + e.message); }
+    toast('Saved'); loadStats().catch(() => {}); await loadShops(view.shops);
+    refocus(`[data-act="approve"][data-id="${CSS.escape(id)}"]`, 'shops'); } catch(e){ toast('❌ ' + e.message); }
 }
-async function rejectShop(id){
-  const reason = prompt('Rejection reason (sent to the owner):');
-  if (!reason) return;
-  try { await api(`/api/admin/shopbook/shops/${encodeURIComponent(id)}/approve`, { method:'POST', body: JSON.stringify({ approved:false, verified:false, reason }) });
-    toast('Rejected'); loadShops(view.shops); } catch(e){ toast('❌ ' + e.message); }
+// reason comes from the inline note form; a failure is thrown to that form.
+async function rejectShop(id, reason){
+  await api(`/api/admin/shopbook/shops/${encodeURIComponent(id)}/approve`, { method:'POST', body: JSON.stringify({ approved:false, verified:false, reason }) });
+  toast('Rejected'); await loadShops(view.shops);
+  refocus(`[data-act="reject-shop"][data-id="${CSS.escape(id)}"]`, 'shops');
 }
 
 function loadCountries(){
@@ -360,6 +384,7 @@ const VERIFY_STATES = ['unverified','pending_review','verified','suspended','rej
 
 function loadVerifications(state){
   view.verifications = state;
+  pressFilter('verifications', state);
   return section('verifications', async () => {
     const { shops } = await api('/api/admin/shopbook/verifications?state=' + encodeURIComponent(state));
     shops.forEach((sh) => shopNames.set(sh.id, sh.name));
@@ -383,21 +408,15 @@ function loadVerifications(state){
   });
 }
 
-async function setVerify(id, state){
+// Refusing or suspending a shop without saying why leaves the owner with
+// nothing to fix, so anything but a grant takes a note from the inline form
+// (see openNote); a grant is confirmed here. Failures are thrown to the caller.
+async function setVerify(id, state, note){
   const name = shopNames.get(id) || id;
-  // Refusing or suspending a shop without saying why leaves the owner with
-  // nothing to fix, so the note is required for anything but a grant.
-  let note = '';
-  if (state !== 'verified') {
-    note = prompt(`Note for "${state}" (shown to the owner of "${name}"):`) || '';
-    if (!note) return;
-  } else if (!confirm(`Mark "${name}" VERIFIED? Customers will see the badge and its location becomes fixed.`)) {
-    return;
-  }
-  try {
-    await api(`/api/admin/shopbook/shops/${encodeURIComponent(id)}/verify`, { method:'POST', body: JSON.stringify({ state, note }) });
-    toast('Saved'); loadVerifications(view.verifications); loadShops(view.shops);
-  } catch(e){ toast('❌ ' + e.message); }
+  if (state === 'verified' && !confirm(`Mark "${name}" VERIFIED? Customers will see the badge and its location becomes fixed.`)) return;
+  await api(`/api/admin/shopbook/shops/${encodeURIComponent(id)}/verify`, { method:'POST', body: JSON.stringify({ state, note }) });
+  toast('Saved'); loadShops(view.shops); await loadVerifications(view.verifications);
+  refocus(`[data-act="documents"][data-id="${CSS.escape(id)}"]`, 'verifications');
 }
 
 const docsBox = (shopId) => document.querySelector(`[data-docs-for="${CSS.escape(shopId)}"]`);
@@ -427,16 +446,12 @@ async function loadDocuments(shopId){
   } catch(e){ box.innerHTML = `<p class="err">Could not load documents: ${esc(e.message)}</p>`; toast('❌ ' + e.message); }
 }
 
-async function reviewDoc(id, status, shopId){
-  let note = '';
-  if (status === 'rejected') {
-    note = prompt('Why is this document rejected? (shown to the owner)') || '';
-    if (!note) return;
-  }
-  try {
-    await api(`/api/admin/shopbook/documents/${encodeURIComponent(id)}/review`, { method:'POST', body: JSON.stringify({ status, note }) });
-    toast('Reviewed'); loadDocuments(shopId);
-  } catch(e){ toast('❌ ' + e.message); }
+// A rejection's note comes from the inline form (see openNote). Failures are
+// thrown to the caller.
+async function reviewDoc(id, status, shopId, note){
+  await api(`/api/admin/shopbook/documents/${encodeURIComponent(id)}/review`, { method:'POST', body: JSON.stringify({ status, note }) });
+  toast('Reviewed'); await loadDocuments(shopId);
+  refocus(`[data-act="review-doc"][data-id="${CSS.escape(id)}"]`, 'verifications');
 }
 
 // ── location changes ────────────────────────────────────────────
@@ -444,6 +459,7 @@ const locReqs = new Map();   // id → request, for the confirmation text
 
 function loadLocations(status){
   view.locations = status;
+  pressFilter('locations', status);
   return section('locations', async () => {
     const { requests } = await api('/api/admin/shopbook/location-requests?status=' + encodeURIComponent(status));
     requests.forEach((q) => locReqs.set(q.id, q));
@@ -466,22 +482,95 @@ function loadLocations(status){
   });
 }
 
-async function decideLocation(id, approve){
-  // The server refuses a refusal with no note, so ask for it here rather than
-  // sending a request that is going to bounce.
-  let note = '';
-  if (!approve) {
-    note = prompt('Why is the move refused? (shown to the owner)') || '';
-    if (!note) return;
-  } else {
+// The server refuses a refusal with no note, so a refusal takes its note from
+// the inline form (see openNote) rather than sending a request that bounces.
+// An approval is confirmed here. Failures are thrown to the caller.
+async function decideLocation(id, approve, note){
+  if (approve) {
     const q = locReqs.get(id);
     const where = (p) => (p && p.address) || `${num(p && p.lat)}, ${num(p && p.lng)}`;
     if (!confirm(`Move "${q ? q.shopName : id}" ${q ? num(q.distanceKm ?? 0, 2) + ' km' : ''}?\n\nFrom: ${q ? where(q.from) : '?'}\nTo:   ${q ? where(q.to) : '?'}\n\nCustomers will be sent to the new pin.`)) return;
   }
+  await api(`/api/admin/shopbook/location-requests/${encodeURIComponent(id)}/decide`, { method:'POST', body: JSON.stringify({ approve, note }) });
+  toast(approve ? 'Moved' : 'Refused'); await loadLocations(view.locations);
+  refocus(`[data-act="decide-location"][data-id="${CSS.escape(id)}"]`, 'locations');
+}
+
+// ── single-note actions: an inline form, not prompt() ─────────────
+// Reject shop, a verification note, reject document and refuse move each need
+// one note that the owner is shown. The form opens at the bottom of the card:
+// a labelled field, the error in the form (role=alert), Cancel returns focus
+// to the button that opened it, and a failed save keeps the typed note.
+const noteOpeners = new WeakMap();   // form → the button that opened it
+let noteSeq = 0;
+function noteAsk(d){
+  const shop = (id) => shopNames.get(id) || id;
+  const st = String(d.state || '').replace('_', ' ');
+  switch (d.act) {
+    case 'reject-shop': return { label: `Why is "${shop(d.id)}" rejected? (sent to the owner)`, send: 'Reject shop', danger: true };
+    case 'set-verify': return { label: `Note for "${st}" (shown to the owner of "${shop(d.id)}")`, send: `Set ${st}`,
+      danger: d.state === 'suspended' || d.state === 'rejected' };
+    case 'review-doc': return { label: `Why is this document rejected? (shown to the owner of "${shop(d.shop)}")`, send: 'Reject document', danger: true };
+    case 'decide-location': { const q = locReqs.get(d.id);
+      return { label: `Why is the move of "${q ? q.shopName : d.id}" refused? (shown to the owner)`, send: 'Refuse move', danger: true }; }
+  }
+  return null;
+}
+function openNote(b){
+  const card = b.closest('.card');
+  const ask = noteAsk(b.dataset);
+  if (!card || !ask) return;
+  const old = card.querySelector(':scope > form[data-note-form]');
+  if (old) old.remove();
+  const uid = 'note' + (++noteSeq);
+  const f = document.createElement('form');
+  f.className = 'entform';
+  f.noValidate = true;
+  f.setAttribute('data-note-form', '');
+  for (const k of ['act', 'id', 'state', 'status', 'shop']) if (b.dataset[k] != null) f.dataset['n' + k] = b.dataset[k];
+  f.innerHTML = `
+    <div class="fld"><label for="${uid}-n">${esc(ask.label)}</label>
+      <input id="${uid}-n" name="note" autocomplete="off" aria-describedby="${uid}-e"></div>
+    <p class="err" role="alert" id="${uid}-e" data-note-err></p>
+    <div class="row">
+      <button type="submit" class="${ask.danger ? 'danger' : ''}" data-note-submit>${esc(ask.send)}</button>
+      <button type="button" class="ghost" data-act="note-cancel">Cancel</button>
+    </div>`;
+  card.appendChild(f);
+  noteOpeners.set(f, b);
+  f.querySelector('input').focus();
+}
+function closeNote(f){
+  const opener = noteOpeners.get(f);
+  f.remove();
+  if (opener && opener.isConnected) opener.focus();
+}
+async function submitNote(f){
+  const btn = f.querySelector('[data-note-submit]');
+  if (btn.disabled) return;
+  const input = f.elements.namedItem('note');
+  const errEl = f.querySelector('[data-note-err]');
+  const note = input.value.trim();
+  if (!note) {
+    errEl.textContent = 'Write the note first — the owner is shown it.';
+    input.setAttribute('aria-invalid', 'true'); input.focus();
+    return;
+  }
+  errEl.textContent = ''; input.removeAttribute('aria-invalid');
+  const d = f.dataset;
+  btn.disabled = true; btn.setAttribute('aria-busy', 'true');
   try {
-    await api(`/api/admin/shopbook/location-requests/${encodeURIComponent(id)}/decide`, { method:'POST', body: JSON.stringify({ approve, note }) });
-    toast(approve ? 'Moved' : 'Refused'); loadLocations(view.locations);
-  } catch(e){ toast('❌ ' + e.message); }
+    switch (d.nact) {
+      case 'reject-shop': await rejectShop(d.nid, note); break;
+      case 'set-verify': await setVerify(d.nid, d.nstate, note); break;
+      case 'review-doc': await reviewDoc(d.nid, 'rejected', d.nshop, note); break;
+      case 'decide-location': await decideLocation(d.nid, false, note); break;
+    }
+    if (f.isConnected) f.remove();   // the list usually re-rendered it away already
+  } catch (e) {
+    errEl.textContent = 'Not saved: ' + e.message;
+    btn.disabled = false; btn.removeAttribute('aria-busy');
+  }
 }
 
 // ── subscriptions / entitlements ────────────────────────────────
@@ -502,7 +591,7 @@ function loadSubscriptions(){
         <b>${esc(s.shopName)}</b>
         <span class="tag ${s.entitledPlan === 'pro' ? 'ok':'pend'}">${esc(s.entitledPlan).toUpperCase()} · ${esc(s.state)}</span>
         ${drift ? `<span class="tag pend">shows ${esc(s.displayPlan)}</span>` : ''}
-        ${s.proRequestedAt ? `<span class="tag pend">Pro requested ${esc(s.proRequestedAt)}</span>` : ''}
+        ${s.proRequestedAt ? `<span class="tag pend">Pro requested ${when(s.proRequestedAt)}</span>` : ''}
         <span class="muted">${num(s.customers)} customer(s) · ${num(s.products)} product(s)
           ${s.expiresAt ? '· expires ' + esc(s.expiresAt) : '· no expiry'}
           ${s.source ? '· ' + esc(s.source) : ''} ${s.reference ? '· ' + esc(s.reference) : ''}</span>
@@ -520,6 +609,9 @@ function loadSubscriptions(){
 // The entitlement change is an inline form (it was a chain of prompt()s):
 // a real date input, an optional reference, validation shown in the form,
 // then a second press of the same button confirms a spelled-out summary.
+// A press within CONFIRM_DELAY_MS of the summary appearing is ignored, so a
+// double-click on Review cannot confirm a summary nobody has read.
+const CONFIRM_DELAY_MS = 800;
 const ENT_WHAT = { 'pro:active': 'PRO', 'pro:trial': 'a Pro TRIAL', 'free:cancelled': 'the FREE plan' };
 const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 let entSeq = 0;
@@ -603,19 +695,21 @@ async function submitEntitlement(f){
   if (exp) exp.removeAttribute('aria-invalid');
   const reference = f.elements.namedItem('reference').value.trim();
   if (!f.dataset.review) {
-    f.dataset.review = '1';
+    f.dataset.review = String(Date.now());
     f.querySelector('[data-ent-summary]').textContent =
       entitlementSummary(shopNames.get(id) || id, plan, state, v.expiresAt, reference);
     btn.textContent = 'Confirm';
     btn.focus();
     return;
   }
+  if (Date.now() - Number(f.dataset.review) < CONFIRM_DELAY_MS) return;
   btn.disabled = true; btn.setAttribute('aria-busy', 'true');
   try {
     await api(`/api/admin/shopbook/shops/${encodeURIComponent(id)}/entitlement`,
       { method:'POST', body: JSON.stringify({ plan, state, expiresAt: v.expiresAt, reference }) });
     toast('Entitlement saved');
     await loadSubscriptions();
+    refocus(`[data-act="entitlement"][data-id="${CSS.escape(id)}"][data-state="${CSS.escape(state)}"]`, 'subscriptions');
   } catch (e) {
     errEl.textContent = 'Not saved: ' + e.message;
     btn.disabled = false; btn.removeAttribute('aria-busy');
@@ -623,14 +717,19 @@ async function submitEntitlement(f){
 }
 
 document.addEventListener('submit', (ev) => {
-  const f = ev.target.closest('form[data-ent-form]');
+  const f = ev.target.closest('form[data-ent-form], form[data-note-form]');
   if (!f) return;
   ev.preventDefault();   // never a real submission (the CSP has form-action 'none')
-  submitEntitlement(f);
+  if (f.hasAttribute('data-note-form')) submitNote(f); else submitEntitlement(f);
 });
 document.addEventListener('input', (ev) => {
   const f = ev.target.closest('form[data-ent-form]');
   if (f && f.dataset.review) resetEntitlementReview(f);
+});
+// A held Enter key repeats: in these forms it must not turn Review into Confirm
+// (or send a note twice) without a second, deliberate press.
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Enter' && ev.repeat && ev.target.closest('form[data-ent-form], form[data-note-form]')) ev.preventDefault();
 });
 
 // ── read-only support windows ───────────────────────────────────
@@ -639,8 +738,9 @@ function loadOrders(){
     const shopId = $('auditShop').value.trim();
     const { orders } = await api('/api/admin/shopbook/orders?shopId=' + encodeURIComponent(shopId));
     // rejectReason / rejectNote (the owner's "other" note, migration 140) are
-    // shown when a row carries them. sbAdminOrders does not select them yet
-    // (backend handoff), so today nothing extra renders.
+    // shown when a row carries them. sbAdminOrders selects them in the backend
+    // written 2026-10-04 (shopbook_admin2.go); until that is deployed the rows
+    // do not carry them and nothing extra renders.
     $('support').innerHTML = orders.length ? orders.map((o) => `
     <div class="card">
       <div class="row"><b>${esc(o.shopName)}</b>
@@ -697,6 +797,7 @@ document.addEventListener('click', (ev) => {
   const d = b.dataset;
   // Every action is async. The button stays disabled until its request
   // settles, so a second click cannot send the same approve/verify/save twice.
+  const toastErr = (p) => p.catch((e) => toast('❌ ' + e.message));
   const busy = (p) => { b.disabled = true; b.setAttribute('aria-busy', 'true');
     Promise.resolve(p).finally(() => { b.disabled = false; b.removeAttribute('aria-busy'); }); };
   busy((() => { switch (d.act) {
@@ -710,11 +811,12 @@ document.addEventListener('click', (ev) => {
     case 'returns': return loadReturns();
     case 'audit': return loadAudit();
     case 'approve': return approve(d.id, d.verified === 'true', d.mode === 'badge');
-    case 'reject-shop': return rejectShop(d.id);
+    case 'reject-shop': return openNote(b);
     case 'documents': return loadDocuments(d.id);
-    case 'set-verify': return setVerify(d.id, d.state);
-    case 'review-doc': return reviewDoc(d.id, d.status, d.shop);
-    case 'decide-location': return decideLocation(d.id, d.approve === 'true');
+    case 'set-verify': return d.state === 'verified' ? toastErr(setVerify(d.id, d.state, '')) : openNote(b);
+    case 'review-doc': return d.status === 'rejected' ? openNote(b) : toastErr(reviewDoc(d.id, d.status, d.shop, ''));
+    case 'decide-location': return d.approve === 'true' ? toastErr(decideLocation(d.id, true, '')) : openNote(b);
+    case 'note-cancel': return closeNote(b.closest('form'));
     case 'entitlement': return openEntitlement(d.id, d.plan, d.state);
     case 'ent-cancel': return closeEntitlement(d.id);
   } })());
@@ -725,7 +827,7 @@ const connectOnEnter = (e) => { if (e.key === 'Enter') document.querySelector('[
 $('key').addEventListener('keydown', connectOnEnter);
 $('base').addEventListener('keydown', connectOnEnter);
 
-$('base').value = localStorage.getItem('sb_admin_base') || '';
+$('base').value = recall('sb_admin_base') || '';
 </script>
 </body>
 </html>

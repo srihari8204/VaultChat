@@ -56,7 +56,13 @@ export const makeC = (P: Palette) => ({
   // green as a FILL under white text, for the same reason: white on the dark
   // accent green read at 1.9:1; this fill reads at 5.3:1.
   greenFill:  P === FIN ? '#0B7A3B' : '#1E7A4C',
-  // Text and icons ON those fills (greenFill, navyFill, danger badge). White
+  // danger as a FILL under white text (the unread/cart badges). The dark
+  // danger below is a light accent for text: white on it read at 1.94:1. This
+  // fill reads at 4.83:1 under white, and 3.2:1 against the dark header.
+  dangerFill: P === FIN ? P.bad : '#D92D20',
+  // secondary text on navyFill (the loyalty tier line): 6.4:1 light, 5.4:1 dark.
+  onNavySub:  '#93C5FD',
+  // Text and icons ON those fills (greenFill, navyFill, dangerFill). White
   // in both themes: each fill above was chosen to clear AA under white.
   onFill:     '#FFFFFF',
 
@@ -121,7 +127,7 @@ export const makeStyles = (C: ReturnType<typeof makeC>) => StyleSheet.create({
   },
   subHeaderTitle: { flex: 1, textAlign: 'center', fontSize: 16, fontWeight: '700', color: C.text },
   cartBadge: {
-    position: 'absolute', top: 2, right: 2, backgroundColor: C.danger,
+    position: 'absolute', top: 2, right: 2, backgroundColor: C.dangerFill,
     borderRadius: 9, minWidth: 18, height: 18, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 4,
   },
   cartBadgeText: { color: C.onFill, fontSize: 10, fontWeight: '800' },
@@ -296,7 +302,7 @@ export const makeStyles = (C: ReturnType<typeof makeC>) => StyleSheet.create({
   offerText: { color: C.green, fontSize: 13.5, fontWeight: '700' },
   couponCode: {
     backgroundColor: C.greenFill, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6,
-    borderStyle: 'dashed', borderWidth: 1, borderColor: '#166534',
+    borderStyle: 'dashed', borderWidth: 1, borderColor: C.greenDark,
   },
   couponCodeText: { color: C.onFill, fontSize: 12.5, fontWeight: '800', letterSpacing: 1 },
 
@@ -308,7 +314,7 @@ export const makeStyles = (C: ReturnType<typeof makeC>) => StyleSheet.create({
     padding: 18, marginTop: 10,
   },
   loyaltyPoints: { color: C.onFill, fontSize: 28, fontWeight: '800' },
-  loyaltyTier: { color: '#93C5FD', fontSize: 13, fontWeight: '700', marginTop: 2 },
+  loyaltyTier: { color: C.onNavySub, fontSize: 13, fontWeight: '700', marginTop: 2 },
   loyaltySub: { color: C.sub, fontSize: 12, marginTop: 2 },
 
   ledgerItemLine: { color: C.sub, fontSize: 12, marginTop: 2 },

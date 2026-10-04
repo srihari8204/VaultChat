@@ -432,10 +432,18 @@ check('callers that pass no symbol keep the old ₹ label',
     notificationTarget(n('order_cancelled', { orderId: 'o2' }), 'customer'), { kind: 'order', side: 'owner', orderId: 'o2' });
   check('an alternative offer opens the customer\'s order',
     notificationTarget(n('alternative', { orderId: 'o3' }), 'owner'), { kind: 'order', side: 'customer', orderId: 'o3' });
-  check('order_status follows the open side (customer)',
-    notificationTarget(n('order_status', { orderId: 'o4', status: 'ready' }), 'customer'), { kind: 'order', side: 'customer', orderId: 'o4' });
-  check('order_status follows the open side (owner)',
-    notificationTarget(n('order_status', { orderId: 'o4', status: 'completed' }), 'owner'), { kind: 'order', side: 'owner', orderId: 'o4' });
+  check('order_status the owner never receives opens the customer\'s order, even in Owner mode',
+    notificationTarget(n('order_status', { orderId: 'o4', status: 'ready' }), 'owner'), { kind: 'order', side: 'customer', orderId: 'o4' });
+  check('order_status tagged for the owner opens the owner\'s order, even in Customer mode',
+    notificationTarget(n('order_status', { orderId: 'o4', status: 'completed', side: 'owner' }), 'customer'), { kind: 'order', side: 'owner', orderId: 'o4' });
+  check('order_status tagged for the customer opens the customer\'s order, even in Owner mode',
+    notificationTarget(n('order_status', { orderId: 'o4', status: 'not_collected', side: 'customer' }), 'owner'), { kind: 'order', side: 'customer', orderId: 'o4' });
+  check('untagged completed / not_collected (today\'s server) follows the open side',
+    [notificationTarget(n('order_status', { orderId: 'o4', status: 'completed' }), 'owner'),
+     notificationTarget(n('order_status', { orderId: 'o4', status: 'not_collected' }), 'customer')],
+    [{ kind: 'order', side: 'owner', orderId: 'o4' }, { kind: 'order', side: 'customer', orderId: 'o4' }]);
+  check('an unknown side tag is ignored',
+    notificationTarget(n('order_status', { orderId: 'o4', status: 'ready', side: 'admin' }), 'owner'), { kind: 'order', side: 'customer', orderId: 'o4' });
   check('a return request opens the owner\'s returns list',
     notificationTarget(n('return_requested', { returnId: 'r1', orderId: 'o5' }), 'customer'), { kind: 'returns' });
   check('a return decision without an orderId (today\'s server) is not a link',
