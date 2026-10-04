@@ -37,9 +37,9 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-// The chat screen's socket effect lives in these files; if it moves out of
-// app/chat.tsx, add the new file here (see outboxRecovery.selftest.ts).
-const CHAT_FILES = ['app/chat.tsx'];
+// The chat screen and its socket effect (components/chat/useChatSocket.ts),
+// read as one source. Add a file here if that code moves again.
+const CHAT_FILES = ['app/chat.tsx', 'components/chat/useChatSocket.ts'];
 const CHAT = CHAT_FILES.map((f) => readFileSync(join(HERE, '..', f), 'utf8')).join('\n');
 const SYNC = readFileSync(join(HERE, 'syncEngine.ts'), 'utf8');
 

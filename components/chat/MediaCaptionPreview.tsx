@@ -10,7 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { brandAlpha } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
 import { KeyboardSafe } from '../ui/KeyboardSafe';
-import { ON_MEDIA_SCRIM } from './chatStyles';
+import { CHAT_MEDIA_SCRIM } from '../../constants/chatPalette';
 
 export type PendingItem = {
   uri: string; mediaType: 'image' | 'video' | 'file'; filename: string; mime: string;
@@ -33,8 +33,8 @@ export function MediaCaptionPreview({
 }) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  // The dark scrims ('#00000088', '#000000aa') and white glyphs below sit ON
-  // the media, which is shown edge to edge, so they stay fixed in both themes.
+  // The dark scrims and white glyphs below sit ON the media, which is shown
+  // edge to edge, so they stay fixed in both themes (constants/chatPalette).
   return (
     <Modal
       visible={pendingItems.length > 0}
@@ -61,13 +61,13 @@ export function MediaCaptionPreview({
               <TouchableOpacity
                 onPress={() => setPendingItems([])} accessibilityRole="button" accessibilityLabel="Discard all attachments"
                 hitSlop={12}
-                style={{ position: 'absolute', top: insets.top + 12, left: 16, zIndex: 2, width: 40, height: 40, borderRadius: 20, backgroundColor: '#00000088', alignItems: 'center', justifyContent: 'center' }}
+                style={{ position: 'absolute', top: insets.top + 12, left: 16, zIndex: 2, width: 40, height: 40, borderRadius: 20, backgroundColor: CHAT_MEDIA_SCRIM.scrim, alignItems: 'center', justifyContent: 'center' }}
               >
-                <Ionicons name="close" size={26} color={ON_MEDIA_SCRIM} />
+                <Ionicons name="close" size={26} color={CHAT_MEDIA_SCRIM.ink} />
               </TouchableOpacity>
               {multi && (
-                <View style={{ position: 'absolute', top: insets.top + 18, right: 16, zIndex: 2, backgroundColor: '#00000088', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 14 }}>
-                  <Text style={{ color: ON_MEDIA_SCRIM, fontWeight: '700', fontSize: 13 }}>{currentIdx + 1} / {pendingItems.length}</Text>
+                <View style={{ position: 'absolute', top: insets.top + 18, right: 16, zIndex: 2, backgroundColor: CHAT_MEDIA_SCRIM.scrimStrong, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 14 }}>
+                  <Text style={{ color: CHAT_MEDIA_SCRIM.ink, fontWeight: '700', fontSize: 13 }}>{currentIdx + 1} / {pendingItems.length}</Text>
                 </View>
               )}
 
@@ -115,8 +115,8 @@ export function MediaCaptionPreview({
                           </View>
                         : <Image source={{ uri: it.uri }} style={{ width: '100%', height: '100%' }} />}
                       <TouchableOpacity onPress={() => removePendingAt(i)} hitSlop={6} accessibilityRole="button" accessibilityLabel={`Remove attachment ${i + 1}`}
-                        style={{ position: 'absolute', top: 1, right: 1, width: 18, height: 18, borderRadius: 9, backgroundColor: '#000000aa', alignItems: 'center', justifyContent: 'center' }}>
-                        <Ionicons name="close" size={12} color={ON_MEDIA_SCRIM} />
+                        style={{ position: 'absolute', top: 1, right: 1, width: 18, height: 18, borderRadius: 9, backgroundColor: CHAT_MEDIA_SCRIM.scrimStrong, alignItems: 'center', justifyContent: 'center' }}>
+                        <Ionicons name="close" size={12} color={CHAT_MEDIA_SCRIM.ink} />
                       </TouchableOpacity>
                     </TouchableOpacity>
                   ))}

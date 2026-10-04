@@ -11,13 +11,9 @@ import { GlassView } from '../ui';
 import { useTheme } from '../../lib/theme';
 import { formatRecDuration } from './chatFormat';
 import { useS } from './chatStyles';
-
-// The glyph ink on S.sendFab (send, mic, the spinner). Its fill is accentDeep
-// #1552E0 in BOTH themes, where white is 6.33:1. Not colors.onPrimary: that is
-// the ink for the `primary` fill (#1777FE in dark), and its dark value waits on
-// an open design decision (see AuroraDark.onPrimary in constants/theme.ts) that
-// must not restyle this button by accident. It is white in both palettes today.
-const ON_SEND_FAB = '#fff';
+// The glyph ink on S.sendFab (send, mic, the spinner) is fixed: its fill is
+// accentDeep in both themes. Why not colors.onPrimary: constants/chatPalette.
+import { SEND_FAB_INK } from '../../constants/chatPalette';
 
 export function Composer({
   recording, recElapsedMs, cancelRecording, stopAndSendRecording, editingId, gifOpen, onOpenGif,
@@ -129,7 +125,7 @@ export function Composer({
             <Ionicons name="trash-outline" size={22} color={colors.danger} />
           </TouchableOpacity>
           <TouchableOpacity style={S.sendFab} onPress={stopAndSendRecording} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel="Send voice message">
-            <Ionicons name="send" size={20} color={ON_SEND_FAB} style={{ marginLeft: 2 }} />
+            <Ionicons name="send" size={20} color={SEND_FAB_INK} style={{ marginLeft: 2 }} />
           </TouchableOpacity>
         </View>
       ) : (
@@ -243,7 +239,7 @@ export function Composer({
               disabled={sending}
               activeOpacity={0.85}
             >
-              <Ionicons name="mic" size={23} color={ON_SEND_FAB} />
+              <Ionicons name="mic" size={23} color={SEND_FAB_INK} />
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
@@ -263,8 +259,8 @@ export function Composer({
               activeOpacity={0.85}
             >
               {sending
-                ? <ActivityIndicator size="small" color={ON_SEND_FAB} />
-                : <Ionicons name={editingId != null ? 'checkmark' : 'send'} size={editingId != null ? 24 : 20} color={ON_SEND_FAB} style={editingId != null ? undefined : { marginLeft: 2 }} />}
+                ? <ActivityIndicator size="small" color={SEND_FAB_INK} />
+                : <Ionicons name={editingId != null ? 'checkmark' : 'send'} size={editingId != null ? 24 : 20} color={SEND_FAB_INK} style={editingId != null ? undefined : { marginLeft: 2 }} />}
             </TouchableOpacity>
           )}
         </View>

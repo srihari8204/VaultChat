@@ -5,9 +5,9 @@ import { URL } from 'node:url';
 import vm from 'node:vm';
 import ts from 'typescript';
 
-// The chat screen's socket effect lives in these files; if it moves out of
-// app/chat.tsx, add the new file here (see outboxRecovery.selftest.ts).
-const CHAT_FILES = ['app/chat.tsx'];
+// The chat screen and its socket effect (components/chat/useChatSocket.ts),
+// read as one source. Add a file here if that code moves again.
+const CHAT_FILES = ['app/chat.tsx', 'components/chat/useChatSocket.ts'];
 const source = CHAT_FILES.map((f) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')).join('\n');
 const tree = ts.createSourceFile('chat.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const handlers = new Map<string, string>();

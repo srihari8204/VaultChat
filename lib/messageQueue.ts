@@ -143,14 +143,15 @@ type QueueEvents = {
   retry:   { tempId: string; chatId: string; attempt: number };
 };
 type Listener<T> = (data: T) => void;
-const listeners: { [K in keyof QueueEvents]?: Set<Listener<QueueEvents[K]>> } = {};
+const listeners: { [K in keyof QueueEvents]: Set<Listener<QueueEvents[K]>> } = {
+  pending: new Set(), sent: new Set(), failed: new Set(), retry: new Set(),
+};
 function emit<K extends keyof QueueEvents>(event: K, data: QueueEvents[K]) {
-  listeners[event]?.forEach(fn => { try { (fn as any)(data); } catch {} });
+  listeners[event].forEach(fn => { try { fn(data); } catch {} });
 }
 export function on<K extends keyof QueueEvents>(event: K, fn: Listener<QueueEvents[K]>): () => void {
-  if (!listeners[event]) listeners[event] = new Set() as any;
-  listeners[event]!.add(fn as any);
-  return () => listeners[event]?.delete(fn as any);
+  listeners[event].add(fn);
+  return () => { listeners[event].delete(fn); };
 }
 
 // ─── Storage ──────────────────────────────────────────────────
@@ -158,7 +159,7 @@ export function on<K extends keyof QueueEvents>(event: K, fn: Listener<QueueEven
 // several flush passes rather than loading the whole backlog into memory.
 // pageOffset rotates past a page that drained NOTHING, so items behind a wedged
 // one still get their turn: 200 messages stuck WAITING_KEYS on one peer must not
-// starve every other chat's sends. Reset to the head as soon as anything drains.
+// starve every other chat's sends. Reset to the head once anything drains.
 let pageOffset = 0;
 async function load(): Promise<QueuedMessage[]> {
   try { return await queueList<QueuedMessage>('msg', PAGE, pageOffset); } catch { return []; }
@@ -577,12 +578,12 @@ async function postOnce(item: QueuedMessage): Promise<PostResult> {
   // meta (enqueueMessage). Its local record still needs the full meta and an
   // empty body — the ack's content is ciphertext and its meta the routing subset.
   if (real && (item.op ?? 'send') === 'send' && (item.plaintext || item.meta)) {
-    (real as any).content = item.plaintext;
+    (real as any).content = item.plaintext;   // cast pinned by lib/signalStyleMessageStorage.selftest.ts
     // ...and the FULL meta, not the subset that came back from the server.
     // `real` is the POST response, so its meta is the routing subset we just
     // sent; caching that would leave the sender's own row without the thumbnail
     // and filename of the photo they just sent, while every recipient has both.
-    if (item.meta) (real as any).meta = item.meta;
+    if (item.meta) real.meta = item.meta;
     // AND COMMIT IT HERE, rather than trusting a caller to do it.
     //
     // This function is the only place that holds BOTH the plaintext and the
@@ -599,10 +600,10 @@ async function postOnce(item: QueuedMessage): Promise<PostResult> {
     // of this row existing, so the write must land before that can happen.
     try {
       const { cacheMessages } = await import('./localDb');
-      await cacheMessages(item.chatId, [real as Message]);
+      await cacheMessages(item.chatId, [real]);
     } catch (err) {
       // Do NOT swallow this quietly — it is the sender's only readable copy.
-      console.warn('[queue] local commit FAILED — id:', (real as any)?.id, '—', (err as any)?.message ?? err);
+      console.warn('[queue] local commit FAILED — id:', real.id, '—', err instanceof Error ? err.message : err);
       // ...AND SAY SO TO THE CALLER, which is the half that was missing.
       //
       // The comment above was already right that this is the only readable

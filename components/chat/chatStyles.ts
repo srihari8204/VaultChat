@@ -11,7 +11,7 @@ import { StyleSheet, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../lib/theme';
 import { useVisionComfort } from '../../lib/visionComfort';
-import { type Palette, ELEVATION, brandAlpha } from '../../constants/theme';
+import { type Palette, ELEVATION, ON_MEDIA_INK, brandAlpha } from '../../constants/theme';
 import { type Message } from '../../lib/chatService';
 import { chatCardMax } from '../../constants/layoutMath';
 import { tint } from '../../lib/tintColor';
@@ -106,9 +106,10 @@ export const HL = StyleSheet.create({
 /**
  * White on an always-dark media scrim (video play button, download overlay):
  * the plate under it is #000 / rgba(0,0,0,·) in both themes, so the ink is
- * fixed on purpose, like the plates themselves (theme-exempt below).
+ * fixed on purpose, like the plates themselves (theme-exempt below). The
+ * app-wide token for exactly that: constants/theme ON_MEDIA_INK.
  */
-export const ON_MEDIA_SCRIM = '#fff';
+export const ON_MEDIA_SCRIM = ON_MEDIA_INK;
 
 // `m` is optional so the one other caller (MessageBubble's direct makeStyles
 // import) keeps working unchanged; it renders bubbles, not the header, so the
@@ -361,7 +362,7 @@ export const makeStyles = (
   mediaBubble:   { backgroundColor: 'transparent', padding: 3, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
   // Sticker: WhatsApp-style — transparent backdrop, no padding, just a
   // big emoji glyph. The bubble component still wraps it so long-press
-  // (forward/reply/delete) works the same as any other message.
+  // (forward/reply/delete) works like it does on every other message.
   stickerBubble: { backgroundColor: 'transparent', padding: 0 },
   stickerEmoji:  { fontSize: 72, lineHeight: 84 },
 

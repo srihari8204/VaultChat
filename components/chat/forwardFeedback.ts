@@ -7,9 +7,15 @@
 // target's name. 'sent' just forgets the id. Pure over the queue's event bus,
 // so components/chat/forwardFeedback.selftest.ts drives it with a fake bus.
 //
-// ponytail: lives as long as the chat screen that created it; a rejection after
-// the user leaves shows only as the red bubble in the target chat. Move it to
-// an app-level outbox listener if forwards need feedback from anywhere.
+// appForwardFeedback is the one app-wide instance the chat screen uses: it is
+// created by the first forward and never disposed, so a rejection is reported
+// even after the user has left the chat they forwarded from (the queue's bus is
+// module state in lib/messageQueue, alive for the whole JS runtime).
+//
+// ponytail: the tempId → name map is in memory only. A forward still queued
+// when the app is killed is not tracked after the restart, and its rejection
+// shows only as the red bubble in the target chat. Store the target's name with
+// the outbox row if that case needs a report too.
 
 type FailedEvent = { tempId: string; error: string };
 type SentEvent = { tempId: string };
@@ -33,6 +39,15 @@ export function forwardFeedback(on: ForwardQueueBus, onRejected: (name: string, 
     pending(): number { return inFlight.size; },
     dispose() { offFailed(); offSent(); inFlight.clear(); },
   };
+}
+
+let appWide: ReturnType<typeof forwardFeedback> | null = null;
+/** The app-wide tracker: subscribes to `on` once, on first use, and stays
+ *  subscribed. Later calls return the same instance (their arguments are
+ *  ignored), so a remounted chat screen cannot double-subscribe. */
+export function appForwardFeedback(on: ForwardQueueBus, onRejected: (name: string, error: string) => void) {
+  appWide ??= forwardFeedback(on, onRejected);
+  return appWide;
 }
 
 /** "Forwarding to X", numbered so a repeat of the same text is a new notice
