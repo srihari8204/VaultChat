@@ -4,12 +4,11 @@
 // Uses expo-location, expo-sensors (Accelerometer)
 
 import { Ionicons } from '@expo/vector-icons';
-import { brandAlpha, type Palette } from '../constants/theme';
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView,
+  View, Text, TouchableOpacity, ScrollView,
   Alert, ActivityIndicator, Vibration, Platform,
-  Animated, Easing,
+  Animated, Easing, AccessibilityInfo,
 } from 'react-native';
 import { useTheme } from '../lib/theme';
 import { useRouter, Stack, useFocusEffect } from 'expo-router';
@@ -18,17 +17,12 @@ import * as Location from 'expo-location';
 import { Accelerometer } from 'expo-sensors';
 import { listTrustedContacts, sendSOS, listSOSHistory, type SOSHistoryItem } from '../lib/chatService';
 import { AuroraBackground } from '../components/ui';
+import SosContacts, { type SosContact } from '../components/sos/SosContacts';
+import SosHistory from '../components/sos/SosHistory';
+import { useSosStyles } from '../components/sos/sosStyles';
 import { useReducedMotion } from '../lib/useReducedMotion';
 // Shared with app/notifications.tsx, so both SOS screens word a result the same way.
-import { sosReachedOf, sosReachText } from '../lib/sosReachCopy';
-
-type SosContact = { uid: string; name: string; vaultId: string };
-
-
-function useS() {
-  const { colors } = useTheme();
-  return useMemo(() => makeStyles(colors), [colors]);
-}
+import { sosReachedOf, sosSentAnnouncement, sosSentLine } from '../lib/sosReachCopy';
 
 /**
  * Best-effort position for an SOS. NEVER throws, NEVER blocks the send.
@@ -66,7 +60,7 @@ async function sosFix(): Promise<{ lat: number | null; lng: number | null }> {
 
 export default function EmergencySOSScreen() {
   const { colors } = useTheme();
-  const styles = useS();
+  const styles = useSosStyles();
   const router = useRouter();
 
   // State
@@ -136,6 +130,7 @@ export default function EmergencySOSScreen() {
     setLoadError(false);
     try {
       const tc = await listTrustedContacts();
+      if (!mounted.current) return;
       const contacts = tc.map(c => ({ uid: c.userId, name: c.name || 'Unknown', vaultId: c.vaultId || c.userId.slice(0, 8) }));
       setTrustedContacts(contacts);
       // Keep the user's choices across a refocus: a contact they deselected
@@ -145,6 +140,7 @@ export default function EmergencySOSScreen() {
       knownIds.current = new Set(contacts.map(c => c.uid));
       setEverLoaded(true);
     } catch {
+      if (!mounted.current) return;
       setLoadError(true);
     }
     setLoading(false);
@@ -250,8 +246,11 @@ export default function EmergencySOSScreen() {
     setCountdown(null);
   };
 
+  // The Sending and Sent faces replace the countdown with no live region, so
+  // both are announced: a screen-reader user must hear the SOS result.
   const triggerSOS = async (isTest: boolean, contactIds: string[] | undefined) => {
     setSending(true);
+    AccessibilityInfo.announceForAccessibility(isTest ? 'Sending test SOS.' : 'Sending SOS.');
     try {
       // Location is genuinely best-effort now — sosFix cannot throw, so a failed
       // or slow fix can no longer take the SOS down with it.
@@ -263,11 +262,14 @@ export default function EmergencySOSScreen() {
       // The SOS went out; only this screen's display is skipped if it closed.
       if (!mounted.current) return;
 
-      setNotified(typeof res?.contactsNotified === 'number' ? res.contactsNotified : null);
-      setReached(sosReachedOf(res));
+      const n = typeof res?.contactsNotified === 'number' ? res.contactsNotified : null;
+      const r = sosReachedOf(res);
+      setNotified(n);
+      setReached(r);
       setSent(true);
       setSentNoLoc(lat == null);
       Vibration.vibrate([0, 500, 200, 500]);
+      AccessibilityInfo.announceForAccessibility(sosSentAnnouncement(isTest, n, r, lat == null));
       loadHistory();
     } catch {
       Alert.alert('Error', 'Failed to send SOS. Please try again.');
@@ -280,16 +282,8 @@ export default function EmergencySOSScreen() {
     shakeGate.current = { busy: countdown !== null || sending || sent, start: startCountdown };
   });
 
-  const formatTime = (ts: string | null | undefined) => {
-    if (!ts) return 'Unknown';
-    try {
-      const d = new Date(ts);
-      return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    } catch { return 'Unknown'; }
-  };
-
   // The last send's result, in the wording app/notifications.tsx uses too.
-  const reach = notified != null && notified > 0 ? sosReachText(notified, reached, false) : null;
+  const reach = sosSentLine(notified, reached);
 
   return (
     <View style={styles.container}>
@@ -343,19 +337,11 @@ export default function EmergencySOSScreen() {
             <View style={styles.sentContainer}>
               <Text style={styles.sentCheck} accessibilityElementsHidden importantForAccessibility="no">✓</Text>
               <Text style={styles.sentText}>{testMode ? 'Test SOS Sent' : 'SOS Sent!'}</Text>
-              <Text style={styles.sentSub}>
-                {/* contactsNotified is who the alert was ADDRESSED to; contactsReached
-                    (when the server sends it) is who the push provider accepted it
-                    for — still not proof a phone showed it, so "reached", not "saw". */}
-                {notified == null ? 'Your trusted contacts are being alerted'
-                  : notified === 0 ? 'No trusted contacts to alert — add some so an SOS reaches someone.'
-                    : reach?.line}
-              </Text>
-              {!!reach?.warn && (
-                <Text style={styles.sentWarn}>
-                  {reach.warn} Call or text them too.
-                </Text>
-              )}
+              {/* contactsNotified is who the alert was ADDRESSED to; contactsReached
+                  (when the server sends it) is who the push provider accepted it
+                  for — still not proof a phone showed it, so "reached", not "saw". */}
+              <Text style={styles.sentSub}>{reach.line}</Text>
+              {!!reach.warn && <Text style={styles.sentWarn}>{reach.warn}</Text>}
               {sentNoLoc && (
                 <Text style={styles.sentWarn}>
                   Sent without your location — turn on location access so your contacts can find you.
@@ -418,190 +404,17 @@ export default function EmergencySOSScreen() {
         </View>
 
         {/* Trusted Contacts for SOS */}
-        <View style={styles.section}>
-          <View style={styles.sectionHead}>
-            <Text style={styles.sectionTitle} accessibilityRole="header">SOS Contacts</Text>
-            {trustedContacts.length > 0 && (
-              <TouchableOpacity
-                onPress={() => router.push('/trusted-contacts')}
-                accessibilityRole="button"
-                accessibilityLabel="Edit trusted contacts"
-                hitSlop={12}
-              >
-                <Text style={styles.editLink}>Edit</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-          {loading && !everLoaded ? (
-            <ActivityIndicator color={colors.accent} style={{ marginTop: 16 }} />
-          ) : loadError && !everLoaded ? (
-            <View style={styles.emptyCard}>
-              <Text style={styles.emptyText}>
-                Couldn&apos;t load your trusted contacts. Check your connection. An SOS still goes to all of them.
-              </Text>
-              <TouchableOpacity onPress={loadTrustedContacts} style={styles.setupBtn} accessibilityRole="button" accessibilityLabel="Retry loading trusted contacts">
-                <Text style={styles.setupBtnText}>Retry</Text>
-              </TouchableOpacity>
-            </View>
-          ) : trustedContacts.length === 0 ? (
-            <View style={styles.emptyCard}>
-              {loadError && (
-                <Text style={styles.refreshWarn} accessibilityLiveRegion="polite">
-                  Couldn&apos;t refresh this list. It was empty when it last loaded.
-                </Text>
-              )}
-              <Text style={styles.emptyText}>No trusted contacts set up</Text>
-              <TouchableOpacity onPress={() => router.push('/trusted-contacts')} style={styles.setupBtn} accessibilityRole="button">
-                <Text style={styles.setupBtnText}>Set Up Trusted Contacts</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <>
-            {loadError && (
-              <Text style={styles.refreshWarn} accessibilityLiveRegion="polite">
-                Couldn&apos;t refresh this list — showing the last one loaded.
-              </Text>
-            )}
-            {trustedContacts.map(contact => (
-              <TouchableOpacity
-                key={contact.uid}
-                style={[styles.contactRow, selectedContacts.includes(contact.uid) && styles.contactSelected]}
-                onPress={() => toggleContact(contact.uid)}
-                // The recipients are fixed when the countdown starts.
-                disabled={countdown !== null || sending}
-                accessibilityRole="checkbox"
-                accessibilityLabel={`${contact.name}, @${contact.vaultId}`}
-                accessibilityState={{ checked: selectedContacts.includes(contact.uid), disabled: countdown !== null || sending }}
-              >
-                <View style={[styles.contactCheck, selectedContacts.includes(contact.uid) && styles.contactCheckActive]}>
-                  {selectedContacts.includes(contact.uid) && <Ionicons name="checkmark" size={14} color={colors.accent} />}
-                </View>
-                <View style={styles.contactInfo}>
-                  <Text numberOfLines={1} style={styles.contactName}>{contact.name}</Text>
-                  <Text style={styles.contactId}>@{contact.vaultId}</Text>
-                </View>
-              </TouchableOpacity>
-            ))}
-            </>
-          )}
-        </View>
+        <SosContacts
+          contacts={trustedContacts} selected={selectedContacts} onToggle={toggleContact}
+          locked={countdown !== null || sending} loading={loading} everLoaded={everLoaded}
+          loadError={loadError} onRetry={loadTrustedContacts}
+        />
 
         {/* SOS History */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle} accessibilityRole="header">History</Text>
-          {historyFailed && (
-            <View style={[styles.sectionHead, { marginTop: 8 }]}>
-              <Text style={[styles.refreshWarn, { flex: 1, marginBottom: 0 }]} accessibilityLiveRegion="polite">
-                Couldn&apos;t load your SOS history.
-              </Text>
-              {historyLoading
-                ? <ActivityIndicator size="small" color={colors.accent} accessibilityLabel="Loading SOS history" />
-                : (
-                  <TouchableOpacity onPress={loadHistory} accessibilityRole="button" accessibilityLabel="Retry loading SOS history" hitSlop={12}>
-                    <Text style={styles.editLink}>Retry</Text>
-                  </TouchableOpacity>
-                )}
-            </View>
-          )}
-          {historyFailed && history.length === 0 ? null : history.length === 0 ? (
-            <Text style={styles.noHistory}>No SOS activations yet</Text>
-          ) : (
-            history.map(item => (
-              <View key={item.id} style={styles.historyRow}>
-                <View style={[styles.historyDot, { backgroundColor: item.type === 'test' ? colors.primary : colors.danger }]} />
-                <View style={styles.historyInfo}>
-                  <Text style={styles.historyType}>
-                    {item.type === 'test' ? 'Test SOS' : 'Emergency SOS'}
-                  </Text>
-                  <Text style={styles.historyTime}>{formatTime(item.createdAt)}</Text>
-                </View>
-                <Text style={styles.historyContacts}>
-                  {sosReachedOf(item) == null ? `${item.contactsNotified} alerted`
-                    : `reached ${Math.min(sosReachedOf(item)!, item.contactsNotified)} of ${item.contactsNotified}`}
-                </Text>
-              </View>
-            ))
-          )}
-        </View>
+        <SosHistory history={history} failed={historyFailed} loading={historyLoading} onRetry={loadHistory} />
 
         <View style={{ height: 40 }} />
       </ScrollView>
     </View>
   );
 }
-
-const SOS_SIZE = 160;
-const makeStyles = (c: Palette) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: 'transparent' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 8, paddingHorizontal: 16, paddingBottom: 14 },
-  backBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: brandAlpha(0.08), justifyContent: 'center', alignItems: 'center' },
-  headerTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
-  scroll: { flex: 1 },
-  scrollContent: { paddingHorizontal: 16 },
-
-  // SOS Button
-  sosSection: { alignItems: 'center', marginVertical: 30 },
-  sosHint: { color: c.textDim, fontSize: 14, marginBottom: 20, textAlign: 'center' },
-  sosButton: { width: SOS_SIZE, height: SOS_SIZE, borderRadius: SOS_SIZE / 2, overflow: 'hidden', elevation: 10, shadowColor: c.danger, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.5, shadowRadius: 20 },
-  sosGradient: { flex: 1, justifyContent: 'center', alignItems: 'center', borderRadius: SOS_SIZE / 2, borderWidth: 4, borderColor: c.danger + '80' },
-  sosText: { color: c.onDanger, fontSize: 48, fontWeight: '900', letterSpacing: 6 },
-  testBtn: { marginTop: 20, paddingHorizontal: 24, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: c.warning + '4D', backgroundColor: c.warning + '14' },
-  testBtnText: { color: c.warning, fontSize: 14, fontWeight: '600' },
-
-  // Countdown
-  countdownContainer: { alignItems: 'center' },
-  countdownLabel: { color: c.danger, fontSize: 18, fontWeight: '600', marginBottom: 10 },
-  countdownNumber: { color: c.text, fontSize: 72, fontWeight: '900' },
-  countdownTo: { color: c.textDim, fontSize: 14, marginTop: 4, textAlign: 'center' },
-  cancelBtn: { marginTop: 20, backgroundColor: c.danger + '26', paddingHorizontal: 40, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: c.danger },
-  cancelBtnText: { color: c.danger, fontSize: 18, fontWeight: '800', letterSpacing: 2 },
-
-  // Sending/Sent
-  sendingContainer: { alignItems: 'center', marginVertical: 30 },
-  sendingText: { color: c.danger, fontSize: 16, fontWeight: '600', marginTop: 12 },
-  sentContainer: { alignItems: 'center', marginVertical: 20 },
-  sentCheck: { fontSize: 48, color: c.primary },
-  sentText: { color: c.text, fontSize: 22, fontWeight: '700', marginTop: 8 },
-  sentSub: { color: c.textDim, fontSize: 14, marginTop: 4 },
-  // Wraps and grows: this line is longer than the others and must stay
-  // readable at any width or OS font scale.
-  sentWarn: { color: c.warning, fontSize: 13, marginTop: 8, textAlign: 'center', paddingHorizontal: 20 },
-  resetBtn: { marginTop: 20, backgroundColor: c.accent, paddingHorizontal: 40, paddingVertical: 10, borderRadius: 8 },
-  resetBtnText: { color: c.onPrimary, fontSize: 15, fontWeight: '700' },
-
-  // Shake
-  shakeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 14, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: c.hairline },
-  shakeTitle: { color: c.text, fontSize: 15, fontWeight: '600' },
-  shakeSub: { color: c.textDim, fontSize: 12, marginTop: 2 },
-  toggleBtn: { paddingHorizontal: 18, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: c.border },
-  toggleBtnActive: { borderColor: c.primary, backgroundColor: brandAlpha(0.15) },
-  toggleText: { color: c.textDim, fontSize: 13, fontWeight: '700' },
-  toggleTextActive: { color: c.primary },
-
-  // Contacts
-  section: { marginTop: 20 },
-  sectionTitle: { color: c.text, fontSize: 16, fontWeight: '700' },
-  sectionHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  editLink: { color: c.accentOn, fontSize: 14, fontWeight: '600' },
-  contactRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: c.hairline },
-  contactSelected: { borderColor: c.accent + '4D', backgroundColor: c.accent + '0A' },
-  contactCheck: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: c.border, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  contactCheckActive: { borderColor: c.accent, backgroundColor: c.accent + '33' },
-  contactInfo: { flex: 1 },
-  contactName: { color: c.text, fontSize: 15, fontWeight: '600' },
-  contactId: { color: c.textDim, fontSize: 12, marginTop: 2 },
-  emptyCard: { alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 14, padding: 24, borderWidth: 1, borderColor: c.hairline },
-  emptyText: { color: c.textDim, fontSize: 14, marginBottom: 14, textAlign: 'center' },
-  refreshWarn: { color: c.textDim, fontSize: 12, marginBottom: 8 },
-  setupBtn: { backgroundColor: c.accent, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 },
-  setupBtnText: { color: c.onPrimary, fontSize: 14, fontWeight: '700' },
-
-  // History
-  noHistory: { color: c.textDim, fontSize: 13, textAlign: 'center', marginTop: 8 },
-  historyRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: c.hairline },
-  historyDot: { width: 10, height: 10, borderRadius: 5, marginRight: 12 },
-  historyInfo: { flex: 1 },
-  historyType: { color: c.text, fontSize: 14, fontWeight: '600' },
-  historyTime: { color: c.textDim, fontSize: 12, marginTop: 2 },
-  historyContacts: { color: c.textDim, fontSize: 12 },
-});

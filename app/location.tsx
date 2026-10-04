@@ -9,7 +9,9 @@ import { Ionicons } from '@expo/vector-icons';
 //     end-to-end encrypted exactly like a text message.
 //   • Share live location → emits `live_location_update` over the socket, which
 //     the server RELAYS to the chat with NO storage (server.js), and the peer's
-//     open chat shows a live banner. Stops automatically after the chosen time.
+//     open chat shows a live banner. Stops automatically after the chosen time,
+//     or when this screen closes (the watcher lives here — a product decision,
+//     and the on-screen copy says so).
 // Honest copy only — no fabricated guarantees.
 
 import { brandAlpha, type Palette } from '../constants/theme';
@@ -18,7 +20,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import React, { useCallback, useEffect, useRef, useState , useMemo} from 'react';
 import {
-  ActivityIndicator, Alert, AppState, Linking, ScrollView,
+  AccessibilityInfo, ActivityIndicator, Alert, AppState, Linking, ScrollView,
   StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import { useTheme } from '../lib/theme';
@@ -129,7 +131,7 @@ export default function LocationScreen() {
   }, [reverseGeocode]);
 
   useEffect(() => {
-    readCache<MapPoint>(LAST_FIX).then((c) => { if (c) setLastFix(c); });
+    readCache<MapPoint>(LAST_FIX).then((c) => { if (c && mountedRef.current) setLastFix(c); }).catch(() => {});
     locate(true);
   }, [locate]);
 
@@ -174,8 +176,18 @@ export default function LocationScreen() {
   useEffect(() => stopLive, [stopLive]);
 
   // The countdown reached zero: end the session (kept out of the state updater,
-  // which must stay free of side effects).
-  useEffect(() => { if (live && timeLeft === 0) stopLive(); }, [live, timeLeft, stopLive]);
+  // which must stay free of side effects). The live card disappears with it, so
+  // the end is announced rather than left to a live region.
+  useEffect(() => {
+    if (!live || timeLeft !== 0) return;
+    stopLive();
+    AccessibilityInfo.announceForAccessibility('Live location sharing ended. The time you picked ran out.');
+  }, [live, timeLeft, stopLive]);
+
+  const stopByUser = useCallback(() => {
+    stopLive();
+    AccessibilityInfo.announceForAccessibility('Stopped sharing live location.');
+  }, [stopLive]);
 
   const startLive = useCallback(async () => {
     if (startingRef.current || watchRef.current) return;
@@ -206,6 +218,8 @@ export default function LocationScreen() {
 
       setLive(true);
       setTimeLeft(dur.seconds);
+      AccessibilityInfo.announceForAccessibility(
+        `Sharing live location with ${chatName} for ${dur.label}. Leaving this screen stops sharing.`);
       setTrail([{ lat: loc.coords.latitude, lng: loc.coords.longitude }]);
 
       // Encrypt each position with the session key and relay the opaque blob.
@@ -239,13 +253,13 @@ export default function LocationScreen() {
 
       timerRef.current = setInterval(() => { setTimeLeft((t) => Math.max(0, t - 1)); }, 1000);
     } finally { startingRef.current = false; if (mountedRef.current) setStartingLive(false); }
-  }, [loc, chatId, selDuration, address, stopLive]);
+  }, [loc, chatId, chatName, selDuration, address, stopLive]);
 
   if (permDenied) {
     return (
       <View style={[S.container, S.center]}>
       <AuroraBackground />
-        <Text style={S.permTitle}>Location permission needed</Text>
+        <Text style={S.permTitle} accessibilityRole="header">Location permission needed</Text>
         <Text style={S.permSub}>Allow location access to share your position.</Text>
         <TouchableOpacity style={S.primaryBtn} onPress={() => { Linking.openSettings().catch(() => {}); }}
           accessibilityRole="button" accessibilityHint="Opens this app's settings to allow location access">
@@ -318,8 +332,9 @@ export default function LocationScreen() {
               <View style={S.liveDot} />
               <Text style={S.liveTitle}>Sharing live with {chatName}</Text>
             </View>
-            <Text style={S.liveSub}>{fmtClock(timeLeft)} remaining · updates as you move · stops if you leave this screen</Text>
-            <TouchableOpacity style={[S.primaryBtn, { backgroundColor: colors.danger, marginTop: 12 }]} onPress={stopLive} accessibilityRole="button">
+            <Text style={S.liveSub}>{fmtClock(timeLeft)} remaining · updates as you move</Text>
+            <Text style={S.liveSub}>Keep this screen open: leaving it stops sharing.</Text>
+            <TouchableOpacity style={[S.primaryBtn, { backgroundColor: colors.danger, marginTop: 12 }]} onPress={stopByUser} accessibilityRole="button">
               <Text style={[S.primaryBtnText, { color: colors.onDanger }]}>Stop sharing</Text>
             </TouchableOpacity>
           </View>

@@ -34,8 +34,14 @@ export const VIBE_PATTERN: Record<LockVibe, number[]> = {
 let sound: Audio.Sound | null = null;
 let soundGen = 0;              // async guard: only the latest start keeps playing
 let vibing = false;
+let toneStarted: Promise<boolean> = Promise.resolve(true);
 
-async function startToneAsync(tone: LockTone, volume: number): Promise<void> {
+/** Whether the most recent tone start played (false: no audio session, or the
+ *  asset failed to load). Read by the settings screen's Test Alarm. */
+export function lastToneStart(): Promise<boolean> { return toneStarted; }
+
+/** Resolves true once playing (or superseded by a newer start), false on failure. */
+async function startToneAsync(tone: LockTone, volume: number): Promise<boolean> {
   const gen = ++soundGen;
   await stopToneAsync();
   try {
@@ -48,10 +54,11 @@ async function startToneAsync(tone: LockTone, volume: number): Promise<void> {
       TONE_ASSET[tone],
       { isLooping: true, volume: Math.max(0.05, Math.min(1, volume)) },
     );
-    if (gen !== soundGen) { s.unloadAsync().catch(() => {}); return; }   // superseded
+    if (gen !== soundGen) { s.unloadAsync().catch(() => {}); return true; }   // superseded
     sound = s;
     await s.playAsync();
-  } catch { /* no audio (emulator, focus loss) — vibration + UI still alert */ }
+    return true;
+  } catch { return false; /* no audio (emulator, focus loss) — vibration + UI still alert */ }
 }
 
 async function stopToneAsync(): Promise<void> {
@@ -63,7 +70,7 @@ async function stopToneAsync(): Promise<void> {
 /** Real drivers for the controller. `onPhase` is supplied by the lock service. */
 export function realAlarmDrivers(onPhase: (p: AlarmPhase) => void): AlarmDrivers {
   return {
-    startTone(tone, volume) { startToneAsync(tone, volume); },
+    startTone(tone, volume) { toneStarted = startToneAsync(tone, volume); },
     stopTone() { soundGen++; stopToneAsync(); },
     startVibe(pattern) {
       if (Platform.OS === 'web') return;

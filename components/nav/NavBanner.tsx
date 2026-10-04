@@ -38,8 +38,9 @@ export default function NavBanner() {
     if (b.active && Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(line);
   }, [b.active, line]);
   if (!b.active) return null;
+  const eta = fmtEta(b.etaEpochMs);
 
-  const dim = colors.text + '99';
+  const dim = colors.textDim;
   const remain = Math.max(4, Math.min(100, (1 - b.progress) * 100)); // line shrinks as we approach
 
   return (
@@ -58,11 +59,16 @@ export default function NavBanner() {
             <Text numberOfLines={1} style={[styles.sub, { color: dim }]}>{b.roadName}</Text>
           )}
         </View>
-        <View style={styles.right}>
+        {/* One element with a spoken label: the bare "300 m" / "3:45 PM" had
+            no context for a screen reader (the trip's ETA is shown only here). */}
+        <View style={styles.right} accessible accessibilityLabel={[
+          b.rerouting ? 'Finding a new route' : `${fmtDist(b.distanceToManeuver)} to the ${b.event === 'destination' ? 'destination' : 'next turn'}`,
+          eta ? `ETA ${eta}` : '',
+        ].filter(Boolean).join(', ')}>
           {b.rerouting
             ? <ActivityIndicator size="small" color={colors.primary} />
             : <Text style={[styles.dist, { color: colors.primary }]}>{fmtDist(b.distanceToManeuver)}</Text>}
-          {!!b.etaEpochMs && <Text style={[styles.eta, { color: dim }]}>{fmtEta(b.etaEpochMs)}</Text>}
+          {!!eta && <Text style={[styles.eta, { color: dim }]}>ETA {eta}</Text>}
         </View>
       </View>
       {/* shrinking progress line toward the maneuver */}

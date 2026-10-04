@@ -99,7 +99,10 @@ export default function TrustedContactsScreen() {
         const next = trusted.filter(t => t.userId !== c.userId);
         setTrusted(next);
         try { await removeTrustedContact(c.userId); writeCache(CACHE_KEY, next); }
-        catch (e: unknown) { setTrusted(prev); Alert.alert('Could not remove', errText(e, 'Try again')); }
+        catch (e: unknown) {
+          if (!mounted.current) return;
+          setTrusted(prev); Alert.alert('Could not remove', errText(e, 'Try again'));
+        }
       } },
     ]);
   };
@@ -119,119 +122,130 @@ export default function TrustedContactsScreen() {
 
       {/* KeyboardSafe: the autoFocus VaultID field sits low on a non-scrolling
           screen, and edge-to-edge Android never resizes the window for the
-          keyboard; the list shrinks so the form stays above it. */}
-      <KeyboardSafe style={s.body}>
-        <View style={s.infoCard}>
-          <Ionicons name="shield-checkmark" size={26} color={colors.primary} />
-          <Text style={s.infoTitle}>Emergency Contacts</Text>
-          <Text style={s.infoDesc}>
-            When you send an Emergency SOS, these contacts get a push alert with a link to your location (when your phone can get one).
-          </Text>
-          <Text style={s.infoStat}>{trusted.length}/{MAX_TRUSTED} contacts set</Text>
-        </View>
+          keyboard; the list shrinks so the form stays above it. Its computed
+          paddingBottom would replace a padding set on it, so the 16pt body
+          padding sits on an inner View and the inset adds below it. */}
+      <KeyboardSafe>
+        <View style={s.body}>
+          {/* While adding, the two fixed cards step aside: on a small phone they
+              could push the form under the keyboard (only the list shrinks). */}
+          {!adding && (
+            <View style={s.infoCard}>
+              <Ionicons name="shield-checkmark" size={26} color={colors.primary} />
+              <Text style={s.infoTitle}>Emergency Contacts</Text>
+              <Text style={s.infoDesc}>
+                When you send an Emergency SOS, these contacts get a push alert with a link to your location (when your phone can get one).
+              </Text>
+              <Text style={s.infoStat}>{trusted.length}/{MAX_TRUSTED} contacts set</Text>
+            </View>
+          )}
 
-        {stale && !loading && (
-          <View style={s.staleRow} accessibilityLiveRegion="polite">
-            <Text style={[s.emptySub, { flex: 1, marginTop: 0 }]}>
-              Couldn&apos;t refresh. Showing the list saved on this phone, which may be out of date.
-            </Text>
-            {refreshing
-              ? <ActivityIndicator size="small" color={colors.primary} accessibilityLabel="Refreshing trusted contacts" />
-              : (
-                <TouchableOpacity onPress={retryStale} accessibilityRole="button" accessibilityLabel="Retry refreshing trusted contacts" hitSlop={12}>
-                  <Text style={s.addBtnTxt}>Retry</Text>
-                </TouchableOpacity>
+          {stale && !loading && (
+            <View style={s.staleRow} accessibilityLiveRegion="polite">
+              <Text style={[s.emptySub, { flex: 1, marginTop: 0 }]}>
+                Couldn&apos;t refresh. Showing the list saved on this phone, which may be out of date.
+              </Text>
+              {refreshing
+                ? <ActivityIndicator size="small" color={colors.primary} accessibilityLabel="Refreshing trusted contacts" />
+                : (
+                  <TouchableOpacity onPress={retryStale} accessibilityRole="button" accessibilityLabel="Retry refreshing trusted contacts" hitSlop={12}>
+                    <Text style={s.addBtnTxt}>Retry</Text>
+                  </TouchableOpacity>
+                )}
+            </View>
+          )}
+
+          {loading ? (
+            <ActivityIndicator color={colors.primary} style={{ marginTop: 30 }} />
+          ) : (
+            <FlatList
+              data={trusted}
+              keyExtractor={t => t.userId}
+              renderItem={({ item }) => (
+                <View style={s.contactRow}>
+                  {/* One element: the status dot used to read "Online" on its own. */}
+                  <View style={s.contactInfo} accessible
+                    accessibilityLabel={`${item.name || 'Contact'}, ${item.vaultId ? `@${item.vaultId}` : 'no VaultID'}, ${item.online ? 'online' : 'offline'}`}>
+                    <View style={s.contactAvatar}>
+                      <Text style={s.contactAvatarTxt}>{initialOf(item.name)}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text numberOfLines={1} style={s.contactName}>{item.name || 'Contact'}</Text>
+                      <Text style={s.contactId}>@{item.vaultId || '—'}</Text>
+                    </View>
+                    <View style={[s.statusDot, { backgroundColor: item.online ? colors.online : colors.textFaint }]} />
+                  </View>
+                  <TouchableOpacity onPress={() => removeTrusted(item)} style={s.removeBtn} hitSlop={10}
+                    accessibilityRole="button" accessibilityLabel={`Remove ${item.name || 'contact'}`}>
+                    <Text style={s.removeTxt}>Remove</Text>
+                  </TouchableOpacity>
+                </View>
               )}
-          </View>
-        )}
+              ListEmptyComponent={loadFailed ? (
+                <View style={{ alignItems: 'center', paddingVertical: 30, gap: 10 }}>
+                  <Text style={s.emptyTxt}>Couldn&apos;t load your trusted contacts.</Text>
+                  <TouchableOpacity onPress={retry} accessibilityRole="button" accessibilityLabel="Retry loading trusted contacts" hitSlop={12}>
+                    <Text style={s.addBtnTxt}>Retry</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={{ alignItems: 'center', paddingVertical: 30 }}>
+                  <Text style={s.emptyTxt}>No trusted contacts yet</Text>
+                  <Text style={s.emptySub}>Add up to {MAX_TRUSTED} emergency contacts</Text>
+                </View>
+              )}
+            />
+          )}
 
-        {loading ? (
-          <ActivityIndicator color={colors.primary} style={{ marginTop: 30 }} />
-        ) : (
-          <FlatList
-            data={trusted}
-            keyExtractor={t => t.userId}
-            renderItem={({ item }) => (
-              <View style={s.contactRow}>
-                <View style={s.contactAvatar}>
-                  <Text style={s.contactAvatarTxt}>{initialOf(item.name)}</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text numberOfLines={1} style={s.contactName}>{item.name || 'Contact'}</Text>
-                  <Text style={s.contactId}>@{item.vaultId || '—'}</Text>
-                </View>
-                <View
-                  style={[s.statusDot, { backgroundColor: item.online ? colors.online : colors.textFaint }]}
-                  accessible accessibilityLabel={item.online ? 'Online' : 'Offline'}
+          {!adding && !loading && !loadFailed && trusted.length < MAX_TRUSTED && (
+            <TouchableOpacity style={[s.addBtn, { flexDirection: 'row', justifyContent: 'center', gap: 8 }]} onPress={() => setAdding(true)} accessibilityRole="button">
+              <Ionicons name="add" size={18} color={colors.primary} />
+              <Text style={s.addBtnTxt}>Add Trusted Contact</Text>
+            </TouchableOpacity>
+          )}
+
+          {adding && (
+            <View style={s.addForm}>
+              <Text style={s.addLabel}>Enter their VaultID</Text>
+              <View style={s.addRow}>
+                <Text style={{ color: colors.textDim, fontSize: 18 }}>@</Text>
+                <TextInput
+                  style={s.addInput}
+                  value={searchId}
+                  onChangeText={(t) => { setSearchId(t); setIdError(null); }}
+                  onSubmitEditing={addByVaultId}
+                  accessibilityLabel="Their VaultID"
+                  placeholder="vaultid"
+                  placeholderTextColor={colors.textFaint}
+                  autoCapitalize="none"
+                  autoFocus
                 />
-                <TouchableOpacity onPress={() => removeTrusted(item)} style={s.removeBtn} hitSlop={10}
-                  accessibilityRole="button" accessibilityLabel={`Remove ${item.name || 'contact'}`}>
-                  <Text style={s.removeTxt}>Remove</Text>
+                <TouchableOpacity style={s.addConfirm} onPress={addByVaultId} disabled={searching}
+                  accessibilityRole="button" accessibilityLabel="Add trusted contact" accessibilityState={{ busy: searching }}>
+                  {searching ? <ActivityIndicator color={colors.onPrimary} size="small" /> : <Text style={s.addConfirmTxt}>Add</Text>}
                 </TouchableOpacity>
               </View>
-            )}
-            ListEmptyComponent={loadFailed ? (
-              <View style={{ alignItems: 'center', paddingVertical: 30, gap: 10 }}>
-                <Text style={s.emptyTxt}>Couldn&apos;t load your trusted contacts.</Text>
-                <TouchableOpacity onPress={retry} accessibilityRole="button" accessibilityLabel="Retry loading trusted contacts" hitSlop={12}>
-                  <Text style={s.addBtnTxt}>Retry</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <View style={{ alignItems: 'center', paddingVertical: 30 }}>
-                <Text style={s.emptyTxt}>No trusted contacts yet</Text>
-                <Text style={s.emptySub}>Add up to {MAX_TRUSTED} emergency contacts</Text>
-              </View>
-            )}
-          />
-        )}
-
-        {!adding && !loading && !loadFailed && trusted.length < MAX_TRUSTED && (
-          <TouchableOpacity style={[s.addBtn, { flexDirection: 'row', justifyContent: 'center', gap: 8 }]} onPress={() => setAdding(true)} accessibilityRole="button">
-            <Ionicons name="add" size={18} color={colors.primary} />
-            <Text style={s.addBtnTxt}>Add Trusted Contact</Text>
-          </TouchableOpacity>
-        )}
-
-        {adding && (
-          <View style={s.addForm}>
-            <Text style={s.addLabel}>Enter their VaultID</Text>
-            <View style={s.addRow}>
-              <Text style={{ color: colors.textDim, fontSize: 18 }}>@</Text>
-              <TextInput
-                style={s.addInput}
-                value={searchId}
-                onChangeText={(t) => { setSearchId(t); setIdError(null); }}
-                onSubmitEditing={addByVaultId}
-                accessibilityLabel="Their VaultID"
-                placeholder="vaultid"
-                placeholderTextColor={colors.textFaint}
-                autoCapitalize="none"
-                autoFocus
-              />
-              <TouchableOpacity style={s.addConfirm} onPress={addByVaultId} disabled={searching}
-                accessibilityRole="button" accessibilityLabel="Add trusted contact" accessibilityState={{ busy: searching }}>
-                {searching ? <ActivityIndicator color={colors.onPrimary} size="small" /> : <Text style={s.addConfirmTxt}>Add</Text>}
+              {idError && <Text style={s.idError} accessibilityLiveRegion="polite">{idError}</Text>}
+              <TouchableOpacity onPress={() => { setAdding(false); setSearchId(''); setIdError(null); }}
+                accessibilityRole="button" hitSlop={12}>
+                <Text style={s.cancelTxt}>Cancel</Text>
               </TouchableOpacity>
             </View>
-            {idError && <Text style={s.idError} accessibilityLiveRegion="polite">{idError}</Text>}
-            <TouchableOpacity onPress={() => { setAdding(false); setSearchId(''); setIdError(null); }}
-              accessibilityRole="button" hitSlop={12}>
-              <Text style={s.cancelTxt}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+          )}
 
-        <View style={s.alertInfo}>
-          <Text style={s.alertTitle}>What trusted contacts receive:</Text>
-          <View style={s.alertRow}>
-            <Ionicons name="alert-circle" size={14} color={colors.danger} accessibilityElementsHidden importantForAccessibility="no" />
-            <Text style={s.alertItem}>Emergency SOS — a push alert with a map link to where you are</Text>
-          </View>
-          <View style={s.alertRow}>
-            <Ionicons name="flask-outline" size={14} color={colors.textDim} accessibilityElementsHidden importantForAccessibility="no" />
-            <Text style={s.alertItem}>Test SOS — the same alert, clearly marked as a test</Text>
-          </View>
+          {!adding && (
+            <View style={s.alertInfo}>
+              <Text style={s.alertTitle}>What trusted contacts receive:</Text>
+              <View style={s.alertRow}>
+                <Ionicons name="alert-circle" size={14} color={colors.danger} accessibilityElementsHidden importantForAccessibility="no" />
+                <Text style={s.alertItem}>Emergency SOS — a push alert with a map link to where you are</Text>
+              </View>
+              <View style={s.alertRow}>
+                <Ionicons name="flask-outline" size={14} color={colors.textDim} accessibilityElementsHidden importantForAccessibility="no" />
+                <Text style={s.alertItem}>Test SOS — the same alert, clearly marked as a test</Text>
+              </View>
+            </View>
+          )}
         </View>
       </KeyboardSafe>
     </View>
@@ -248,6 +262,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   infoTitle: { color: c.text, fontSize: 18, fontWeight: '900', marginTop: 8, marginBottom: 6 },
   infoDesc: { color: c.textDim, fontSize: 13, lineHeight: 20 },
   infoStat: { color: c.primary, fontSize: 13, fontWeight: '700', marginTop: 12 },
+  contactInfo: { flex: 1, flexDirection: 'row', alignItems: 'center' },
   contactRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: c.glassStroke },
   contactAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: c.primary, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   contactAvatarTxt: { color: c.onPrimary, fontWeight: '900', fontSize: 18 },

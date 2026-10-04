@@ -131,15 +131,17 @@ export function bandFor(score: number): RiskBand {
   return 'low';
 }
 
-// Presentation metadata for the four bands. Colours match the palette used
-// across the security screens (auditChain/alerts/aiguardian). Kept here so the
-// dashboard, the notification service and the score ring all render one band
-// identically — but it is inert data; the engine never reads it.
-export const BAND_META: Record<RiskBand, { label: string; color: string; blurb: string }> = {
-  low:      { color: '#34D399', label: 'Low risk',      blurb: 'No security indicators were found on this device.' },
-  medium:   { color: '#F59E0B', label: 'Medium risk',   blurb: 'Configuration or minor indicators are present. Review recommended.' },
-  high:     { color: '#F97316', label: 'High risk',     blurb: 'A significant security indicator was detected. Act soon.' },
-  critical: { color: '#EF4444', label: 'Critical risk', blurb: 'The device shows strong signs of compromise. Act now.' },
+// Presentation metadata for the four bands, used by the dashboard view model
+// (score ring, band header, scan-result title). Kept here so every surface
+// renders one band identically — but it is inert data; the engine never reads it.
+// `color` is for the dark theme, `lightColor` for the light theme; both are text
+// colours with ≥4.5:1 on that theme's glass card (dark ≈ #1C1B22, light ≈ #E5EEFB):
+// dark 8.9 / 7.9 / 6.1 / 4.5:1, light 6.6 / 5.4 / 6.3 / 5.6:1.
+export const BAND_META: Record<RiskBand, { label: string; color: string; lightColor: string; blurb: string }> = {
+  low:      { color: '#34D399', lightColor: '#05603A', label: 'Low risk',      blurb: 'No security indicators were found on this device.' },
+  medium:   { color: '#F59E0B', lightColor: '#7C5A00', label: 'Medium risk',   blurb: 'Configuration or minor indicators are present. Review recommended.' },
+  high:     { color: '#F97316', lightColor: '#9A3412', label: 'High risk',     blurb: 'A significant security indicator was detected. Act soon.' },
+  critical: { color: '#EF4444', lightColor: '#B42318', label: 'Critical risk', blurb: 'The device shows strong signs of compromise. Act now.' },
 };
 
 // Per-signal recommended action for the dashboard's "Recommended actions" list.

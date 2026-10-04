@@ -16,13 +16,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View,
+  AccessibilityInfo, ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { getCurrentSnapshot } from '../services/security/deviceSecurity/postureStore';
 import { runMonitoringScan } from '../services/security/deviceSecurity/monitorService';
-import { buildDashboardViewModel, STATUS_META, type DashboardVM } from '../services/security/deviceSecurity/viewModel';
+import { buildDashboardViewModel } from '../services/security/deviceSecurity/viewModel';
+import type { PostureSnapshot } from '../services/security/deviceSecurity/posture';
 import { AuroraBackground } from '../components/ui';
 
 const STATUS_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
@@ -36,10 +37,13 @@ function useS() {
 }
 
 export default function SecurityHubScreen() {
-  const { colors } = useTheme();
+  const { colors, scheme } = useTheme();
   const S = useS();
   const router = useRouter();
-  const [vm, setVm] = useState<DashboardVM>(() => buildDashboardViewModel(null, Date.now()));
+  /** The last snapshot read or scanned, and when: the view model is derived per theme. */
+  const [shown, setShown] = useState<{ snapshot: PostureSnapshot | null; at: number }>(() => ({ snapshot: null, at: Date.now() }));
+  // Band/status colours are text on the glass card, so they follow the theme (AA in both).
+  const vm = useMemo(() => buildDashboardViewModel(shown.snapshot, shown.at, scheme), [shown, scheme]);
   const [scanning, setScanning] = useState(false);
   /** The stored scan could not be read: the view on screen may be stale. */
   const [readFailed, setReadFailed] = useState(false);
@@ -48,10 +52,14 @@ export default function SecurityHubScreen() {
 
   // Never rejects: a secure-store read failure used to surface as an unhandled
   // rejection. The last rendered view stays, and a notice says it may be stale.
+  // The scan-result card describes the scan just run from this screen, so a
+  // reload (focus return, or after a failed scan) retires it: it can neither
+  // contradict a newer snapshot nor sit next to the "couldn't read" notice.
   const load = useCallback(async () => {
+    setScanResult(null);
     try {
-      const snap = await getCurrentSnapshot();
-      setVm(buildDashboardViewModel(snap, Date.now()));
+      const snapshot = await getCurrentSnapshot();
+      setShown({ snapshot, at: Date.now() });
       setReadFailed(false);
     } catch { setReadFailed(true); }
   }, []);
@@ -66,20 +74,23 @@ export default function SecurityHubScreen() {
       // audit chain + fires the "Security" channel, so the screen just renders.
       const { outcome } = await runMonitoringScan('manual');
       const snapshot = outcome?.snapshot ?? (await getCurrentSnapshot());
-      const view = buildDashboardViewModel(snapshot, Date.now());
+      const at = Date.now();
+      const view = buildDashboardViewModel(snapshot, at);
       // The scan produced a fresh snapshot: no reload, which could otherwise
       // pair "Scan complete" with a stale-read notice.
-      setVm(view);
+      setShown({ snapshot, at });
       setReadFailed(false);
       const n = view.actions.length;
-      setScanResult({
+      const result = {
         title: `Scan complete — ${view.bandLabel}`,
         body: n
           ? `${n} recommended action${n === 1 ? '' : 's'} listed below.`
           : 'No security indicators were found. A sandboxed app cannot detect kernel-level implants, so clean does not guarantee safety.',
-      });
+      };
+      setScanResult(result);
+      // The card's live region speaks on Android only; VoiceOver needs this.
+      if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(`${result.title}. ${result.body}`);
     } catch {
-      setScanResult(null);
       Alert.alert('Scan failed', 'The device scan could not complete. Please try again.');
       load();
     } finally {
@@ -146,7 +157,7 @@ export default function SecurityHubScreen() {
                     <Ionicons
                       name={a.severity === 'critical' ? 'alert-circle' : 'warning'}
                       size={20}
-                      color={STATUS_META[a.severity].color}
+                      color={a.color}
                     />
                     <Text style={S.actionText}>{a.text}</Text>
                   </View>

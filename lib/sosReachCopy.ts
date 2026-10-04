@@ -27,3 +27,23 @@ export function sosReachText(notified: number, reached: number | null, withLocat
       : null,
   };
 }
+
+/** The Sent face's result line (and warning) on the SOS screen: `notified` is
+ *  null when the server answer had no count. */
+export function sosSentLine(notified: number | null, reached: number | null): { line: string; warn: string | null } {
+  if (notified == null) return { line: 'Your trusted contacts are being alerted', warn: null };
+  if (notified === 0) return { line: 'No trusted contacts to alert — add some so an SOS reaches someone.', warn: null };
+  const r = sosReachText(notified, reached, false);
+  return { line: r.line, warn: r.warn && `${r.warn} Call or text them too.` };
+}
+
+/** Everything the Sent face says, as one announcement for screen readers. */
+export function sosSentAnnouncement(isTest: boolean, notified: number | null, reached: number | null, withoutLocation: boolean): string {
+  const { line, warn } = sosSentLine(notified, reached);
+  return [
+    isTest ? 'Test SOS sent.' : 'SOS sent.',
+    /[.!?]$/.test(line) ? line : `${line}.`,
+    warn,
+    withoutLocation ? 'Sent without your location.' : null,
+  ].filter(Boolean).join(' ');
+}

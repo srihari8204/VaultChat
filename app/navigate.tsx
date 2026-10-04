@@ -96,8 +96,9 @@ export default function NavigateScreen() {
     return () => { cancel = true; };
   // Keyed on the route options too: toggling Shortest / Avoid tolls during
   // setup must re-fetch the preview (setRouteOpt reroutes only while active).
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dest, s.costing, JSON.stringify(s.routeOpts)]);
+  // The settings store keeps the routeOpts object until it is patched, and
+  // setRouteOpt patches only on a real change, so the reference is the key.
+  }, [dest, s.costing, s.routeOpts]);
   useEffect(() => {
     if (params.lat && params.lng) {
       const c = { lat: Number(params.lat), lng: Number(params.lng) };
@@ -162,6 +163,8 @@ export default function NavigateScreen() {
   };
 
   const setRouteOpt = (patch: Partial<typeof s.routeOpts>) => {
+    // Re-tapping the checked radio is not a change: no refetch, no reroute.
+    if ((Object.keys(patch) as (keyof typeof patch)[]).every((k) => !!s.routeOpts[k] === !!patch[k])) return;
     const routeOpts = { ...s.routeOpts, ...patch };
     setNavSettings({ routeOpts });
     if (banner.active) forceReroute(routeOpts);   // live change → recalc now
@@ -230,24 +233,24 @@ export default function NavigateScreen() {
                 <Text style={{ color: colors.text, fontWeight: '800', fontSize: 14.5 }}>
                   {lock.active ? 'Location Locked' : 'Location Lock'}
                 </Text>
-                <Text style={{ color: colors.text + '88', fontSize: 12.5, marginTop: 1 }}>
+                <Text style={{ color: colors.textDim, fontSize: 12.5, marginTop: 1 }}>
                   {lock.active
                     ? `${Math.round(lock.distance)} m of ${Math.round(lock.radius)} m · ${(lock.state ?? 'safe').toUpperCase()}`
                     : 'Lock a spot, get alarmed if you leave it'}
                 </Text>
               </View>
-              <Ionicons name="chevron-forward" size={18} color={colors.text + '66'} />
+              <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
             </TouchableOpacity>
           )}
 
           {/* destination */}
           <Text style={[st.h, { color: colors.text }]} accessibilityRole="header">Destination</Text>
           <View style={[st.searchRow, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
-            <Ionicons name="search" size={18} color={colors.text + '99'} />
+            <Ionicons name="search" size={18} color={colors.textDim} />
             <TextInput
               value={query} onChangeText={setQuery} onSubmitEditing={search} returnKeyType="search"
               accessibilityLabel="Destination" accessibilityHint='Type an address or place, or "lat, lng"'
-              placeholder='Address or "lat, lng"' placeholderTextColor={colors.text + '66'}
+              placeholder='Address or "lat, lng"' placeholderTextColor={colors.textFaint}
               style={[st.input, { color: colors.text }]}
             />
             {searching ? <ActivityIndicator size="small" color={colors.primary} />
@@ -268,7 +271,7 @@ export default function NavigateScreen() {
             <View style={[st.destPill, { backgroundColor: colors.primary + '14' }]}>
               <Ionicons name="flag" size={16} color={colors.primary} />
               <Text numberOfLines={1} style={{ color: colors.text, flex: 1 }}>{dest.name}</Text>
-              <Text style={{ color: colors.text + '77', fontSize: 12 }}>{dest.coords.lat.toFixed(4)}, {dest.coords.lng.toFixed(4)}</Text>
+              <Text style={{ color: colors.textFaint, fontSize: 12 }}>{dest.coords.lat.toFixed(4)}, {dest.coords.lng.toFixed(4)}</Text>
             </View>
           )}
           {dest && (
@@ -348,7 +351,7 @@ export default function NavigateScreen() {
             {starting ? <ActivityIndicator color={colors.onPrimary} />
               : <><Ionicons name="navigate" size={18} color={colors.onPrimary} /><Text style={[st.startTxt, { color: colors.onPrimary }]}>Start navigation</Text></>}
           </TouchableOpacity>
-          {Platform.OS === 'ios' && <Text style={{ color: colors.text + '77', fontSize: 12, textAlign: 'center', marginTop: 10 }}>iOS plays intensity accents; Android plays the full vibration patterns.</Text>}
+          {Platform.OS === 'ios' && <Text style={{ color: colors.textFaint, fontSize: 12, textAlign: 'center', marginTop: 10 }}>iOS plays intensity accents; Android plays the full vibration patterns.</Text>}
         </ScrollView>
       )}
     </View>
@@ -385,7 +388,8 @@ const st = StyleSheet.create({
   destPill: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, padding: 12, borderRadius: 10 },
   previewMap: { height: 210, borderRadius: 14, borderWidth: 1, marginTop: 14 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
+  // minHeight: the 13.5sp label + 8pt padding made a ~36pt chip, under the 44pt tap floor.
+  chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8, minHeight: 44, justifyContent: 'center' },
   startBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 52, paddingVertical: 10, borderRadius: 14, marginTop: 30 },
   startTxt: { fontSize: 16, fontWeight: '800' },
   sheet: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14, paddingBottom: 22, borderTopWidth: StyleSheet.hairlineWidth },

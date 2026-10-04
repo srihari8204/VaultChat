@@ -26,7 +26,7 @@ import {
 } from './lockStore';
 import { getLockSettings, loadLockSettings, zoneConfigFor } from './lockSettings';
 import { createAlarmController, type AlarmController, type AlarmPhase } from './alarmController';
-import { realAlarmDrivers } from './alarmChannels';
+import { lastToneStart, realAlarmDrivers } from './alarmChannels';
 import {
   showLockStatus, hideLockStatus, showLockAlarm, cancelLockAlarm, showBackInside,
 } from './lockNotifications';
@@ -362,20 +362,35 @@ export async function restoreLock(): Promise<boolean> {
   return true;
 }
 
-/** Upgrade a foreground-only lock to kill-safe (asks for "Allow all the time"). */
-/** What to tell the user when enableKillSafe() returns false (the grant was
- *  refused or the background service would not start). Shared by every caller. */
-export const KILL_SAFE_REFUSED = {
-  title: 'Background tracking is off',
-  body: 'It needs location access set to “Allow all the time”. Without it the lock only works while the app is open.',
+/** Why enableKillSafe() did not turn background tracking on, or 'on'. */
+export type KillSafeResult = 'on' | 'no_lock' | 'denied' | 'service_failed';
+
+/** What to tell the user for each enableKillSafe() refusal: a denied grant and
+ *  a background service that would not start need different advice. Shared by
+ *  every caller. */
+export const KILL_SAFE_REFUSED: Record<Exclude<KillSafeResult, 'on'>, { title: string; body: string }> = {
+  no_lock: {
+    title: 'No active lock',
+    body: 'Background tracking applies to a running lock. Lock a spot first, then turn it on.',
+  },
+  denied: {
+    title: 'Background tracking is off',
+    body: 'It needs location access set to “Allow all the time”. Without it the lock only works while the app is open.',
+  },
+  service_failed: {
+    title: 'Background tracking could not start',
+    body: 'Location access is allowed, but the background service did not start, so the lock only works while the app is open. Try again, or unlock and lock again.',
+  },
 };
 
-export async function enableKillSafe(): Promise<boolean> {
-  if (!active) return false;
-  if (!await requestBackgroundPermission()) return false;
-  const ok = await startLockBackground();
-  if (ok) { setView({ killSafe: true }); await hideLockStatus(); }
-  return ok;
+/** Upgrade a foreground-only lock to kill-safe (asks for "Allow all the time"). */
+export async function enableKillSafe(): Promise<KillSafeResult> {
+  if (!active) return 'no_lock';
+  if (!await requestBackgroundPermission()) return 'denied';
+  if (!await startLockBackground()) return 'service_failed';
+  setView({ killSafe: true });
+  await hideLockStatus();
+  return 'on';
 }
 
 /** Manual "Stop Alarm" — silence channels, keep the lock armed. */
@@ -387,12 +402,17 @@ export async function stopLockAlarm(): Promise<void> {
   }
 }
 
-/** Play the configured channels briefly (settings screen's Test Alarm). */
-export function testAlarm(): void {
-  if (controller) { controller.configure(getLockSettings().alerts); controller.test(); return; }
-  // No armed lock: a throwaway controller drives the real channels once.
-  const c = createAlarmController(realAlarmDrivers(() => {}), getLockSettings().alerts);
-  c.test();
+/** Play the configured channels briefly (settings screen's Test Alarm).
+ *  Resolves false when a tone channel is on but its sound could not play
+ *  (vibration and voice give no failure signal to read). */
+export function testAlarm(): Promise<boolean> {
+  const alerts = getLockSettings().alerts;
+  if (controller) { controller.configure(alerts); controller.test(); }
+  else {
+    // No armed lock: a throwaway controller drives the real channels once.
+    createAlarmController(realAlarmDrivers(() => {}), alerts).test();
+  }
+  return alerts.siren || alerts.continuousBeep ? lastToneStart() : Promise.resolve(true);
 }
 
 /** Live-update alert settings + monitoring mode on an armed lock. */

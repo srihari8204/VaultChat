@@ -5,7 +5,7 @@
 // and one-tap navigate-back. Auto-resolves to a green "safe" state on return.
 
 import React, { useEffect, useRef, useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Animated, Alert, ActivityIndicator, AccessibilityInfo } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Animated, Alert, ActivityIndicator, AccessibilityInfo, Platform } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { type Costing } from '../lib/nav/routing';
@@ -60,14 +60,27 @@ export default function LockAlertScreen() {
   const back = lock.state !== 'outside';
   const alarmFace = lock.active && !back;
 
-  // One spoken announcement when the alarm face first shows (iOS has no live
-  // regions; on Android it front-runs the assertive phase line below).
-  const announced = useRef(false);
+  const phaseLine = lock.alarmPhase === 'alarming'
+    ? 'Alarm sounding — head back now'
+    : lock.alarmPhase === 'grace'
+      ? 'Alarm starts in moments — head back now'
+      : lock.alarmPhase === 'silenced'
+        ? 'Alarm silenced — you are still outside the locked area'
+        : 'You are outside the locked area — head back now';
+
+  // A spoken announcement when the alarm face first shows (on Android it
+  // front-runs the assertive phase line below). iOS has no live regions, so
+  // each later phase change (grace → alarming → silenced) is announced too.
+  const announcedLine = useRef<string | null>(null);
   useEffect(() => {
-    if (!alarmFace || announced.current) return;
-    announced.current = true;
-    AccessibilityInfo.announceForAccessibility('Location Lock alarm. You have left the locked area. Head back now.');
-  }, [alarmFace]);
+    if (!alarmFace) return;
+    if (announcedLine.current === null) {
+      AccessibilityInfo.announceForAccessibility('Location Lock alarm. You have left the locked area. Head back now.');
+    } else if (Platform.OS === 'ios' && announcedLine.current !== phaseLine) {
+      AccessibilityInfo.announceForAccessibility(phaseLine);
+    }
+    announcedLine.current = phaseLine;
+  }, [alarmFace, phaseLine]);
   const over = Math.max(0, lock.distance - lock.radius);
   const bg = flash.interpolate({ inputRange: [0, 1], outputRange: [ALARM.flashLow, ALARM.flashHigh] });
 
@@ -127,13 +140,7 @@ export default function LockAlertScreen() {
           the assertive live region announces each phase CHANGE (a static
           "ALERT!" heading carried it before and never changed). */}
       <Text style={[st.sub, { marginTop: 0, marginBottom: 10 }]} accessibilityLiveRegion="assertive">
-        {lock.alarmPhase === 'alarming'
-          ? 'Alarm sounding — head back now'
-          : lock.alarmPhase === 'grace'
-            ? 'Alarm starts in moments — head back now'
-            : lock.alarmPhase === 'silenced'
-              ? 'Alarm silenced — you are still outside the locked area'
-              : 'You are outside the locked area — head back now'}
+        {phaseLine}
       </Text>
       {lock.alarmPhase === 'alarming' && (
         // Solid white, not c.glassSoft: on the dark theme that glass is 7%

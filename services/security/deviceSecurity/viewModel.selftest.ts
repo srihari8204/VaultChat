@@ -7,7 +7,7 @@
  * de-duplicated recommended actions (most-severe first), and deterministic
  * relative-time text.
  */
-import { assessRisk, riskSignal, type SecuritySignalType } from './riskEngine';
+import { assessRisk, BAND_META, riskSignal, type SecuritySignalType } from './riskEngine';
 import { buildSnapshot, type BuildOptions } from './posture';
 import { buildDashboardViewModel, relativeTime, STATUS_META } from './viewModel';
 
@@ -81,6 +81,20 @@ function snap(signals: ReturnType<typeof riskSignal>[], scannedAt: number) {
   const fridaRow = partial.factors.find((f) => f.key === 'frida');
   check('frida row = "Not evaluated" grey', fridaRow?.statusLabel === 'Not evaluated' && fridaRow?.statusColor === STATUS_META.pending.color);
 
+  // ── Theme-aware colours: text colours meet AA on each theme's card ─
+  console.log('Scheme colours:');
+  const lightBad = buildDashboardViewModel(snap([riskSignal('ROOT_DETECTED'), riskSignal('OVERLAY_RISK')], now), now, 'light');
+  check('light band colour is the light variant', lightBad.bandColor === BAND_META.critical.lightColor);
+  check('light factor colours are light variants',
+    lightBad.factors.every((f) => f.statusColor === STATUS_META[f.status].lightColor));
+  check('action colour follows its severity and scheme',
+    lightBad.actions.every((a) => a.color === STATUS_META[a.severity].lightColor));
+  // The glass card composited on each ground (glassSoft over bg, constants/theme.ts).
+  const DARK_CARD = '#1C1B22', LIGHT_CARD = '#E5EEFB';
+  const metas = [...Object.values(STATUS_META), ...Object.values(BAND_META)];
+  check('every dark colour ≥4.5:1 on the dark card', metas.every((m) => contrast(m.color, DARK_CARD) >= 4.5));
+  check('every light colour ≥4.5:1 on the light card', metas.every((m) => contrast(m.lightColor, LIGHT_CARD) >= 4.5));
+
   // ── relativeTime buckets ─────────────────────────────────────────
   console.log('relativeTime:');
   check('seconds → just now', relativeTime(now - 10_000, now) === 'just now');
@@ -91,6 +105,19 @@ function snap(signals: ReturnType<typeof riskSignal>[], scannedAt: number) {
   if (failures === 0) { console.log('ALL VIEW-MODEL TESTS PASSED ✓\n'); process.exit(0); }
   else { console.log(`${failures} TEST(S) FAILED ✗\n`); process.exit(1); }
 })().catch((e) => { console.error('UNCAUGHT', e); process.exit(1); });
+
+/** WCAG 2 contrast ratio of two #RRGGBB colours. */
+function contrast(a: string, b: string): number {
+  const lum = (h: string) => {
+    const [r, g, bl] = [1, 3, 5].map((i) => {
+      const c = parseInt(h.slice(i, i + 2), 16) / 255;
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+  };
+  const [x, y] = [lum(a), lum(b)];
+  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+}
 
 function RANKok(sevs: string[]): boolean {
   // no 'warning' may appear before a 'critical'

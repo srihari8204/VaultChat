@@ -1,6 +1,6 @@
 // lib/sosReachCopy.selftest.ts — run: npx tsx lib/sosReachCopy.selftest.ts
 import assert from 'node:assert/strict';
-import { sosReachedOf, sosReachText } from './sosReachCopy';
+import { sosReachedOf, sosReachText, sosSentAnnouncement, sosSentLine } from './sosReachCopy';
 
 let n = 0;
 const ok = (label: string, fn: () => void) => { fn(); n++; console.log('  ok  ' + label); };
@@ -41,6 +41,20 @@ ok('reached is never shown above notified', () => {
 ok('nobody addressed is said plainly', () => {
   assert.equal(sosReachText(0, null, false).line, 'No trusted contacts were alerted.');
   assert.equal(sosReachText(0, 0, false).warn, null);
+});
+
+ok('the Sent face line covers a missing count and nobody addressed', () => {
+  assert.equal(sosSentLine(null, null).line, 'Your trusted contacts are being alerted');
+  assert.match(sosSentLine(0, null).line, /^No trusted contacts to alert/);
+  assert.equal(sosSentLine(3, null).line, 'Sent to 3 trusted contacts.');
+  assert.equal(sosSentLine(4, 2).warn, '2 could not be reached (no app, or notifications turned off). Call or text them too.');
+});
+
+ok('the announcement says everything the Sent face shows', () => {
+  assert.equal(sosSentAnnouncement(false, 3, null, false), 'SOS sent. Sent to 3 trusted contacts.');
+  assert.equal(sosSentAnnouncement(true, null, null, true),
+    'Test SOS sent. Your trusted contacts are being alerted. Sent without your location.');
+  assert.match(sosSentAnnouncement(false, 4, 2, false), /^SOS sent\. Reached 2 of 4 trusted contacts\. 2 could not be reached .* Call or text them too\.$/);
 });
 
 console.log(`sosReachCopy.selftest: ${n} groups passed`);

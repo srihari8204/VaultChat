@@ -31,7 +31,7 @@ export function useReducedMotionSetting(): boolean | null {
     AccessibilityInfo.isReduceMotionEnabled()
       .then(v => { if (alive) setReduced(!!v); })
       .catch(() => { if (alive) setReduced(false); /* setting unavailable — animate normally */ });
-    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', v => setReduced(!!v));
+    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', v => { if (alive) setReduced(!!v); });
     return () => { alive = false; sub.remove(); };
   }, []);
 

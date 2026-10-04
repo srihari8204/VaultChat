@@ -37,10 +37,10 @@ const HYSTS = [2, 3, 5, 10];
 /** The on/off channels: the only LockAlertSettings keys a Switch row may own. */
 type ChannelKey = { [K in keyof LockAlertSettings]: LockAlertSettings[K] extends boolean ? K : never }[keyof LockAlertSettings];
 
-/** Persist, then hand the change to an armed lock, and SAY when either fails.
- *  Both used to end in .catch(() => {}): an alarm setting that silently did
- *  not stick, or did not reach the running lock, is a safety gap. */
-/** One alert, even when both steps fail (it used to show two back to back). */
+/** Persist, then hand the change to an armed lock, and SAY when either fails,
+ *  in one alert even when both steps fail. Both used to end in .catch(() => {}):
+ *  an alarm setting that silently did not stick, or did not reach the running
+ *  lock, is a safety gap. */
 async function save(write: Promise<void>): Promise<void> {
   const saved = await write.then(() => true, () => false);
   const applied = await applyAlertSettings().then(() => true, () => false);
@@ -110,9 +110,10 @@ export default function LockSettingsScreen() {
     setKillBusy(true);
     try {
       if (v) {
-        // false = the "Allow all the time" grant was refused or the background
-        // service would not start; the switch stays off, and now says why.
-        if (!await enableKillSafe()) Alert.alert(KILL_SAFE_REFUSED.title, KILL_SAFE_REFUSED.body);
+        // Refused (no running lock, the "Allow all the time" grant denied, or the
+        // background service would not start): the switch stays off and says why.
+        const r = await enableKillSafe();
+        if (r !== 'on') Alert.alert(KILL_SAFE_REFUSED[r].title, KILL_SAFE_REFUSED[r].body);
       } else {
         await disableKillSafe();
       }
@@ -261,7 +262,8 @@ export default function LockSettingsScreen() {
           </View>
         )}
 
-        <TouchableOpacity onPress={() => testAlarm()} accessibilityRole="button" accessibilityLabel="Test the full alarm"
+        <TouchableOpacity onPress={() => { testAlarm().then((ok) => { if (!ok) testFailed('Alarm sound'); }, () => testFailed('Alarm')); }}
+          accessibilityRole="button" accessibilityLabel="Test the full alarm"
           style={[st.testBtn, { backgroundColor: colors.primary }]}>
           <Ionicons name="play" size={17} color={colors.onPrimary} />
           <Text style={[st.testTxt, { color: colors.onPrimary }]}>Test Alarm</Text>
@@ -270,12 +272,15 @@ export default function LockSettingsScreen() {
           <Chip label="Test voice" colors={colors} onPress={() => {
             try { Speech.stop(); Speech.speak(VOICE.outside, { rate: 1.0, onError: () => testFailed('Voice') }); } catch { testFailed('Voice'); }
           }} />
+          {/* Vibration.vibrate does not report a disabled motor, so only a throw
+              is caught here; the note below covers the silent case. */}
           <Chip label="Test vibration" colors={colors} onPress={() => {
             try { Vibration.vibrate(VIBE_PATTERN[a.vibePattern], false); } catch { testFailed('Vibration'); }
           }} />
         </View>
         <Text style={{ color: colors.textDim, fontSize: 12, textAlign: 'center', marginTop: 8 }}>
-          Plays the enabled channels for a few seconds. Nothing is written to history.
+          Plays the enabled channels for a few seconds. Nothing is written to history. If you
+          hear or feel nothing, check the system sound and vibration settings.
         </Text>
 
         {/* ── About ── */}
@@ -309,7 +314,8 @@ const st = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 12 },
   rowTxt: { flex: 1, fontSize: 14.5 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
+  // minHeight: the label + 8pt padding made a ~33pt chip, under the 44pt tap floor.
+  chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8, minHeight: 44, justifyContent: 'center' },
   // 2026-09-18: minHeight, not height — 'Test Alarm' at font scale 1.5 overran a
   // pinned 48 and the label lost its bottom. 48 is the tap floor, and 19 of line
   // box + 2×14 padding leaves it looking exactly as it did at scale 1.0.

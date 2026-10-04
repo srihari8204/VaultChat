@@ -11,17 +11,27 @@
 import { BAND_META, REMEDIATION, type RiskBand } from './riskEngine';
 import type { FactorStatus, Platform, PostureSnapshot } from './posture';
 
-export interface StatusMeta { label: string; color: string; }
+/** The app's colour scheme (constants/theme ColorScheme): picks the text colour set. */
+export type Scheme = 'dark' | 'light';
 
-// Per-status presentation. Colours match the palette used across the security
-// screens (auditChain/alerts). Severity order is encoded in RANK for sorting.
+export interface StatusMeta { label: string; color: string; lightColor: string; }
+
+// Per-status presentation. Both colours are drawn as TEXT (status pill) on the
+// theme's glass card, so each has ≥4.5:1 there: `color` on dark (≈ #1C1B22:
+// 4.5 / 7.9 / 8.9 / 6.7 / 5.5:1), `lightColor` on light (≈ #E5EEFB:
+// 5.6 / 6.4 / 6.6 / 6.5 / 5.6:1). Severity order is encoded in RANK for sorting.
 export const STATUS_META: Record<FactorStatus, StatusMeta> = {
-  critical:       { label: 'Critical',       color: '#EF4444' },
-  warning:        { label: 'Warning',        color: '#F59E0B' },
-  clear:          { label: 'Clear',          color: '#34D399' },
-  pending:        { label: 'Not evaluated',  color: '#9CA3AF' },
-  not_applicable: { label: 'N/A',            color: '#6B7280' },
+  critical:       { label: 'Critical',       color: '#EF4444', lightColor: '#B42318' },
+  warning:        { label: 'Warning',        color: '#F59E0B', lightColor: '#93370D' },
+  clear:          { label: 'Clear',          color: '#34D399', lightColor: '#05603A' },
+  pending:        { label: 'Not evaluated',  color: '#9CA3AF', lightColor: '#4B5563' },
+  not_applicable: { label: 'N/A',            color: '#8B93A1', lightColor: '#565E6C' },
 };
+
+/** The text colour for a status (or band meta) in the given scheme. */
+export function schemeColor(meta: { color: string; lightColor: string }, scheme: Scheme): string {
+  return scheme === 'light' ? meta.lightColor : meta.color;
+}
 
 const RANK: Record<FactorStatus, number> = {
   critical: 4, warning: 3, pending: 2, clear: 1, not_applicable: 0,
@@ -40,6 +50,7 @@ export interface ActionItem {
   key: string;
   text: string;
   severity: 'warning' | 'critical';
+  color: string;
 }
 
 export interface DashboardVM {
@@ -56,18 +67,19 @@ export interface DashboardVM {
   platform: Platform | null;
 }
 
-const UNKNOWN_BAND = { color: '#9CA3AF', label: 'Not scanned', blurb: 'Run a device scan to evaluate this device.' };
+const UNKNOWN_BAND = { color: '#9CA3AF', lightColor: '#4B5563', label: 'Not scanned', blurb: 'Run a device scan to evaluate this device.' };
 
 /**
  * Build the full dashboard view model. When `snapshot` is null (never scanned),
- * returns an honest empty state — never a fabricated score.
+ * returns an honest empty state — never a fabricated score. Colours are for
+ * `scheme` (default dark).
  */
-export function buildDashboardViewModel(snapshot: PostureSnapshot | null, now: number): DashboardVM {
+export function buildDashboardViewModel(snapshot: PostureSnapshot | null, now: number, scheme: Scheme = 'dark'): DashboardVM {
   if (!snapshot) {
     return {
       hasScanned: false,
       score: null, band: null,
-      bandLabel: UNKNOWN_BAND.label, bandColor: UNKNOWN_BAND.color, bandBlurb: UNKNOWN_BAND.blurb,
+      bandLabel: UNKNOWN_BAND.label, bandColor: schemeColor(UNKNOWN_BAND, scheme), bandBlurb: UNKNOWN_BAND.blurb,
       ringPct: 0, factors: [], actions: [],
       lastScanText: 'Not scanned yet', platform: null,
     };
@@ -79,7 +91,7 @@ export function buildDashboardViewModel(snapshot: PostureSnapshot | null, now: n
     label: f.label,
     status: f.status,
     statusLabel: STATUS_META[f.status].label,
-    statusColor: STATUS_META[f.status].color,
+    statusColor: schemeColor(STATUS_META[f.status], scheme),
     detail: f.detail,
   }));
 
@@ -90,7 +102,10 @@ export function buildDashboardViewModel(snapshot: PostureSnapshot | null, now: n
   const actions: ActionItem[] = snapshot.factors
     .filter((f) => (f.status === 'warning' || f.status === 'critical') && f.signalType && REMEDIATION[f.signalType])
     .sort((a, b) => RANK[b.status] - RANK[a.status])
-    .map((f) => ({ key: f.key, severity: f.status as 'warning' | 'critical', text: REMEDIATION[f.signalType as string] }))
+    .map((f) => ({
+      key: f.key, severity: f.status as 'warning' | 'critical',
+      text: REMEDIATION[f.signalType as string], color: schemeColor(STATUS_META[f.status], scheme),
+    }))
     .filter((a) => (seenText.has(a.text) ? false : (seenText.add(a.text), true)));
 
   return {
@@ -98,7 +113,7 @@ export function buildDashboardViewModel(snapshot: PostureSnapshot | null, now: n
     score: snapshot.score,
     band: snapshot.band,
     bandLabel: meta.label,
-    bandColor: meta.color,
+    bandColor: schemeColor(meta, scheme),
     bandBlurb: meta.blurb,
     ringPct: Math.max(0, Math.min(1, snapshot.score / 100)),
     factors,

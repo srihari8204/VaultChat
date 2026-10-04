@@ -105,37 +105,58 @@ export default function LockHistoryScreen() {
   // 'loading' and 'error' are not "No lock sessions yet" — the empty copy used
   // to show while loading and after a failed read alike.
   const [load, setLoad] = useState<'loading' | 'ok' | 'error'>('loading');
+  /** A Retry after a failed read is in flight: only then does the header
+   *  banner show "Refreshing…". Filter, range and "Show more" changes keep the
+   *  list up and show progress in the footer instead. */
+  const [retrying, setRetrying] = useState(false);
+  /** The newest reload: an older read (previous filter, range or limit) that
+   *  resolves later must not overwrite it. */
+  const reqRef = useRef(0);
 
   const reload = useCallback(async () => {
-    setSessions(await getSessions(filter, limit));
+    const rows = await getSessions(filter, limit);
     const days = RANGES.find((r) => r.key === range)!.days;
     const now = new Date();
     const from = days === 1
       ? new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
       : Date.now() - days * 86_400_000;
-    setStats(await statsForRange(from, Date.now() + 1));
-    setTrend(await distancePerDay(7));
+    const stat = await statsForRange(from, Date.now() + 1);
+    const tr = await distancePerDay(7);
+    return { rows, stat, tr };
   }, [filter, range, limit]);
 
   /** Every reload reports into `load`, so a failure is never silent. */
-  const refresh = useCallback(
-    () => reload().then(() => setLoad('ok'), () => setLoad('error')), [reload]);
+  const refresh = useCallback(() => {
+    const req = ++reqRef.current;
+    return reload().then((d) => {
+      if (req !== reqRef.current) return;
+      setSessions(d.rows); setStats(d.stat); setTrend(d.tr);
+      setLoad('ok'); setRetrying(false);
+    }, () => {
+      if (req !== reqRef.current) return;
+      setLoad('error'); setRetrying(false);
+    });
+  }, [reload]);
   // A filter, range or "Show more" change reloads: show progress meanwhile.
   useEffect(() => { setLoad('loading'); refresh(); }, [refresh]);
-  const retry = () => { setLoad('loading'); refresh(); };
+  const retry = () => { setRetrying(true); setLoad('loading'); refresh(); };
 
-  const toggle = async (id: number) => {
-    if (open === id) { openRef.current = null; setOpen(null); return; }
-    openRef.current = id;
-    setOpen(id);
-    setEvents([]);   // never show the previous session's events under this one
+  const loadEvents = async (id: number) => {
     setEventsFailed(false);
-    setNoteSaved(false);
-    setNoteDraft(sessions.find((s) => s.id === id)?.notes ?? '');
     try {
       const evs = await getEvents(id);
       if (openRef.current === id) setEvents(evs);
     } catch { if (openRef.current === id) setEventsFailed(true); }
+  };
+
+  const toggle = (id: number) => {
+    if (open === id) { openRef.current = null; setOpen(null); return; }
+    openRef.current = id;
+    setOpen(id);
+    setEvents([]);   // never show the previous session's events under this one
+    setNoteSaved(false);
+    setNoteDraft(sessions.find((s) => s.id === id)?.notes ?? '');
+    loadEvents(id);
   };
 
   const share = async (make: () => Promise<string>, title: string) => {
@@ -244,11 +265,11 @@ export default function LockHistoryScreen() {
         </TouchableOpacity>
       </View>
       {/* The empty-list error below cannot show while sessions are listed, so a
-          failed reload (after a filter change, delete or note save) gets this. */}
-      {/* 'loading' with sessions listed only happens after Retry: keep the
-          banner and show progress instead of letting it vanish silently. */}
-      {load !== 'ok' && sessions.length > 0 && (
-        <View accessibilityLiveRegion="polite" style={[st.rowBetween, st.errBanner, { borderColor: colors.danger, backgroundColor: colors.glass }]}>
+          failed reload (after a filter change, delete or note save) gets this.
+          While its Retry runs, the banner stays (neutral border) with progress
+          instead of vanishing silently; ordinary reloads do not show it. */}
+      {sessions.length > 0 && (load === 'error' || (load === 'loading' && retrying)) && (
+        <View accessibilityLiveRegion="polite" style={[st.rowBetween, st.errBanner, { borderColor: load === 'error' ? colors.danger : colors.glassStroke, backgroundColor: colors.glass }]}>
           <Text style={{ color: colors.text, fontSize: 13, flex: 1 }}>
             {load === 'loading' ? 'Refreshing lock history…' : 'Couldn\u2019t refresh lock history. The list may be out of date.'}
           </Text>
@@ -272,15 +293,17 @@ export default function LockHistoryScreen() {
         data={sessions}
         keyExtractor={(s) => String(s.id)}
         ListHeaderComponent={header}
-        ListFooterComponent={sessions.length >= limit ? (load === 'loading' ? (
-          <ActivityIndicator color={colors.primary} style={{ marginTop: 16 }} accessibilityLabel="Loading more sessions" />
-        ) : (
+        // Progress for a filter, range or "Show more" reload of a listed history
+        // (the empty list shows its own spinner).
+        ListFooterComponent={sessions.length > 0 && load === 'loading' ? (
+          <ActivityIndicator color={colors.primary} style={{ marginTop: 16 }} accessibilityLabel="Loading sessions" />
+        ) : sessions.length >= limit ? (
           <TouchableOpacity onPress={() => setLimit((l) => l + PAGE)} accessibilityRole="button"
             accessibilityLabel={`Showing the latest ${sessions.length} sessions. Show more`}
             hitSlop={12} style={{ alignSelf: 'center', marginTop: 16, minHeight: 44, justifyContent: 'center' }}>
             <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 13 }}>Showing the latest {sessions.length} · Show more</Text>
           </TouchableOpacity>
-        )) : null}
+        ) : null}
         contentContainerStyle={st.body}
         ListEmptyComponent={
           load === 'loading' ? (
@@ -336,20 +359,29 @@ export default function LockHistoryScreen() {
             {open === s.id && (
               <View style={[st.timeline, { borderColor: colors.glassStroke }]}>
                 {eventsFailed && (
-                  <Text style={{ color: colors.textDim, fontSize: 12.5, paddingVertical: 4 }}>
-                    Couldn’t read this session’s events. Close and reopen it to try again.
-                  </Text>
+                  <View style={[st.rowBetween, { gap: 10 }]}>
+                    <Text style={{ color: colors.textDim, fontSize: 12.5, paddingVertical: 4, flex: 1 }} accessibilityLiveRegion="polite">
+                      Couldn’t read this session’s events.
+                    </Text>
+                    <TouchableOpacity onPress={() => loadEvents(s.id)} accessibilityRole="button"
+                      accessibilityLabel="Retry loading this session's events" hitSlop={12}>
+                      <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 12.5 }}>Retry</Text>
+                    </TouchableOpacity>
+                  </View>
                 )}
                 {events.map((e) => {
                   const meta = eventMeta(e.type, colors);
+                  const dist = e.distance != null ? fmtDistance(e.distance, settings.units) : null;
+                  const time = new Date(e.t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
                   return (
-                    <View key={e.id} style={st.eventRow}>
+                    // One element per event: icon, label, distance and time
+                    // were read as separate fragments.
+                    <View key={e.id} style={st.eventRow} accessible
+                      accessibilityLabel={`${meta.label}${dist ? `, ${dist}` : ''}, at ${time}`}>
                       <Ionicons name={meta.icon} size={14} color={meta.color} />
                       <Text style={{ color: colors.text, fontSize: 12.5, flex: 1 }}>{meta.label}</Text>
-                      {e.distance != null && <Text style={{ color: colors.textDim, fontSize: 12 }}>{fmtDistance(e.distance, settings.units)}</Text>}
-                      <Text style={{ color: colors.textDim, fontSize: 12 }}>
-                        {new Date(e.t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                      </Text>
+                      {dist != null && <Text style={{ color: colors.textDim, fontSize: 12 }}>{dist}</Text>}
+                      <Text style={{ color: colors.textDim, fontSize: 12 }}>{time}</Text>
                     </View>
                   );
                 })}
@@ -408,7 +440,7 @@ const st = StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   body: { padding: 16, paddingBottom: 48 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+  chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7, minHeight: 44, justifyContent: 'center' },
   statsCard: { flexDirection: 'row', flexWrap: 'wrap', borderWidth: 1, borderRadius: 14, marginTop: 12, paddingVertical: 6 },
   statCell: { width: '33.33%', alignItems: 'center', paddingVertical: 10 },
   trendCard: { borderWidth: 1, borderRadius: 14, marginTop: 10, padding: 12 },
