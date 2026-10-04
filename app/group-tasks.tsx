@@ -18,8 +18,7 @@ import { useTheme } from '../lib/theme';
 import { AuroraBackground } from '../components/ui/AuroraBackground';
 import { AppText as Text } from '../components/ui/Text';
 import { brandAlpha } from '../constants/theme';
-import { sendMessage } from '../lib/chatService';
-import { readGroupOps } from '../lib/groups/opThread';
+import { readGroupOps, sendGroupOp } from '../lib/groups/opThread';
 import { ThreadGaps } from '../components/groups/ThreadGaps';
 import { GroupNotFound } from '../components/groups/GroupNotFound';
 import { circleMembers } from '../lib/family/circle';
@@ -72,8 +71,12 @@ export default function GroupTasksScreen() {
   const rebuild = useCallback(async () => {
     if (!groupId) { setLoading(false); return; }
     try {
-      // Paged server read plus this device's own history (lib/groups/opThread).
-      const { ops, unreadable, complete } = await readGroupOps<TaskOp>(groupId, decodeOp);
+      // The server op index (or, on a server without it, the paged read) plus
+      // this device's own history (lib/groups/opThread). The viewer keys the
+      // in-memory legacy scan, so another account never reuses it.
+      const u = await getCurrentUserAsync().catch(() => null);
+      const viewer = u ? String(u.id) : null;
+      const { ops, unreadable, complete } = await readGroupOps<TaskOp>(groupId, 'tasks', decodeOp, viewer);
       opsRef.current = ops;
       setGaps({ unreadable, complete });
       const folded = foldTasks(ops);
@@ -83,8 +86,7 @@ export default function GroupTasksScreen() {
       // here rather than from the save handler because the list is a fold: a
       // due date moved on somebody else's phone arrives as a rebuild, not as a
       // tap. Idempotent, so an unchanged list books and cancels nothing.
-      const u = await getCurrentUserAsync().catch(() => null);
-      syncTaskReminders(groupId, folded, u ? String(u.id) : null).catch(() => {});
+      syncTaskReminders(groupId, folded, viewer).catch(() => {});
     } catch {
       // Offline: keep whatever is already on screen rather than blanking it.
       setFailed(true);
@@ -107,14 +109,15 @@ export default function GroupTasksScreen() {
     opsRef.current = [...opsRef.current, op];
     setTasks(foldTasks(opsRef.current));
     try {
-      await sendMessage(groupId, encodeOp(op));
+      // Tagged 'tasks' so the server can index it; the op itself stays encrypted.
+      await sendGroupOp(groupId, 'tasks', encodeOp(op));
       return true;
-    } catch (e: any) {
+    } catch (e) {
       // Take the unsent op back out first, so an offline re-read below does
       // not leave a change on screen that nobody received.
       opsRef.current = opsRef.current.filter((x) => x !== op);
       setTasks(foldTasks(opsRef.current));
-      Alert.alert('Not saved', e?.message ?? 'Could not reach the group. Try again.');
+      Alert.alert('Not saved', e instanceof Error && e.message ? e.message : 'Could not reach the group. Try again.');
       rebuild();
       return false;
     }

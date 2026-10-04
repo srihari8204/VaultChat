@@ -19,13 +19,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { AuroraBackground } from '../components/ui/AuroraBackground';
 import { AppText as Text } from '../components/ui/Text';
-import { sendMessage } from '../lib/chatService';
 import { getCurrentUserAsync } from './(constants)/authService';
 import {
   encodeNoteOp, decodeNoteOp, foldNotes, sortNotes, preview, newNoteId,
   type Note, type NoteOp,
 } from '../lib/groups/notes';
-import { readGroupOps } from '../lib/groups/opThread';
+import { readGroupOps, sendGroupOp } from '../lib/groups/opThread';
 import { KeyboardSafe } from '../components/ui';
 import { GroupNotFound } from '../components/groups/GroupNotFound';
 import { ThreadGaps } from '../components/groups/ThreadGaps';
@@ -63,8 +62,11 @@ export default function GroupNotesScreen() {
   const rebuild = useCallback(async () => {
     if (!groupId) { setLoading(false); return; }
     try {
-      // Paged server read plus this device's own history (lib/groups/opThread).
-      const { ops, unreadable, complete } = await readGroupOps<NoteOp>(groupId, decodeNoteOp);
+      // The server op index (or, on a server without it, the paged read) plus
+      // this device's own history (lib/groups/opThread). The viewer keys the
+      // in-memory legacy scan, so another account never reuses it.
+      const u = await getCurrentUserAsync().catch(() => null);
+      const { ops, unreadable, complete } = await readGroupOps<NoteOp>(groupId, 'notes', decodeNoteOp, u ? String(u.id) : null);
       opsRef.current = ops;
       setGaps({ unreadable, complete });
       setNotes(foldNotes(ops));
@@ -90,14 +92,15 @@ export default function GroupNotesScreen() {
     opsRef.current = [...opsRef.current, op];
     setNotes(foldNotes(opsRef.current));
     try {
-      await sendMessage(groupId, encodeNoteOp(op));
+      // Tagged 'notes' so the server can index it; the op itself stays encrypted.
+      await sendGroupOp(groupId, 'notes', encodeNoteOp(op));
       return true;
-    } catch (e: any) {
+    } catch (e) {
       // Take the unsent op back out first: if the re-read below also fails
       // (offline), the list must not keep showing a change nobody received.
       opsRef.current = opsRef.current.filter((x) => x !== op);
       setNotes(foldNotes(opsRef.current));
-      Alert.alert('Not saved', e?.message ?? 'Could not reach the group.');
+      Alert.alert('Not saved', e instanceof Error && e.message ? e.message : 'Could not reach the group.');
       rebuild();
       return false;
     }
@@ -235,7 +238,7 @@ export default function GroupNotesScreen() {
             adjustResize, and KAV's 'padding' math mixes Modal-relative layout
             coords with absolute screen coords, so the lift came up short.
             keyboardOnly: this sheet already sets its own bottom padding. */}
-        <KeyboardSafe keyboardOnly style={st.backdrop}>
+        <KeyboardSafe keyboardOnly style={[st.backdrop, { backgroundColor: colors.scrim }]}>
           <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setCreating(false)}
             accessibilityRole="button" accessibilityLabel="Close without saving" />
           <View style={[st.sheet, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
@@ -283,7 +286,7 @@ const st = StyleSheet.create({
   cardMain: { padding: 14 },
   pin: { position: 'absolute', top: 10, right: 10, padding: 4 },
   banner: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderWidth: 1, borderRadius: 12, marginBottom: 12 },
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' },
+  backdrop: { flex: 1 },
   sheet: { borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, padding: 18, paddingBottom: 32 },
   field: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, minHeight: 48 },
   input: { flex: 1, fontSize: 15 },

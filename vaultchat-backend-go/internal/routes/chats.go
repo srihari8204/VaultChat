@@ -158,6 +158,7 @@ func RegisterChats(mux *http.ServeMux) {
 	RegisterChatsAnonOnID(id)       // code chats: "keep this person" (migration 119)
 	RegisterChatMembershipOnID(id)  // Groups & Circles in-app membership (v2)
 	RegisterChatCalendarOnID(id)    // Groups & Circles shared calendar
+	RegisterChatOpsOnID(id)         // Group notes/tasks op index (migration 145)
 	// Family Space rides the chat router until it moves out; with SERVICES
 	// naming only core, these paths 404 here and Caddy sends them to family.
 	if services.Enabled(services.Family) {

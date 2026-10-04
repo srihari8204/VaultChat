@@ -587,6 +587,13 @@ func chatsMessagePost(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 400, "invalid type")
 		return
 	}
+	// Group notes/tasks op index (chats_ops.go, migration 145): an optional
+	// plaintext routing tag. It says only THAT this is a notes or tasks op.
+	opKind, opErr, opCode := chatsOpKindFromBody(b, mem, msgType)
+	if opErr != "" {
+		httpx.Err(w, 400, opErr, map[string]any{"code": opCode})
+		return
+	}
 
 	isMedia := msgType == "image" || msgType == "video" || msgType == "audio" || msgType == "file"
 	switch {
@@ -798,6 +805,9 @@ func chatsMessagePost(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 		if e != nil {
+			return e
+		}
+		if e := chatsTagOp(ctx, tx, row.ID, opKind); e != nil {
 			return e
 		}
 		// The ephemeral half, in the SAME transaction. message_bodies has no FK
