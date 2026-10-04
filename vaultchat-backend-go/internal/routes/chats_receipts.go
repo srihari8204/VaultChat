@@ -59,9 +59,11 @@ func chatsMessageReceipts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var senderID *string
-	err := db.Pool.QueryRow(ctx,
+	// Under the caller's user context, like every other message read: as the
+	// non-owner RLS role a bare pool read sees no message rows and 404s.
+	err := chatsQRow(ctx, user.ID,
 		`SELECT sender_id::text FROM messages WHERE id = $1 AND chat_id = $2 AND deleted_at IS NULL`,
-		msgID, chatID).Scan(&senderID)
+		[]any{msgID, chatID}, &senderID)
 	if err != nil && !db.NoRows(err) {
 		log.Printf("[receipts GET] %v", err)
 		httpx.Err(w, 500, "Failed to load message info")
@@ -119,7 +121,7 @@ func chatsMessageReceipts(w http.ResponseWriter, r *http.Request) {
 	// The caller's own setting counts too (chatsGet checks every active member).
 	if mem.ChatType == "direct" && !anyReceiptsOff {
 		var mine *bool
-		if e := db.Pool.QueryRow(ctx, `SELECT read_receipts FROM users WHERE id = $1`, user.ID).Scan(&mine); e == nil &&
+		if e := chatsQRow(ctx, user.ID, `SELECT read_receipts FROM users WHERE id = $1`, []any{user.ID}, &mine); e == nil &&
 			mine != nil && !*mine {
 			anyReceiptsOff = true
 		}
