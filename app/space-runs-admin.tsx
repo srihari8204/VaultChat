@@ -39,16 +39,18 @@ import { AuroraBackground } from '../components/ui';
 import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 import LoadError from '../components/spaces/LoadError';
 import {
-  clockOf, stopPayload, remapRiders, idsPreserved, plannedPickStart,
+  stopWhenText, stopPayload, remapRiders, idsPreserved, plannedPickStart,
 } from '../lib/spaces/runPlan';
 import ChatDoorButton from '../components/spaces/ChatDoorButton';
 import { runsAdminStyles } from '../components/spaces/runsAdminStyles';
-import NewRunModal, { type NewRunBody } from '../components/spaces/NewRunModal';
+import NewRunModal, { type NewRunBody, whenLabel } from '../components/spaces/NewRunModal';
 import StopFormModal, { type StopFormInitial, type StopFormResult } from '../components/spaces/StopFormModal';
 
 /** One stop as the editor holds it: its OLD server id (null when new) plus the
  *  fields the server stores. See lib/spaces/runPlan.ts for why the old id matters. */
 type StopDraft = { prevId: string | null; label: string; lat: number | null; lng: number | null; plannedAt: string | null };
+/** What opening a run needs: its id, and its labels for the error card. */
+type OpenTarget = Pick<Run, 'id' | 'name' | 'vehicleLabel'>;
 const draftOf = (st: RunStop): StopDraft =>
   ({ prevId: st.id, label: st.label, lat: st.lat, lng: st.lng, plannedAt: st.plannedAt });
 
@@ -67,7 +69,7 @@ export default function SpaceRunsAdminScreen() {
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   // A run that could not be opened, shown inline with a retry instead of an Alert.
-  const [openError, setOpenError] = useState<{ run: Run; message: string } | null>(null);
+  const [openError, setOpenError] = useState<{ run: OpenTarget; message: string } | null>(null);
 
   // The run being edited, with its stops and manifest.
   const [editing, setEditing] = useState<{ run: Run; stops: RunStop[]; riders: RunRider[] } | null>(null);
@@ -97,7 +99,8 @@ export default function SpaceRunsAdminScreen() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const openRun = useCallback(async (r: Run) => {
+  /** Reads only the id, and the name/vehicle for its error card. */
+  const openRun = useCallback(async (r: OpenTarget) => {
     try {
       setEditing(await getRun(spaceId, r.id));
       setOpenError(null);
@@ -121,8 +124,7 @@ export default function SpaceRunsAdminScreen() {
     // its own inline retry rather than reading as "not created").
     setCreating(false);
     await load();
-    // openRun reads only the id, and the name/vehicle for its error card.
-    await openRun({ id, name: body.name, vehicleLabel: body.vehicleLabel ?? null } as Run);
+    await openRun({ id, name: body.name, vehicleLabel: body.vehicleLabel ?? null });
     return true;
   }, [spaceId, load, openRun]);
 
@@ -425,7 +427,7 @@ export default function SpaceRunsAdminScreen() {
           <ScrollView contentContainerStyle={[s.body, { paddingBottom: 40 + insets.bottom }]}>
             {/* driver */}
             <Text style={s.section}>DRIVER</Text>
-            <View style={s.card}>
+            <View style={s.card} accessibilityRole="radiogroup" accessibilityLabel="Driver">
               {members.length === 0 && <Text style={s.muted}>Nobody in this space can be assigned yet.</Text>}
               {members.map((m) => {
                 const on = editing?.run.driverId === m.id;
@@ -455,16 +457,18 @@ export default function SpaceRunsAdminScreen() {
                   guardians get no arrival estimate or late warning.
                 </Text>
               )}
-              {orderedStops.map((st, i) => (
+              {orderedStops.map((st, i) => {
+                const when = stopWhenText(st.plannedAt, editing?.run.scheduledAt ?? null, whenLabel);
+                return (
                 <View key={st.id} style={s.pickRow}>
                   <Text style={s.seq}>{i + 1}</Text>
                   <TouchableOpacity
                     style={{ flex: 1 }} onPress={() => editStop(i)} disabled={busy}
-                    accessibilityRole="button" accessibilityLabel={`Edit stop ${st.label}`}
+                    accessibilityRole="button" accessibilityLabel={`Edit stop ${st.label}, ${when || 'no planned time'}`}
                   >
                     <Text style={[s.pickText, { color: colors.text }]}>{st.label}</Text>
                     <Text style={s.muted}>
-                      {st.plannedAt ? clockOf(st.plannedAt) : 'No planned time'}
+                      {when || 'No planned time'}
                       {' · '}
                       {st.lat != null && st.lng != null ? 'Location set' : 'No location'}
                     </Text>
@@ -478,7 +482,8 @@ export default function SpaceRunsAdminScreen() {
                     <Ionicons name="close-circle-outline" size={19} color={colors.textDim} />
                   </TouchableOpacity>
                 </View>
-              ))}
+                );
+              })}
               <TouchableOpacity
                 style={[s.addStop, busy && s.off]} onPress={() => editStop(null)} disabled={busy}
                 accessibilityRole="button" accessibilityLabel="Add a stop"
@@ -551,7 +556,8 @@ export default function SpaceRunsAdminScreen() {
         <Modal visible={!!stopFor} transparent animationType="fade" onRequestClose={() => setStopFor(null)}>
           <View style={s.modalWrap}>
             <View style={s.modal}>
-              <Text style={s.modalTitle}>Stop for {stopFor?.displayName}</Text>
+              <Text style={s.modalTitle} accessibilityRole="header">Stop for {stopFor?.displayName}</Text>
+              <View accessibilityRole="radiogroup" accessibilityLabel={`Stop for ${stopFor?.displayName ?? 'this rider'}`}>
               {[{ id: null as string | null, label: 'No stop (shown at the first stop)' },
                 ...orderedStops.map((st, i) => ({ id: st.id as string | null, label: `${i + 1}. ${st.label}` }))].map((o) => {
                 const on = (stopFor?.stopId ?? null) === o.id;
@@ -566,6 +572,7 @@ export default function SpaceRunsAdminScreen() {
                   </TouchableOpacity>
                 );
               })}
+              </View>
               <View style={s.modalRow}>
                 <TouchableOpacity style={s.modalBtn} onPress={() => setStopFor(null)} accessibilityRole="button" accessibilityLabel="Cancel">
                   <Text style={s.muted}>Cancel</Text>

@@ -222,6 +222,9 @@ export default function SpaceVisitorsScreen() {
           {loadError && (
             <LoadError colors={colors} title="Could not load passes" message={loadError} onRetry={() => { setLoading(true); void load(); }} />
           )}
+          {loadError && ordered.length > 0 && (
+            <Text style={s.muted}>The passes below are from the last successful refresh and may be out of date.</Text>
+          )}
           {!loadError && ordered.length === 0 && (
             <View style={s.card}>
               <Text style={s.cardTitle}>No passes yet</Text>
@@ -235,10 +238,19 @@ export default function SpaceVisitorsScreen() {
         renderItem={({ item: p }) => {
           const inside = !!p.redeemedAt && !p.exitedAt;
           const expired = !p.redeemedAt && Date.parse(p.validTo) < Date.now();
+          const state = inside ? `On site since ${clock(p.redeemedAt!)}`
+            : p.exitedAt ? `Left at ${clock(p.exitedAt)}`
+              : expired ? 'Expired unused'
+                : `Expected · valid until ${clock(p.validTo)}`;
           return (
-            <View style={[s.card, inside && s.inside, expired && s.spent]}>
+            <View style={[s.card, inside && s.inside]}>
               <View style={s.row}>
-                <View style={[s.icon, { backgroundColor: (inside ? colors.success : colors.primary) + '22' }]}>
+                {/* One element for who and their state; the code and Sign out
+                    stay their own buttons. */}
+                <View style={s.who} accessible accessibilityLabel={`${p.visitorName}, ${state.replace(' · ', ', ')}`}>
+                {/* An expired pass fades only its icon: fading the card took
+                    its text below readable contrast. */}
+                <View style={[s.icon, { backgroundColor: (inside ? colors.success : colors.primary) + '22' }, expired && s.spent]}>
                   <Ionicons
                     name={inside ? 'walk' : p.exitedAt ? 'checkmark-done' : 'time-outline'}
                     size={18}
@@ -247,12 +259,8 @@ export default function SpaceVisitorsScreen() {
                 </View>
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={s.cardTitle} numberOfLines={1}>{p.visitorName}</Text>
-                  <Text style={s.muted} numberOfLines={1}>
-                    {inside ? `On site since ${clock(p.redeemedAt!)}`
-                      : p.exitedAt ? `Left at ${clock(p.exitedAt)}`
-                        : expired ? 'Expired unused'
-                          : `Expected · valid until ${clock(p.validTo)}`}
-                  </Text>
+                  <Text style={s.muted} numberOfLines={1}>{state}</Text>
+                </View>
                 </View>
                 {!p.redeemedAt && !expired && (
                   <TouchableOpacity
@@ -403,7 +411,8 @@ const styles = (c: Palette) => StyleSheet.create({
   scanText: { color: c.primary, fontWeight: '600', flex: 1 },
   card: { backgroundColor: c.glassSoft, borderRadius: 14, padding: 14, gap: 6 },
   inside: { borderWidth: 1, borderColor: c.success },
-  spent: { opacity: 0.55 },
+  spent: { opacity: 0.5 },
+  who: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 12 },
   cardTitle: { color: c.text, fontSize: 15.5, fontWeight: '700' },
   muted: { color: c.textDim, fontSize: 12.5, flexShrink: 1 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },

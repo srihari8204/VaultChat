@@ -118,7 +118,11 @@ export default function SpaceRosterScreen() {
     }
   }, [newName, newRef, newKind, defaultKind, spaceId, load]);
 
+  // The entry being removed: one at a time, so a double tap on Remove (or on
+  // two rows) cannot send overlapping archive calls.
+  const [archiving, setArchiving] = useState<string | null>(null);
   const onArchive = useCallback((entry: RosterEntry) => {
+    if (archiving) return;
     Alert.alert(
       `Remove ${entry.displayName}?`,
       'They stop appearing everywhere in this space. Their past run records stay, so history remains readable.',
@@ -128,17 +132,20 @@ export default function SpaceRosterScreen() {
           text: 'Remove',
           style: 'destructive',
           onPress: async () => {
+            setArchiving(entry.id);
             try {
               await updateRosterEntry(spaceId, entry.id, { archived: true });
               await load();
             } catch (e: any) {
               Alert.alert('Could not remove', e?.message ?? 'Try again.');
+            } finally {
+              setArchiving(null);
             }
           },
         },
       ],
     );
-  }, [spaceId, load]);
+  }, [spaceId, load, archiving]);
 
   const s = useMemo(() => styles(colors), [colors]);
 
@@ -187,6 +194,9 @@ export default function SpaceRosterScreen() {
           {loadError && (
             <LoadError colors={colors} title="Could not load the roster" message={loadError} onRetry={() => { setLoading(true); void load(); }} />
           )}
+          {loadError && roster.length > 0 && (
+            <Text style={s.muted}>The roster below is from the last successful refresh and may be out of date.</Text>
+          )}
           {canManage && !loadError && (
             <TouchableOpacity
               style={[s.card, s.row]} onPress={() => setLinksOpen(true)}
@@ -223,6 +233,12 @@ export default function SpaceRosterScreen() {
         renderItem={({ item: r }) => (
           <View style={s.card}>
             <View style={s.row}>
+              {/* One element for who this is; Remove stays its own button. */}
+              <View
+                style={s.who} accessible
+                accessibilityLabel={[r.displayName, kindLabel(r.kind), r.userId ? 'has an account' : 'no account',
+                  linkedIds.has(r.id) ? 'in your care' : null, r.externalRef].filter(Boolean).join(', ')}
+              >
               <View style={[s.avatar, { backgroundColor: colors.primary + '22' }]}>
                 <Ionicons
                   name={r.userId ? 'person' : 'happy-outline'}
@@ -241,9 +257,16 @@ export default function SpaceRosterScreen() {
                   {r.externalRef ? ` · ${r.externalRef}` : ''}
                 </Text>
               </View>
+              </View>
               {canManage && (
-                <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Remove ${r.displayName} from the roster`} onPress={() => onArchive(r)} style={s.hit}>
-                  <Ionicons name="close-circle-outline" size={20} color={colors.textDim} />
+                <TouchableOpacity
+                  accessibilityRole="button" accessibilityLabel={`Remove ${r.displayName} from the roster`}
+                  onPress={() => onArchive(r)} style={s.hit} disabled={!!archiving}
+                  accessibilityState={{ disabled: !!archiving, busy: archiving === r.id }}
+                >
+                  {archiving === r.id
+                    ? <ActivityIndicator size="small" color={colors.textDim} />
+                    : <Ionicons name="close-circle-outline" size={20} color={colors.textDim} />}
                 </TouchableOpacity>
               )}
             </View>
@@ -333,6 +356,7 @@ const styles = (c: Palette) => StyleSheet.create({
   header: { gap: 10 },
   card: { backgroundColor: c.glassSoft, borderRadius: 14, padding: 14 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  who: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 12 },
   avatar: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   name: { color: c.text, fontSize: 15.5, fontWeight: '600' },
   muted: { color: c.textDim, fontSize: 13, flexShrink: 1 },

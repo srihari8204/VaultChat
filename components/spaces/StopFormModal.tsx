@@ -44,7 +44,7 @@ export default function StopFormModal({ initial, colors, s, busy, pickStart, sch
   onClose: () => void;
   onSubmit: (v: StopFormResult) => void;
 }) {
-  const picker = useDatePicker();
+  const picker = useDatePicker(undefined, { inModal: true });
   const [label, setLabel] = useState('');
   const [where, setWhere] = useState('');
   const [planned, setPlanned] = useState<Date | null>(null);
@@ -98,7 +98,7 @@ export default function StopFormModal({ initial, colors, s, busy, pickStart, sch
   const working = busy || locating;
 
   return (
-    <Modal visible={!!initial} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={!!initial} transparent animationType="fade" onRequestClose={onClose} onDismiss={picker.close}>
       <KeyboardSafe keyboardOnly>
       <View style={s.modalWrap}>
         <View style={s.modal}>
@@ -162,7 +162,8 @@ export default function StopFormModal({ initial, colors, s, busy, pickStart, sch
         </View>
       </View>
       </KeyboardSafe>
-      {/* Inside this Modal so it stacks above it on iOS. */}
+      {/* Last child: on iOS the picker is an overlay inside this Modal, not a
+          second Modal (components/ui/useDatePicker inModal). */}
       {picker.element}
     </Modal>
   );

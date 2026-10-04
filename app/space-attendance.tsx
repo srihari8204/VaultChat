@@ -28,7 +28,7 @@ import { getPlaces } from '../lib/family/store';
 import { circleMembers } from '../lib/family/circle';
 import { attendanceTiles } from '../lib/spaces/dashboard';
 import {
-  crossingsFromSamples, crossingsForDay, projectDay, summarise, makeShift, pickWorkZone, liveZones,
+  crossingsFromSamples, crossingsForDay, projectDay, summarise, makeShift, pickWorkZone, liveZones, calendarDaysAgo,
   STATE_LABELS, type AttendanceState, type DayAttendance,
 } from '../lib/spaces/attendance';
 import type { Geofence } from '../lib/family/geofence';
@@ -119,15 +119,15 @@ export default function SpaceAttendanceScreen() {
         );
         const week: DayAttendance[] = [];
         for (let d = DAYS - 1; d >= 0; d--) {
-          const dayMs = Date.now() - d * 24 * 3600_000;
+          const dayMs = calendarDaysAgo(Date.now(), d);
           week.push(projectDay(crossingsForDay(crossings, dayMs), sh, Math.min(Date.now(), endOfDay(dayMs))));
         }
         return { userId: m.id, name: m.name, today: week[week.length - 1], week };
       });
       setRows(built);
-    } catch (e: any) {
+    } catch (e) {
       // Not "No workplace set": a failed read is not an absent zone.
-      setLoadError(e?.message ?? 'Could not load attendance.');
+      setLoadError((e instanceof Error && e.message) || 'Could not load attendance.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -228,7 +228,7 @@ export default function SpaceAttendanceScreen() {
         <>
           <View style={s.tiles}>
             {tiles.map((t) => (
-              <View key={t.key} style={s.tile}>
+              <View key={t.key} style={s.tile} accessible accessibilityLabel={`${t.label}, ${t.value}`}>
                 <Text style={s.tileValue}>{t.value}</Text>
                 <Text style={s.tileLabel}>{t.label}</Text>
               </View>
@@ -316,7 +316,7 @@ const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-dig
 
 function dayLabel(daysAgo: number): string {
   if (daysAgo === 0) return 'Today';
-  const d = new Date(Date.now() - daysAgo * 24 * 3600_000);
+  const d = new Date(calendarDaysAgo(Date.now(), daysAgo));
   return d.toLocaleDateString([], { weekday: 'short' });
 }
 

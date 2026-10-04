@@ -113,7 +113,7 @@ const SCHOOL: SpaceSection[] = [
 
 const OFFICE: SpaceSection[] = [
   { key: 'people', label: 'Employees', hint: 'Who is in, out or on leave', icon: 'people-outline', route: '/space-people', needs: 'view_space_ops' },
-  { key: 'attendance', label: 'Attendance', hint: 'Check in and check out', icon: 'log-in-outline', route: '/space-checkin' },
+  { key: 'attendance', label: 'Check in', hint: 'Check in and check out', icon: 'log-in-outline', route: '/space-checkin' },
   { key: 'map', label: 'Live locations', hint: 'Only those authorised by policy', icon: 'map-outline', route: '/space-ops-map', needs: 'view_space_ops', usesLocation: true },
   { key: 'tasks', label: 'Tasks', hint: 'Assigned work and its progress', icon: 'checkbox-outline', route: '/space-tasks' },
   { key: 'leave', label: 'Leave', hint: 'Requests, approvals and balance', icon: 'calendar-outline', route: '/space-leave' },

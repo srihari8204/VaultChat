@@ -65,7 +65,7 @@ export default function SpaceLeaveScreen() {
     [params.perms],
   );
   const insets = useSafeAreaInsets();
-  const picker = useDatePicker();
+  const picker = useDatePicker(undefined, { inModal: true });
   const [allowanceOpen, setAllowanceOpen] = useState(false);
   const [allowanceForm, setAllowanceForm] = useState<Record<AllowanceKind, string>>({ casual: '', sick: '', privilege: '', unpaid: '' });
 
@@ -86,25 +86,29 @@ export default function SpaceLeaveScreen() {
   const [saving, setSaving] = useState(false);
   const [meId, setMeId] = useState<string | null>(null);
 
-  React.useEffect(() => {
-    getCurrentUserAsync().then((u: any) => setMeId(u?.id ? String(u.id) : null)).catch(() => {});
-  }, []);
-
   const load = useCallback(async () => {
     if (!spaceId) { setErr('No space was given.'); setRows([]); return; }
     try {
       setErr(null);
-      const [l, b] = await Promise.all([
+      const [u, l, b] = await Promise.all([
+        getCurrentUserAsync().catch(() => null),
         getLeave(spaceId),
         // Balance is a nicety; its absence must not empty the whole screen.
         getLeaveBalance(spaceId).catch(() => null),
       ]);
+      // Without knowing who is signed in, My Leave would be empty, Withdraw
+      // hidden, and an approver shown Approve on their own request (which the
+      // server refuses). An error, as on space-checkin.
+      const id = u?.id != null ? String(u.id) : '';
+      if (!id) throw new Error('Could not tell who is signed in. Try again.');
+      setMeId(id);
       setRows(l);
       setBalance(b);
       setBalanceFailed(b == null);
     } catch (e: any) {
       setErr(e?.message || 'Could not load leave.');
-      setRows([]);
+      // Keep what was last shown; the note under the error says it may be old.
+      setRows((prev) => prev ?? []);
     }
   }, [spaceId]);
 
@@ -184,11 +188,14 @@ export default function SpaceLeaveScreen() {
   };
 
   const s = useMemo(() => styles(colors), [colors]);
-  // Pending is orange in the design system — attention, not a verdict either way.
+  // Pending is orange in the design system — attention, not a verdict either
+  // way. Withdrawn (cancelled) is the requester's own choice: neutral, not red.
   const tone = (st: string) =>
-    st === 'approved' ? colors.success : st === 'pending' ? colors.warning : colors.danger;
+    st === 'approved' ? colors.success : st === 'pending' ? colors.warning
+      : st === 'cancelled' ? colors.textDim : colors.danger;
   const icon = (st: string): keyof typeof Ionicons.glyphMap =>
-    st === 'approved' ? 'checkmark-circle' : st === 'pending' ? 'time-outline' : 'close-circle';
+    st === 'approved' ? 'checkmark-circle' : st === 'pending' ? 'time-outline'
+      : st === 'cancelled' ? 'arrow-undo-outline' : 'close-circle';
 
   const mine = (rows ?? []).filter((r) => r.userId === meId);
   const pending = (rows ?? []).filter((r) => r.status === 'pending');
@@ -213,7 +220,7 @@ export default function SpaceLeaveScreen() {
             {pretty(r.fromDay)} – {pretty(r.toDay)} · {r.days} day{r.days === 1 ? '' : 's'}
           </Text>
         </View>
-        <Text style={[s.status, { color: tone(r.status) }]}>{r.status}</Text>
+        <Text style={[s.status, { color: tone(r.status) }]}>{r.status === 'cancelled' ? 'withdrawn' : r.status}</Text>
       </View>
       {!!r.reason && <Text style={s.muted}>{r.reason}</Text>}
       {/* NOBODY DECIDES THEIR OWN REQUEST. The server refuses it outright, so
@@ -235,14 +242,14 @@ export default function SpaceLeaveScreen() {
           <Text style={[s.btnText, { color: colors.text }]}>{busy === r.id ? '…' : 'Withdraw'}</Text>
         </TouchableOpacity>
       )}
-      {canDecide && r.status === 'pending' && r.userId !== meId && (
+      {canDecide && !!meId && r.status === 'pending' && r.userId !== meId && (
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <TouchableOpacity
             onPress={() => decide(r, 'rejected')}
             disabled={busy === r.id}
             style={[s.btn, s.btnGhost, { flex: 1 }]}
             accessibilityRole="button" accessibilityLabel={`Decline leave for ${r.name || 'this person'}`}
-            accessibilityState={{ disabled: busy === r.id }}
+            accessibilityState={{ disabled: busy === r.id, busy: busy === r.id }}
           >
             <Text style={[s.btnText, { color: colors.danger }]}>Decline</Text>
           </TouchableOpacity>
@@ -337,6 +344,9 @@ export default function SpaceLeaveScreen() {
         {err && (
           <LoadError colors={colors} title="Could not load leave" message={err} onRetry={() => { void onRefresh(); }} />
         )}
+        {err && !!rows?.length && (
+          <Text style={s.muted}>The requests below are from the last successful refresh and may be out of date.</Text>
+        )}
 
         {rows !== null && rows.length === 0 && !err && (
           <View style={s.card}>
@@ -361,7 +371,7 @@ export default function SpaceLeaveScreen() {
         <Ionicons name="add" size={26} color={colors.onBrand} />
       </TouchableOpacity>
 
-      <Modal visible={compose} animationType="slide" transparent onRequestClose={() => setCompose(false)}>
+      <Modal visible={compose} animationType="slide" transparent onRequestClose={() => setCompose(false)} onDismiss={picker.close}>
         <KeyboardSafe keyboardOnly>
         <View style={s.sheetWrap}>
           <View style={[s.sheet, { paddingBottom: 18 + insets.bottom }]}>
@@ -430,7 +440,8 @@ export default function SpaceLeaveScreen() {
           </View>
         </View>
         </KeyboardSafe>
-        {/* Inside this Modal so it stacks above it on iOS. */}
+        {/* Last child: on iOS the picker is an overlay inside this Modal, not a
+            second Modal (components/ui/useDatePicker inModal). */}
         {picker.element}
       </Modal>
 

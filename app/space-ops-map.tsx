@@ -17,7 +17,7 @@
 // position to draw, which is different from a bus that is not moving.
 
 import { AppText as Text } from '../components/ui/Text';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, TextInput, RefreshControl,
 } from 'react-native';
@@ -26,7 +26,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import FamilyMap, { type FamilyMarker } from '../components/family/FamilyMap';
-import { getRunsWithManifest } from '../lib/spaces/api';
+import { getRunsWithManifest, type RunWithManifest } from '../lib/spaces/api';
 import { subscribeRun, type RunPing } from '../lib/spaces/runSession';
 import { progress, type Run, type RunRider } from '../lib/spaces/runs';
 import { tilesForType, type RunSet } from '../lib/spaces/dashboard';
@@ -58,13 +58,20 @@ export default function SpaceOpsMapScreen() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const load = useCallback(async () => {
+  // The last list read, so a timer re-read against a server without
+  // `include=` re-reads only the runs on the road (lib/spaces/api previous).
+  const lastList = useRef<RunWithManifest[] | undefined>(undefined);
+  const load = useCallback(async (timer = false) => {
     try {
       // Manifests come with the runs (one call where the server supports it,
       // else per run) so the office sees "22 of 40 aboard" rather than just a
       // dot. Failures are per-run and non-fatal — and marked, not drawn as 0/0.
-      const list = await getRunsWithManifest(spaceId, { activeOnly: true });
+      const list = await getRunsWithManifest(spaceId, { activeOnly: true, previous: timer ? lastList.current : undefined });
+      lastList.current = list;
       setRuns(list.map((x) => x.run));
+      // A run that finished or vanished since: the composer must not keep
+      // addressing it.
+      setFocus((f) => (f && list.some((x) => x.run.id === f) ? f : null));
       setManifests(Object.fromEntries(list.map((x) => [x.run.id, x.riders])));
       setNoManifest(list.filter((x) => x.failed).map((x) => x.run.id));
       setLoadError(null);
@@ -82,7 +89,7 @@ export default function SpaceOpsMapScreen() {
   // while this screen is open appears without leaving it.
   useFocusEffect(useCallback(() => {
     void load();
-    const t = setInterval(() => { void load(); }, RELOAD_MS);
+    const t = setInterval(() => { void load(true); }, RELOAD_MS);
     return () => clearInterval(t);
   }, [load]));
 
@@ -276,6 +283,13 @@ export default function SpaceOpsMapScreen() {
         style={s.list} contentContainerStyle={s.listBody} keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} tintColor={colors.primary} />}
       >
+        {/* A failed re-read keeps the last rows: say so, above them. */}
+        {loadError && (
+          <LoadError colors={colors} title="Could not load runs" message={loadError} onRetry={() => { void load(); }} />
+        )}
+        {loadError && runs.length > 0 && (
+          <Text style={s.muted}>The runs below are from the last successful refresh and may be out of date.</Text>
+        )}
         {/* Derived tiles (S3.2). Alert colour is reserved for what is actually
             wrong: riders still to collect on a running route is the normal state
             of a bus halfway round, and a dashboard that is red every morning is
@@ -375,9 +389,6 @@ export default function SpaceOpsMapScreen() {
           </View>
         )}
 
-        {loadError && (
-          <LoadError colors={colors} title="Could not load runs" message={loadError} onRetry={() => { void load(); }} />
-        )}
         {!loadError && runs.length === 0 && (
           <Text style={s.muted}>No runs are scheduled or in progress.</Text>
         )}

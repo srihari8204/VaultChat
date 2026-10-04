@@ -23,6 +23,9 @@ import { AuroraBackground } from '../components/ui';
 import LoadError from '../components/spaces/LoadError';
 import { initialOf } from '../lib/format';
 
+/** How often the list is re-read while the screen is focused. */
+const RELOAD_MS = 60_000;
+
 export default function SpacePendingScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ spaceId?: string; name?: string; groupType?: string }>();
@@ -53,7 +56,14 @@ export default function SpacePendingScreen() {
     }
   }, [spaceId]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  // Read on focus, and again every minute while focused: this is the screen
+  // open while a parent is on the phone, and a rider picked up meanwhile must
+  // leave it without a manual pull. One server-side query per read.
+  useFocusEffect(useCallback(() => {
+    void load();
+    const t = setInterval(() => { void load(); }, RELOAD_MS);
+    return () => clearInterval(t);
+  }, [load]));
 
   // Grouped by run for the eye, in the server's order. Map preserves insertion
   // order, so the first run listed is still the one with the earliest stop.

@@ -20,9 +20,10 @@
 // Arrival is a WINDOW, never a single time. See lib/spaces/runs.ts for why.
 
 import { AppText as Text } from '../components/ui/Text';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, RefreshControl,
+  AccessibilityInfo, Platform,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -426,23 +427,41 @@ function RiderCard({ rider, run, stops, reachedStopId, vehicle, colors, s, delay
   // delayThresholdMin undefined (first instant before load) → isDelayed's own
   // default (10) applies, same as before this fix.
   const late = waiting && isDelayed(myStop?.plannedAt ?? null, win.latest, delayThresholdMin);
+  const windowText = between === 0 ? 'Arriving now' : `Between ${clockMs(win.earliest)} and ${clockMs(win.latest)}`;
+  const whereText = `${myStop ? `at ${myStop.label}` : 'at the first stop'}${between > 0 ? ` · ${between} ${between === 1 ? 'stop' : 'stops'} away` : ''}`;
+
+  // The window is recomputed every 30s, and a screen-reader user should hear
+  // it move without re-reading. Android: the card's polite live region below.
+  // iOS ignores live regions, so announce a CHANGED window there.
+  const lastWindow = useRef<string | null>(null);
+  useEffect(() => {
+    const said = waiting ? windowText : null;
+    if (Platform.OS === 'ios' && said && lastWindow.current && said !== lastWindow.current) {
+      AccessibilityInfo.announceForAccessibility(said);
+    }
+    lastWindow.current = said;
+  }, [waiting, windowText]);
 
   return (
-    <View style={[s.card, s.hero]}>
+    <View
+      style={[s.card, s.hero]}
+      // One element: "Asha, waiting, between 07:40 and 07:50 at Green Lane, 2 stops away".
+      accessible
+      accessibilityLabel={[
+        rider.displayName, riderHeadline(rider.state, run),
+        waiting ? `${windowText} ${whereText.replace(' · ', ', ')}` : null,
+        late ? 'running behind the scheduled time' : null,
+        rider.stateAt && rider.state !== 'pending' ? clock(rider.stateAt) : null,
+      ].filter(Boolean).join(', ')}
+      accessibilityLiveRegion={waiting ? 'polite' : 'none'}
+    >
       <Text numberOfLines={1} style={s.heroName}>{rider.displayName}</Text>
       <Text style={s.heroState}>{riderHeadline(rider.state, run)}</Text>
 
       {waiting && (
         <>
-          {/* Polite live region: the window is recomputed every 30s, and a
-              screen-reader user should hear it move without re-reading. */}
-          <Text style={s.window} accessibilityLiveRegion="polite">
-            {between === 0 ? 'Arriving now' : `Between ${clockMs(win.earliest)} and ${clockMs(win.latest)}`}
-          </Text>
-          <Text style={s.muted}>
-            {myStop ? `at ${myStop.label}` : 'at the first stop'}
-            {between > 0 ? ` · ${between} ${between === 1 ? 'stop' : 'stops'} away` : ''}
-          </Text>
+          <Text style={s.window}>{windowText}</Text>
+          <Text style={s.muted}>{whereText}</Text>
           {late && (
             <View style={s.warn}>
               <Ionicons name="alert-circle-outline" size={16} color={colors.warning} />

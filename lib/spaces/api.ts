@@ -12,7 +12,7 @@
 
 import { api } from '../api';
 import type { Run, RunStop, RunRider, RunEvent, RiderState } from './runs';
-import { splitListedRun } from './runPlan';
+import { splitListedRun, reusableManifest } from './runPlan';
 
 export interface RosterEntry {
   id: string;
@@ -99,6 +99,9 @@ export const getRun = (spaceId: string, runId: string) =>
     `/chats/${spaceId}/runs/${runId}`,
   );
 
+/** One run with its manifest; `failed` = the manifest could not be read. */
+export interface RunWithManifest { run: Run; riders: RunRider[]; stops: RunStop[]; failed: boolean }
+
 /**
  * Runs with each one's scoped riders (and stops, when asked) — ONE call where
  * the server supports `?include=` (R4BE C11: written, not deployed). An older
@@ -106,16 +109,26 @@ export const getRun = (spaceId: string, runId: string) =>
  * to one getRun per run, as the screens did before. `failed` marks a run whose
  * manifest could not be read on that path, so a screen can say so rather than
  * draw nobody on it. Throws only when the run list itself fails.
+ *
+ * `previous` (a timer re-read only): on that per-run path, runs that are not on
+ * the road keep their last manifest instead of costing a getRun each tick
+ * (runPlan.reusableManifest).
  */
 export async function getRunsWithManifest(
-  spaceId: string, opts: { activeOnly?: boolean; stops?: boolean } = {},
-): Promise<{ run: Run; riders: RunRider[]; stops: RunStop[]; failed: boolean }[]> {
+  spaceId: string,
+  opts: { activeOnly?: boolean; stops?: boolean; previous?: readonly RunWithManifest[] } = {},
+): Promise<RunWithManifest[]> {
   const include = opts.stops ? 'riders,stops' : 'riders';
   const listed = await api<(Run & { riders?: unknown; stops?: unknown })[]>(
     `/chats/${spaceId}/runs?${opts.activeOnly ? 'active=1&' : ''}include=${include}`);
   return Promise.all((listed || []).map(async (r) => {
     const one = splitListedRun(r, !!opts.stops);
     if (one) return { ...one, failed: false };
+    const kept = reusableManifest(opts.previous, r);
+    if (kept) {
+      const { riders: _r, stops: _s, ...run } = r;
+      return { run, riders: kept.riders, stops: kept.stops, failed: false };
+    }
     try {
       const d = await getRun(spaceId, r.id);
       return { run: d.run, riders: d.riders || [], stops: d.stops || [], failed: false };

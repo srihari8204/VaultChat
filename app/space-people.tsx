@@ -91,6 +91,7 @@ export default function SpacePeopleScreen() {
       // shared ChatDetail type does not declare them.
       const detail = chat as typeof chat & { roleCatalog?: RoleDef[] | null; role?: string };
       setCatalog(detail?.roleCatalog ?? null);
+      setCatalogErr(null);
       if (me?.id) setViewer({ id: String(me.id), role: String(detail?.role ?? 'member') });
     } catch (e: any) {
       // Stated, not swallowed. Without the catalog the matrix must say so
@@ -196,11 +197,27 @@ export default function SpacePeopleScreen() {
         keyExtractor={(p) => p.userId}
         contentContainerStyle={s.body}
         keyboardShouldPersistTaps="handled"
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); loadMeta(); }} tintColor={colors.primary} />}
         ListHeaderComponent={
           <>
             {loadError && (
               <LoadError colors={colors} title="Could not load people" message={loadError} onRetry={() => { setLoading(true); void load(); }} />
+            )}
+            {loadError && people.length > 0 && (
+              <Text style={s.muted}>The list below is from the last successful refresh and may be out of date.</Text>
+            )}
+            {/* Without the catalog no row offers a role change and roles show
+                by rank only: say so, with a way to try again. */}
+            {catalogErr && (
+              <View style={s.errBox}>
+                <Ionicons name="alert-circle" size={16} color={colors.danger} />
+                <Text style={[s.muted, { color: colors.danger, flex: 1 }]}>
+                  Role names could not be loaded, so roles cannot be changed right now.
+                </Text>
+                <TouchableOpacity onPress={() => { void loadMeta(); }} style={s.retryHit} accessibilityRole="button" accessibilityLabel="Try loading the role list again">
+                  <Text style={{ color: colors.primary, fontWeight: '700' }}>Try again</Text>
+                </TouchableOpacity>
+              </View>
             )}
             {!loadError && filtered.length === 0 && (
               <Text style={s.muted}>{q.trim() ? 'Nobody matches.' : 'Nobody is in this space yet.'}</Text>
@@ -301,7 +318,7 @@ export default function SpacePeopleScreen() {
                     onPress={() => { setChosen(o); setRoleErr(null); }}
                     accessibilityRole="radio"
                     accessibilityState={{ checked: chosen?.key === o.key }}
-                    accessibilityLabel={o.label}
+                    accessibilityLabel={`${o.label}${o.current ? ', current' : ''}, ${grantsSummary(o)}`}
                     style={s.roleHit}
                   >
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -317,17 +334,7 @@ export default function SpacePeopleScreen() {
                         choosing a role is never done blind. null, [] and a real
                         list stay three distinct statements — PermissionMatrix
                         owns that distinction. */}
-                    {o.grants === null ? (
-                      <Text style={s.muted}>Inherits the standard {rankLabel(o.rank)} permissions</Text>
-                    ) : o.grants.length === 0 ? (
-                      <Text style={s.muted}>No permissions of its own</Text>
-                    ) : (
-                      <Text style={s.muted}>
-                        {o.grants.length} permission{o.grants.length === 1 ? '' : 's'}
-                        {' · '}{o.grants.slice(0, 3).map(permissionLabel).join(', ')}
-                        {o.grants.length > 3 ? '…' : ''}
-                      </Text>
-                    )}
+                    <Text style={s.muted}>{grantsSummary(o)}</Text>
                   </TouchableOpacity>
                   {/* Below the radio, not inside it: the radio's own label would
                       hide the matrix from a screen reader. */}
@@ -398,6 +405,15 @@ function Count({ value, label, tone, s }: { value: number; label: string; tone: 
   );
 }
 
+/** One line on what a role grants, for the option card and its radio label.
+ *  null, [] and a real list stay three distinct statements. */
+function grantsSummary(o: RoleOption): string {
+  if (o.grants === null) return `Inherits the standard ${rankLabel(o.rank)} permissions`;
+  if (o.grants.length === 0) return 'No permissions of its own';
+  return `${o.grants.length} permission${o.grants.length === 1 ? '' : 's'} · `
+    + `${o.grants.slice(0, 3).map(permissionLabel).join(', ')}${o.grants.length > 3 ? '…' : ''}`;
+}
+
 function tone(st: Person['status'], c: Palette): string {
   switch (st) {
     case 'in': return c.success;
@@ -442,6 +458,7 @@ const styles = (c: Palette) => StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 8,
     backgroundColor: c.danger + '14', borderRadius: 10, padding: 10,
   },
+  retryHit: { minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' },
   roleCard: {
     borderWidth: 1, borderColor: c.glassStroke, borderRadius: 12,
     padding: 12, gap: 4, marginBottom: 8,

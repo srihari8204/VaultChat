@@ -1,12 +1,13 @@
-// Execute the screen's actual focus callback with a fake timer, without RN or a server.
+// Execute the driver screen's actual heartbeat focus callback (split into
+// components/spaces/useRunBroadcast.ts) with a fake timer, without RN or a server.
 // Run: npx tsx lib/spaces/runHeartbeat.selftest.ts
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import ts from 'typescript';
 
-const source = readFileSync(join(__dirname, '../../app/space-run-driver.tsx'), 'utf8');
-const tree = ts.createSourceFile('driver.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+const source = readFileSync(join(__dirname, '../../components/spaces/useRunBroadcast.ts'), 'utf8');
+const tree = ts.createSourceFile('useRunBroadcast.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 let focus: ts.CallExpression | undefined;
 function visit(node: ts.Node) {
   if (ts.isCallExpression(node) && node.expression.getText(tree) === 'useFocusEffect'

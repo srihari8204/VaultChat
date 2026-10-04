@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import {
   parseCoords, parseClock, plannedAtOn, clockOf, stopPayload, remapRiders, idsPreserved,
-  parseDay, dayOf, stopDay, plannedPickStart, splitListedRun,
+  parseDay, dayOf, stopDay, plannedPickStart, splitListedRun, reusableManifest, stopWhenText,
 } from './runPlan';
 import { driverView, nextStop, type Run, type RunStop, type RunRider, type RiderState } from './runs';
 
@@ -156,6 +156,37 @@ assert.equal(driverView([], []), null);
   assert.deepEqual(one?.stops.map((x) => x.id), ['s1']);
   assert.equal('riders' in (one?.run ?? {}), false, 'the run object is the summary alone');
   assert.deepEqual(splitListedRun({ ...base, riders: [] }, false)?.stops, [], 'empty manifest is a real answer');
+}
+
+// ── timer re-reads keep the manifest of runs that are not moving ──
+{
+  type E = { run: Pick<Run, 'id' | 'status'>; failed: boolean; tag: string };
+  const prev: E[] = [
+    { run: { id: 'a', status: 'scheduled' }, failed: false, tag: 'A' },
+    { run: { id: 'b', status: 'started' }, failed: false, tag: 'B' },
+    { run: { id: 'c', status: 'completed' }, failed: true, tag: 'C' },
+    { run: { id: 'd', status: 'scheduled' }, failed: false, tag: 'D' },
+  ];
+  assert.equal(reusableManifest(prev, { id: 'a', status: 'scheduled' })?.tag, 'A', 'unchanged, not on the road → kept');
+  assert.equal(reusableManifest(prev, { id: 'b', status: 'started' }), null, 'on the road → always re-read');
+  assert.equal(reusableManifest(prev, { id: 'c', status: 'completed' }), null, 'last read failed → re-read');
+  assert.equal(reusableManifest(prev, { id: 'd', status: 'started' }), null, 'just started → re-read');
+  assert.equal(reusableManifest(prev, { id: 'b', status: 'completed' }), null, 'just finished → re-read once');
+  assert.equal(reusableManifest(prev, { id: 'z', status: 'scheduled' }), null, 'new run → read');
+  assert.equal(reusableManifest(undefined, { id: 'a', status: 'scheduled' }), null, 'focus/pull pass nothing → read all');
+}
+
+// ── a stop row says the day when it is not the run's day ──
+{
+  const sched = new Date(2026, 9, 5, 7, 0).toISOString();
+  const sameDay = new Date(2026, 9, 5, 7, 45).toISOString();
+  const nextDay = new Date(2026, 9, 6, 7, 45).toISOString();
+  const day = (d: Date) => `day${d.getDate()} ${clockOf(d.toISOString())}`;
+  assert.equal(stopWhenText(sameDay, sched, day), '07:45', 'same day → the clock alone');
+  assert.equal(stopWhenText(nextDay, sched, day), 'day6 07:45', 'another day → the day too');
+  assert.equal(stopWhenText(sameDay, null, day), 'day5 07:45', 'no scheduled day → the day too');
+  assert.equal(stopWhenText(null, sched, day), '');
+  assert.equal(stopWhenText('nonsense', sched, day), '');
 }
 
 console.log('spaces/runPlan self-check OK');

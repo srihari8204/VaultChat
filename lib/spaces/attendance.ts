@@ -205,8 +205,18 @@ function metres(a: { lat: number; lng: number }, b: { lat: number; lng: number }
 export function crossingsForDay(crossings: Crossing[], dayMs: number): Crossing[] {
   const d = new Date(dayMs);
   const start = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const end = start + 24 * 3600_000;
+  // The next local midnight, not start + 24h: a daylight-saving day is 23 or 25 hours.
+  const end = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
   return crossings.filter((c) => c.at >= start && c.at < end);
+}
+
+/** The same wall-clock time `daysAgo` CALENDAR days before `nowMs`. Not
+ *  nowMs - n×24h, which lands on the wrong day across a daylight-saving change
+ *  when the time is near midnight. Self-checked in attendanceDays.selftest.ts. */
+export function calendarDaysAgo(nowMs: number, daysAgo: number): number {
+  const d = new Date(nowMs);
+  d.setDate(d.getDate() - daysAgo);
+  return d.getTime();
 }
 
 export interface Summary {

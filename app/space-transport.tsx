@@ -28,7 +28,7 @@ import { AuroraBackground } from '../components/ui/AuroraBackground';
 // child's bus must never require the parent to share their own position.
 
 import { AppText as Text } from '../components/ui/Text';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, Alert,
 } from 'react-native';
@@ -140,7 +140,10 @@ export default function SpaceTransportScreen() {
     [params.perms],
   );
 
-  const load = useCallback(async () => {
+  // The last list read, so a timer re-read against a server without
+  // `include=` re-reads only the runs on the road (lib/spaces/api previous).
+  const lastLoaded = useRef<Loaded[] | undefined>(undefined);
+  const load = useCallback(async (timer = false) => {
     if (!spaceId) { setErr('No space was given.'); setLoaded([]); return; }
     try {
       setErr(null);
@@ -148,11 +151,9 @@ export default function SpaceTransportScreen() {
       // down to the children this caller is linked to. One call where the server
       // supports it, else one read per run; a failure on one run must not blank
       // the whole screen, and is marked on that run.
-      setLoaded(await getRunsWithManifest(spaceId, { stops: true }));
-      // Best-effort: without it the button simply says "Driver".
-      circleMembers(spaceId)
-        .then((ms) => setNames(Object.fromEntries(ms.map((m) => [m.id, m.name]))))
-        .catch(() => {});
+      const list = await getRunsWithManifest(spaceId, { stops: true, previous: timer ? lastLoaded.current : undefined });
+      lastLoaded.current = list;
+      setLoaded(list);
     } catch (e: any) {
       setErr(e?.message || 'Could not load transport.');
       // Keep what was last shown (the timer re-reads while a run is out); the
@@ -161,7 +162,16 @@ export default function SpaceTransportScreen() {
     }
   }, [spaceId]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useFocusEffect(useCallback(() => {
+    void load();
+    // Drivers' names: once per focus, not on every timer re-read. Best-effort:
+    // without it the button simply says "Call driver".
+    if (spaceId) {
+      circleMembers(spaceId)
+        .then((ms) => setNames(Object.fromEntries(ms.map((m) => [m.id, m.name]))))
+        .catch(() => {});
+    }
+  }, [load, spaceId]));
 
   // Rider states change while a run is out ("picked up", "dropped off"): re-read
   // them on a timer, but only while something is on the road and the screen is
@@ -169,7 +179,7 @@ export default function SpaceTransportScreen() {
   const anyStarted = (loaded ?? []).some((l) => l.run.status === 'started');
   useFocusEffect(useCallback(() => {
     if (!anyStarted) return;
-    const t = setInterval(() => { void load(); }, LIVE_REFRESH_MS);
+    const t = setInterval(() => { void load(true); }, LIVE_REFRESH_MS);
     return () => clearInterval(t);
   }, [anyStarted, load]));
 
@@ -264,7 +274,10 @@ export default function SpaceTransportScreen() {
             {riders.map((r) => {
               const w = riderWords(r.state, run.kind);
               return (
-                <View key={r.riderId} style={s.rider}>
+                <View
+                  key={r.riderId} style={s.rider}
+                  accessible accessibilityLabel={`${r.displayName}, ${w.text}${r.stateAt ? `, ${clockOf(r.stateAt)}` : ''}`}
+                >
                   <View style={[s.avatar, { backgroundColor: colors.primary + '22' }]}>
                     <Text style={{ color: colors.primary, fontWeight: '800' }}>
                       {initialOf(r.displayName)}
@@ -326,7 +339,7 @@ export default function SpaceTransportScreen() {
                 >
                   <Ionicons name="call-outline" size={16} color={colors.text} />
                   <Text style={[s.btnText, { color: colors.text }]} numberOfLines={1}>
-                    {names[run.driverId] ? `Call ${names[run.driverId].split(' ')[0]}` : 'Driver'}
+                    {names[run.driverId] ? `Call ${names[run.driverId].split(' ')[0]}` : 'Call driver'}
                   </Text>
                 </TouchableOpacity>
               )}

@@ -59,6 +59,15 @@ function resultColour(r: DeviceCommand['result'], c: Palette): string {
     default: return c.warning;
   }
 }
+/** The words for eventColour's tone, for the row's spoken label. */
+function eventSeverity(kind: string): string {
+  switch (kind) {
+    case 'overspeed': case 'shock': return 'Alert: ';
+    case 'left_zone': case 'disconnected': case 'powered_off': return 'Warning: ';
+    default: return '';
+  }
+}
+
 function eventColour(kind: string, c: Palette): string {
   switch (kind) {
     case 'overspeed': case 'shock': return c.danger;
@@ -232,7 +241,11 @@ export default function DeviceDetailSheet({
           <View style={s.card}>
             {events.length === 0 && !detailError && <Text style={s.muted}>Nothing recorded yet.</Text>}
             {events.map((e) => (
-              <View key={e.id} style={s.row} accessible>
+              <View
+                key={e.id} style={s.row} accessible
+                // The dot's colour is said too: it is the event's severity.
+                accessibilityLabel={`${eventSeverity(e.kind)}${e.text || e.kind.replace(/_/g, ' ')}, ${ago(e.at)}`}
+              >
                 <View style={[s.dot, { backgroundColor: eventColour(e.kind, colors) }]} />
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={s.actionText} numberOfLines={2}>

@@ -99,6 +99,34 @@ export function splitListedRun(
   return { run, riders: riders as RunRider[], stops: Array.isArray(stops) ? stops as RunStop[] : [] };
 }
 
+/**
+ * On a TIMER re-read against a server without `include=` (one getRun per run),
+ * the manifest of a run that is not on the road and whose status has not
+ * changed since the previous read is kept instead of read again: its rider
+ * states are not moving. Started runs, runs that changed status, and runs whose
+ * last read failed are always re-read. Focus and pull-to-refresh pass no
+ * previous list, so they re-read everything.
+ */
+export function reusableManifest<T extends { run: Pick<Run, 'id' | 'status'>; failed: boolean }>(
+  previous: readonly T[] | undefined, run: Pick<Run, 'id' | 'status'>,
+): T | null {
+  if (!previous || run.status === 'started') return null;
+  const p = previous.find((x) => x.run.id === run.id);
+  return p && !p.failed && p.run.status === run.status ? p : null;
+}
+
+/**
+ * A stop's planned time for a list row: the clock alone when it falls on the
+ * run's scheduled day, else the day too — a stop planned for another day (or on
+ * a run with no scheduled day) must not read as a time on the run's day.
+ */
+export function stopWhenText(plannedAt: string | null, scheduledAt: string | null, withDay: (d: Date) => string): string {
+  const clock = clockOf(plannedAt);
+  if (!clock || !plannedAt) return '';
+  const sched = dayOf(scheduledAt);
+  return sched && dayOf(plannedAt) === sched ? clock : withDay(new Date(Date.parse(plannedAt)));
+}
+
 /** The local "HH:MM" of an instant, for pre-filling an edit form. */
 export function clockOf(iso: string | null): string {
   if (!iso) return '';

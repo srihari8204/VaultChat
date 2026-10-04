@@ -52,6 +52,9 @@ const KINDS: { key: string; label: string; icon: keyof typeof Ionicons.glyphMap 
   { key: 'other', label: 'Other', icon: 'cube-outline' },
 ];
 
+/** A thrown error's own words, when it has any. */
+const errorText = (e: unknown) => (e instanceof Error && e.message) || undefined;
+
 export default function SpaceDevicesScreen() {
   const params = useLocalSearchParams<{ spaceId?: string; name?: string; groupType?: string; perms?: string }>();
   const colors = useSpaceColors(params.groupType);
@@ -81,13 +84,13 @@ export default function SpaceDevicesScreen() {
 
   const load = useCallback(async () => {
     try { setDevices(await getDevices(spaceId)); setLoadError(null); }
-    catch (e: any) { setLoadError(e?.message ?? 'Could not load devices.'); }
+    catch (e) { setLoadError(errorText(e) ?? 'Could not load devices.'); }
     finally { setLoading(false); setRefreshing(false); }
   }, [spaceId]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
   useEffect(() => {
-    getCachedUser().then((u: any) => setMyId(u?.id != null ? String(u.id) : '')).catch(() => {});
+    getCachedUser().then((u: { id?: string | number } | null) => setMyId(u?.id != null ? String(u.id) : '')).catch(() => {});
   }, []);
 
   const openDevice = useCallback(async (d: SpaceDevice) => {
@@ -124,7 +127,7 @@ export default function SpaceDevicesScreen() {
       }
       setAdding(false); setLabel(''); setIsThisPhone(true);
       await load();
-    } catch (e: any) { Alert.alert('Could not add', e?.message ?? 'Try again.'); }
+    } catch (e) { Alert.alert('Could not add', errorText(e) ?? 'Try again.'); }
     finally { setBusy(false); }
   }, [label, kind, spaceId, load, isThisPhone, myId]);
 
@@ -133,7 +136,7 @@ export default function SpaceDevicesScreen() {
       if (boundHere) await unbindThisPhone({ spaceId, deviceId: d.id });
       else await bindThisPhone({ spaceId, deviceId: d.id, ownerId: myId, label: d.label });
       setBoundHere(!boundHere);
-    } catch (e: any) { Alert.alert('Could not update this phone', e?.message ?? 'Try again.'); }
+    } catch (e) { Alert.alert('Could not update this phone', errorText(e) ?? 'Try again.'); }
   }, [boundHere, spaceId, myId]);
 
   const archiveDevice = useCallback((d: SpaceDevice) => {
@@ -147,7 +150,7 @@ export default function SpaceDevicesScreen() {
           onPress: async () => {
             try {
               await updateDevice(spaceId, d.id, { archived: true });
-            } catch (e: any) { Alert.alert('Could not remove', e?.message ?? 'Try again.'); return; }
+            } catch (e) { Alert.alert('Could not remove', errorText(e) ?? 'Try again.'); return; }
             // The device IS removed now. Forgetting it on this phone is a
             // separate, local step, and its failure must not read as "not removed".
             closeDevice();
@@ -170,7 +173,7 @@ export default function SpaceDevicesScreen() {
       setOpen({ ...open, label: l });
       await load();
       return true;
-    } catch (e: any) { Alert.alert('Could not rename', e?.message ?? 'Try again.'); return false; }
+    } catch (e) { Alert.alert('Could not rename', errorText(e) ?? 'Try again.'); return false; }
     finally { setBusy(false); }
   }, [open, spaceId, load]);
 
@@ -187,8 +190,8 @@ export default function SpaceDevicesScreen() {
         'The request is queued. The phone carries it out the next time crazzychat is open on it, and this screen will show when it did.',
       );
       return true;
-    } catch (e: any) {
-      Alert.alert('Could not send', e?.message ?? 'Try again.');
+    } catch (e) {
+      Alert.alert('Could not send', errorText(e) ?? 'Try again.');
       return false;
     } finally { setBusy(false); }
   }, [spaceId]);

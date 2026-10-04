@@ -9,9 +9,13 @@
 //
 // Usage: const picker = useDatePicker();  picker.open(date, onPick[, 'datetime'])
 //        and render {picker.element} once anywhere in the screen.
+//        Inside a Modal: useDatePicker(undefined, { inModal: true }) and render
+//        {picker.element} as the LAST child of that Modal. On iOS the sheet is
+//        then drawn inline, as an overlay over the Modal's own content, instead
+//        of as a second Modal (which may present behind the first).
 
 import React, { useCallback, useState } from 'react';
-import { Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Keyboard, Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { useTheme } from '../../lib/theme';
 import { Button } from './Button';
@@ -25,7 +29,8 @@ export interface DatePickerSkin {
   scrim: string; scrimOpacity: number;
 }
 
-export function useDatePicker(skin?: DatePickerSkin) {
+export function useDatePicker(skin?: DatePickerSkin, opts?: { inModal?: boolean }) {
+  const inModal = !!opts?.inModal;
   const { colors, scheme } = useTheme();
   const [req, setReq] = useState<Request | null>(null);
   const [draft, setDraft] = useState(() => new Date());
@@ -51,6 +56,8 @@ export function useDatePicker(skin?: DatePickerSkin) {
       });
       return;
     }
+    // The sheet sits at the bottom of the screen, where the keyboard would be.
+    Keyboard.dismiss();
     setDraft(value);
     setReq({ mode, onPick });
   }, []);
@@ -62,35 +69,38 @@ export function useDatePicker(skin?: DatePickerSkin) {
     scrim: scheme === 'dark' ? colors.bg : colors.text,
     scrimOpacity: scheme === 'dark' ? 0.7 : 0.4,
   };
-  const close = () => setReq(null);
-  // iOS: this sheet is its own Modal, so don't open it from inside another
-  // Modal (a second Modal may present behind the first). Screens with a modal
-  // composer draw DateTimePicker inline instead (group-calendar does).
-  const element = req ? (
-    <Modal visible transparent animationType="fade" onRequestClose={close}>
-      <View style={styles.wrap}>
-        <Pressable
-          style={[styles.scrim, { backgroundColor: k.scrim, opacity: k.scrimOpacity }]}
-          onPress={close} accessibilityRole="button" accessibilityLabel="Close the date picker" />
-        <View style={[styles.sheet, { backgroundColor: k.sheet, borderColor: k.edge }]}>
-          <DateTimePicker
-            value={draft}
-            mode={req.mode}
-            display="inline"
-            themeVariant={scheme === 'dark' ? 'dark' : 'light'}
-            accentColor={k.accent}
-            onChange={(_e, d) => { if (d) setDraft(d); }}
-          />
-          <View style={styles.row}>
-            <Button title="Cancel" variant="ghost" onPress={close} style={styles.btn} />
-            <Button title="Done" onPress={() => { req.onPick(draft); close(); }} style={styles.btn} />
-          </View>
+  const close = useCallback(() => setReq(null), []);
+  // iOS: by default this sheet is its own Modal, so don't open that from inside
+  // another Modal (a second Modal may present behind the first). With
+  // `inModal` the same sheet is an absolute overlay drawn inline in the host
+  // Modal instead (accessibilityViewIsModal keeps VoiceOver inside it).
+  const body = req ? (
+    <View style={inModal ? [StyleSheet.absoluteFill, styles.wrap] : styles.wrap} accessibilityViewIsModal={inModal}>
+      <Pressable
+        style={[styles.scrim, { backgroundColor: k.scrim, opacity: k.scrimOpacity }]}
+        onPress={close} accessibilityRole="button" accessibilityLabel="Close the date picker" />
+      <View style={[styles.sheet, { backgroundColor: k.sheet, borderColor: k.edge }]}>
+        <DateTimePicker
+          value={draft}
+          mode={req.mode}
+          display="inline"
+          themeVariant={scheme === 'dark' ? 'dark' : 'light'}
+          accentColor={k.accent}
+          onChange={(_e, d) => { if (d) setDraft(d); }}
+        />
+        <View style={styles.row}>
+          <Button title="Cancel" variant="ghost" onPress={close} style={styles.btn} />
+          <Button title="Done" onPress={() => { req.onPick(draft); close(); }} style={styles.btn} />
         </View>
       </View>
-    </Modal>
+    </View>
   ) : null;
+  const element = body && !inModal ? (
+    <Modal visible transparent animationType="fade" onRequestClose={close}>{body}</Modal>
+  ) : body;
 
-  return { open, element };
+  // `close` lets a host Modal drop an open inline sheet when it closes itself.
+  return { open, close, element };
 }
 
 const styles = StyleSheet.create({

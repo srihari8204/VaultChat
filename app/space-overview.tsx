@@ -53,7 +53,9 @@ type Shortcut = readonly [string, keyof typeof Ionicons.glyphMap, string, string
 const SCHOOL_SHORTCUTS: readonly Shortcut[] = [
   ['Runs', 'bus-outline', '/space-runs-admin', 'manage_runs'],
   ['Roster', 'people-outline', '/space-roster', 'manage_roster'],
-  ['Attendance', 'calendar-number-outline', '/space-checkin', null],
+  // Named for the screen it opens (titled "Check in"); "Attendance" is
+  // space-attendance, the location-derived view.
+  ['Check in', 'log-in-outline', '/space-checkin', null],
   ['Incidents', 'alert-circle-outline', '/space-incidents', null],
   ['Visitors', 'qr-code-outline', '/space-visitors', 'manage_roster'],
 ];
@@ -163,6 +165,9 @@ export default function SpaceOverviewScreen() {
       {error && (
         <LoadError colors={colors} title="Not available" message={error} onRetry={() => { setRefreshing(true); void load(); }} />
       )}
+      {error && sum && (
+        <Text style={s.muted}>The figures below are from the last successful refresh and may be out of date.</Text>
+      )}
 
       {sum && (
         <>
@@ -271,6 +276,13 @@ export default function SpaceOverviewScreen() {
                 {/* ATTENDANCE TODAY */}
                 <View style={s.card}>
                   <Text style={s.sectionTitle}>ATTENDANCE TODAY</Text>
+                  {/* One element with a value, not three fragments. */}
+                  <View
+                    accessible accessibilityRole="progressbar"
+                    accessibilityLabel={`${w.checkedIn} of ${w.members} checked in`}
+                    accessibilityValue={{ min: 0, max: 100, now: Math.min(100, Math.round(attendancePct)), text: `${attendancePct}%` }}
+                    style={{ gap: 8 }}
+                  >
                   <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8 }}>
                     <Text style={s.bigValue}>{w.checkedIn}</Text>
                     <Text style={[s.muted, { marginBottom: 6 }]}>/ {w.members} checked in</Text>
@@ -279,8 +291,9 @@ export default function SpaceOverviewScreen() {
                     <View style={[s.barFill, { width: `${Math.min(100, attendancePct)}%` }]} />
                   </View>
                   <Text style={s.muted}>{attendancePct}%</Text>
+                  </View>
                   <TouchableOpacity accessibilityRole="button" style={s.viewRow} onPress={() => go('/space-checkin')}>
-                    <Text style={s.link}>View Attendance</Text>
+                    <Text style={s.link}>View check-ins</Text>
                     <Ionicons name="arrow-forward" size={14} color={colors.primary} />
                   </TouchableOpacity>
                 </View>

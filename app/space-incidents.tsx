@@ -143,6 +143,9 @@ export default function SpaceIncidentsScreen() {
         {loadError && (
           <LoadError colors={colors} title="Could not load incidents" message={loadError} onRetry={() => { setLoading(true); void load(); }} />
         )}
+        {loadError && ordered.length > 0 && (
+          <Text style={s.muted}>The incidents below are from the last successful refresh and may be out of date.</Text>
+        )}
         {!loadError && ordered.length === 0 && (
           <View style={s.card}>
             <Text style={s.cardTitle}>Nothing reported</Text>
@@ -163,9 +166,15 @@ export default function SpaceIncidentsScreen() {
         const done = i.status === 'resolved';
         const vehicle = vehicleFor(i.runId);
         return (
-          <View style={[s.card, sos && !done && s.sosCard, done && s.doneCard]}>
-            <View style={s.row}>
-              <View style={[s.icon, { backgroundColor: (sos ? colors.danger : colors.primary) + '22' }]}>
+          <View style={[s.card, sos && !done && s.sosCard]}>
+            {/* One element for the summary; the buttons below stay separate. */}
+            <View
+              style={s.row} accessible
+              accessibilityLabel={[meta.label, vehicle, when(i.createdAt), done ? 'resolved' : i.status === 'ack' ? 'acknowledged' : 'open'].filter(Boolean).join(', ')}
+            >
+              {/* Resolved cards fade only the icon: fading the card took its
+                  text below readable contrast. */}
+              <View style={[s.icon, { backgroundColor: (sos ? colors.danger : colors.primary) + '22' }, done && s.doneIcon]}>
                 <Ionicons name={meta.icon} size={19} color={sos ? colors.danger : colors.primary} />
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
@@ -213,7 +222,7 @@ export default function SpaceIncidentsScreen() {
                     disabled={busy === i.id}
                     accessibilityRole="button"
                     accessibilityLabel={`Acknowledge ${meta.label}`}
-                    accessibilityState={{ disabled: busy === i.id }}
+                    accessibilityState={{ disabled: busy === i.id, busy: busy === i.id }}
                   >
                     <Text style={s.ghostText}>Acknowledge</Text>
                   </TouchableOpacity>
@@ -265,7 +274,7 @@ const styles = (c: Palette) => StyleSheet.create({
   header: { gap: 10 },
   card: { backgroundColor: c.glassSoft, borderRadius: 14, padding: 14, gap: 8 },
   sosCard: { borderWidth: 1, borderColor: c.danger },
-  doneCard: { opacity: 0.6 },
+  doneIcon: { opacity: 0.5 },
   cardTitle: { color: c.text, fontSize: 15.5, fontWeight: '700' },
   muted: { color: c.textDim, fontSize: 12.5, flexShrink: 1 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },

@@ -40,17 +40,18 @@ import SpaceLinksSheet from '../components/spaces/SpaceLinksSheet';
 import { tilesForType, type RunSet } from '../lib/spaces/dashboard';
 import type { Run } from '../lib/spaces/runs';
 
-interface Entry {
+type Entry = {
   key: string;
   label: string;
   hint: string;
   icon: keyof typeof Ionicons.glyphMap;
-  /** A screen to open, or a setup sheet drawn on top of this console. */
-  route?: string;
-  sheet?: 'shift' | 'links';
   /** Permission the caller needs. Presentation only — the server re-checks. */
   needs?: 'manage_runs' | 'manage_roster' | 'view_space_ops' | 'edit_settings';
-}
+} & (
+  /** A screen to open, or a setup sheet drawn on top of this console. */
+  | { route: string; sheet?: never }
+  | { sheet: 'shift' | 'links'; route?: never }
+);
 
 const ENTRIES: Entry[] = [
   { key: 'overview', label: 'Overview', hint: 'The day in numbers, computed on the server', icon: 'stats-chart-outline', route: '/space-overview', needs: 'view_space_ops' },
@@ -138,7 +139,7 @@ export default function SpaceAdminScreen() {
     // sits behind that full-screen modal, and an empty list there reads as
     // "No links yet".
     try { setLinks(await getLinks(spaceId)); setLinksError(null); }
-    catch (e: any) { setLinksError(e?.message ?? 'Check your connection and try again.'); }
+    catch (e) { setLinksError((e instanceof Error && e.message) || 'Check your connection and try again.'); }
     finally { setLinksLoading(false); }
   }, [spaceId]);
   const openSheet = useCallback((which: 'shift' | 'links') => {
@@ -249,7 +250,7 @@ export default function SpaceAdminScreen() {
             accessibilityRole="button"
             accessibilityLabel={`${e.label}${badge != null ? `, ${badge}` : ''}. ${e.hint}`}
             onPress={() => e.sheet ? openSheet(e.sheet) : router.push({
-              pathname: e.route as string,
+              pathname: e.route,
               params: {
                 spaceId, name: spaceName,
                 groupType: params.groupType ?? '',

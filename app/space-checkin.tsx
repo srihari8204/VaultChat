@@ -95,7 +95,7 @@ export default function SpaceCheckinScreen() {
     finally { setBusy(false); }
   }, [spaceId, load]);
 
-  const doCheckOut = useCallback(async () => {
+  const checkOutNow = useCallback(async () => {
     setBusy(true);
     try { await checkOut(spaceId); await load(); }
     catch (e: any) {
@@ -104,6 +104,15 @@ export default function SpaceCheckinScreen() {
       Alert.alert('Could not check out', e?.message ?? 'Try again.');
     } finally { setBusy(false); }
   }, [spaceId, load]);
+  // Checking out closes the day and cannot be undone (checking in again would
+  // move the arrival time), so it is confirmed.
+  const doCheckOut = useCallback(() => {
+    Alert.alert(
+      'Check out for today?',
+      'This closes today’s record. You cannot check in again until tomorrow.',
+      [{ text: 'Not yet', style: 'cancel' }, { text: 'Check out', style: 'destructive', onPress: () => { void checkOutNow(); } }],
+    );
+  }, [checkOutNow]);
 
   // The leave summary: the viewer's own pending requests, and — for an
   // approver — other people's waiting for a decision.
@@ -200,8 +209,15 @@ export default function SpaceCheckinScreen() {
       {records.length > 1 && (
         <View style={s.card}>
           <Text style={s.cardTitle}>Today</Text>
+          {loadError && (
+            <Text style={s.muted}>This list is from the last successful refresh and may be out of date.</Text>
+          )}
           {records.map((r) => (
-            <View key={r.userId} style={s.leaveRow}>
+            <View
+              key={r.userId} style={s.leaveRow}
+              // One element: the dot's colour alone is not a status.
+              accessible accessibilityLabel={teamRowLabel(r, r.userId === me)}
+            >
               <View style={[s.leaveDot, {
                 backgroundColor: r.checkInAt && !r.checkOutAt ? colors.success : colors.textFaint,
               }]} />
@@ -228,6 +244,14 @@ export default function SpaceCheckinScreen() {
 }
 
 const clock = (d: Date) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+/** "Asha, in 09:02, out 17:40" / "You, in 09:02, still in" / "Ravi, not checked in". */
+function teamRowLabel(r: AttendanceRecord, isMe: boolean): string {
+  const who = isMe ? 'You' : (r.name || 'Someone');
+  if (!r.checkInAt) return `${who}, not checked in`;
+  const inText = `in ${clock(new Date(r.checkInAt))}`;
+  return `${who}, ${inText}, ${r.checkOutAt ? `out ${clock(new Date(r.checkOutAt))}` : 'still in'}`;
+}
 
 const styles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },

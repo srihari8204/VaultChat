@@ -8,7 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { AppText as Text } from '../ui/Text';
 import { KeyboardSafe } from '../ui/KeyboardSafe';
 // The app's one cross-platform date+time picker (native dialog on Android,
-// inline sheet on iOS), in the app theme.
+// an inline sheet inside this dialog on iOS), in the app theme.
 import { useDatePicker } from '../ui/useDatePicker';
 import { plannedPickStart } from '../../lib/spaces/runPlan';
 import type { SpacePalette as Palette } from '../../lib/spaces/theme';
@@ -38,7 +38,7 @@ export default function NewRunModal({ visible, colors, s, busy, onClose, onCreat
   /** Resolves true when the run was created; the fields are then cleared. */
   onCreate: (body: NewRunBody) => Promise<boolean>;
 }) {
-  const picker = useDatePicker();
+  const picker = useDatePicker(undefined, { inModal: true });
   const [name, setName] = useState('');
   const [kind, setKind] = useState('school_pickup');
   const [vehicle, setVehicle] = useState('');
@@ -59,7 +59,7 @@ export default function NewRunModal({ visible, colors, s, busy, onClose, onCreat
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} onDismiss={picker.close}>
       <KeyboardSafe keyboardOnly>
       <View style={s.modalWrap}>
         <View style={s.modal}>
@@ -132,7 +132,8 @@ export default function NewRunModal({ visible, colors, s, busy, onClose, onCreat
         </View>
       </View>
       </KeyboardSafe>
-      {/* Inside this Modal so it stacks above it on iOS. */}
+      {/* Last child: on iOS the picker is an overlay inside this Modal, not a
+          second Modal (components/ui/useDatePicker inModal). */}
       {picker.element}
     </Modal>
   );

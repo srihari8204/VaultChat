@@ -104,7 +104,7 @@ export default function SpaceTasksScreen() {
   // A due day picked from the calendar; overrides the preset chips.
   const [dueCustom, setDueCustom] = useState<Date | null>(null);
   const insets = useSafeAreaInsets();
-  const picker = useDatePicker();
+  const picker = useDatePicker(undefined, { inModal: true });
   const loadMembers = useCallback(() => {
     setMembersError(false);
     circleMembers(spaceId).then(setMembers).catch(() => setMembersError(true));
@@ -121,7 +121,8 @@ export default function SpaceTasksScreen() {
       // server, not an error — so anything that throws here is a real failure
       // and is shown as one.
       setErr(e?.message || 'Could not load tasks.');
-      setTasks([]);
+      // Keep what was last shown; the note under the error says it may be old.
+      setTasks((prev) => prev ?? []);
     }
   }, [spaceId]);
 
@@ -261,6 +262,9 @@ export default function SpaceTasksScreen() {
           {err && (
             <LoadError colors={colors} title="Could not load tasks" message={err} onRetry={() => { void onRefresh(); }} />
           )}
+          {err && !!tasks?.length && (
+            <Text style={s.muted}>The tasks below are from the last successful refresh and may be out of date.</Text>
+          )}
 
           {tasks !== null && tasks.length === 0 && !err && (
             <View style={s.card}>
@@ -295,7 +299,7 @@ export default function SpaceTasksScreen() {
         </TouchableOpacity>
       )}
 
-      <Modal visible={compose} animationType="slide" transparent onRequestClose={() => setCompose(false)}>
+      <Modal visible={compose} animationType="slide" transparent onRequestClose={() => setCompose(false)} onDismiss={picker.close}>
         <KeyboardSafe keyboardOnly>
         <View style={s.sheetWrap}>
           <View style={[s.sheet, { paddingBottom: 18 + insets.bottom }]}>
@@ -310,7 +314,7 @@ export default function SpaceTasksScreen() {
               maxLength={200}
               accessibilityLabel="Task title"
             />
-            <View style={s.prioRow}>
+            <View style={s.prioRow} accessibilityRole="radiogroup" accessibilityLabel="Priority">
               {PRIORITIES.map((p) => (
                 <TouchableOpacity
                   key={p.key}
@@ -323,6 +327,7 @@ export default function SpaceTasksScreen() {
                 </TouchableOpacity>
               ))}
             </View>
+            <View style={s.dueGroup} accessibilityRole="radiogroup" accessibilityLabel="Due">
             <View style={s.prioRow}>
               {DUE.map((d) => (
                 <TouchableOpacity
@@ -349,6 +354,7 @@ export default function SpaceTasksScreen() {
                   : 'Another day…'}
               </Text>
             </TouchableOpacity>
+            </View>
             {customPast && (
               <Text style={[s.muted, { color: colors.warning }]} accessibilityRole="alert">
                 That day has already ended, so the task will be overdue as soon as it is created.
@@ -365,6 +371,7 @@ export default function SpaceTasksScreen() {
               </View>
             )}
             {members.length > 0 && (
+              <View accessibilityRole="radiogroup" accessibilityLabel="Assign to">
               <ScrollView style={{ maxHeight: 132 }} contentContainerStyle={[s.prioRow, { flexWrap: 'wrap' }]}>
                 {[{ id: null as string | null, name: 'Unassigned' }, ...members.map((m) => ({ id: m.id as string | null, name: m.name }))].map((m) => (
                   <TouchableOpacity
@@ -378,6 +385,7 @@ export default function SpaceTasksScreen() {
                   </TouchableOpacity>
                 ))}
               </ScrollView>
+              </View>
             )}
             <View style={{ flexDirection: 'row', gap: 8 }}>
               <TouchableOpacity onPress={() => setCompose(false)} style={[s.btn, s.btnGhost, { flex: 1 }]} accessibilityRole="button" accessibilityLabel="Cancel">
@@ -396,7 +404,8 @@ export default function SpaceTasksScreen() {
           </View>
         </View>
         </KeyboardSafe>
-        {/* Inside this Modal so it stacks above it on iOS. */}
+        {/* Last child: on iOS the picker is an overlay inside this Modal, not a
+            second Modal (components/ui/useDatePicker inModal). */}
         {picker.element}
       </Modal>
     </View>
@@ -436,6 +445,7 @@ const styles = (c: Palette) => StyleSheet.create({
     color: c.text, fontSize: 15,
   },
   prioRow: { flexDirection: 'row', gap: 8 },
+  dueGroup: { gap: 12 },
   prio: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.bg, borderRadius: 10, minHeight: 44, paddingHorizontal: 10 },
   hintRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   hintBtn: { minHeight: 44, justifyContent: 'center' },
