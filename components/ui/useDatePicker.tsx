@@ -7,7 +7,7 @@
 // Cancel / Done. Finance screens use components/finance/useDatePicker, which
 // is this hook with the finance palette passed as `skin`.
 //
-// Usage: const picker = useDatePicker();  picker.open(date, onPick[, 'datetime'])
+// Usage: const picker = useDatePicker();  picker.open(date, onPick[, 'datetime'[, minimumDate]])
 //        and render {picker.element} once anywhere in the screen.
 //        Inside a Modal: useDatePicker(undefined, { inModal: true }) and render
 //        {picker.element} as the LAST child of that Modal. On iOS the sheet is
@@ -21,7 +21,7 @@ import { useTheme } from '../../lib/theme';
 import { Button } from './Button';
 
 export type PickMode = 'date' | 'datetime';
-interface Request { mode: PickMode; onPick: (d: Date) => void }
+interface Request { mode: PickMode; onPick: (d: Date) => void; minimumDate?: Date }
 
 /** Sheet colours; defaults come from the app theme. */
 export interface DatePickerSkin {
@@ -35,17 +35,18 @@ export function useDatePicker(skin?: DatePickerSkin, opts?: { inModal?: boolean 
   const [req, setReq] = useState<Request | null>(null);
   const [draft, setDraft] = useState(() => new Date());
 
-  const open = useCallback((value: Date, onPick: (d: Date) => void, mode: PickMode = 'date') => {
+  const open = useCallback((value: Date, onPick: (d: Date) => void, mode: PickMode = 'date', minimumDate?: Date) => {
     if (Platform.OS === 'android') {
       DateTimePickerAndroid.open({
-        value, mode: 'date',
+        value, mode: 'date', minimumDate,
         onChange: (e, d) => {
           if (e.type !== 'set' || !d) return;
           if (mode === 'date') { onPick(d); return; }
           // Android has no combined mode: chain the time dialog. Dismissing it
-          // keeps the chosen day at the previous time of day.
+          // keeps the chosen day at the previous time of day. Android's time
+          // dialog ignores minimumDate, so callers still check the result.
           DateTimePickerAndroid.open({
-            value, mode: 'time',
+            value, mode: 'time', minimumDate,
             onChange: (e2, t) => {
               const day = new Date(d);
               if (e2.type === 'set' && t) day.setHours(t.getHours(), t.getMinutes(), 0, 0);
@@ -59,7 +60,7 @@ export function useDatePicker(skin?: DatePickerSkin, opts?: { inModal?: boolean 
     // The sheet sits at the bottom of the screen, where the keyboard would be.
     Keyboard.dismiss();
     setDraft(value);
-    setReq({ mode, onPick });
+    setReq({ mode, onPick, minimumDate });
   }, []);
 
   // Scrim from theme ink: the darkest ink of each scheme, faded by opacity, so
@@ -83,6 +84,7 @@ export function useDatePicker(skin?: DatePickerSkin, opts?: { inModal?: boolean 
         <DateTimePicker
           value={draft}
           mode={req.mode}
+          minimumDate={req.minimumDate}
           display="inline"
           themeVariant={scheme === 'dark' ? 'dark' : 'light'}
           accentColor={k.accent}

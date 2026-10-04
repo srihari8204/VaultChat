@@ -100,7 +100,7 @@ export function UpdateGate({ children }: { children: React.ReactNode }) {
           </Text>
         )}
         <Text style={styles.meta}>
-          Installed build {currentBuild() || '—'} · minimum {gate?.minBuild ?? '—'}
+          {t('update.build', { installed: currentBuild() || '—', min: gate?.minBuild ?? '—' })}
         </Text>
       </View>
     );

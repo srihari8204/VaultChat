@@ -19,7 +19,7 @@ import { TAB_LABEL_MAX_SCALE, visionTabBarGrowth } from '../../constants/layoutM
 import { useUnreadTotal } from '../../lib/unreadStore';
 import { useReducedMotion } from '../../lib/useReducedMotion';
 import { useVisionComfort } from '../../lib/visionComfort';
-import { APPS_DISC_GRADIENT, MOTION, TAB_BAR_SHADOW, TAB_ICON_INK } from '../../constants/theme';
+import { APPS_DISC_GRADIENT, APPS_DISC_INK, MOTION, TAB_BAR_SHADOW, TAB_ICON_INK } from '../../constants/theme';
 
 // Prominent raised center button for Mini Apps (the eye-catcher).
 // Styles and the unread count are computed ONCE in TabLayout and passed down:
@@ -39,9 +39,8 @@ function MiniCenterIcon({ focused, styles }: { focused: boolean; styles: TabStyl
         end={{ x: 1, y: 1 }}
         style={[styles.centerBtn, focused && styles.centerBtnActive]}
       >
-        {/* Fixed white on the fixed brand disc in both themes, not a palette
-            ink: ≥3:1 (graphics) on every APPS_DISC_GRADIENT stop. */}
-        <TabGlyph name="mini" size={28} color="#FFFFFF" active={focused} />
+        {/* Fixed ink on the fixed brand disc in both themes, not a palette ink. */}
+        <TabGlyph name="mini" size={28} color={APPS_DISC_INK} active={focused} />
       </LinearGradient>
       <AppText variant="tiny" color={TAB_ICON_INK.mini[scheme]} style={styles.centerLabel} numberOfLines={normalLabels ? 1 : 2} maxFontSizeMultiplier={TAB_LABEL_MAX_SCALE}>Apps</AppText>
     </View>

@@ -16,8 +16,9 @@ export async function getShareViewing(chatId: string, _isGroup: boolean): Promis
   } catch { return true; }
 }
 
+/** Rejects when the value could not be stored, so the caller can revert its switch. */
 export async function setShareViewing(chatId: string, on: boolean): Promise<void> {
-  try { await AsyncStorage.setItem(KEY(chatId), on ? '1' : '0'); } catch {}
+  await AsyncStorage.setItem(KEY(chatId), on ? '1' : '0');
 }
 
 export default { getShareViewing, setShareViewing };

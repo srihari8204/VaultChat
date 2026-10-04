@@ -231,3 +231,41 @@ func TestSpaceZBEShiftGet(t *testing.T) {
 		}
 	}
 }
+
+func TestSpaceZBEVisitorPassRevoke(t *testing.T) {
+	mux := zbeSpaceSeed(t)
+	base := "/chats/" + zsChat + "/visitor-passes"
+
+	issue := func(name string) (string, string) {
+		t.Helper()
+		code, out := call(t, mux, zsAdmin, "POST", base, fmt.Sprintf(`{"visitorName":%q}`, name))
+		if code != 200 {
+			t.Fatalf("issue %s: %d %v", name, code, out)
+		}
+		return out["id"].(string), out["code"].(string)
+	}
+	unused, _ := issue("Unused")
+	used, usedCode := issue("Used")
+
+	// Only someone who may issue passes may withdraw one.
+	if code, out := call(t, mux, zsDriver, "DELETE", base+"/"+unused, ""); code != 403 {
+		t.Fatalf("member revoke: %d %v, want 403", code, out)
+	}
+	if code, out := call(t, mux, zsAdmin, "DELETE", base+"/not-a-uuid", ""); code != 404 {
+		t.Fatalf("bad id: %d %v, want 404", code, out)
+	}
+	if code, out := call(t, mux, zsAdmin, "DELETE", base+"/"+unused, ""); code != 200 {
+		t.Fatalf("revoke: %d %v", code, out)
+	}
+	if code, out := call(t, mux, zsAdmin, "DELETE", base+"/"+unused, ""); code != 404 {
+		t.Fatalf("second revoke: %d %v, want 404", code, out)
+	}
+
+	// A used pass is the record of a visit: it stays.
+	if code, out := call(t, mux, zsAdmin, "POST", base+"/redeem", fmt.Sprintf(`{"code":%q}`, usedCode)); code != 200 {
+		t.Fatalf("redeem: %d %v", code, out)
+	}
+	if code, out := call(t, mux, zsAdmin, "DELETE", base+"/"+used, ""); code != 409 {
+		t.Fatalf("revoke used: %d %v, want 409", code, out)
+	}
+}

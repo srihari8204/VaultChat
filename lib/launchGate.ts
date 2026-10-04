@@ -46,8 +46,9 @@ let settle!: (allowed: boolean) => void;
  * Resolves once the root gate has decided.
  *
  * `true`  — this launch may proceed to the app.
- * `false` — the root has ALREADY replaced the route (with /onboard or
- *           /app-lock) and the caller must not navigate.
+ * `false` — the root has ALREADY replaced the cold-start route (with /onboard
+ *           or /app-lock) and the caller must not navigate. A later visit to
+ *           '/' routes itself through lib/pendingLink.ts `splashNext`.
  */
 export const launchAllowed: Promise<boolean> = new Promise((r) => { settle = r; });
 

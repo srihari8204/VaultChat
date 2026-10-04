@@ -661,7 +661,7 @@ export default function CameraScreen() {
                     style={[s.chip, on && s.chipOn]}
                     accessibilityRole="radio" accessibilityState={{ selected: on }}
                     accessibilityLabel={`${st.label} style`}>
-                    <Ionicons name={st.icon as keyof typeof Ionicons.glyphMap} size={16}
+                    <Ionicons name={st.icon} size={16}
                       color={on ? BRAND_ACCENT : AuroraDark.textDim} />
                     <Text variant="callout" color={on ? AuroraDark.text : AuroraDark.textDim}>
                       {st.label}

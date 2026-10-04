@@ -58,6 +58,7 @@ func RegisterSpaceOpsOnID(id *http.ServeMux) {
 	id.HandleFunc("GET /chats/{id}/visitor-passes", httpx.RequireAuth(visitorPassList))
 	id.HandleFunc("POST /chats/{id}/visitor-passes", httpx.RequireAuth(visitorPassCreate))
 	id.HandleFunc("POST /chats/{id}/visitor-passes/redeem", httpx.RequireAuth(visitorPassRedeem))
+	id.HandleFunc("DELETE /chats/{id}/visitor-passes/{passId}", httpx.RequireAuth(visitorPassRevoke))
 	id.HandleFunc("GET /chats/{id}/shift", httpx.RequireAuth(shiftGet))
 	id.HandleFunc("PATCH /chats/{id}/shift", httpx.RequireAuth(shiftSet))
 }
@@ -434,6 +435,64 @@ func visitorPassCreate(w http.ResponseWriter, r *http.Request) {
 
 	chatsAudit(ctx, user.ID, chatID, "visitor_pass_issued", &host, map[string]any{"passId": id})
 	httpx.JSON(w, 200, map[string]any{"id": id, "code": code, "validTo": httpx.JSTime(validTo)})
+}
+
+// visitorPassRevoke withdraws a pass nobody has used yet (wrong day, visit
+// cancelled, code sent to the wrong person). Same gate as issuing one. A
+// redeemed pass is the record of who came in, so it stays: 409. The row is
+// deleted, which also frees its code; the audit entry keeps the trail.
+func visitorPassRevoke(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := httpx.UserFrom(r)
+	chatID := r.PathValue("id")
+	passID := r.PathValue("passId")
+
+	mem := chatsRequirePerm(w, r, groups.PermManageRoster,
+		"You cannot revoke visitor passes in this space", "Failed to revoke pass")
+	if mem == nil {
+		return
+	}
+	if !isUUID(passID) {
+		httpx.Err(w, 404, "Pass not found")
+		return
+	}
+
+	var redeemed bool
+	err := chatsQRow(ctx, user.ID,
+		`SELECT redeemed_at IS NOT NULL FROM visitor_passes WHERE chat_id = $1 AND id = $2`,
+		[]any{chatID, passID}, &redeemed)
+	if db.NoRows(err) {
+		httpx.Err(w, 404, "Pass not found")
+		return
+	}
+	if err != nil {
+		log.Printf("[visitor revoke] %v", err)
+		httpx.Err(w, 500, "Failed to revoke pass")
+		return
+	}
+	if redeemed {
+		httpx.Err(w, 409, "This pass has already been used")
+		return
+	}
+
+	// Conditional, like redeem: a pass presented at the gate between the read
+	// above and this delete is admitted, not silently erased.
+	var id string
+	err = chatsQRow(ctx, user.ID,
+		`DELETE FROM visitor_passes WHERE chat_id = $1 AND id = $2 AND redeemed_at IS NULL RETURNING id`,
+		[]any{chatID, passID}, &id)
+	if db.NoRows(err) {
+		httpx.Err(w, 409, "This pass has already been used")
+		return
+	}
+	if err != nil {
+		log.Printf("[visitor revoke] %v", err)
+		httpx.Err(w, 500, "Failed to revoke pass")
+		return
+	}
+
+	chatsAudit(ctx, user.ID, chatID, "visitor_pass_revoked", nil, map[string]any{"passId": id})
+	httpx.JSON(w, 200, map[string]any{"ok": true})
 }
 
 // visitorPassRedeem consumes a pass ONCE.

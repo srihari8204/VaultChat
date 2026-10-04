@@ -71,6 +71,8 @@ const ASSUMED_SPEED_MPS = 7;
 
 /** A fix older than this is drawn faded, as on the operations map. */
 const STALE_MS = 90_000;
+/** FamilyMap's screen-reader labels count vehicles here, not people. */
+const VEHICLE_NOUN: [string, string] = ['vehicle', 'vehicles'];
 
 export default function SpaceRunScreen() {
   const params = useLocalSearchParams<{ spaceId?: string; runId?: string; groupType?: string; name?: string }>();
@@ -299,6 +301,7 @@ export default function SpaceRunScreen() {
               focusId={runId}
               path={trail.length > 1 ? trail : undefined}
               destination={myStopPin}
+              noun={VEHICLE_NOUN}
             />
             <View style={s.row}>
               <Ionicons name="navigate" size={18} color={colors.success} />

@@ -9,7 +9,7 @@
 
 import { useAuthHeader } from '../hooks/useAuthHeader';
 import { brandAlpha, type Palette } from '../constants/theme';
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { View, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator, Linking, Switch, useWindowDimensions } from 'react-native';
 import { getShareViewing, setShareViewing } from '../lib/viewerPrefs';
 import LinkPreview from '../components/LinkPreview';
@@ -102,9 +102,19 @@ export default function ContactInfoScreen() {
   const [blocked, setBlocked] = useState(false);
   const [shareViewing, setShareViewingState] = useState(true);   // Live Chat Viewers (#58)
   useEffect(() => { if (chatId) getShareViewing(chatId, false).then(setShareViewingState).catch(() => {}); }, [chatId]);
-  const toggleShareViewing = useCallback((on: boolean) => {
+  const shareSeq = useRef(0);
+  const toggleShareViewing = useCallback(async (on: boolean) => {
+    const mine = ++shareSeq.current;
     setShareViewingState(on);
-    setShareViewing(chatId, on).catch(() => {});
+    // setShareViewing rejects when the write fails: put the switch back and say
+    // so. Only the latest toggle reverts, so a quick on-off is not undone.
+    try {
+      await setShareViewing(chatId, on);
+    } catch {
+      if (mine !== shareSeq.current) return;
+      setShareViewingState(!on);
+      Alert.alert('Could not save', 'Your viewing-status setting was not changed. Try again.');
+    }
   }, [chatId]);
   const authHeader = useAuthHeader();
   const [media, setMedia] = useState<Message[]>([]);

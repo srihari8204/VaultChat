@@ -25,12 +25,13 @@ import {
   ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import { HEADER_TOP } from '../constants/layout';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { AuroraBackground } from '../components/ui';
 import {
-  cloudBackupMeta, restoreCloudBackup, restoreFromGoogleDrive, type BackupMeta,
+  cloudBackupMeta, isSecretRequired, restoreCloudBackup, restoreFromGoogleDrive, type BackupMeta,
 } from '../lib/cloudBackup';
 import { markRestorePromptSeen } from '../lib/restoreGate';
 import { resetTo } from '../lib/authNav';
@@ -104,6 +105,16 @@ export default function RestoreBackupScreen() {
       inFlight.current = false;
       if (!alive.current) return;
       setBusy(null);
+      // An end-to-end encrypted backup needs its password or key, which this
+      // screen does not ask for; Chat backup's restore does.
+      if (isSecretRequired(e)) {
+        Alert.alert(
+          'Your backup is end-to-end encrypted',
+          `Restore it from Settings → Chat backup → Restore, with the ${e.mode === 'key' ? '64-character key' : 'backup password'} you set.`,
+          [{ text: 'Later', style: 'cancel' }, { text: 'Open Chat backup', onPress: () => router.push('/chat-backup') }],
+        );
+        return;
+      }
       // Named plainly: the two real causes are "there isn't one" and "the
       // network went away mid-download", and the user can act on both.
       // Mapped, not the raw error text.

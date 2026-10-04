@@ -56,6 +56,12 @@ const en: Catalog = {
   'update.advise.cta': 'Update',
   'update.advise.label': 'Update crazzychat',
   'update.dismiss': 'Dismiss update notice',
+  'update.build': 'Installed build {installed} · minimum {min}',
+
+  // launch screen (app/index.tsx)
+  'launch.opening': 'Opening crazzychat',
+  'launch.failed': 'Couldn’t open the app — Try again',
+  'launch.failed.label': "Couldn't open the app. Try again",
 
   // terms gate
   'terms.first.title': 'Before you start',
@@ -105,6 +111,11 @@ const hi: Catalog = {
   'update.advise.cta': 'अपडेट करें',
   'update.advise.label': 'crazzychat अपडेट करें',
   'update.dismiss': 'अपडेट सूचना हटाएँ',
+  'update.build': 'इंस्टॉल बिल्ड {installed} · न्यूनतम {min}',
+
+  'launch.opening': 'crazzychat खुल रहा है',
+  'launch.failed': 'ऐप नहीं खुल सका — फिर कोशिश करें',
+  'launch.failed.label': 'ऐप नहीं खुल सका। फिर कोशिश करें',
 
   'terms.first.title': 'शुरू करने से पहले',
   'terms.first.body': 'crazzychat हमारी सेवा शर्तों और गोपनीयता नीति के अंतर्गत आता है। जारी रखने से पहले उन्हें पढ़ें।',
@@ -149,6 +160,11 @@ const te: Catalog = {
   'update.advise.cta': 'నవీకరించు',
   'update.advise.label': 'crazzychat నవీకరించు',
   'update.dismiss': 'నవీకరణ సూచనను తీసివేయి',
+  'update.build': 'ఇన్‌స్టాల్ చేసిన బిల్డ్ {installed} · కనీసం {min}',
+
+  'launch.opening': 'crazzychat తెరుస్తోంది',
+  'launch.failed': 'యాప్ తెరవలేకపోయాం — మళ్ళీ ప్రయత్నించండి',
+  'launch.failed.label': 'యాప్ తెరవలేకపోయాం. మళ్ళీ ప్రయత్నించండి',
 
   'terms.first.title': 'ప్రారంభించే ముందు',
   'terms.first.body': 'crazzychat మా సేవా నిబంధనలు మరియు గోప్యతా విధానానికి లోబడి ఉంటుంది. కొనసాగించే ముందు వాటిని చదవండి.',

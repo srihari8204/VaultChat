@@ -84,13 +84,13 @@ export default function GroupInfoScreen() {
   const toggleShareViewing = useCallback(async (on: boolean) => {
     const mine = ++shareSeq.current;
     setShareViewingState(on);
-    // setShareViewing swallows its own storage error (lib/viewerPrefs), so read
-    // the value back: if it did not stick, show what is really saved and say so.
-    // Only the latest toggle checks, so a quick on-off is not read as a failure.
-    await setShareViewing(chatId, on);
-    const saved = await getShareViewing(chatId, true);
-    if (mine === shareSeq.current && saved !== on) {
-      setShareViewingState(saved);
+    // setShareViewing rejects when the write fails: put the switch back and say
+    // so. Only the latest toggle reverts, so a quick on-off is not undone.
+    try {
+      await setShareViewing(chatId, on);
+    } catch {
+      if (mine !== shareSeq.current) return;
+      setShareViewingState(!on);
       Alert.alert('Could not save', 'Your viewing-status setting was not changed. Try again.');
     }
   }, [chatId]);

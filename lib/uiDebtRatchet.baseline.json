@@ -1,8 +1,4 @@
 {
- "app/(tabs)/_layout.tsx": {
-  "unroled": 0,
-  "hex": 1
- },
  "app/(tabs)/mini.tsx": {
   "unroled": 0,
   "hex": 21
@@ -26,14 +22,6 @@
  "app/games.tsx": {
   "unroled": 0,
   "hex": 4
- },
- "app/group-create.tsx": {
-  "unroled": 0,
-  "hex": 8
- },
- "app/group-info.tsx": {
-  "unroled": 0,
-  "hex": 1
  },
  "app/image-editor.tsx": {
   "unroled": 0,
@@ -93,7 +81,7 @@
  },
  "app/videocall.tsx": {
   "unroled": 1,
-  "hex": 4
+  "hex": 2
  },
  "app/whiteboard.tsx": {
   "unroled": 0,
@@ -121,7 +109,7 @@
  },
  "components/PdfView.tsx": {
   "unroled": 0,
-  "hex": 4
+  "hex": 3
  },
  "components/ProgressRing.tsx": {
   "unroled": 0,
@@ -149,11 +137,11 @@
  },
  "components/chat/Composer.tsx": {
   "unroled": 0,
-  "hex": 4
+  "hex": 1
  },
  "components/chat/MediaCaptionPreview.tsx": {
   "unroled": 0,
-  "hex": 12
+  "hex": 5
  },
  "components/family/CheckinSheet.tsx": {
   "unroled": 0,

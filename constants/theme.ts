@@ -128,6 +128,8 @@ export const APPS_DISC_GRADIENT = {
   light: ['#9471ED', '#5830AC'],
   dark: ['#9D82F5', '#6036BB'],
 } as const;
+/** Glyph on the Apps disc, both themes: ≥3:1 (graphics) on every gradient stop. */
+export const APPS_DISC_INK = '#FFFFFF';
 
 /** Drop shadow under the floating tab bar (both appearances). */
 export const TAB_BAR_SHADOW = '#05030D';

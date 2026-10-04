@@ -117,9 +117,9 @@ export default function ScheduleMessageScreen() {
   // Custom date + time. Android chains its date and time dialogs; iOS (which
   // has no DateTimePickerAndroid) gets an inline picker sheet. A past time is
   // refused as soon as it is picked, not later at Schedule (doSchedule checks
-  // again, since a time can pass while the screen is open).
-  // ponytail: components/ui/useDatePicker has no minimumDate, so the picker
-  // still lets a past time be chosen; pass one once the hook takes it.
+  // again, since a time can pass while the screen is open). minimumDate stops
+  // past days on both platforms and past times on iOS; Android's time dialog
+  // ignores it, so the check below still matters there.
   const picker = useDatePicker();
   const pickCustom = useCallback(() => {
     picker.open(customWhen ?? new Date(Date.now() + 60 * 60 * 1000), (d) => {
@@ -128,7 +128,7 @@ export default function ScheduleMessageScreen() {
         return;
       }
       setCustomWhen(d);
-    }, 'datetime');
+    }, 'datetime', new Date(Date.now() + 60_000));
   }, [customWhen, picker]);
 
   return (

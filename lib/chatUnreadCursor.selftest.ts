@@ -33,12 +33,14 @@
 //   produces symptom 1 as well.
 
 import { readFileSync } from 'node:fs';
-import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const CHAT = readFileSync(join(HERE, '..', 'app', 'chat.tsx'), 'utf8');
+// The chat screen's socket effect lives in these files; if it moves out of
+// app/chat.tsx, add the new file here (see outboxRecovery.selftest.ts).
+const CHAT_FILES = ['app/chat.tsx'];
+const CHAT = CHAT_FILES.map((f) => readFileSync(join(HERE, '..', f), 'utf8')).join('\n');
 const SYNC = readFileSync(join(HERE, 'syncEngine.ts'), 'utf8');
 
 let failures = 0;
@@ -246,7 +248,7 @@ if (failures) {
 // and applyLocalReadPointers above cannot correct a count it has no pointer
 // for. That is the "I opened it and it still says unread" case.
 {
-  const src = fs.readFileSync('app/chat.tsx', 'utf8');
+  const src = CHAT;
   const cleanup = src.slice(src.indexOf('A GLANCE STILL COUNTS AS READING'));
   check('the read debounce has a blur handler at all', cleanup.length > 0, 'the 2026-09-18 comment block is gone');
   check('blur flushes the pending read instead of dropping it',

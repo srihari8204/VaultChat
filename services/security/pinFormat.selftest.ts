@@ -19,7 +19,10 @@ assert.equal(isPinFormat(''), false);
 const root = path.resolve(__dirname, '../..');
 const read = (p: string) => fs.readFileSync(path.join(root, p), 'utf8');
 assert.match(read('services/security/pinStore.ts'), /isPinFormat\(pin\)/, 'pinStore.setPin validates with isPinFormat');
-assert.match(read('app/vault.tsx'), /isPinFormat/, 'the vault gate validates with isPinFormat');
+// The vault PIN gate lives in these files; if it moves out of app/vault.tsx,
+// add (or swap in) its new file here.
+const VAULT_GATE_FILES = ['app/vault.tsx'];
+assert.match(VAULT_GATE_FILES.map(read).join('\n'), /isPinFormat/, 'the vault gate validates with isPinFormat');
 const bp = read('app/backup-pin.tsx');
 const m = bp.match(/const NEW_PIN_LENGTH = (\d+);/);
 assert.ok(m, 'backup-pin declares NEW_PIN_LENGTH');

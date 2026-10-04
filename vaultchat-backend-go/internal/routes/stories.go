@@ -34,6 +34,17 @@ func RegisterStories(mux *http.ServeMux) {
 // audienceIDs mirrors stories.js audienceIds: shared-active-chat peers minus
 // blocks, filtered by the author's status_privacy mode.
 func audienceIDs(ctx context.Context, userID string) ([]string, error) {
+	base, err := audienceBaseIDs(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return filterAudience(ctx, userID, base)
+}
+
+// audienceBaseIDs is everyone the author shares an active chat with (groups
+// included), minus blocks in either direction — the set the privacy mode
+// then filters.
+func audienceBaseIDs(ctx context.Context, userID string) ([]string, error) {
 	rows, err := db.SysPool.Query(ctx,
 		`SELECT DISTINCT cm_them.user_id AS id
 		   FROM chat_members cm_me
@@ -57,7 +68,11 @@ func audienceIDs(ctx context.Context, userID string) ([]string, error) {
 		}
 		base = append(base, id)
 	}
+	return base, rows.Err()
+}
 
+// filterAudience applies the author's status_privacy mode to the base set.
+func filterAudience(ctx context.Context, userID string, base []string) ([]string, error) {
 	var mode *string
 	if err := db.Pool.QueryRow(ctx,
 		`SELECT status_privacy FROM users WHERE id = $1`, userID).Scan(&mode); err != nil {
@@ -296,12 +311,62 @@ func storiesPrivacyPut(w http.ResponseWriter, r *http.Request) {
 }
 
 func storiesAudience(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("base") == "1" {
+		storiesAudienceBase(w, r)
+		return
+	}
 	aud, err := audienceIDs(r.Context(), httpx.UserFrom(r).ID)
 	if err != nil {
 		httpx.Err(w, 500, "Failed to load audience")
 		return
 	}
 	httpx.JSON(w, 200, map[string]any{"viewerIds": aud})
+}
+
+// storiesAudienceBase answers GET /stories/audience?base=1: the people the
+// status-privacy picker can choose from — the audience BEFORE the mode filter,
+// so a peer met only in a group can be listed. Names are what the author
+// already sees for these people in their shared chats; a photo is sent only
+// when its owner left profile_photo_visible on.
+func storiesAudienceBase(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	ids, err := audienceBaseIDs(ctx, httpx.UserFrom(r).ID)
+	if err != nil {
+		httpx.Err(w, 500, "Failed to load audience")
+		return
+	}
+	type person struct {
+		ID       string  `json:"id"`
+		Name     *string `json:"name"`
+		PhotoURL *string `json:"photoURL"`
+	}
+	people := []person{}
+	if len(ids) > 0 {
+		rows, err := db.Pool.Query(ctx,
+			`SELECT id, name, email, first_name_cipher, last_name_cipher, email_cipher,
+			        CASE WHEN profile_photo_visible THEN photo_url END
+			   FROM users WHERE id = ANY($1::uuid[])`, ids)
+		if err != nil {
+			httpx.Err(w, 500, "Failed to load audience")
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			var name, email, firstC, lastC, emailC, photoURL *string
+			if err := rows.Scan(&id, &name, &email, &firstC, &lastC, &emailC, &photoURL); err != nil {
+				httpx.Err(w, 500, "Failed to load audience")
+				return
+			}
+			ident := vault.IdentityFromRow(firstC, lastC, emailC, nil, nil, nil, name, email, nil, nil, nil)
+			people = append(people, person{ID: id, Name: ident.Name, PhotoURL: photoURL})
+		}
+		if rows.Err() != nil {
+			httpx.Err(w, 500, "Failed to load audience")
+			return
+		}
+	}
+	httpx.JSON(w, 200, map[string]any{"people": people})
 }
 
 func storiesPost(w http.ResponseWriter, r *http.Request) {

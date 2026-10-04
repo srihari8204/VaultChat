@@ -8,13 +8,16 @@
 // laid out full-bleed on A4 comes out as a poster, which is what makes a scanned
 // card useless when someone prints it.
 
+// Type-only: erased at runtime, so this file still loads under tsx.
+import type { Ionicons } from '@expo/vector-icons';
+
 export type DocStyleId = 'id' | 'document' | 'letter' | 'report';
 
 export interface DocStyle {
   id: DocStyleId;
   label: string;
   /** Ionicons glyph for the chip. */
-  icon: string;
+  icon: keyof typeof Ionicons.glyphMap;
   /** @page rule for the PDF. */
   page: string;
   /** Width the scanned page is drawn at, inside that page. */

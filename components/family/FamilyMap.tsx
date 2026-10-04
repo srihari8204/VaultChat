@@ -518,7 +518,7 @@ map.on('error',function(e){
 
 export default function FamilyMap({
   members, onSelect, onUserMove, focusId, followId, followZoom, path, destination, linkFrom, route, style,
-  headingDeg, cameraMode, camera3D = FAMILY_MAP_3D, controlsBottom = 12,
+  headingDeg, cameraMode, camera3D = FAMILY_MAP_3D, controlsBottom = 12, noun,
 }: {
   members: FamilyMarker[];
   onSelect?: (id: string) => void;
@@ -565,6 +565,9 @@ export default function FamilyMap({
   /** Floor for the map's own controls, so a screen stacking bars along the
    *  bottom can lift them clear instead of having them covered. */
   controlsBottom?: number;
+  /** What the markers are, [singular, plural], for the screen-reader labels.
+   *  Omitted: people (family members). */
+  noun?: [string, string];
 }) {
   const { colors } = useTheme();
   const ref = useRef<WebView>(null);
@@ -715,10 +718,11 @@ export default function FamilyMap({
   // map announces what it shows as one element: who is on it, and whose dot
   // is an old (last-known) position rather than a live one.
   const a11ySummary = useMemo(() => {
-    if (!members.length) return path?.length ? 'Map of the track' : 'Map, no one located yet';
+    if (!members.length) return path?.length ? 'Map of the track' : `Map, ${noun ? `no ${noun[1]}` : 'no one'} located yet`;
     const who = members.map((m) => `${m.self ? 'You' : m.name}${m.stale ? ', last known position' : ''}${m.label ? `, ${m.label}` : ''}`);
-    return `Map showing ${members.length} ${members.length === 1 ? 'person' : 'people'}: ${who.join('; ')}`;
-  }, [members, path?.length]);
+    const [one, many] = noun ?? ['person', 'people'];
+    return `Map showing ${members.length} ${members.length === 1 ? one : many}: ${who.join('; ')}`;
+  }, [members, path?.length, noun]);
 
   return (
     <View style={[styles.wrap, style]}>
@@ -798,7 +802,7 @@ export default function FamilyMap({
       <TouchableOpacity
         onPress={() => ref.current?.injectJavaScript('fitAll();true;')}
         accessibilityRole="button"
-        accessibilityLabel="Fit all family members on screen"
+        accessibilityLabel={`Fit all ${noun ? noun[1] : 'family members'} on screen`}
         style={[styles.fab, { bottom: controlsBottom, backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}
       >
         <Ionicons name="scan" size={20} color={colors.primary} />

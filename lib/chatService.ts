@@ -1123,9 +1123,9 @@ export async function cacheOwnPlaintext(chatId: string, messageId: number | unde
  * message id the preview carries; this just looks it up. Peer messages are left
  * alone — theirs decrypt through the normal path.
  */
-export async function hydrateOwnPreviews(
-  map: Map<string, { content: string | null; type: string | null; senderId: string | null; id: number }>,
-): Promise<Map<string, { content: string | null; type: string | null; senderId: string | null; id: number }>> {
+export async function hydrateOwnPreviews<T extends { content: string | null; senderId: string | null; id: number }>(
+  map: Map<string, T>,
+): Promise<Map<string, T>> {
   if (!E2EE_ENABLED || !map?.size) return map;
   try {
     const me = await myUserId();

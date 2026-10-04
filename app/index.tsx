@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Image, StyleSheet, TouchableOpacity, View } from "react-native";
 import { AppText as Text } from "../components/ui/Text";
 import { AuroraDark, BRAND_NIGHT } from "../constants/theme";
+import { t } from "../lib/i18n";
 import { launchAllowed } from "../lib/launchGate";
 import { authEdge, consumeLaunchLink, launchGateDecided, markLaunchRouted, splashNext } from "../lib/pendingLink";
 import { shouldCheckRestore } from "../lib/restoreGate";
@@ -130,16 +131,16 @@ export default function IndexScreen() {
         importantForAccessibility="no"
       />
       {slow && !failed && (
-        <ActivityIndicator style={S.wait} color={AuroraDark.accentOn} accessibilityLabel="Opening crazzychat" />
+        <ActivityIndicator style={S.wait} color={AuroraDark.accentOn} accessibilityLabel={t('launch.opening')} />
       )}
       {failed && (
         <TouchableOpacity
           style={S.retry}
           onPress={() => { void route(); }}
           accessibilityRole="button"
-          accessibilityLabel="Couldn't open the app. Try again"
+          accessibilityLabel={t('launch.failed.label')}
         >
-          <Text style={S.retryTxt}>Couldn’t open the app — Try again</Text>
+          <Text style={S.retryTxt}>{t('launch.failed')}</Text>
         </TouchableOpacity>
       )}
     </View>

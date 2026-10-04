@@ -38,6 +38,8 @@ import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 
 /** A fix older than this is drawn faded — the map must not imply freshness. */
 const STALE_MS = 90_000;
+/** FamilyMap's screen-reader labels count vehicles here, not people. */
+const VEHICLE_NOUN: [string, string] = ['vehicle', 'vehicles'];
 /** How often the run list is re-read while the screen is focused. */
 const RELOAD_MS = 60_000;
 
@@ -266,7 +268,7 @@ export default function SpaceOpsMapScreen() {
       <AuroraBackground />
       <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · Operations` : 'Operations', { id: spaceId, name: params.name })} />
 
-      <FamilyMap members={markers} focusId={focus} onSelect={setFocus} style={s.map} />
+      <FamilyMap members={markers} focusId={focus} onSelect={setFocus} style={s.map} noun={VEHICLE_NOUN} />
 
       {/* What the map cannot show, said rather than left blank. */}
       {waiting > 0 && (

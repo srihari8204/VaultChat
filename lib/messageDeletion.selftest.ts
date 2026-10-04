@@ -40,7 +40,10 @@ async function main() {
   assert.match(localDb, /SET type = 'system', content = NULL, reply_to_id = NULL/);
   assert.match(localDb, /excluded\.deleted_at IS NOT NULL THEN NULL/);
 
-  const chat = readFileSync(new URL('../app/chat.tsx', import.meta.url), 'utf8');
+  // The chat screen's socket effect lives in these files; if it moves out of
+  // app/chat.tsx, add the new file here (see outboxRecovery.selftest.ts).
+  const CHAT_FILES = ['app/chat.tsx'];
+  const chat = CHAT_FILES.map((f) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')).join('\n');
   assert.match(chat, /persistMessageDeletion\(chatId, eid, e\.deletedAt\)/,
     'live delete event must persist before a reopen');
 
