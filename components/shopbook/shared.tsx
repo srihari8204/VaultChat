@@ -287,7 +287,7 @@ export function AvailabilityTag({ a, altName }: { a: ItemAvailability; altName: 
  */
 export function TxnRow({
   icon, iconTone = 'brand', title, sub, amount, amountTone = 'plain', amountNote,
-  right, onPress, children,
+  right, action, onPress, children,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
   iconTone?: 'brand' | 'good' | 'bad' | 'warn';
@@ -300,6 +300,10 @@ export function TxnRow({
    *  an accessible carrier of meaning. */
   amountNote?: string;
   right?: React.ReactNode;
+  /** A button drawn in `right`. The row is grouped into one screen-reader
+   *  element, which hides buttons inside it, so the button is also offered
+   *  as an accessibility action on the row. */
+  action?: { label: string; onPress: () => void };
   onPress?: () => void;
   children?: React.ReactNode;
 }) {
@@ -319,6 +323,10 @@ export function TxnRow({
       // a screen reader that reads the name and not the balance is useless on
       // a khata.
       accessibilityLabel={[title, sub, amountNote, amount].filter(Boolean).join(', ')}
+      accessibilityActions={action ? [{ name: 'rowAction', label: action.label }] : undefined}
+      onAccessibilityAction={action ? (e: { nativeEvent: { actionName: string } }) => {
+        if (e.nativeEvent.actionName === 'rowAction') action.onPress();
+      } : undefined}
     >
       <View style={[s.shopIcon, { backgroundColor: bg }]}>
         <Ionicons name={icon} size={20} color={fg} />
@@ -360,6 +368,7 @@ export function LedgerRow({ entry, currency, onShare }: { entry: SB.LedgerEntry;
       // alone is not an accessible carrier of meaning.
       amount={`${isPay ? '−' : '+'}${money(entry.amount)}`}
       amountTone={isPay ? 'good' : 'bad'}
+      action={onShare ? { label: isPay ? 'Share receipt' : 'Share bill', onPress: onShare } : undefined}
       right={onShare ? (
         <TouchableOpacity onPress={onShare} hitSlop={8}
           accessibilityRole="button"
