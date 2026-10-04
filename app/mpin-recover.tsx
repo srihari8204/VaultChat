@@ -2,9 +2,8 @@
 // (≥3 must match) → recovery ticket. Phase 2: set + confirm a new 6-digit MPIN
 // (weak rejected) → logged in → Chats.
 //
-// Reached from app/mpin-entry.tsx, so it keeps that screen's fixed night
-// palette rather than the app theme — see the always-dark note in
-// components/ui/Brand.tsx.
+// Reached from app/mpin-entry.tsx and app/app-lock.tsx; uses the shared
+// adaptive auth palette (lib/useAuthTheme).
 
 import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
@@ -26,6 +25,7 @@ import { openRestoreIfNewPhone } from '../lib/postSignIn';
 import { resetTo } from '../lib/authNav';
 import { type AuthPalette } from '../constants/authTheme';
 import { useAuthTheme } from '../lib/useAuthTheme';
+import { isWeakPin } from '../lib/weakPin';
 
 export default function MpinRecover() {
   const AUTH = useAuthTheme();
@@ -68,7 +68,9 @@ export default function MpinRecover() {
     try {
       const payload = questions
         .filter(q => (answers[q] ?? '').trim())
-        .map(q => ({ questionCode: q, answer: answers[q] }));
+        // Trimmed, as the filter above judged it: a stray space typed after an
+        // answer must not make a right answer wrong.
+        .map(q => ({ questionCode: q, answer: (answers[q] ?? '').trim() }));
       const t = await verifyRecoveryAnswers(userId, payload);
       setTicket(t); setPhase('setmpin');
     } catch (e: any) {
@@ -76,9 +78,7 @@ export default function MpinRecover() {
     } finally { setBusy(false); }
   };
 
-  const isWeak = (m: string) => !/^\d{6}$/.test(m) || /^(\d)\1{5}$/.test(m) || '0123456789'.includes(m) || '9876543210'.includes(m) || ['123456', '654321', '000000', '121212', '112233'].includes(m);
-
-  const onSet = (v: string) => { if (isWeak(v)) { setError('That MPIN is too easy to guess.'); setFirst(''); doShake(); return; } setError(null); setMpinPhase('confirm'); };
+  const onSet = (v: string) => { if (isWeakPin(v)) { setError('That MPIN is too easy to guess.'); setFirst(''); doShake(); return; } setError(null); setMpinPhase('confirm'); };
   const onConfirm = async (v: string) => {
     if (v !== first) { setError('PINs don’t match.'); setConfirm(''); setFirst(''); setMpinPhase('set'); doShake(); return; }
     setBusy(true);
@@ -118,7 +118,7 @@ export default function MpinRecover() {
             <>
               <View style={s.head}>
                 <BrandMark size={52} markOnly />
-                <Text style={s.title}>Reset your MPIN</Text>
+                <Text style={s.title} accessibilityRole="header">Reset your MPIN</Text>
                 <Text style={s.sub}>Answer at least 3 of your security questions.</Text>
               </View>
 
@@ -135,6 +135,7 @@ export default function MpinRecover() {
                       placeholder="Your answer"
                       placeholderTextColor={AUTH.faint}
                       autoCapitalize="none" autoCorrect={false} secureTextEntry
+                      accessibilityLabel={`Answer to: ${questionLabel(q)}`}
                     />
                   </View>
                 ))}
@@ -171,8 +172,8 @@ export default function MpinRecover() {
               <View style={s.pinCard}>
                 {busy ? <ActivityIndicator color={AUTH.accent} size="large" />
                   : mpinPhase === 'set'
-                    ? <MpinInput key="set" value={first} onChange={setFirst} onComplete={onSet} autoFocus shakeAnim={shake} onDark />
-                    : <MpinInput key="confirm" value={confirm} onChange={setConfirm} onComplete={onConfirm} autoFocus shakeAnim={shake} onDark />}
+                    ? <MpinInput key="set" value={first} onChange={setFirst} onComplete={onSet} autoFocus shakeAnim={shake} onDark label="New MPIN" />
+                    : <MpinInput key="confirm" value={confirm} onChange={setConfirm} onComplete={onConfirm} autoFocus shakeAnim={shake} onDark label="Confirm new MPIN" />}
               </View>
 
               {!!error && <Text style={s.error} accessibilityLiveRegion="polite">{error}</Text>}

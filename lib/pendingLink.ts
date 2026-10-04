@@ -138,14 +138,22 @@ export function setResumeLockCheck(check: Promise<boolean>): void {
 }
 
 /**
+ * True once app/index.tsx has made its cold-start replace. Until then a tap on
+ * '/' is held: index's replace('/(tabs)/chats') swaps the TOP entry, so a tap
+ * pushed first was overwritten and lost. index replays the held tap itself.
+ */
+let launchRouted = false;
+export function markLaunchRouted(): void { launchRouted = true; }
+
+/**
  * Open `href` once the launch gate has decided and nothing is locking now;
  * otherwise hold it for replay after unlock.
  *
  * `launch` settles ONCE per process, so `false` means only "this launch was sent
  * to the lock or sign-in", not "still locked". After the user unlocks or signs
- * in, later taps must open, so the current route decides. While the launch was
- * redirected, the root path ('/', the veil) still counts as locked: the
- * redirect may not have reached the router yet.
+ * in, later taps must open, so the current route decides. The root path ('/',
+ * the splash) holds taps until something has routed away from it: the gate's
+ * redirect (launch false) or index's own replace (launch true).
  */
 export async function openWhenUnlocked(
   href: string,
@@ -155,7 +163,39 @@ export async function openWhenUnlocked(
 ): Promise<void> {
   const [allowed, relocking] = await Promise.all([launch, resumeLock]);
   const path = currentPath();
-  const stillGated = isLockOrAuthRoute(path) || (!allowed && (!path || path === '/'));
+  const onSplash = !path || path === '/';
+  const stillGated = isLockOrAuthRoute(path) || (onSplash && !(allowed && launchRouted));
   if (!relocking && !stillGated) open(href);
   else stashLaunchLink(href);
+}
+
+// ── Taps that arrive outside React ────────────────────────────────────────
+//
+// notifee's background handler (lib/callBackground.ts) runs for a notification
+// pressed while the app is backgrounded, and at JS load on a cold start —
+// possibly before the root layout has mounted. It hands the tap here; the root
+// subscribes and sends it through its lock-aware opener. The same tap can also
+// come back from getInitialNotification on a cold start, so a repeat of the
+// same href within DUP_MS is dropped rather than opened twice.
+
+const DUP_MS = 10_000;
+let tapSink: ((href: string) => void) | null = null;
+let heldTap: string | null = null;
+let lastTap: { href: string; at: number } | null = null;
+
+/** Deliver a tap to the root's opener, or hold it until the root subscribes. */
+export function deliverTap(href: string, now: number = Date.now()): void {
+  if (lastTap && lastTap.href === href && now - lastTap.at < DUP_MS) return;
+  lastTap = { href, at: now };
+  if (tapSink) tapSink(href);
+  else heldTap = href;
+}
+
+/** The root's subscription; a tap that arrived before it is delivered at once. */
+export function onDeliveredTap(sink: (href: string) => void): () => void {
+  tapSink = sink;
+  const held = heldTap;
+  heldTap = null;
+  if (held) sink(held);
+  return () => { if (tapSink === sink) tapSink = null; };
 }

@@ -61,7 +61,15 @@ export default function RestoreBackupScreen() {
   const [busy, setBusy] = useState<null | 'cloud' | 'drive'>(null);
   const [restored, setRestored] = useState<number | null>(null);
 
-  useEffect(() => { cloudBackupMeta().then(setMeta).catch(() => setMeta({ exists: false })); }, []);
+  // `unavailable` means the lookup failed — NOT "no backup". Showing "No
+  // backup was found" for a dead connection invited the user to carry on and
+  // lose a backup that exists; offer a retry instead.
+  const lookUp = useCallback(() => {
+    setMeta(null);
+    cloudBackupMeta().then(setMeta).catch(() => setMeta({ exists: false, unavailable: true }));
+  }, []);
+  useEffect(() => { lookUp(); }, [lookUp]);
+  const lookupFailed = !!meta?.unavailable;
 
   // Leaving — by any route — must mark the prompt seen, or a user who skips is
   // asked again on the next cold start, which reads as the app nagging.
@@ -83,11 +91,13 @@ export default function RestoreBackupScreen() {
       setBusy(null);
       // Named plainly: the two real causes are "there isn't one" and "the
       // network went away mid-download", and the user can act on both.
+      // Mapped, not the raw error text.
+      const msg = String(e?.message ?? '');
       Alert.alert(
         'Could not restore',
-        e?.message?.includes('No backup')
+        msg.includes('No backup')
           ? 'No backup was found for this account.'
-          : `${e?.message ?? 'Something went wrong.'}\n\nYour backup is untouched — you can try again from Settings → Chat backup.`,
+          : `${/network|abort|timed? ?out/i.test(msg) ? 'The connection dropped during the restore.' : 'The restore did not finish.'}\n\nYour backup is untouched — try again, or later from Settings → Chat backup.`,
       );
       return;
     }
@@ -100,13 +110,13 @@ export default function RestoreBackupScreen() {
         <AuroraBackground />
         <View style={S.done}>
           <Ionicons name="checkmark-circle" size={64} color={colors.success} />
-          <Text style={S.doneTitle}>Chats restored</Text>
+          <Text style={S.doneTitle} accessibilityRole="header">Chats restored</Text>
           <Text style={S.doneSub}>
             {restored > 0
               ? `${restored.toLocaleString()} message${restored === 1 ? '' : 's'} are back on this phone.`
               : 'Your backup was applied.'}
           </Text>
-          <TouchableOpacity style={S.cta} onPress={leave} activeOpacity={0.85}>
+          <TouchableOpacity style={S.cta} onPress={leave} activeOpacity={0.85} accessibilityRole="button">
             <Text style={S.ctaTxt}>Continue</Text>
           </TouchableOpacity>
         </View>
@@ -118,12 +128,14 @@ export default function RestoreBackupScreen() {
     <View style={S.screen}>
       <AuroraBackground />
       <ScrollView contentContainerStyle={S.body}>
-        <View style={S.badge}><Ionicons name="cloud-download-outline" size={34} color={colors.primary} /></View>
+        <View style={S.badge} accessibilityElementsHidden importantForAccessibility="no"><Ionicons name="cloud-download-outline" size={34} color={colors.primary} /></View>
 
-        <Text style={S.title}>Restore your chats</Text>
-        <Text style={S.lede}>
+        <Text style={S.title} accessibilityRole="header">Restore your chats</Text>
+        <Text style={S.lede} accessibilityLiveRegion="polite">
           {meta === null
             ? 'Looking for a backup…'
+            : lookupFailed
+              ? 'Couldn’t check for a backup — you may be offline. Try again, or carry on and restore later from Settings → Chat backup.'
             : meta.exists
               ? 'We found a backup for this account. Restoring brings your messages and media onto this phone.'
               : 'No backup was found for this account. You can carry on — new messages will be backed up from here.'}
@@ -137,6 +149,12 @@ export default function RestoreBackupScreen() {
           </View>
         )}
 
+        {lookupFailed && (
+          <TouchableOpacity style={S.cta} onPress={lookUp} activeOpacity={0.85} accessibilityRole="button">
+            <Text style={S.ctaTxt}>Try again</Text>
+          </TouchableOpacity>
+        )}
+
         {meta?.exists && (
           <>
             <TouchableOpacity
@@ -144,6 +162,8 @@ export default function RestoreBackupScreen() {
               onPress={() => run('cloud')}
               disabled={!!busy}
               activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !!busy, busy: busy === 'cloud' }}
             >
               {busy === 'cloud'
                 ? <ActivityIndicator color="#fff" />
@@ -155,6 +175,8 @@ export default function RestoreBackupScreen() {
               onPress={() => run('drive')}
               disabled={!!busy}
               activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !!busy, busy: busy === 'drive' }}
             >
               {busy === 'drive'
                 ? <ActivityIndicator color={colors.text} />
@@ -167,7 +189,14 @@ export default function RestoreBackupScreen() {
           </>
         )}
 
-        <TouchableOpacity style={S.skip} onPress={leave} disabled={!!busy} activeOpacity={0.7}>
+        <TouchableOpacity
+          style={S.skip}
+          onPress={leave}
+          disabled={!!busy}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !!busy }}
+        >
           <Text style={S.skipTxt}>{meta?.exists ? 'Not now' : 'Continue'}</Text>
         </TouchableOpacity>
 
@@ -182,7 +211,7 @@ export default function RestoreBackupScreen() {
   );
 }
 
-function Row({ label, value, S, last }: { label: string; value: string; S: any; last?: boolean }) {
+function Row({ label, value, S, last }: { label: string; value: string; S: ReturnType<typeof makeStyles>; last?: boolean }) {
   return (
     <View style={[S.row, last && { borderBottomWidth: 0 }]}>
       <Text style={S.rowLabel}>{label}</Text>
@@ -234,7 +263,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   secondaryTxt: { color: c.text, fontSize: 14.5, fontWeight: '600' },
 
   note: { color: c.textFaint, fontSize: 12.5, lineHeight: 17, textAlign: 'center', marginTop: 14 },
-  skip: { marginTop: 22, paddingVertical: 10, paddingHorizontal: 20 },
+  skip: { marginTop: 22, paddingVertical: 10, paddingHorizontal: 20, minHeight: 44, justifyContent: 'center' },
   skipTxt: { color: c.textDim, fontSize: 15, fontWeight: '600' },
   reassure: {
     color: c.textFaint, fontSize: 12.5, lineHeight: 17, textAlign: 'center',

@@ -1,4 +1,5 @@
-// app/onboard-security.tsx — pick 5 distinct security questions + answers.
+// app/onboard-security.tsx — pick REQUIRED_SECURITY_ANSWERS distinct security
+// questions + answers.
 // Answers are held in the store and only sent (argon2-hashed server-side) after
 // the MPIN is set. Each row excludes questions chosen by the others.
 //
@@ -11,7 +12,7 @@ import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BRAND_GRADIENT_CTA } from '../constants/theme';
-import { SecurityQuestionRow } from '../components/auth/SecurityQuestionRow';
+import { MIN_ANSWER, SecurityQuestionRow } from '../components/auth/SecurityQuestionRow';
 import { REQUIRED_SECURITY_ANSWERS } from '../constants/securityQuestionPool';
 import { onboarding } from '../lib/onboarding';
 import { AuthSky, BrandMark, KeyboardSafe, StepRail } from '../components/ui';
@@ -32,7 +33,7 @@ export default function OnboardSecurity() {
     setSlots(prev => prev.map((sl, j) => (j === i ? { ...sl, ...patch } : sl)));
 
   const chosen = slots.map(sl => sl.questionCode).filter(Boolean) as string[];
-  const valid = slots.every(sl => sl.questionCode && sl.answer.trim().length >= 2);
+  const valid = slots.every(sl => sl.questionCode && sl.answer.trim().length >= MIN_ANSWER);
 
   const next = () => {
     if (!valid) return;
@@ -60,12 +61,12 @@ export default function OnboardSecurity() {
 
           <View style={s.head}>
             <BrandMark size={52} markOnly />
-            <Text style={s.title}>Security questions</Text>
+            <Text style={s.title} accessibilityRole="header">Security questions</Text>
             <Text style={s.step}>Step 2 of 3 · used to recover your account</Text>
             <StepRail step={2} style={s.rail} />
           </View>
 
-          {/* All five rows in one card: they are one answer to one question
+          {/* All the rows in one card: they are one answer to one question
               ("how do we know it's you"), not five separate settings. */}
           <View style={s.card}>
             {slots.map((sl, i) => (

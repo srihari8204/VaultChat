@@ -22,12 +22,14 @@ import { useVisionComfort } from '../../lib/visionComfort';
 import { MOTION, TAB_ICON_INK } from '../../constants/theme';
 
 // Prominent raised center button for Mini Apps (the eye-catcher).
-function MiniCenterIcon({ focused }: { focused: boolean }) {
-  const c = useColors();
+// Styles and the unread count are computed ONCE in TabLayout and passed down:
+// each icon used to build its own StyleSheet and subscribe to the unread store.
+type TabStyles = ReturnType<typeof makeStyles>;
+
+function MiniCenterIcon({ focused, styles }: { focused: boolean; styles: TabStyles }) {
   const { metrics } = useVisionComfort();
   const { scheme } = useTheme();
   const { width, fontScale } = useWindowDimensions();
-  const styles = useStyles(c);
   const normalLabels = fontScale <= 1.2 && metrics.textScale <= 1.15;
   return (
     <View style={[styles.centerWrap, { width: Math.min(64, (width - 32) / 5) }]} pointerEvents="none">
@@ -44,12 +46,13 @@ function MiniCenterIcon({ focused }: { focused: boolean }) {
   );
 }
 
-function TabIcon({ tab, label, focused }: { tab: TabGlyphName; label: string; focused: boolean }) {
+function TabIcon({ tab, label, focused, styles, unread = 0 }: {
+  tab: TabGlyphName; label: string; focused: boolean; styles: TabStyles; unread?: number;
+}) {
   const c = useColors();
   const { metrics } = useVisionComfort();
   const { scheme } = useTheme();
   const { width, fontScale } = useWindowDimensions();
-  const styles = useStyles(c);
   const normalLabels = fontScale <= 1.2 && metrics.textScale <= 1.15;
   const reduced = useReducedMotion();
   const lift = useRef(new Animated.Value(focused ? 1 : 0)).current;
@@ -70,8 +73,7 @@ function TabIcon({ tab, label, focused }: { tab: TabGlyphName; label: string; fo
     ? undefined
     : { transform: [{ scale: lift.interpolate({ inputRange: [0, 1], outputRange: [1, 1.09] }) }] };
   const color = TAB_ICON_INK[tab][scheme];
-  const unread = useUnreadTotal();
-  const badge = tab === 'chats' && unread > 0;
+  const badge = unread > 0;
   return (
     <View style={[styles.tabIconWrap, { width: Math.min(64, (width - 32) / 5) }]}>
       <Animated.View style={anim}>
@@ -122,8 +124,8 @@ export default function TabLayout() {
         tabBarBackground: () => <GlassView kind="chrome" highlight style={styles.tabBarGlass} />,
       }}
     >
-      <Tabs.Screen name="chats"   options={{ title: 'Chats',   tabBarAccessibilityLabel: unread > 0 ? `Chats, ${unread} unread` : 'Chats', tabBarIcon: ({ focused }) => <TabIcon tab="chats"   label="Chats"   focused={focused} /> }} />
-      <Tabs.Screen name="status"  options={{ title: 'Status',  tabBarIcon: ({ focused }) => <TabIcon tab="status"  label="Status"  focused={focused} /> }} />
+      <Tabs.Screen name="chats"   options={{ title: 'Chats',   tabBarAccessibilityLabel: unread > 0 ? `Chats, ${unread} unread` : 'Chats', tabBarIcon: ({ focused }) => <TabIcon tab="chats"   label="Chats"   focused={focused} styles={styles} unread={unread} /> }} />
+      <Tabs.Screen name="status"  options={{ title: 'Status',  tabBarIcon: ({ focused }) => <TabIcon tab="status"  label="Status"  focused={focused} styles={styles} /> }} />
       {/* Center: Mini Apps — prominent raised button */}
       {/* The ONLY item that fills the bar's full (raised) height: its disc is
           drawn above the pill, and Android will not deliver a touch to a child
@@ -136,13 +138,13 @@ export default function TabLayout() {
           back button — so nothing is stranded. `display: 'none'` rather than
           removing the Screen: the tab must stay routable and stay reachable
           from the bar on Chats, Status and Calls, which still show it. */}
-      <Tabs.Screen name="mini"    options={{ title: 'Apps',    tabBarStyle: { display: 'none' }, tabBarItemStyle: styles.tabItemCenter, tabBarIconStyle: styles.centerIconBox, tabBarIcon: ({ focused }) => <MiniCenterIcon focused={focused} /> }} />
-      <Tabs.Screen name="calls"   options={{ title: 'Calls',   tabBarIcon: ({ focused }) => <TabIcon tab="calls"   label="Calls"   focused={focused} /> }} />
+      <Tabs.Screen name="mini"    options={{ title: 'Apps',    tabBarStyle: { display: 'none' }, tabBarItemStyle: styles.tabItemCenter, tabBarIconStyle: styles.centerIconBox, tabBarIcon: ({ focused }) => <MiniCenterIcon focused={focused} styles={styles} /> }} />
+      <Tabs.Screen name="calls"   options={{ title: 'Calls',   tabBarIcon: ({ focused }) => <TabIcon tab="calls"   label="Calls"   focused={focused} styles={styles} /> }} />
       {/* BAR HIDDEN HERE TOO — and this one needed a back control added first.
           Profile had NO way off it other than the bar: no header back, no
           router.back() anywhere in the file. Hiding the bar without that would
           have stranded the screen on iOS, which has no hardware back. */}
-      <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarStyle: { display: 'none' }, tabBarIcon: ({ focused }) => <TabIcon tab="profile" label="Profile" focused={focused} /> }} />
+      <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarStyle: { display: 'none' }, tabBarIcon: ({ focused }) => <TabIcon tab="profile" label="Profile" focused={focused} styles={styles} /> }} />
       {/* Routable but hidden from the bar — opened from the Chats header */}
       <Tabs.Screen name="alerts"  options={{ href: null }} />
     </Tabs>

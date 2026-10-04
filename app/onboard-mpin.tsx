@@ -3,8 +3,7 @@
 // questions (argon2) → mpin/set (argon2, marks onboarding_complete). Then → success.
 // Weak MPINs are rejected client-side too (server re-checks).
 //
-// Step 3 of 3, on the same fixed night palette as the rest of the chain — see
-// the always-dark note in components/ui/Brand.tsx.
+// Step 3 of 3, on the shared adaptive auth palette (lib/useAuthTheme).
 
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
@@ -15,15 +14,9 @@ import { initProfile, onboarding, saveSecurityQuestions, setMpinRemote, onboardi
 import { AuthSky, BrandMark, KeyboardSafe, StepRail } from '../components/ui';
 import { type AuthPalette } from '../constants/authTheme';
 import { useAuthTheme } from '../lib/useAuthTheme';
+import { resetTo } from '../lib/authNav';
+import { isWeakPin } from '../lib/weakPin';
 
-function isWeak(m: string, dobYear?: string): boolean {
-  if (!/^\d{6}$/.test(m)) return true;
-  if (/^(\d)\1{5}$/.test(m)) return true;
-  if ('0123456789'.includes(m) || '9876543210'.includes(m)) return true;
-  if (['123456', '654321', '000000', '121212', '112233'].includes(m)) return true;
-  if (dobYear && m.includes(dobYear)) return true;          // year-of-birth pattern
-  return false;
-}
 
 export default function OnboardMpin() {
   const AUTH = useAuthTheme();
@@ -60,12 +53,12 @@ export default function OnboardMpin() {
   };
 
   const onSet = (v: string) => {
-    if (isWeak(v, dobYear)) { setMsg('That MPIN is too easy to guess. Pick another.'); setFirst(''); doShake(); return; }
+    if (isWeakPin(v, 6, dobYear)) { setMsg('That MPIN is too easy to guess. Pick another.'); setFirst(''); doShake(); return; }
     setMsg(null); setPhase('confirm');
   };
 
   const onConfirm = async (v: string) => {
-    if (v !== first) { setMsg('PINs don’t match. Start again.'); setConfirm(''); setFirst(''); setPhase('set'); doShake(); return; }
+    if (v !== first) { setMsg('The confirmation didn’t match the first MPIN. Create it again.'); setConfirm(''); setFirst(''); setPhase('set'); doShake(); return; }
     setBusy(true); setMsg(null);
     try {
       const st = onboarding.get();
@@ -85,6 +78,15 @@ export default function OnboardMpin() {
       let userId = st.userId;
       let setupTicket = st.setupTicket;
       if (!userId || !setupTicket) {
+        // The store is RAM-only: after process death there is no verified
+        // number to create an account with. Start over instead of a 400.
+        if (!st.phone || !st.phoneTicket) {
+          setBusy(false);
+          onboarding.reset();
+          Alert.alert('Sign-up expired', 'Please verify your number again.');
+          resetTo('/onboard');
+          return;
+        }
         const created = await initProfile({
           phone: st.phone, phoneTicket: st.phoneTicket,
           email: st.email || undefined,           // optional recovery address, or nothing at all
@@ -129,7 +131,7 @@ export default function OnboardMpin() {
         {/* The mark replaces the 🔐 emoji: a padlock glyph renders as whatever
             font the OS picked, which is three different pictures across phones. */}
         <BrandMark size={52} markOnly />
-        <Text style={s.title}>{setting ? 'Create your MPIN' : 'Confirm your MPIN'}</Text>
+        <Text style={s.title} accessibilityRole="header">{setting ? 'Create your MPIN' : 'Confirm your MPIN'}</Text>
         <Text style={s.sub}>{setting ? 'A 6-digit PIN unlocks crazzychat' : 'Re-enter the same 6 digits'}</Text>
         <StepRail step={3} style={s.rail} />
 
@@ -137,8 +139,8 @@ export default function OnboardMpin() {
           {busy
             ? <ActivityIndicator color={AUTH.accent} size="large" />
             : setting
-              ? <MpinInput key="set" value={first} onChange={setFirst} onComplete={onSet} autoFocus shakeAnim={shake} onDark />
-              : <MpinInput key="confirm" value={confirm} onChange={setConfirm} onComplete={onConfirm} autoFocus shakeAnim={shake} onDark />}
+              ? <MpinInput key="set" value={first} onChange={setFirst} onComplete={onSet} autoFocus shakeAnim={shake} onDark label="New MPIN" />
+              : <MpinInput key="confirm" value={confirm} onChange={setConfirm} onComplete={onConfirm} autoFocus shakeAnim={shake} onDark label="Confirm new MPIN" />}
         </View>
 
         {/* accessibilityLiveRegion so a rejected PIN is announced rather than

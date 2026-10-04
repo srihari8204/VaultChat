@@ -10,9 +10,9 @@
 // and says what it is for — an unlabelled optional field reads as a required
 // one somebody forgot to mark.
 //
-// Step 1 of 3 of the sign-up chain, and it stays on the night ground the landing
-// form established: the palette is fixed, not themed. See the always-dark note
-// in components/ui/Brand.tsx.
+// Step 1 of 3 of the sign-up chain. Its colours come from useAuthTheme(), which
+// follows the selected appearance: the night auth palette in dark, the app's
+// light palette in light (lib/useAuthTheme.ts).
 
 import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
@@ -31,6 +31,9 @@ import { AuthSky, BrandMark, KeyboardSafe, StepRail } from '../components/ui';
 import { type AuthPalette } from '../constants/authTheme';
 import { useAuthTheme } from '../lib/useAuthTheme';
 import { permissionDenied } from '../lib/permissionDenied';
+// Local-field date both ways: toISOString() stored the previous day east of
+// UTC, and new Date('YYYY-MM-DD') showed it west of UTC (lib/onboardDate.ts).
+import { fromLocalIsoDate, toLocalIsoDate } from '../lib/onboardDate';
 
 function ageOf(d: Date): number {
   const n = new Date();
@@ -39,23 +42,6 @@ function ageOf(d: Date): number {
   if (m < 0 || (m === 0 && n.getDate() < d.getDate())) a--;
   return a;
 }
-/**
- * A calendar date, formatted from LOCAL fields — never via toISOString().
- *
- * The picker hands back a Date at local midnight. toISOString() converts to UTC
- * first, so anywhere east of UTC that midnight lands on the PREVIOUS day: a user
- * in IST picking 1 Jan 2000 had 1999-12-31 stored. Every user in India was
- * born a day early, and the value then fed both the age-13 gate here and the
- * weak-MPIN check in onboard-mpin.tsx, which compares against the birth year.
- *
- * ageOf() above already reads local getFullYear/getMonth/getDate, so the
- * validated value and the stored value disagreed by a day. Now they match.
- */
-const iso = (d: Date) => {
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${d.getFullYear()}-${mm}-${dd}`;
-};
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function OnboardProfile() {
@@ -68,29 +54,36 @@ export default function OnboardProfile() {
   const [firstName, setFirstName] = useState(st.firstName);
   const [lastName, setLastName] = useState(st.lastName);
   const [status, setStatus] = useState(st.status);
-  const [dob, setDob] = useState<Date | null>(st.dob ? new Date(st.dob) : null);
+  const [dob, setDob] = useState<Date | null>(fromLocalIsoDate(st.dob));
   const [showPicker, setShowPicker] = useState(false);
   const [pic, setPic] = useState<string | null>(st.profilePicLocalUri);
   // 4 buttons when a photo exists — over Android's 3-button ceiling.
   const [sheet, setSheet] = useState<{ title: string; message?: string; actions: SheetAction[] } | null>(null);
+  const [photoErr, setPhotoErr] = useState<string | null>(null);
 
   const pickFrom = async (source: 'camera' | 'gallery') => {
-    const perm = source === 'camera'
-      ? await ImagePicker.requestCameraPermissionsAsync()
-      : await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) { permissionDenied('Permission needed', `Allow ${source} access to set a photo.`, perm.canAskAgain); return; }
-    const fn = source === 'camera' ? ImagePicker.launchCameraAsync : ImagePicker.launchImageLibraryAsync;
-    const res = await fn({ allowsEditing: true, aspect: [1, 1], quality: 0.85 });   // square crop
-    if (res.canceled || !res.assets?.[0]) return;
-    const uri = res.assets[0].uri;
-    setPic(uri);
-    onboarding.set({ profilePicLocalUri: uri });
+    try {
+      const perm = source === 'camera'
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) { permissionDenied('Permission needed', `Allow ${source} access to set a photo.`, perm.canAskAgain); return; }
+      const fn = source === 'camera' ? ImagePicker.launchCameraAsync : ImagePicker.launchImageLibraryAsync;
+      const res = await fn({ allowsEditing: true, aspect: [1, 1], quality: 0.85 });   // square crop
+      if (res.canceled || !res.assets?.[0]) return;
+      const uri = res.assets[0].uri;
+      setPic(uri);
+      onboarding.set({ profilePicLocalUri: uri });
+    } catch {
+      // No camera, a picker crash, an OEM that refuses the intent: the photo
+      // is optional, so say so and let sign-up continue.
+      setPhotoErr(`Couldn't open the ${source === 'camera' ? 'camera' : 'gallery'}. You can add a photo later.`);
+    }
   };
   const choosePhoto = () => setSheet({
     title: 'Profile photo',
     actions: [
-      { label: 'Take photo', icon: 'camera-outline', onPress: () => pickFrom('camera') },
-      { label: 'Choose from gallery', icon: 'images-outline', onPress: () => pickFrom('gallery') },
+      { label: 'Take photo', icon: 'camera-outline', onPress: () => { setPhotoErr(null); void pickFrom('camera'); } },
+      { label: 'Choose from gallery', icon: 'images-outline', onPress: () => { setPhotoErr(null); void pickFrom('gallery'); } },
       ...(pic ? [{ label: 'Remove', icon: 'trash-outline' as const, destructive: true, onPress: () => { setPic(null); onboarding.set({ profilePicLocalUri: null }); } }] : []),
     ],
   });
@@ -106,7 +99,7 @@ export default function OnboardProfile() {
     onboarding.set({
       email: email.trim().toLowerCase(),
       firstName: firstName.trim(), lastName: lastName.trim(),
-      status: status.slice(0, 139), dob: iso(dob),
+      status: status.slice(0, 139), dob: toLocalIsoDate(dob),
     });
     router.push('/onboard-security' as any);
   };
@@ -131,7 +124,7 @@ export default function OnboardProfile() {
               the name and a second full lockup here reads as a splash rerun. */}
           <View style={s.head}>
             <BrandMark size={52} markOnly />
-            <Text style={s.title}>Set up your profile</Text>
+            <Text style={s.title} accessibilityRole="header">Set up your profile</Text>
             <Text style={s.step}>Step 1 of 3</Text>
             <StepRail step={1} style={s.rail} />
           </View>
@@ -148,13 +141,14 @@ export default function OnboardProfile() {
               : <View style={[s.avatar, s.avatarEmpty]}><Ionicons name="add" size={34} color={AUTH.dim} /></View>}
             <Text style={s.avatarHint}>{pic ? 'Change photo' : 'Add photo'}</Text>
           </TouchableOpacity>
+          {!!photoErr && <Text style={[s.warn, { textAlign: 'center', marginBottom: 12 }]} accessibilityLiveRegion="polite">{photoErr}</Text>}
 
           {/* One card, not nine loose fields — the whole thing is a single
               question ("who are you"), same as the landing form. */}
           <View style={s.card}>
             {/* Verified, and the account's identity — not editable here. */}
             <Text style={s.labelFirst}>MOBILE</Text>
-            <TextInput style={[s.input, s.disabled]} value={st.phone} editable={false} />
+            <TextInput style={[s.input, s.disabled]} value={st.phone} editable={false} accessibilityLabel="Mobile number, verified" />
 
             <Text style={s.label}>EMAIL (OPTIONAL) — FOR ACCOUNT RECOVERY</Text>
             <TextInput
@@ -167,27 +161,35 @@ export default function OnboardProfile() {
               autoCapitalize="none"
               autoCorrect={false}
               inputMode="email"
+              accessibilityLabel="Email, optional, for account recovery"
             />
-            {!emailOk && <Text style={s.warn}>That doesn’t look like an email address.</Text>}
+            {!emailOk && <Text style={s.warn} accessibilityLiveRegion="polite">That doesn’t look like an email address.</Text>}
 
             <View style={s.rowTwo}>
               <View style={{ flex: 1 }}>
                 <Text style={s.label}>FIRST NAME</Text>
-                <TextInput style={s.input} value={firstName} onChangeText={setFirstName} placeholder="First" placeholderTextColor={AUTH.faint} />
+                <TextInput style={s.input} value={firstName} onChangeText={setFirstName} placeholder="First" placeholderTextColor={AUTH.faint} accessibilityLabel="First name, required" autoComplete="given-name" />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={s.label}>LAST NAME</Text>
-                <TextInput style={s.input} value={lastName} onChangeText={setLastName} placeholder="Last" placeholderTextColor={AUTH.faint} />
+                <TextInput style={s.input} value={lastName} onChangeText={setLastName} placeholder="Last" placeholderTextColor={AUTH.faint} accessibilityLabel="Last name, optional" autoComplete="family-name" />
               </View>
             </View>
 
             <Text style={s.label}>DATE OF BIRTH</Text>
-            <TouchableOpacity style={s.input} onPress={() => setShowPicker(true)} activeOpacity={0.8}>
+            <TouchableOpacity
+              style={s.input}
+              onPress={() => setShowPicker(true)}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel={dob ? `Date of birth, ${dob.toLocaleDateString()}` : 'Date of birth, not set'}
+              accessibilityHint="Opens a date picker"
+            >
               <Text style={[s.inputTxt, !dob && s.inputPlaceholder]}>
                 {dob ? dob.toLocaleDateString() : 'Select your date of birth'}
               </Text>
             </TouchableOpacity>
-            {!!dob && !ageOk && <Text style={s.warn}>You must be at least 13.</Text>}
+            {!!dob && !ageOk && <Text style={s.warn} accessibilityLiveRegion="polite">You must be at least 13.</Text>}
             {showPicker && (
               <DateTimePicker
                 value={dob ?? new Date(2000, 0, 1)}
@@ -206,6 +208,7 @@ export default function OnboardProfile() {
               placeholder="Hey there! I'm on crazzychat ✨"
               placeholderTextColor={AUTH.faint}
               maxLength={139}
+              accessibilityLabel="Status, optional"
             />
             <Text style={s.counter}>{status.length}/139</Text>
           </View>

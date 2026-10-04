@@ -2,8 +2,8 @@
 // fingerprint / face) via expo-local-authentication. "Continue to Chats" logs in
 // (mpin/verify → JWT), optionally enrolls MFA, clears the onboarding store.
 //
-// The last screen of the chain, so it keeps the chain's fixed night palette —
-// see the always-dark note in components/ui/Brand.tsx. The lockup comes back at
+// The last screen of the chain, on the shared adaptive auth palette
+// (lib/useAuthTheme). The lockup comes back at
 // full size here: this is the hand-off into the app, and the brand closing the
 // sign-up is the point, not a splash rerun.
 
@@ -42,6 +42,10 @@ export default function OnboardSuccess() {
     return () => sub.remove();
   }, []);
 
+  // The plaintext MPIN rides the RAM store from onboard-mpin to here for the
+  // first sign-in. Every exit from this screen drops it, not only success.
+  useEffect(() => () => { onboarding.set({ mpin: '' }); }, []);
+
   // `next` lets the same login run land somewhere other than the chat list.
   // Exit Kit needs a real session (and a contact to import into), and neither
   // exists until verifyMpinRemote below has returned a JWT — so the import entry
@@ -58,10 +62,17 @@ export default function OnboardSuccess() {
       const localPic = onboarding.get().profilePicLocalUri;
       if (localPic) { try { await uploadAndSetProfilePhoto(localPic); } catch { /* non-blocking */ } }
 
+      // The user is SIGNED IN from here on. MFA is optional, and enableMfa can
+      // throw on its network step — that must not land in the catch below,
+      // which would tell a signed-in user "Could not continue".
       if (mfaOn) {
-        const enabled = await enableMfa();
-        if (!enabled && !hasDeviceSecurity) {
-          Alert.alert('No device security found', 'You can enable this later in Settings.');
+        try {
+          const enabled = await enableMfa();
+          if (!enabled && !hasDeviceSecurity) {
+            Alert.alert('No device security found', 'You can enable this later in Settings.');
+          }
+        } catch {
+          Alert.alert('Device protection not turned on', 'Your account is ready. You can turn this on later in Settings.');
         }
       }
       onboarding.reset();                                // wipe plaintext MPIN/answers
@@ -101,7 +112,7 @@ export default function OnboardSuccess() {
       <Stack.Screen options={{ headerShown: false, gestureEnabled: false }} />
       <View style={s.body}>
         <BrandMark size={72} markOnly />
-        <Text style={s.title}>Account secured</Text>
+        <Text style={s.title} accessibilityRole="header">Account secured</Text>
         <Text style={s.sub}>Your profile is encrypted and your MPIN is set.</Text>
 
         <View style={s.mfaCard}>
@@ -146,6 +157,9 @@ export default function OnboardSuccess() {
           onPress={() => finish('/import-chats')}
           disabled={busy}
           activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityHint="Signs you in, then opens the chat import"
+          accessibilityState={{ disabled: busy }}
         >
           <Text style={s.secondaryTxt}>Import an existing conversation</Text>
         </TouchableOpacity>
@@ -184,6 +198,6 @@ const makeStyles = (AUTH: AuthPalette) => StyleSheet.create({
   cta: { minHeight: 56, paddingVertical: 10, alignItems: 'center', justifyContent: 'center' },
   ctaDown: { opacity: 0.88 },
   ctaTxt: { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.2 },
-  secondary: { width: '100%', marginTop: 12, marginBottom: 32, paddingVertical: 12, alignItems: 'center' },
+  secondary: { width: '100%', marginTop: 12, marginBottom: 32, paddingVertical: 12, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   secondaryTxt: { color: AUTH.cyan, fontSize: 14, fontWeight: '700' },
 });

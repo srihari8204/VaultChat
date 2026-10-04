@@ -17,10 +17,11 @@
 // caddy/public/terms.html is served at a stable URL.
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, AppState, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { SERVER_URL } from '../constants/server';
+import { hasSession } from '../lib/api';
 // AUDIT F8. The first screen a new user sees is the worst place to be speaking
 // the wrong language, so the gates are the first consumers of the app catalog.
 import { t, useLang } from '../lib/i18n';
@@ -57,7 +58,14 @@ export function TermsGate({ children }: { children: React.ReactNode }) {
     // moment there is one. An answer includes "nothing outstanding" — this
     // stops as soon as the server says anything at all.
     let delay = 1500;
-    const ask = (force = false) => {
+    const again = () => {
+      delay = Math.min(delay * 2, 30_000);
+      timer = setTimeout(() => ask(), delay);
+    };
+    const ask = async (force = false) => {
+      // Signed out there is nothing to ask the SERVER about: check the local
+      // session only (no request) and keep waiting for a sign-in.
+      if (!(await hasSession().catch(() => false))) { if (alive) again(); return; }
       fetchTermsState(force)
         .then((s) => {
           if (!alive) return;
@@ -65,12 +73,11 @@ export function TermsGate({ children }: { children: React.ReactNode }) {
           // No answer yet: not signed in, offline, or a server without the
           // endpoint. Ask again, but give up climbing past half a minute so an
           // app that is simply signed out is not polling forever.
-          delay = Math.min(delay * 2, 30_000);
-          timer = setTimeout(() => ask(), delay);
+          again();
         })
         .catch(() => {});
     };
-    ask();
+    void ask();
 
     // Coming back to the foreground is the other moment the answer can change —
     // a session established in another tab, a token refreshed, terms republished.
@@ -81,7 +88,7 @@ export function TermsGate({ children }: { children: React.ReactNode }) {
       if (st !== 'active' || !alive || termsOutstanding(stateRef.current)) return;
       if (timer) { clearTimeout(timer); timer = null; }
       delay = 1500;
-      ask(true);
+      void ask(true);
     });
 
     return () => {
@@ -116,11 +123,14 @@ export function TermsGate({ children }: { children: React.ReactNode }) {
 
   return (
     <View style={styles.block}>
-      <View style={styles.icon}>
+      {/* Scrolls: at large font scales the block is taller than a short phone,
+          and the accept button was pushed off the bottom with no way to reach it. */}
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <View style={styles.icon} accessibilityElementsHidden importantForAccessibility="no">
         <Ionicons name={isUpdate ? 'refresh-circle' : 'document-text'} size={44} color="#fff" />
       </View>
 
-      <Text style={styles.title}>
+      <Text style={styles.title} accessibilityRole="header">
         {t(isUpdate ? 'terms.update.title' : 'terms.first.title')}
       </Text>
 
@@ -140,14 +150,14 @@ export function TermsGate({ children }: { children: React.ReactNode }) {
         <Ionicons name="open-outline" size={15} color="#8A879B" />
       </TouchableOpacity>
 
-      {error && <Text style={styles.error}>{error}</Text>}
+      {error && <Text style={styles.error} accessibilityLiveRegion="polite">{error}</Text>}
 
       <TouchableOpacity
         style={[styles.button, busy && styles.buttonBusy]}
         onPress={onAccept}
         disabled={busy}
         accessibilityRole="button"
-        accessibilityLabel="Accept the terms of service and privacy policy"
+        accessibilityState={{ disabled: busy, busy }}
       >
         {busy
           ? <ActivityIndicator color="#fff" />
@@ -157,6 +167,7 @@ export function TermsGate({ children }: { children: React.ReactNode }) {
       {/* Says what the button means, in the one place where saying it matters.
           "I agree" on its own is a claim the user has to take on trust. */}
       <Text style={styles.foot}>{t('terms.agree.foot')}</Text>
+      </ScrollView>
     </View>
   );
 }
@@ -168,11 +179,9 @@ const styles = StyleSheet.create({
   block: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: '#0F1115',   // theme-exempt: shown before the themed shell exists
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 28,
     zIndex: 9999,
   },
+  scroll: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28, paddingVertical: 48 },
   icon: {
     width: 84, height: 84, borderRadius: 42,
     backgroundColor: '#9D6FD0',

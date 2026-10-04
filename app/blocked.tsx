@@ -29,6 +29,7 @@ import { useRouter } from 'expo-router';
 import { securityVerdict } from '../lib/securityVerdict';
 import type { Palette } from '../constants/theme';
 import { useColors } from '../lib/theme';
+import { tint } from '../lib/tintColor';
 import { HEADER_TOP } from '../constants/layout';
 import { AppText as Text, AuroraBackground } from '../components/ui';
 
@@ -192,7 +193,7 @@ export default function BlockedScreen() {
       <AuroraBackground />
       {/* Top warning bar */}
       <View style={styles.topBar}>
-        <Text style={styles.topBarText}>SECURITY ALERT</Text>
+        <Text style={styles.topBarText} accessibilityRole="header">SECURITY ALERT</Text>
       </View>
 
       <ScrollView
@@ -305,6 +306,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   topBarText: {
     fontSize: 13,
     fontWeight: 'bold',
+    // White on the danger bar in both themes (both palettes' danger is a deep red).
     color: '#FFFFFF',
     letterSpacing: 2,
   },
@@ -317,7 +319,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     width: 88,
     height: 88,
     borderRadius: 44,
-    backgroundColor: 'rgba(239,68,68,0.13)',
+    backgroundColor: tint(c.danger, 0.13),
     borderWidth: 2,
     borderColor: c.danger,
     justifyContent: 'center',
@@ -353,7 +355,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     letterSpacing: 1,
   },
   threatCard: {
-    backgroundColor: 'rgba(239,68,68,0.10)',
+    backgroundColor: tint(c.danger, 0.10),
     borderWidth: 0.5,
     borderColor: c.danger,
     borderRadius: 10,
@@ -424,7 +426,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     width: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: 'rgba(34,197,94,0.14)',
+    backgroundColor: tint(c.success, 0.14),
     borderWidth: 1,
     borderColor: c.success,
     justifyContent: 'center',

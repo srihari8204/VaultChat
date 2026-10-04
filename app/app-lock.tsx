@@ -1,5 +1,7 @@
-// app/app-lock.tsx — cold-launch gate when device MFA is on. Unlock with biometric
-// OR the account MPIN. Reached only when a session token AND vc.mfa.token exist.
+// app/app-lock.tsx — the app lock. Reached on a cold launch when device MFA is
+// on or the session is sealed, and on resume (components/ResumeLock, resume=1)
+// after the Auto Screen Lock timeout for an MFA or Device-PIN user. Unlock with
+// biometrics or the account MPIN (MFA), or the Device PIN (PIN-only users).
 //
 // #32: it is ALSO the unseal screen. When the session is sealed under a local
 // PIN (the user set one — see services/security/pinStore), neither biometrics
@@ -15,8 +17,10 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { clearTokens, getCachedUser, loadSealedSession, sealedSessionLocked, setCachedUser } from '../lib/api';
 import { MpinInput } from '../components/auth/MpinInput';
-import { promptBiometricUnlock } from '../lib/mfa';
-import { verifyMpinRemote, onboardingError } from '../lib/onboarding';
+import { isMfaEnabled, promptBiometricUnlock } from '../lib/mfa';
+import { verifyMpinRemote, onboardingError, isOfflineError } from '../lib/onboarding';
+import { unlockMode } from '../lib/resumeLockPolicy';
+import { hasPin, pinBackoffMs, verifyPin } from '../services/security/pinStore';
 import { AppText as Text, AuroraBackground, KeyboardSafe } from '../components/ui';
 import { resetTo } from '../lib/authNav';
 import { consumeLaunchLink } from '../lib/pendingLink';
@@ -29,7 +33,11 @@ export default function AppLock() {
   // came back from the background — unlocking returns to that screen.
   const { resume } = useLocalSearchParams<{ resume?: string }>();
 
-  const [mode, setMode] = useState<'bio' | 'mpin' | 'seal'>('bio');
+  const [mode, setMode] = useState<'bio' | 'mpin' | 'seal' | 'pin'>('bio');
+  /** A Device PIN exists, so it is offered as another way in. */
+  const [devicePin, setDevicePin] = useState(false);
+  const alive = useRef(true);
+  useEffect(() => () => { alive.current = false; }, []);
   const [pin, setPin] = useState('');
   const [userId, setUserId] = useState<string | null>(null);
   const [mpin, setMpin] = useState('');
@@ -69,26 +77,44 @@ export default function AppLock() {
   useEffect(() => { getCachedUser().then(u => setUserId(u?.id ?? null)).catch(() => setUserId(null)); }, []);
   useEffect(() => {
     // Sealed session? Only the local PIN opens it — don't prompt for a
-    // biometric that cannot possibly unlock anything.
-    sealedSessionLocked()
-      .then(locked => { if (locked) setMode('seal'); else tryBiometric(); })
-      .catch(() => tryBiometric());
+    // biometric that cannot possibly unlock anything. A Device-PIN user without
+    // MFA (relocked on resume) is asked for that PIN (lib/resumeLockPolicy).
+    Promise.all([
+      sealedSessionLocked().catch(() => false),
+      isMfaEnabled(),
+      hasPin().catch(() => false),
+    ]).then(([sealedLocked, mfaOn, hasDevicePin]) => {
+      if (!alive.current) return;
+      setDevicePin(hasDevicePin);
+      const m = unlockMode({ sealedLocked, mfaOn, hasDevicePin });
+      if (m === 'bio') tryBiometric(); else setMode(m);
+    }).catch(() => { if (alive.current) tryBiometric(); });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const tryBiometric = async () => {
     const ok = await promptBiometricUnlock();
+    // The prompt can outlive the screen (unlocked another way, signed out).
+    if (!alive.current) return;
     if (ok) enter(); else setMode('mpin');
   };
 
   // #32 unseal path: the PIN derives the key that opens the sealed tokens.
+  // Resume path for a Device-PIN user: the session is already open in memory,
+  // so the PIN is checked against pinStore (which owns the attempt backoff).
   const submitSeal = async () => {
     if (busy) return;
     setBusy(true); setError(null);
     try {
-      if (await loadSealedSession(pin)) { enter(); return; }
+      const ok = mode === 'pin' ? await verifyPin(pin) : await loadSealedSession(pin);
+      if (ok) { enter(); return; }
       setPin(''); doShake();
-      setError('That PIN did not unlock this device. Your messages are still here — try again.');
-    } finally { setBusy(false); }
+      const wait = mode === 'pin' ? await pinBackoffMs() : 0;
+      setError(wait > 0
+        ? `Too many attempts. Try again in ${Math.ceil(wait / 1000)} s.`
+        : 'That PIN did not unlock this device. Your messages are still here — try again.');
+    } catch {
+      setError("Couldn't check your PIN. Try again.");
+    } finally { if (alive.current) setBusy(false); }
   };
 
   // The honest last resort, and it is the USER'S choice, not a silent redirect.
@@ -128,8 +154,13 @@ export default function AppLock() {
       await verifyMpinRemote(userId, value);
       enter();
     } catch (e: any) {
-      setMpin(''); doShake(); setError(onboardingError(e, 'Incorrect MPIN'));
-    } finally { setBusy(false); }
+      setMpin(''); doShake();
+      // The MPIN is checked by the server; offline, only biometrics (or the
+      // Device PIN) can unlock.
+      setError(isOfflineError(e)
+        ? `You're offline — use biometrics${devicePin ? ' or your device PIN' : ''}, or try again when connected.`
+        : onboardingError(e, 'Incorrect MPIN'));
+    } finally { if (alive.current) setBusy(false); }
   };
 
   return (
@@ -141,9 +172,9 @@ export default function AppLock() {
         <Text style={s.lock} accessibilityElementsHidden importantForAccessibility="no">🔐</Text>
         <Text style={s.title}>crazzychat is locked</Text>
 
-        {mode === 'seal' ? (
+        {mode === 'seal' || mode === 'pin' ? (
           <>
-            <Text style={s.sub}>Enter your device PIN to unlock this session</Text>
+            <Text style={s.sub}>{mode === 'seal' ? 'Enter your device PIN to unlock this session' : 'Enter your device PIN to unlock'}</Text>
             <Animated.View style={{ transform: [{ translateX: shake }], width: '100%' }}>
               <TextInput
                 style={s.pinInput}
@@ -156,6 +187,8 @@ export default function AppLock() {
                 placeholder="••••••"
                 placeholderTextColor={colors.textDim}
                 onSubmitEditing={submitSeal}
+                accessibilityLabel="Device PIN"
+                accessibilityHint="4 to 8 digits"
               />
             </Animated.View>
             <TouchableOpacity
@@ -169,6 +202,13 @@ export default function AppLock() {
               <Text style={s.bioTxt}>{busy ? 'Unlocking…' : 'Unlock'}</Text>
             </TouchableOpacity>
             {!!error && <Text style={s.error} accessibilityLiveRegion="polite">{error}</Text>}
+            {mode === 'pin' && (
+              // The session is open in memory here (unlike a sealed one), so the
+              // server-checked MPIN can unlock it too.
+              <TouchableOpacity onPress={() => { setError(null); setMode('mpin'); }} style={{ marginTop: 20 }} accessibilityRole="button">
+                <Text style={s.alt}>Use MPIN instead</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity onPress={forgotPin} style={{ marginTop: 20 }} accessibilityRole="button">
               <Text style={s.alt}>Forgotten your PIN?</Text>
             </TouchableOpacity>
@@ -182,6 +222,11 @@ export default function AppLock() {
             <TouchableOpacity onPress={() => setMode('mpin')} style={{ marginTop: 18 }} accessibilityRole="button">
               <Text style={s.alt}>Use MPIN instead</Text>
             </TouchableOpacity>
+            {devicePin && (
+              <TouchableOpacity onPress={() => { setError(null); setMode('pin'); }} style={{ marginTop: 18 }} accessibilityRole="button">
+                <Text style={s.alt}>Use device PIN</Text>
+              </TouchableOpacity>
+            )}
           </>
         ) : (
           <>
@@ -194,6 +239,11 @@ export default function AppLock() {
             <TouchableOpacity onPress={tryBiometric} style={{ marginTop: 16 }} accessibilityRole="button">
               <Text style={s.alt}>Use biometrics</Text>
             </TouchableOpacity>
+            {devicePin && (
+              <TouchableOpacity onPress={() => { setError(null); setMode('pin'); }} style={{ marginTop: 16 }} accessibilityRole="button">
+                <Text style={s.alt}>Use device PIN</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity onPress={forgotMpin} style={{ marginTop: 16 }} accessibilityRole="button">
               <Text style={s.alt}>{userId ? 'Forgot MPIN?' : 'Sign in again'}</Text>
             </TouchableOpacity>

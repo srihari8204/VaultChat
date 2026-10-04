@@ -8,7 +8,7 @@ interface Props {
   fallbackTitle?: string;
   fallbackMessage?: string;
 }
-interface State { hasError: boolean; }
+interface State { hasError: boolean; attempt: number; }
 
 // Usable at the root of the app (app/_layout.tsx wraps RootLayout in it), where
 // it is the last line before a white screen — so it depends on nothing but
@@ -18,9 +18,9 @@ interface State { hasError: boolean; }
 // thrown — possibly ThemeProvider itself — so reading the palette from context
 // here risks the crash screen crashing. Its colours stay fixed and dark.
 export class ErrorBoundary extends React.Component<Props, State> {
-  constructor(props: Props) { super(props); this.state = { hasError: false }; }
+  constructor(props: Props) { super(props); this.state = { hasError: false, attempt: 0 }; }
 
-  static getDerivedStateFromError(): State { return { hasError: true }; }
+  static getDerivedStateFromError(): Partial<State> { return { hasError: true }; }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     console.error('[ErrorBoundary]', this.props.screen, error.message, info);
@@ -38,10 +38,12 @@ export class ErrorBoundary extends React.Component<Props, State> {
       return (
         <View style={s.wrap}>
           <Text style={s.title} accessibilityRole="header">{this.props.fallbackTitle ?? 'Something went wrong'}</Text>
-          <Text style={s.msg}>{this.props.fallbackMessage ?? 'Please restart the app.'}</Text>
+          <Text style={s.msg}>{this.props.fallbackMessage ?? 'Tap Try again. If this keeps happening, close crazzychat and open it again.'}</Text>
           <TouchableOpacity
             style={s.btn}
-            onPress={() => this.setState({ hasError: false })}
+            // A NEW key remounts the subtree from scratch. Clearing hasError
+            // alone re-rendered the same broken state, which threw again at once.
+            onPress={() => this.setState(st => ({ hasError: false, attempt: st.attempt + 1 }))}
             accessibilityRole="button"
             accessibilityLabel="Try again"
           >
@@ -50,7 +52,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
         </View>
       );
     }
-    return this.props.children;
+    return <React.Fragment key={this.state.attempt}>{this.props.children}</React.Fragment>;
   }
 }
 

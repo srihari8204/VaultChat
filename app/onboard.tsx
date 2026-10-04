@@ -13,7 +13,7 @@
 // Mounted auth screens follow the selected appearance; native splash artwork is unchanged.
 
 import { Stack, useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View,
 } from 'react-native';
@@ -33,12 +33,16 @@ export default function OnboardLanding() {
   const [dialCode, setDialCode] = useState('+91');
   const [national, setNational] = useState('');
   const [busy, setBusy] = useState(false);
+  // Synchronous latch, as on the OTP screen: two taps inside one render both
+  // saw busy === false and sent two lookups (and could send two SMS codes).
+  const inFlight = useRef(false);
 
   const e164 = toE164(dialCode, national);
   const valid = !!e164;
 
   const onContinue = async () => {
-    if (!valid || busy) return;
+    if (!valid || inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     try {
       onboarding.set({ phone: e164 });
@@ -58,6 +62,7 @@ export default function OnboardLanding() {
     } catch (e: any) {
       Alert.alert('Could not continue', onboardingError(e, 'Please try again'));
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   };
@@ -74,7 +79,7 @@ export default function OnboardLanding() {
               stops the screen reading as a form with a logo parked above it,
               and the email half is gone, not moved. */}
           <View style={s.card}>
-            <Text style={s.label}>MOBILE NUMBER</Text>
+            <Text style={s.label} accessibilityElementsHidden importantForAccessibility="no">MOBILE NUMBER</Text>
             <PhoneField dialCode={dialCode} national={national} onChange={(d, n) => { setDialCode(d); setNational(n); }} onDark autoFocus />
           </View>
 

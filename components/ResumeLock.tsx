@@ -1,10 +1,13 @@
 // components/ResumeLock.tsx — lock the app again when it returns from the
 // background after the "Auto Screen Lock" timeout. Renders nothing.
 //
-// The launch gate in app/_layout.tsx sends a device-MFA user to /app-lock once
-// per cold start; nothing re-checked after that, so an app left in the
-// background stayed open indefinitely. This applies the same condition (device
-// MFA on, signed in) on resume, after the timeout chosen in Vault Features.
+// The launch gate in app/_layout.tsx sends a device-MFA or sealed-session user
+// to /app-lock once per cold start; nothing re-checked after that, so an app
+// left in the background stayed open indefinitely. This relocks on resume,
+// after the timeout chosen in Vault Features, for a signed-in user with device
+// MFA OR a Device PIN (lib/resumeLockPolicy.lockAppliesTo). A PIN holder's
+// session is sealed under that PIN, so this covers sealed-session users too;
+// app-lock then asks for the PIN.
 //
 // Mounted once inside the root Stack's navigator context (see the P2 handoff).
 // app/app-lock reads `resume=1` to return to the screen underneath on unlock
@@ -22,13 +25,20 @@ import { AppState } from 'react-native';
 import { hasSession } from '../lib/api';
 import { isMfaEnabled } from '../lib/mfa';
 import { isLockOrAuthRoute, setResumeLockCheck } from '../lib/pendingLink';
+import { lockAppliesTo } from '../lib/resumeLockPolicy';
 import { checkLockOnResume } from '../services/lockService';
+import { hasPin } from '../services/security/pinStore';
 
 // Screens that are already a lock or are the sign-in flow itself, and the
 // launch splash ("/"), which hands off to the launch gate.
 const exempt = (path: string | null | undefined) => path === '/' || isLockOrAuthRoute(path);
 
-const lockApplies = async () => (await isMfaEnabled()) && (await hasSession().catch(() => false));
+const lockApplies = async () => {
+  const [mfaOn, signedIn, hasDevicePin] = await Promise.all([
+    isMfaEnabled(), hasSession().catch(() => false), hasPin().catch(() => false),
+  ]);
+  return lockAppliesTo({ signedIn, mfaOn, hasDevicePin });
+};
 
 export function ResumeLock(): null {
   const router = useRouter();

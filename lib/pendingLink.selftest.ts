@@ -15,7 +15,10 @@ import {
   clearLaunchLink,
   consumeLaunchLink,
   hrefWithQuery,
+  deliverTap,
   isLockOrAuthRoute,
+  markLaunchRouted,
+  onDeliveredTap,
   openWhenUnlocked,
   pathFromLaunchUrl,
   setResumeLockCheck,
@@ -129,6 +132,17 @@ async function taps() {
   await openWhenUnlocked('/chat?id=1', Promise.resolve(true), () => '/(tabs)/chats', open);
   ok('unlocked + allowed: opened at once', opened.join() === '/chat?id=1' && consumeLaunchLink() === null);
 
+  // An allowed cold start that opened on '/': index.tsx is about to replace
+  // the top entry with Chats, so a tap pushed now would be overwritten.
+  opened.length = 0;
+  await openWhenUnlocked('/chat?id=0', Promise.resolve(true), () => '/', open);
+  ok('allowed launch still on the splash: held for index to replay',
+    opened.length === 0 && consumeLaunchLink() === '/chat?id=0');
+  markLaunchRouted();
+  await openWhenUnlocked('/chat?id=0b', Promise.resolve(true), () => '/', open);
+  ok('…and once index has routed, a tap opens (its push queues after the replace)',
+    opened.join() === '/chat?id=0b');
+
   opened.length = 0;
   await openWhenUnlocked('/family-alerts?circleId=c', Promise.resolve(false), () => '/', open);
   ok('cold start redirected to the lock/sign-in: held, not pushed',
@@ -167,6 +181,27 @@ async function taps() {
   ok('redirected launch, still signing in: held', opened.length === 0 && consumeLaunchLink() === '/chat?id=7');
   await openWhenUnlocked('/chat?id=8', Promise.resolve(false), () => '/(tabs)/chats', open);
   ok('redirected launch, unlocked since: opened', opened.join() === '/chat?id=8' && consumeLaunchLink() === null);
+
+  // Taps from notifee's background handler (a family alert pressed while the
+  // app was backgrounded, or at JS load before the root mounted).
+  console.log('\nTaps delivered from outside React:');
+  const got: string[] = [];
+  deliverTap('/family-alerts?circleId=a', 1_000);
+  const off = onDeliveredTap((h) => { got.push(h); });
+  ok('a tap that arrived before the root subscribed is delivered on subscribe',
+    got.join() === '/family-alerts?circleId=a');
+  deliverTap('/family-alerts?circleId=a', 3_000);
+  ok('the same press seen again (getInitialNotification) is not opened twice', got.length === 1);
+  deliverTap('/family-alerts?circleId=b', 3_500);
+  ok('a different alert is delivered', got.join() === '/family-alerts?circleId=a,/family-alerts?circleId=b');
+  deliverTap('/family-alerts?circleId=b', 60_000);
+  ok('the same alert tapped again later is delivered', got.length === 3);
+  off();
+  deliverTap('/family-alerts?circleId=c', 70_000);
+  ok('after unsubscribe a tap is held, not lost', got.length === 3);
+  const off2 = onDeliveredTap((h) => { got.push(h); });
+  ok('…and handed to the next subscriber', got[3] === '/family-alerts?circleId=c');
+  off2();
 }
 
 // ── the wiring, pinned from source ───────────────────────────────────────
@@ -199,6 +234,15 @@ const resume = fs.readFileSync(
   require('node:path').join(__dirname, '..', 'components', 'ResumeLock.tsx'), 'utf8');
 ok('ResumeLock publishes each resume decision before acting on it',
   /setResumeLockCheck\(lock\)/.test(resume));
+const bg = fs.readFileSync(require('node:path').join(__dirname, 'callBackground.ts'), 'utf8');
+ok('the notifee background handler routes a family-alert press to the root',
+  /type === 'family-alert'[\s\S]{0,300}deliverTap\(hrefWithQuery\('\/family-alerts'/.test(bg));
+ok('the root subscribes and opens delivered taps through the lock-aware opener',
+  /onDeliveredTap\(openHref\)/.test(layout) && /const openHref[\s\S]{0,120}openWhenUnlocked\(href/.test(layout));
+const indexSrc = fs.readFileSync(
+  require('node:path').join(__dirname, '..', 'app', 'index.tsx'), 'utf8');
+ok('index replays a tap held on the splash instead of overwriting it',
+  /router\.replace\("\/\(tabs\)\/chats"[\s\S]{0,80}markLaunchRouted\(\);[\s\S]{0,80}consumeLaunchLink\(\)/.test(indexSrc));
 const appLock = fs.readFileSync(
   require('node:path').join(__dirname, '..', 'app', 'app-lock.tsx'), 'utf8');
 ok('app-lock replays a held tap after a resume unlock',

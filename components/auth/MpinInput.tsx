@@ -13,6 +13,7 @@ export const MPIN_LENGTH = 6;
 
 export function MpinInput({
   value, onChange, onComplete, length = MPIN_LENGTH, secure = true, autoFocus = false, shakeAnim, onDark = false,
+  label = 'MPIN',
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -22,6 +23,8 @@ export function MpinInput({
   autoFocus?: boolean;
   shakeAnim?: Animated.Value;
   onDark?: boolean;
+  /** What a screen reader calls this field, e.g. "MPIN" or "Verification code". */
+  label?: string;
 }) {
   const { colors, scheme } = useTheme();
   const c = onDark && scheme === 'dark' ? AUTH_FIELDS : colors;
@@ -55,13 +58,23 @@ export function MpinInput({
   };
 
   return (
-    <Pressable onPress={reveal} style={s.inputWrap}>
+    // One accessible control for the whole field: the cells only draw, so a
+    // screen reader hears "MPIN, 2 of 6 digits entered" and a double tap opens
+    // the keyboard (reveal), instead of six unlabelled boxes.
+    <Pressable
+      onPress={reveal}
+      style={s.inputWrap}
+      accessibilityRole="button"
+      accessibilityLabel={`${label}, ${value.length} of ${length} digits entered`}
+      accessibilityHint="Opens the number keyboard"
+    >
       <Animated.View style={[s.row, shakeAnim ? { transform: [{ translateX: shakeAnim }] } : null]}>
         {Array.from({ length }).map((_, i) => {
           const filled = i < value.length;
           const active = i === value.length;
           return (
-            <View key={i} style={[s.cell, filled && s.cellFilled, active && s.cellActive]}>
+            <View key={i} style={[s.cell, filled && s.cellFilled, active && s.cellActive]}
+              accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
               <Text style={s.cellTxt}>{filled ? (secure ? '•' : value[i]) : ''}</Text>
             </View>
           );
@@ -76,6 +89,7 @@ export function MpinInput({
           autoFocus={autoFocus}
           caretHidden
           textContentType="oneTimeCode"
+          accessibilityLabel={label}
         />
       </Animated.View>
     </Pressable>

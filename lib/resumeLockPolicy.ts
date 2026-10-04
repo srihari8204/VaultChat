@@ -30,9 +30,34 @@ export function lockTimerMs(t: LockTimer): number | null {
   return t === 'never' ? null : MS[t];
 }
 
+/** What decides whether the app lock applies to this user at all. */
+export type LockFactors = { signedIn: boolean; mfaOn: boolean; hasDevicePin: boolean };
+
 /**
- * Relock only when the app lock applies to this user (device MFA on, signed
- * in), a timeout is set, and the app was away at least that long. A negative
+ * The app lock applies to a signed-in user who turned on device MFA OR set a
+ * Device PIN (app/backup-pin). It used to be MFA-only, so a PIN holder whose
+ * session is sealed at cold start was never relocked on resume.
+ */
+export function lockAppliesTo(f: LockFactors): boolean {
+  return f.signedIn && (f.mfaOn || f.hasDevicePin);
+}
+
+export type UnlockMode = 'seal' | 'bio' | 'pin';
+
+/**
+ * Which unlock app/app-lock opens with. A sealed session can only be opened by
+ * the PIN that seals it; device MFA starts with biometrics (MPIN fallback); a
+ * Device-PIN user without MFA is asked for that PIN.
+ */
+export function unlockMode(f: { sealedLocked: boolean; mfaOn: boolean; hasDevicePin: boolean }): UnlockMode {
+  if (f.sealedLocked) return 'seal';
+  if (!f.mfaOn && f.hasDevicePin) return 'pin';
+  return 'bio';
+}
+
+/**
+ * Relock only when the app lock applies to this user (lockAppliesTo), a
+ * timeout is set, and the app was away at least that long. A negative
  * gap (clock moved back) never locks on its own — the cold launch still does.
  */
 export function shouldRelock(awayMs: number, timeoutMs: number | null, lockApplies: boolean): boolean {

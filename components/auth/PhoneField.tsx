@@ -12,9 +12,11 @@
 // missing from the table falls back to the generic rule rather than blocking.
 //
 // onDark preserves the auth night styling; light appearance uses app colors.
+// The country picker is the shared components/ui/Sheet.
 
 import { useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Sheet } from '../ui/Sheet';
 import { AUTH_FIELDS, type FieldColors } from '../../constants/authTheme';
 import { useTheme } from '../../lib/theme';
 
@@ -87,31 +89,26 @@ export function PhoneField({
         keyboardType="phone-pad"
         autoFocus={autoFocus}
         maxLength={maxDigits}
+        accessibilityLabel={`Mobile number, ${country.name} ${country.code}`}
+        textContentType="telephoneNumber"
+        autoComplete="tel-national"
       />
 
-      <Modal visible={pick} transparent animationType="fade" onRequestClose={() => setPick(false)}>
-        <Pressable style={s.backdrop} onPress={() => setPick(false)}>
-          <View style={s.sheet}>
-            <Text style={s.sheetTitle}>Select country</Text>
-            <ScrollView>
-              {COUNTRIES.map(item => (
-                <TouchableOpacity
-                  key={item.code}
-                  style={[s.countryRow, item.code === dialCode && s.countryActive]}
-                  // Trim to the new country's ceiling — 10 Indian digits are not
-                  // a Singapore number, and carrying them over silently is how
-                  // the CTA ends up dead with nothing on screen explaining it.
-                  onPress={() => { onChange(item.code, national.slice(0, item.len[1])); setPick(false); }}
-                >
-                  <Text style={s.flag}>{item.flag}</Text>
-                  <Text numberOfLines={1} style={s.countryName}>{item.name}</Text>
-                  <Text style={s.codeTxt}>{item.code}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        </Pressable>
-      </Modal>
+      {/* The shared Sheet: roles, the selected mark, a modal scrim that only its
+          own backdrop closes, and the bottom safe-area inset. */}
+      <Sheet
+        visible={pick}
+        title="Select country"
+        onClose={() => setPick(false)}
+        actions={COUNTRIES.map(item => ({
+          label: `${item.flag}  ${item.name}  ${item.code}`,
+          selected: item.code === dialCode,
+          // Trim to the new country's ceiling — 10 Indian digits are not
+          // a Singapore number, and carrying them over silently is how
+          // the CTA ends up dead with nothing on screen explaining it.
+          onPress: () => onChange(item.code, national.slice(0, item.len[1])),
+        }))}
+      />
     </View>
   );
 }
@@ -127,10 +124,4 @@ const makeStyles = (c: FieldColors) => StyleSheet.create({
   codeTxt: { color: c.text, fontSize: 16, fontWeight: '700' },
   chev: { color: c.textDim, fontSize: 12 },
   input: { flex: 1, minHeight: 52, borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glassSoft, paddingHorizontal: 14, color: c.text, fontSize: 16 },
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: c.bg, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16, maxHeight: '70%' },
-  sheetTitle: { color: c.text, fontSize: 16, fontWeight: '800', marginBottom: 12 },
-  countryRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
-  countryActive: { backgroundColor: c.glassSoft },
-  countryName: { color: c.text, fontSize: 15, flex: 1 },
 });

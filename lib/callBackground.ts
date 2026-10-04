@@ -2,13 +2,15 @@
 // JS-load time (before the React tree), so they fire even when the app is
 // launched headless by a notification while killed.
 //
-// Imported for its side effects from app/_layout.tsx.
+// Imported for its side effects from app/_layout.tsx. Also routes a family-alert
+// notification pressed while backgrounded (lib/pendingLink.deliverTap).
 
 import notifee, { EventType } from '@notifee/react-native';
 import * as TaskManager from 'expo-task-manager';
 import * as Notifications from 'expo-notifications';
 import { cancelIncomingCall } from './callNotification';
 import { setPendingCall } from './ringTracker';
+import { deliverTap, hrefWithQuery } from './pendingLink';
 
 // 1. Notifee background events (app backgrounded or killed). Answer is handled
 //    by launchActivity + getInitialNotification on app start; here we record the
@@ -35,6 +37,15 @@ notifee.onBackgroundEvent(async ({ type, detail }) => {
   if (data?.type === 'family-emergency') {
     if (type === EventType.ACTION_PRESS && detail?.pressAction?.id === 'family-emergency-ack') {
       try { await require('./family/notify').cancelEmergencyConnect(); } catch {}
+    }
+    return;
+  }
+  // A family alert pressed while the app was backgrounded reaches only this
+  // handler, never the foreground one in lib/push.ts. Hand it to the root,
+  // which opens it through the same lock-aware path as every other tap.
+  if (data?.type === 'family-alert') {
+    if (type === EventType.PRESS) {
+      deliverTap(hrefWithQuery('/family-alerts', { circleId: String(data.circleId ?? '') }));
     }
     return;
   }

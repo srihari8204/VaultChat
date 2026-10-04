@@ -84,6 +84,10 @@ export const onboarding = {
  * saying nothing. The OTP screen turns the same seconds into a live countdown.
  */
 function msg(e: any, fallback: string): string {
+  // NO RESPONSE AT ALL is not "wrong code" or "wrong MPIN". fetch rejects with
+  // a TypeError ("Network request failed") offline, and lib/api's 30 s backstop
+  // aborts; neither carries a status. Say so instead of echoing the raw text.
+  if (isOfflineError(e)) return "You're offline or the server can't be reached. Check your connection and try again.";
   const base = e?.body?.error?.message || e?.message || fallback;
   if (e?.status !== 429 && e?.status !== 423) return base;
 
@@ -95,6 +99,12 @@ function msg(e: any, fallback: string): string {
     ? `${Math.ceil(mins / 60)} hour${Math.ceil(mins / 60) === 1 ? '' : 's'}`
     : `${mins} minute${mins === 1 ? '' : 's'}`;
   return `Too many attempts. Try again in about ${wait}.\n\nAsking again before then only extends the wait.`;
+}
+
+/** True when a request failed without any HTTP answer (offline, DNS, timeout). */
+export function isOfflineError(e: any): boolean {
+  return !!e && !e.status && (e.name === 'AbortError'
+    || /network request failed|network unavailable|aborted/i.test(String(e.message ?? '')));
 }
 
 /** Seconds the server says to wait, off a 429/423 envelope; 0 when it did not say. */

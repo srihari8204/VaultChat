@@ -74,7 +74,7 @@ export default function MpinEntry() {
       <KeyboardSafe style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
         <BrandMark size={64} markOnly style={{ marginBottom: 4 }} />
-        <Text style={s.title}>Welcome back</Text>
+        <Text style={s.title} accessibilityRole="header">Welcome back</Text>
         <Text style={s.sub}>Enter your 6-digit MPIN to unlock crazzychat</Text>
 
         <View style={{ marginVertical: 28 }}>
@@ -89,10 +89,15 @@ export default function MpinEntry() {
           <Text style={s.error} accessibilityLiveRegion="polite">{error}</Text>
         )}
 
+        {/* Without a userId there is no account to recover: same guard as submit. */}
         <Pressable
-          onPress={() => router.push({ pathname: '/mpin-recover', params: { userId } } as any)}
-          style={{ marginTop: 24 }}
+          onPress={() => {
+            if (!userId) { setError('Enter your mobile number first.'); resetTo('/onboard'); return; }
+            router.push({ pathname: '/mpin-recover', params: { userId } } as any);
+          }}
+          style={s.forgotHit}
           accessibilityRole="button"
+          accessibilityHint="Reset your MPIN with your security questions"
         >
           <Text style={s.forgot}>Forgot MPIN?</Text>
         </Pressable>
@@ -110,4 +115,5 @@ const makeStyles = (AUTH: AuthPalette) => StyleSheet.create({
   sub: { color: AUTH.dim, fontSize: 14, marginTop: 8, textAlign: 'center' },
   error: { color: AUTH.danger, fontSize: 13, marginTop: 14, textAlign: 'center', fontWeight: '600' },
   forgot: { color: AUTH.cyan, fontSize: 14, fontWeight: '700' },
+  forgotHit: { marginTop: 24, minHeight: 44, justifyContent: 'center', paddingHorizontal: 12 },
 });

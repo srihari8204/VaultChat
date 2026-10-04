@@ -2,13 +2,18 @@
 // a dropdown of still-available questions + an answer field. The parent excludes
 // codes already chosen in other rows so the same question can't be picked twice.
 //
-// Follows the same selected appearance as its parent auth screen.
+// Follows the same selected appearance as its parent auth screen. The picker is
+// the shared components/ui/Sheet (roles, selected mark, insets, modal scrim).
 
 import { useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Sheet } from '../ui/Sheet';
 import { SECURITY_QUESTION_POOL, questionLabel } from '../../constants/securityQuestionPool';
 import { type AuthPalette } from '../../constants/authTheme';
 import { useAuthTheme } from '../../lib/useAuthTheme';
+
+/** Shortest answer accepted (app/onboard-security.tsx checks the same). */
+export const MIN_ANSWER = 2;
 
 export function SecurityQuestionRow({
   index, selectedCode, answer, excludeCodes, onSelect, onAnswer,
@@ -52,27 +57,25 @@ export function SecurityQuestionRow({
           autoCapitalize="none"
           autoCorrect={false}
           secureTextEntry
+          accessibilityLabel={`Answer to: ${questionLabel(selectedCode)}`}
+          accessibilityHint={`At least ${MIN_ANSWER} characters`}
         />
       )}
+      {/* Why Next is still off: an answer that is started but too short. */}
+      {selectedCode && answer.length > 0 && answer.trim().length < MIN_ANSWER && (
+        <Text style={s.hint} accessibilityLiveRegion="polite">Use at least {MIN_ANSWER} characters.</Text>
+      )}
 
-      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-        <Pressable style={s.backdrop} onPress={() => setOpen(false)}>
-          <View style={s.sheet}>
-            <Text style={s.sheetTitle}>Security question {index + 1}</Text>
-            <ScrollView>
-              {available.map(q => (
-                <TouchableOpacity
-                  key={q.code}
-                  style={[s.qRow, q.code === selectedCode && s.qActive]}
-                  onPress={() => { onSelect(q.code); setOpen(false); }}
-                >
-                  <Text style={s.qTxt}>{q.label}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        </Pressable>
-      </Modal>
+      <Sheet
+        visible={open}
+        title={`Security question ${index + 1}`}
+        onClose={() => setOpen(false)}
+        actions={available.map(q => ({
+          label: q.label,
+          selected: q.code === selectedCode,
+          onPress: () => onSelect(q.code),
+        }))}
+      />
     </View>
   );
 }
@@ -87,10 +90,5 @@ const makeStyles = (AUTH: AuthPalette) => StyleSheet.create({
   selectEmpty: { color: AUTH.faint },
   chev: { color: AUTH.dim, fontSize: 12, marginLeft: 8 },
   answer: { marginTop: 8, backgroundColor: AUTH.hairline, borderRadius: 12, borderWidth: 1, borderColor: AUTH.stroke, paddingHorizontal: 14, paddingVertical: 12, color: AUTH.text, fontSize: 15 },
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: AUTH.bg, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16, maxHeight: '70%' },
-  sheetTitle: { color: AUTH.text, fontSize: 16, fontWeight: '800', marginBottom: 12 },
-  qRow: { paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: AUTH.stroke },
-  qActive: { backgroundColor: AUTH.card },
-  qTxt: { color: AUTH.text, fontSize: 14, lineHeight: 19 },
+  hint: { color: AUTH.danger, fontSize: 12, marginTop: 6 },
 });

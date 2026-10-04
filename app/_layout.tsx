@@ -79,8 +79,8 @@ import '../lib/lock/background';   // registers the Location Lock geofence task 
                                    // rule: headless wakes need it defined at load
 import { getAccessToken, getLaunchSessionState } from '../lib/api';
 import { launchAllowed, settleLaunchGate } from '../lib/launchGate';
-import { hrefWithQuery, openWhenUnlocked, stashLaunchLink } from '../lib/pendingLink';
-import { holdSecurityVerdict } from '../lib/securityVerdict';
+import { deliverTap, hrefWithQuery, onDeliveredTap, openWhenUnlocked, stashLaunchLink } from '../lib/pendingLink';
+import { holdSecurityVerdict, securityVerdict } from '../lib/securityVerdict';
 import { isMfaEnabled } from '../lib/mfa';
 import { E2EE_ENABLED, SCHEDULED_LOCAL } from '../constants/flags';
 import { mark } from '../lib/perf';
@@ -331,6 +331,17 @@ function RootLayoutInner() {
     if (launchGate !== 'checking' && pathname === '/blocked') setLanded(true);
   }, [launchGate, pathname]);
   const launchReady = launchGate === 'allow' || landed || launchGate === pathname;
+
+  // A HELD SECURITY VERDICT OWNS THE SCREEN. Taps are already held while
+  // /blocked is up (lib/pendingLink), but a deep link that expo-router opens
+  // itself never passes through that gate, so it could stack a chat on top of
+  // the verdict. Any route other than /blocked goes back to it — except the
+  // call screens, which stay answerable as they are from the OS lock screen.
+  useEffect(() => {
+    if (launchGate === 'checking' || pathname === '/blocked' || !securityVerdict()) return;
+    if (/^\/(incoming-call|voicecall|videocall|group-call-active)(\/|$)/.test(pathname)) return;
+    router.replace('/blocked' as any);
+  }, [launchGate, pathname, router]);
   useEffect(() => {
     if (launchReady) SplashScreen.hideAsync().catch(() => {});
   }, [launchReady]);
@@ -434,10 +445,15 @@ function RootLayoutInner() {
     // held for replay after unlock when either is locking (lib/pendingLink).
     // Call routes are deliberately NOT gated: a ring must be answerable from
     // the lock screen, as the OS full-screen call already is.
-    const openLink = ({ pathname: path, params }: { pathname: string; params?: Record<string, string> }) => {
-      void openWhenUnlocked(hrefWithQuery(path, params), launchAllowed, () => pathRef.current,
-        (href) => router.push(href as any)).catch(() => {});
+    const openHref = (href: string) => {
+      void openWhenUnlocked(href, launchAllowed, () => pathRef.current,
+        (h) => router.push(h as any)).catch(() => {});
     };
+    const openLink = ({ pathname: path, params }: { pathname: string; params?: Record<string, string> }) =>
+      openHref(hrefWithQuery(path, params));
+    // Taps from notifee's background handler (lib/callBackground) — a family
+    // alert pressed while the app was backgrounded, or before this mounted.
+    const offDeliveredTap = onDeliveredTap(openHref);
 
     // Open the in-app ringing screen for a call. `offer` may be empty (push /
     // backgrounded) — incoming-call captures the caller's re-sent offer live.
@@ -823,8 +839,10 @@ function RootLayoutInner() {
         }
         // A family alert tapped while the app was killed opens that circle's
         // alerts, as a foreground tap does (lib/push.ts attachTapHandler).
+        // deliverTap, not openLink: the background handler may already have
+        // delivered this same press, and it de-duplicates.
         else if (initial?.notification?.data?.type === 'family-alert') {
-          openLink({ pathname: '/family-alerts', params: { circleId: String(initial.notification.data.circleId ?? '') } });
+          deliverTap(hrefWithQuery('/family-alerts', { circleId: String(initial.notification.data.circleId ?? '') }));
         }
       } catch {}
       const pending = consumePendingCall();   // chosen from a bg notification action
@@ -876,6 +894,7 @@ function RootLayoutInner() {
       deferred.cancel();   // don't run deferred boot work after unmount
       launchIntentSub.remove();
       cleanupListeners();
+      offDeliveredTap();
       cleanupCallListener();
       cleanupRekey();
       cleanupMsgNotif();

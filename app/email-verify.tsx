@@ -113,7 +113,14 @@ export default function EmailVerify() {
     } finally { inFlight.current = false; }
   };
 
+  // The onboarding store is RAM-only (lib/onboarding.ts). After process death,
+  // or a deep link straight here, there is no number to verify — start over
+  // rather than POST an empty phone.
+  const noPhone = !phone;
+  useEffect(() => { if (noPhone) router.replace('/onboard' as any); }, [noPhone, router]);
+
   const waiting = cooldown > 0;
+  if (noPhone) return <View style={s.screen}><AuthSky /></View>;
   return (
     <View style={s.screen}>
       <AuthSky />
@@ -142,7 +149,7 @@ export default function EmailVerify() {
 
         {/* The code and its resend belong to one question, so they share one card. */}
         <View style={s.card}>
-          <MpinInput value={code} onChange={setCode} onComplete={submit} secure={false} autoFocus onDark />
+          <MpinInput value={code} onChange={setCode} onComplete={submit} secure={false} autoFocus onDark label="Verification code" />
 
           {busy && <ActivityIndicator color={AUTH.accent} style={{ marginTop: 18 }} />}
 

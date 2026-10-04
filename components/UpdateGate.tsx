@@ -14,17 +14,40 @@
 // different messages and collapsing them trains people to ignore both.
 
 import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Linking, ActivityIndicator } from 'react-native';
+import { AppState, View, Text, TouchableOpacity, StyleSheet, Linking, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Constants from 'expo-constants';
 import { Ionicons } from '@expo/vector-icons';
-import { checkAppVersion, currentBuild, type VersionGate, type VersionVerdict } from '../lib/appVersion';
+import {
+  checkAppVersion, currentBuild, fetchVersionGate, verdictFor, type VersionGate, type VersionVerdict,
+} from '../lib/appVersion';
+
+/** Re-ask the server on foreground at most this often: a floor raised while the
+ *  app sat in the background must still apply, without a request per resume. */
+const RECHECK_MS = 60 * 60_000;
+
+/**
+ * Where "Update" goes when the server sent no updateUrl. On Android the Play
+ * listing for this package (market:// first, the web page if no store app);
+ * elsewhere null — the screen then says where to update instead of a dead button.
+ */
+async function openStoreFallback(): Promise<boolean> {
+  const pkg = Constants.expoConfig?.android?.package;
+  if (Platform.OS !== 'android' || !pkg) return false;
+  try { await Linking.openURL(`market://details?id=${pkg}`); return true; } catch { /* no Play Store app */ }
+  try { await Linking.openURL(`https://play.google.com/store/apps/details?id=${pkg}`); return true; } catch { return false; }
+}
 
 export function UpdateGate({ children }: { children: React.ReactNode }) {
   const [verdict, setVerdict] = useState<VersionVerdict>('ok');
   const [gate, setGate] = useState<VersionGate | null>(null);
   const [dismissed, setDismissed] = useState(false);
+  const [noStore, setNoStore] = useState(false);
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     let alive = true;
+    let checkedAt = Date.now();
     // Deliberately NOT awaited before the first paint. A version check that
     // gates rendering would add a network round trip to every cold start, and
     // on a slow connection that is a blank screen — for a check that says "ok"
@@ -32,19 +55,30 @@ export function UpdateGate({ children }: { children: React.ReactNode }) {
     checkAppVersion()
       .then(({ verdict: v, gate: g }) => { if (alive) { setVerdict(v); setGate(g); } })
       .catch(() => {});
-    return () => { alive = false; };
+    // Re-check on foreground (throttled): the check used to run once per
+    // process, so a floor raised while the app lived in the background never
+    // applied until the next cold start.
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st !== 'active' || Date.now() - checkedAt < RECHECK_MS) return;
+      checkedAt = Date.now();
+      fetchVersionGate(true)
+        .then((g) => { if (alive && g) { setVerdict(verdictFor(currentBuild(), g)); setGate(g); } })
+        .catch(() => {});
+    });
+    return () => { alive = false; sub.remove(); };
   }, []);
 
-  const openStore = () => {
+  const openStore = async () => {
     const url = gate?.updateUrl;
-    if (url) Linking.openURL(url).catch(() => {});
+    if (url) { Linking.openURL(url).catch(() => {}); return; }
+    if (!(await openStoreFallback())) setNoStore(true);
   };
 
   if (verdict === 'blocked') {
     return (
       <View style={styles.block}>
-        <View style={styles.icon}><Ionicons name="arrow-up-circle" size={44} color="#fff" /></View>
-        <Text style={styles.title}>Update crazzychat to continue</Text>
+        <View style={styles.icon} accessibilityElementsHidden importantForAccessibility="no"><Ionicons name="arrow-up-circle" size={44} color="#fff" /></View>
+        <Text style={styles.title} accessibilityRole="header">Update crazzychat to continue</Text>
         <Text style={styles.body}>
           {gate?.message?.trim()
             ? gate.message
@@ -53,6 +87,11 @@ export function UpdateGate({ children }: { children: React.ReactNode }) {
         <TouchableOpacity style={styles.cta} onPress={openStore} activeOpacity={0.85} accessibilityRole="button">
           <Text style={styles.ctaTxt}>Update now</Text>
         </TouchableOpacity>
+        {noStore && (
+          <Text style={styles.body} accessibilityLiveRegion="polite">
+            Open your app store, search for crazzychat and install the update.
+          </Text>
+        )}
         <Text style={styles.meta}>
           Installed build {currentBuild() || '—'} · minimum {gate?.minBuild ?? '—'}
         </Text>
@@ -63,28 +102,19 @@ export function UpdateGate({ children }: { children: React.ReactNode }) {
   return (
     <View style={{ flex: 1 }}>
       {verdict === 'advise' && !dismissed && (
-        <View style={styles.bar}>
+        <View style={[styles.bar, { paddingTop: 9 + insets.top }]}>
           <Ionicons name="arrow-up-circle-outline" size={17} color="#fff" />
           <Text style={styles.barTxt} numberOfLines={1}>A newer version of crazzychat is available</Text>
-          <TouchableOpacity onPress={openStore} accessibilityRole="button" hitSlop={8}>
+          <TouchableOpacity onPress={openStore} accessibilityRole="button" accessibilityLabel="Update crazzychat" hitSlop={12}>
             <Text style={styles.barCta}>Update</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setDismissed(true)} accessibilityRole="button"
-            accessibilityLabel="Dismiss update notice" hitSlop={8}>
+            accessibilityLabel="Dismiss update notice" hitSlop={14}>
             <Ionicons name="close" size={17} color="rgba(255,255,255,0.8)" />
           </TouchableOpacity>
         </View>
       )}
       {children}
-    </View>
-  );
-}
-
-/** Exported for the boot path, which needs the verdict before it routes. */
-export function UpdateSpinner() {
-  return (
-    <View style={styles.block}>
-      <ActivityIndicator size="large" color="#fff" />
     </View>
   );
 }
