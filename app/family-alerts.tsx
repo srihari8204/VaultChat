@@ -67,6 +67,9 @@ export default function FamilyAlertsScreen() {
 
   const [filter, setFilter] = useState<AlertFilter>('all');
   const alerts = useFamilyAlerts(circleId, filter);
+  // Clear empties the circle's WHOLE history, whatever the filter shows, so it
+  // is offered only while there is something in it to clear.
+  const hasAny = useFamilyAlerts(circleId, 'all').length > 0;
 
   // "No alerts yet" must not flash before the device store has been read.
   const [ready, setReady] = useState(false);
@@ -110,20 +113,20 @@ export default function FamilyAlertsScreen() {
       <Stack.Screen options={{
         headerShown: true, title: 'Alerts', headerTitleAlign: 'center',
         headerStyle: { backgroundColor: G.bgTop }, headerTintColor: colors.text, headerShadowVisible: false,
-        headerRight: () => (
+        headerRight: () => (hasAny && circleId ? (
           <TouchableOpacity onPress={confirmClear} style={{ paddingHorizontal: 8 }} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }} accessibilityRole="button" accessibilityLabel="Clear alert history">
             <Ionicons name="trash-outline" size={19} color={colors.textDim} />
           </TouchableOpacity>
-        ),
+        ) : null),
       }} />
       <SpaceGround />
 
-      <View style={[st.tabs, { borderColor: G.line }]}>
+      <View style={[st.tabs, { borderColor: G.line }]} accessibilityRole="tablist">
         {FILTERS.map((f) => {
           const on = f.key === filter;
           return (
             <TouchableOpacity key={f.key} onPress={() => setFilter(f.key)}
-              accessibilityRole="button" accessibilityState={{ selected: on }}
+              accessibilityRole="tab" accessibilityState={{ selected: on }}
               style={[st.tab, { backgroundColor: on ? brandAlpha(0.14) : G.paneFaint, borderColor: on ? colors.primary : G.chipEdge }]}>
               <Text style={{ color: on ? G.accentText : colors.textDim, fontWeight: on ? '800' : '600', fontSize: 13 }}>{f.label}</Text>
             </TouchableOpacity>

@@ -52,6 +52,8 @@ export default function CrashCountdown({ visible, secondsLeft, onOk, onSendNow }
           <TouchableOpacity
             onPress={onSendNow}
             accessibilityRole="button"
+            accessibilityLabel="Send SOS now"
+            accessibilityHint="Alerts your circle with your live location without waiting"
             style={[st.crashBtn, { backgroundColor: '#B42318' }]}
           >
             <Text style={st.crashBtnTxt}>Send SOS now</Text>

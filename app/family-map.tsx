@@ -16,7 +16,7 @@
 
 import { AppText as Text } from '../components/ui/Text';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, ScrollView, ActivityIndicator, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
@@ -28,7 +28,7 @@ import MeetHereSheet, { type MeetDestination } from '../components/family/MeetHe
 import { type MemberInput, formatMetres, formatRoute } from '../lib/family/distance';
 import { circleMembers } from '../lib/family/circle';
 import { subscribeCircle, type PresenceEvent } from '../lib/family/presence';
-import { freshnessOf, markSharingOff, type Freshness, zoomForSpeed } from '../lib/family/status';
+import { freshnessOf, markSharingOff, zoomForSpeed } from '../lib/family/status';
 import { subscribeSpaceLocations, mergePresence, fetchSpaceSnapshot } from '../lib/location/live';
 import { startRefreshController } from '../lib/family/refresh';
 import { useVisibleTick } from '../lib/family/useVisibleTick';
@@ -40,7 +40,6 @@ import { haversine } from '../lib/nav/geo';
 import { startNavigation, stopNavigation, forceReroute, useNavBanner } from '../lib/nav/navigationService';
 import { loadNavSettings, getNavSettings } from '../lib/nav/navSettings';
 import { playHaptic } from '../lib/nav/hapticPlayer';
-import { iconFor } from '../components/nav/NavBanner';
 import NavigationLayer from '../components/family/NavigationLayer';
 import SelectedMemberSheet from '../components/family/SelectedMemberSheet';
 import { createDirectChat } from '../lib/chatService';
@@ -49,29 +48,11 @@ import {
   startTrip, joinTrip, endTrip, leaveTrip, subscribeTrip, currentTrip, setTripRoute,
 } from '../lib/groups/tripSession';
 import { foldParticipants, lastEta, minutesUntil, type Trip, type TripPing } from '../lib/groups/trips';
-import { leavePlan, formatLeaveIn } from '../lib/family/leaveNow';
+import { leavePlan } from '../lib/family/leaveNow';
 import { armLeaveNow, cancelLeaveNow } from '../lib/family/leaveNowAlarm';
 import { getCurrentUserAsync } from './(constants)/authService';
-
-const AGO = (ms: number) => {
-  const m = Math.round(ms / 60_000);
-  if (m < 1) return 'just now';
-  if (m < 60) return `${m} min ago`;
-  const h = Math.round(m / 60);
-  return `${h} h ago`;
-};
-
-/** Honest per-member line: never "LIVE" without a fresh fix, and an explicit
- *  sharing-off outranks freshness however new the retained fix is. */
-const freshLabel = (f: Freshness, ts?: number, now?: number, sharingOff?: boolean): string => {
-  if (sharingOff) return ts && now ? `Sharing off · last seen ${AGO(now - ts)}` : 'Location sharing off';
-  switch (f) {
-    case 'live': return 'LIVE';
-    case 'recent': return ts && now ? AGO(now - ts) : 'recent';
-    case 'stale': return ts && now ? `Last known · ${AGO(now - ts)}` : 'last known';
-    default: return 'Location unavailable';
-  }
-};
+import MapRosterSheet, { freshLabel } from '../components/family/MapRosterSheet';
+import { BarAction, TripBar, LeaveBar, FollowBar, TurnBar, RouteBar } from '../components/family/MapBars';
 
 export default function FamilyMapScreen() {
   const insets = useSafeAreaInsets();
@@ -924,56 +905,23 @@ export default function FamilyMapScreen() {
         {/* FAMILY TRIP BAR: whose trip, where to, when everyone is in — and
             the way out of it. */}
         {trip && !meetOpen && (
-          <View style={[st.tripBar, { top: slots.tripTop, backgroundColor: G.sheet, borderColor: colors.primary }]}>
-            <Ionicons name="car" size={16} color={colors.primary} />
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={{ color: colors.text, fontWeight: '800', fontSize: 13 }} numberOfLines={1}>
-                Trip to {trip.destinationName}
-              </Text>
-              <Text style={{ color: colors.textDim, fontSize: 11 }} numberOfLines={1}>
-                started by {trip.startedBy === me ? 'you' : (nameOf.get(trip.startedBy) || 'a member')}
-                {tripEta != null ? ` · all in by ~${minutesUntil(tripEta, now)} min` : ''}
-              </Text>
-            </View>
-            <BarAction
-              onPress={tripAction}
-              label={trip.startedBy === me ? 'END' : joined ? 'LEAVE' : 'JOIN'}
-              a11y={trip.startedBy === me ? 'End the family trip' : joined ? 'Leave the family trip' : 'Join the family trip'}
-              style={{ color: trip.startedBy === me || joined ? G.dangerText : G.accentText, fontWeight: '800', fontSize: 12 }}
-            />
-          </View>
+          <TripBar
+            top={slots.tripTop}
+            destinationName={trip.destinationName}
+            startedBy={trip.startedBy === me ? 'you' : (nameOf.get(trip.startedBy) || 'a member')}
+            etaMin={tripEta != null ? minutesUntil(tripEta, now) : null}
+            action={trip.startedBy === me ? 'END' : joined ? 'LEAVE' : 'JOIN'}
+            actionA11y={trip.startedBy === me ? 'End the family trip' : joined ? 'Leave the family trip' : 'Join the family trip'}
+            danger={trip.startedBy === me || joined}
+            onAction={tripAction}
+          />
         )}
 
         {/* LEAVE NOW. Only offered once a road duration exists — without one
             there is no honest leave time, and this refuses to invent one
             (leaveNow.leavePlan returns null and nothing renders). */}
         {!!destination && !meetOpen && destSecs != null && (
-          <View style={[st.leaveBar, { top: slots.leaveTop, backgroundColor: G.sheet, borderColor: leave?.warn ? colors.danger : G.edge }]}>
-            <Ionicons name="alarm-outline" size={15} color={leave?.warn ? colors.danger : colors.primary} />
-            {leave ? (
-              <>
-                <Text style={{ color: colors.text, fontWeight: '700', fontSize: 11.5, flex: 1 }} numberOfLines={1}>
-                  {leave.late ? 'Running late' : `Leave ${formatLeaveIn(leave.inMs)}`}
-                  <Text style={{ color: colors.textDim, fontWeight: '400' }}>
-                    {'  ·  arrive '}{new Date(arriveBy!).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                  </Text>
-                </Text>
-                <BarAction onPress={() => setArriveBy(null)} label="CLEAR" a11y="Clear the arrive-by time"
-                  style={{ color: G.accentText, fontWeight: '800', fontSize: 11 }} />
-              </>
-            ) : (
-              <>
-                <Text style={{ color: colors.textDim, fontSize: 11.5 }}>Arrive by</Text>
-                {arriveChoices.map((t) => {
-                  const hhmm = new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-                  return (
-                    <BarAction key={t} onPress={() => setArriveBy(t)} label={hhmm} a11y={`Arrive by ${hhmm}`}
-                      style={{ color: G.accentText, fontWeight: '800', fontSize: 11.5, paddingHorizontal: 7 }} />
-                  );
-                })}
-              </>
-            )}
-          </View>
+          <LeaveBar top={slots.leaveTop} leave={leave} arriveBy={arriveBy} choices={arriveChoices} onArriveBy={setArriveBy} />
         )}
 
         {/* Connector toggle — ten dashed lines are the point on one screen and
@@ -1017,15 +965,7 @@ export default function FamilyMapScreen() {
         {/* NEXT TURN of the routed member — the watcher's indicator. Their
             route, their live pings; the buzz fires from the effect above. */}
         {memberTurn && routeShape && (
-          <View style={[st.turnBar, { bottom: turnBarBottom, backgroundColor: G.sheet, borderColor: G.edge }]}>
-            <Ionicons name={iconFor(memberTurn.event)} size={16} color={colors.primary} />
-            <Text style={{ color: colors.text, fontWeight: '700', fontSize: 12, flex: 1 }} numberOfLines={1}>
-              {nameOf.get(routeTo ?? '') || 'Member'} · {memberTurn.instruction || memberTurn.event}
-            </Text>
-            <Text style={{ color: G.accentText, fontWeight: '800', fontSize: 12, fontVariant: ['tabular-nums'] }}>
-              {formatMetres(memberTurn.distM)}
-            </Text>
-          </View>
+          <TurnBar bottom={turnBarBottom} name={nameOf.get(routeTo ?? '') || 'Member'} turn={memberTurn} />
         )}
 
         {/* Active road route: says whose it is, what it costs BY ROAD, and how
@@ -1033,15 +973,11 @@ export default function FamilyMapScreen() {
             trip; instead they carry NAVIGATE, which starts real turn-by-turn
             guidance (banner + vibration + voice per nav settings). */}
         {(routeShape || homeRoute || destRoute) && (
-          <View style={[st.routeBar, { bottom: routeBarBottom, backgroundColor: G.sheet, borderColor: colors.primary }]}>
-            <Ionicons name="navigate-circle" size={16} color={colors.primary} />
-            <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, flex: 1 }} numberOfLines={1}>
-              {routeShape
-                ? `${nameOf.get(routeTo ?? '') || 'Member'}${destination ? ` → ${destination.name}` : ''}${routeInfo ? ` · ${routeInfo}` : ''}`
-                : homeRoute
-                  ? `${homeName} → You${homeInfo ? ` · ${homeInfo}` : ''}`
-                  : `You → ${destination?.name ?? 'destination'}${destInfo ? ` · ${destInfo}` : ''}`}
-            </Text>
+          <RouteBar bottom={routeBarBottom} label={routeShape
+            ? `${nameOf.get(routeTo ?? '') || 'Member'}${destination ? ` → ${destination.name}` : ''}${routeInfo ? ` · ${routeInfo}` : ''}`
+            : homeRoute
+              ? `${homeName} → You${homeInfo ? ` · ${homeInfo}` : ''}`
+              : `You → ${destination?.name ?? 'destination'}${destInfo ? ` · ${destInfo}` : ''}`}>
             {routeShape ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
                 {/* Me -> member: this route can be DRIVEN, so offer it. A member ->
@@ -1070,7 +1006,7 @@ export default function FamilyMapScreen() {
               <BarAction onPress={startNav} label="NAVIGATE" a11y={`Navigate to ${destination?.name ?? 'the destination'}`}
                 style={{ color: G.accentText, fontWeight: '800', fontSize: 12 }} />
             )}
-          </View>
+          </RouteBar>
         )}
         {/* Following banner (spec: "Following X" + "Stop following"). Only
             shown while a follow is active, and it is the way OUT — a map that
@@ -1078,14 +1014,7 @@ export default function FamilyMapScreen() {
         {/* Only where its slot exists: with Meet Here open no slot is
             allocated, and the bar used to render at top 0 over the header. */}
         {showFollowBar && (
-          <View style={[st.followBar, { top: slots.followTop, backgroundColor: G.sheet, borderColor: colors.primary }]}>
-            <Ionicons name="navigate-circle" size={16} color={colors.primary} />
-            <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, flex: 1 }} numberOfLines={1}>
-              Following {nameOf.get(followId) || 'member'}
-            </Text>
-            <BarAction onPress={() => setFollowId(null)} label="STOP" a11y="Stop following"
-              style={{ color: G.accentText, fontWeight: '800', fontSize: 12.5 }} />
-          </View>
+          <FollowBar top={slots.followTop} name={nameOf.get(followId) || 'member'} onStop={() => setFollowId(null)} />
         )}
       </View>
       {meetOpen ? (
@@ -1102,155 +1031,22 @@ export default function FamilyMapScreen() {
           tripActive={!!trip}
         />
       ) : (
-      <View style={[st.sheet, { backgroundColor: G.sheet, borderColor: G.edge }]}>
-        {!membersLoaded && membersFailed ? (
-          <View style={st.center}>
-            <Text style={{ color: colors.textDim, fontSize: 13 }}>Couldn&apos;t load the circle.</Text>
-            <BarAction onPress={() => setMembersTry((n) => n + 1)} label="RETRY" a11y="Retry loading the circle"
-              style={{ color: G.accentText, fontWeight: '800', fontSize: 12.5, paddingVertical: 6 }} />
-          </View>
-        ) : !membersLoaded ? (
-          <View style={st.center}><ActivityIndicator color={colors.primary} /></View>
-        ) : (
-          <ScrollView style={{ maxHeight: 148 }} contentContainerStyle={{ paddingBottom: 4 }}>
-            {members.map((m) => {
-              // My own row falls back to the OS's last known position. This
-              // screen never starts a watcher (read-only by design), so
-              // presences never contains me — and the row said "Location
-              // unavailable" while the rows beneath it were computing "17 km
-              // from You". Seen on the Honor: the screen contradicted itself in
-              // adjacent lines.
-              const p = presences[m.id] ?? (m.id === me ? mine ?? undefined : undefined);
-              const f = freshnessOf(p?.ts, now);
-              const liveNow = f === 'live' && !p?.sharingOff;
-              const following = followId === m.id;
-              // Straight-line from ME. Explicitly not a road distance — see
-              // formatRoute in lib/family/distance for the other kind.
-              const fromMe = p && mine && m.id !== me && f !== 'unavailable'
-                ? haversine(mine.pos, p.pos) : null;
-              // What they published about their own reference places. A member
-              // who stopped sharing keeps their last-known dot but loses the
-              // reference line: the number described where they were, not
-              // where they are, and there is no fresh one to replace it.
-              const refs = p?.sharingOff ? [] : (p?.refs ?? []);
-              const showRef = refs.length > 0 && f !== 'unavailable' && f !== 'stale';
-              // Following needs a position to follow. A member with no usable
-              // fix (silent, or sharing off) cannot be followed — offering it
-              // would promise something the map cannot do.
-              const canFollow = !!p && !p.sharingOff && f !== 'unavailable' && m.id !== me;
-              // This member's own trip report: THEIR device computed the ETA
-              // and sealed it; we only render it. Never invented from distance.
-              const tp = trip ? tripPings.find((x) => x.userId === m.id) : undefined;
-              const tripLine = tp
-                ? (tp.arrived ? `Arrived at ${trip!.destinationName}`
-                  : tp.etaAt != null ? `${minutesUntil(tp.etaAt, now)} min to ${trip!.destinationName}` : null)
-                : null;
-              return (
-                <View key={m.id} style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: G.line }}>
-                  <View style={st.rowWrap}>
-                    <Text
-                      onPress={() => p && setFocusId(m.id)}
-                      accessibilityRole={p ? 'button' : undefined}
-                      accessibilityHint={p ? 'Centres the map on them' : undefined}
-                      style={[st.row, { color: colors.text, flex: 1 }]}
-                    >
-                      <Text style={{ color: liveNow ? G.goodText : colors.textDim }}>● </Text>
-                      {m.id === me ? 'You' : m.name}
-                      <Text style={{ color: liveNow ? G.goodText : colors.textDim, fontSize: 12 }}>
-                        {'   '}{freshLabel(f, p?.ts, now, p?.sharingOff)}
-                        {fromMe != null ? `   ·   ${formatMetres(fromMe)} from You` : ''}
-                        {tripLine ? `   ·   ${tripLine}` : ''}
-                      </Text>
-                    </Text>
-                    {/* Road route — to THIS member normally; with a trip or
-                        Meet Here destination set, THEIR road to it instead. */}
-                    {canFollow && (!!mine || !!destination) && (
-                      <BarAction
-                        onPress={() => { setRouteTo(routeTo === m.id ? null : m.id); setFocusId(m.id); }}
-                        label={routeBusy && routeTo === m.id ? '…' : routeTo === m.id ? 'ROUTED' : 'Route'}
-                        a11y={routeTo === m.id ? `Clear the route to ${m.name}` : `Show the road route to ${m.name}`}
-                        style={{ color: routeTo === m.id ? G.accentText : colors.textDim, fontWeight: '700', fontSize: 12, paddingHorizontal: 6 }}
-                      />
-                    )}
-                    {canFollow && (
-                      <BarAction
-                        onPress={() => { setFollowId(following ? null : m.id); setFocusId(m.id); }}
-                        label={following ? 'FOLLOWING' : 'Follow'}
-                        a11y={following ? `Stop following ${m.name}` : `Follow ${m.name}`}
-                        style={{ color: following ? G.accentText : colors.textDim, fontWeight: '700', fontSize: 12, paddingHorizontal: 6 }}
-                      />
-                    )}
-                  </View>
-                  {/* Distance from THEIR reference place, with the picker over
-                      the references they chose to publish. Tapping a name only
-                      re-reads a number they already sent — nothing is fetched,
-                      and no coordinate for these places exists on this device. */}
-                  {/* EVERY reference this member published, not one at a time.
-                      The spec's example is the whole list per person —
-                        Mother   Home 1.2 km · Shop 2.8 km · Other 4.5 km
-                      — readable without opening another screen (§4). Their
-                      chosen default leads and is marked; the rest follow.
-                      Every value was computed on THEIR device, so we hold the
-                      names and the metres and never the coordinates. */}
-                  {showRef && (
-                    <View style={st.refWrap}>
-                      {refs.map((r, ri) => (
-                        <View key={r.n} style={st.refLine}>
-                          <Text
-                            style={{ color: ri === 0 ? colors.text : colors.textDim, fontSize: 12, fontWeight: ri === 0 ? '700' : '400', flex: 1 }}
-                            numberOfLines={1}
-                          >
-                            {r.n}
-                          </Text>
-                          <Text style={{ color: ri === 0 ? colors.text : colors.textDim, fontSize: 12, fontWeight: ri === 0 ? '700' : '400' }}>
-                            {formatMetres(r.d)}
-                          </Text>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-                </View>
-              );
-            })}
-            {members.length === 0 && (
-              <Text style={{ color: colors.textDim, padding: 12, textAlign: 'center' }}>
-                Nobody here yet.
-              </Text>
-            )}
-          </ScrollView>
-        )}
-      </View>
+      <MapRosterSheet
+        members={members} me={me} mine={mine} presences={presences} now={now}
+        loaded={membersLoaded} failed={membersFailed} onRetry={() => setMembersTry((n) => n + 1)}
+        trip={trip} tripPings={tripPings} followId={followId} routeTo={routeTo} routeBusy={routeBusy}
+        canRoute={!!mine || !!destination}
+        onFocus={(id) => setFocusId(id)}
+        onRoute={(id) => { setRouteTo(routeTo === id ? null : id); setFocusId(id); }}
+        onFollow={(id) => { setFollowId(followId === id ? null : id); setFocusId(id); }}
+      />
       )}
     </View>
   );
 }
 
-/**
- * A text action on an overlay bar (END, CLEAR, NAVIGATE, Route…). These were
- * bare <Text onPress> at 11–12 px: no role for a screen reader and a target
- * the height of one line. Same look; a real button with a ≥44 dp hit area.
- */
-function BarAction({ label, a11y, onPress, style }: {
-  label: string; a11y?: string; onPress: () => void; style: any;
-}) {
-  return (
-    <TouchableOpacity
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={a11y ?? label}
-      hitSlop={{ top: 14, bottom: 14, left: 8, right: 8 }}
-    >
-      <Text style={style}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
-
 const st = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  sheet: {
-    borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1,
-    paddingHorizontal: 16, paddingTop: 4, paddingBottom: 8,
-  },
   // Sits just under the search bar; horizontal, wraps rather than scrolls
   // because four chips always fit and a scroll view here would swallow the
   // map's own pan gesture at the top of the screen.
@@ -1274,36 +1070,5 @@ const st = StyleSheet.create({
   linkFab: {
     position: 'absolute', left: 12, bottom: 12, alignItems: 'center', justifyContent: 'center',
     gap: 1, borderWidth: 1, borderRadius: 12, paddingHorizontal: 8, minHeight: 44, maxWidth: 180, elevation: 3,
-  },
-  routeBar: {
-    position: 'absolute', left: 12, right: 12, bottom: 12, flexDirection: 'row', alignItems: 'center', gap: 8,
-    borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, minHeight: 32, elevation: 3,
-  },
-  rowWrap: { flexDirection: 'row', alignItems: 'center' },
-  row: { paddingVertical: 7, fontSize: 14, fontWeight: '600' },
-  refWrap: { paddingBottom: 6, paddingLeft: 12, gap: 1 },
-  refLine: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  followBar: {
-    position: 'absolute', left: 12, right: 12, top: 12,
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    borderWidth: 1, borderRadius: 999, paddingHorizontal: 13, paddingVertical: 6,
-  },
-  // Sits UNDER the search bar — the trip is context, the search stays a search.
-  tripBar: {
-    position: 'absolute', left: 12, right: 12, top: 64,
-    flexDirection: 'row', alignItems: 'center', gap: 9,
-    borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 5, elevation: 4,
-  },
-  // Between the trip bar and the map: the leave-now countdown / arrive-by picker.
-  leaveBar: {
-    position: 'absolute', left: 12, right: 12, top: 122,
-    flexDirection: 'row', alignItems: 'center', gap: 7,
-    borderWidth: 1, borderRadius: 11, paddingHorizontal: 11, minHeight: 32, elevation: 3,
-  },
-  // Rides just above the route bar: the routed member's next left/right.
-  turnBar: {
-    position: 'absolute', left: 12, right: 12, bottom: 58,
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    borderWidth: 1, borderRadius: 999, paddingHorizontal: 13, minHeight: 36, elevation: 3,
   },
 });

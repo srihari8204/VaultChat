@@ -130,8 +130,8 @@ export default function SelectedMemberSheet(p: SelectedMemberSheetProps) {
           hitSlop={HIT}
           style={[st.primary, { backgroundColor: colors.primary }]}
         >
-          <Ionicons name="navigate" size={17} color="#fff" />
-          <Text style={st.primaryTxt}>Start navigation</Text>
+          <Ionicons name="navigate" size={17} color={colors.onPrimary} />
+          <Text style={[st.primaryTxt, { color: colors.onPrimary }]}>Start navigation</Text>
         </TouchableOpacity>
       )}
     </View>
@@ -162,5 +162,5 @@ const st = StyleSheet.create({
     minHeight: 48, borderRadius: 16,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
   },
-  primaryTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  primaryTxt: { fontSize: 15, fontWeight: '800' },
 });

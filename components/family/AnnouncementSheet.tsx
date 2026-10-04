@@ -50,8 +50,8 @@ export default function AnnouncementSheet({ visible, onClose, text, onText, busy
               accessibilityState={{ disabled: !ready, busy }}
               style={[st.btnWide, { backgroundColor: ready ? colors.primary : colors.border }]}
             >
-              {busy ? <ActivityIndicator color="#fff" />
-                : <><Ionicons name="megaphone" size={17} color="#fff" /><Text style={{ color: '#fff', fontWeight: '800', fontSize: 15 }}>Post to group</Text></>}
+              {busy ? <ActivityIndicator color={colors.onPrimary} />
+                : <><Ionicons name="megaphone" size={17} color={ready ? colors.onPrimary : colors.textDim} /><Text style={{ color: ready ? colors.onPrimary : colors.textDim, fontWeight: '800', fontSize: 15 }}>Post to group</Text></>}
             </TouchableOpacity>
           </ScrollView>
         </View>

@@ -2,10 +2,18 @@
 // the hub (app/family.tsx) and the member screen (app/family-member.tsx), which
 // used to carry their own copies (and their own wording for "just now").
 //
-// Pure — no react-native imports — so the selftest runs under tsx.
+// Pure — no react-native imports — so memberFormat.selftest.ts runs under tsx.
 
 /** Avatar fills. Saturated on purpose: identity colours, the same in both themes. */
 export const AVATAR_COLORS = ['#4A9FFF', '#EC4899', '#22C55E', '#F59E0B', '#A855F7', '#EF4444', '#14B8A6', '#F97316'];
+
+/**
+ * The initial drawn ON an avatar fill. White on the saturated fills in dark;
+ * near-black in light, where the paler page makes white initials on the
+ * lighter fills (#22C55E, #F59E0B, #14B8A6) hard to read. Identity ink tied to
+ * AVATAR_COLORS above, not a surface colour, so it is not a theme token.
+ */
+export const AVATAR_INK = { dark: '#FFFFFF', light: '#070A18' } as const;
 
 /** A member's colour, stable for their id on every screen and every device. */
 export const colorFor = (id: string): string =>

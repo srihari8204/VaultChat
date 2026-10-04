@@ -80,7 +80,7 @@ export default function CheckinSheet({ visible, onClose, picked, onPick, note, o
               accessibilityState={{ disabled: !picked }}
               style={[st.sendCheckin, { backgroundColor: picked ? colors.primary : colors.border }]}
             >
-              <Text style={{ color: picked ? '#fff' : colors.textDim, fontWeight: '800', fontSize: 15 }}>
+              <Text style={{ color: picked ? colors.onPrimary : colors.textDim, fontWeight: '800', fontSize: 15 }}>
                 {picked ? `Send “${picked.label}”` : 'Choose a status'}
               </Text>
             </TouchableOpacity>

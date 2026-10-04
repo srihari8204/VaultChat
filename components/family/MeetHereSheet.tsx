@@ -93,7 +93,11 @@ export default function MeetHereSheet({ members, myPos, destination, onDestinati
       // Index alignment is the contract: send EVERY member so index i here is
       // index i in `members`, and let the backend skip unusable coordinates.
       // Filtering first would silently shift everyone's results by one.
-      const origins = members.map((m) => m.pos ?? { lat: 0, lng: 0 });
+      // Rounded to ~110 m like the map's and the hub's matrix calls: an ETA to
+      // a meeting place needs no more, and the routing server need not see
+      // anyone's exact position.
+      const q = (n: number) => Math.round(n * 1000) / 1000;
+      const origins = members.map((m) => (m.pos ? { lat: q(m.pos.lat), lng: q(m.pos.lng) } : { lat: 0, lng: 0 }));
       setMatrix(await fetchMatrix(origins, dest, 'auto'));
     } catch (e: any) {
       setMatrix(null);

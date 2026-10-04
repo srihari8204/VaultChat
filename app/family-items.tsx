@@ -41,6 +41,8 @@ import {
 } from '../lib/items/api';
 import { type Geofence } from '../lib/family/geofence';
 import { haversine } from '../lib/nav/geo';
+import { ago } from '../lib/family/memberFormat';
+import { sheetSt } from '../components/family/sheetStyles';
 
 /** Which saved Place contains this position, if any. Local to this screen:
  *  geofence.ts owns crossing DETECTION (with hysteresis); this is the simpler
@@ -199,12 +201,14 @@ export default function FamilyItemsScreen() {
   }, [whereNow, circleId]);
 
   /** Another member's tag heard by this phone: tell the space where (place
-   *  name only), and show it here as heard by you. */
+   *  name only), and show it here as heard by you — only once the space has
+   *  actually taken the report, so "by you" never claims a sighting the
+   *  owner cannot see. A failed report is retried on the next due minute. */
   const reportFamilySighting = useCallback(async (bleId: string) => {
     if (!circleId) return;
     const { place } = await whereNow();
     const at = Date.now();
-    await reportSighting(circleId, bleId, place, at).catch(() => {});
+    try { await reportSighting(circleId, bleId, place, at); } catch { return; }
     setShared((list) => list.map((x) => (x.bleId === bleId
       ? { ...x, lastSeenAt: at, lastSeenBy: me, placeName: place } : x)));
   }, [circleId, whereNow, me]);
@@ -273,14 +277,8 @@ export default function FamilyItemsScreen() {
     setPairName('');
   };
 
-  const ago = (ms?: number) => {
-    if (!ms) return 'never';
-    const m = Math.round((Date.now() - ms) / 60000);
-    if (m < 1) return 'just now';
-    if (m < 60) return `${m} min ago`;
-    const h = Math.round(m / 60);
-    return h < 24 ? `${h} h ago` : `${Math.round(h / 24)} d ago`;
-  };
+  /** The shared "5m ago" wording (lib/family/memberFormat), or "never". */
+  const seenAgo = (ms?: number | null) => (ms ? ago(ms) : 'never');
 
   return (
     <View style={{ flex: 1, backgroundColor: G.bgMid }}>
@@ -294,7 +292,7 @@ export default function FamilyItemsScreen() {
         <TouchableOpacity
           onPress={scanning ? stop : start}
           accessibilityRole="button"
-          style={[st.scanBtn, { backgroundColor: scanning ? colors.danger + '18' : brandAlpha(0.1), borderColor: scanning ? colors.danger : colors.primary }]}
+          style={[st.scanBtn, { backgroundColor: scanning ? G.paneStrong : brandAlpha(0.1), borderColor: scanning ? colors.danger : colors.primary }]}
         >
           {scanning ? <ActivityIndicator size="small" color={colors.danger} /> : <Ionicons name="bluetooth" size={18} color={colors.primary} />}
           <Text style={{ color: scanning ? G.dangerText : G.accentText, fontWeight: '800', fontSize: 14 }}>
@@ -337,7 +335,7 @@ export default function FamilyItemsScreen() {
                   const place = byOther ? sh?.placeName : it.lastSeenPlace;
                   return (
                     <Text style={{ color: colors.textDim, fontSize: 12.5 }} numberOfLines={1}>
-                      Last seen {ago(at)}
+                      Last seen {seenAgo(at)}
                       {place ? ` · ${place}` : ''}
                       {byOther ? '  · by family' : ''}
                     </Text>
@@ -402,7 +400,7 @@ export default function FamilyItemsScreen() {
                 <Text style={{ color: heardNow ? G.goodText : colors.textDim, fontSize: 12.5 }} numberOfLines={1}>
                   {heardNow
                     ? 'Heard by this phone now'
-                    : `Last heard ${ago(f.lastSeenAt ?? undefined)}${f.placeName ? ` · ${f.placeName}` : ''}${by}`}
+                    : `Last heard ${seenAgo(f.lastSeenAt)}${f.placeName ? ` · ${f.placeName}` : ''}${by}`}
                 </Text>
               </View>
             </View>
@@ -426,7 +424,7 @@ export default function FamilyItemsScreen() {
                   accessibilityLabel={`Pair ${s.name || 'unnamed device'}, ${BAND_LABEL[bandOf(r)]}`}
                   style={[st.card, { backgroundColor: G.pane, borderColor: G.edge }]}
                 >
-                  <View style={[st.icon, { backgroundColor: colors.primary + '18' }]}>
+                  <View style={[st.icon, { backgroundColor: brandAlpha(0.1) }]}>
                     <Ionicons name="radio-outline" size={19} color={colors.primary} />
                   </View>
                   <View style={{ flex: 1, minWidth: 0 }}>
@@ -453,15 +451,17 @@ export default function FamilyItemsScreen() {
         <Text style={{ color: colors.textDim, fontSize: 11.5, lineHeight: 16, marginTop: 16 }}>
           Works with any Bluetooth tag — no brand lock-in, no subscription. Tags you pair are listed
           in this space with the place they were last heard (a saved place&apos;s name, never
-          coordinates). While another member searches here on their phone, it reports the tags it
-          hears — yours included — so they can help find them. The tag&apos;s maker is never involved.
+          coordinates). While you search here, this phone also reports the other members&apos; tags it
+          hears, so they can help find them: everyone in this space then sees that you heard it, and
+          the name of the saved place you were in (such as &ldquo;Home&rdquo;), if any. Their phones do
+          the same for your tags. The tag&apos;s maker is never involved.
         </Text>
       </ScrollView>
 
       {/* ── PAIRING SHEET ── a real modal, so the keyboard lifts it instead of
           covering it at the bottom of a long list. */}
       <Modal visible={!!pairing} transparent animationType="slide" onRequestClose={() => setPairing(null)}>
-        <KeyboardSafe keyboardOnly style={st.backdrop}>
+        <KeyboardSafe keyboardOnly style={sheetSt.modalWrap}>
           <Pressable style={{ flex: 1 }} onPress={() => setPairing(null)}
             accessibilityRole="button" accessibilityLabel="Cancel pairing" />
           <View style={[st.pair, { backgroundColor: G.sheet, borderColor: G.edge }]}>
@@ -475,12 +475,12 @@ export default function FamilyItemsScreen() {
               placeholderTextColor={colors.textFaint}
               style={[st.input, { color: colors.text, borderColor: G.chipEdge, backgroundColor: G.paneFaint }]}
             />
-            <View style={st.iconRow}>
+            <View style={st.iconRow} accessibilityRole="radiogroup" accessibilityLabel="Item icon">
               {ICONS.map((ic) => (
                 <TouchableOpacity
                   key={ic}
                   onPress={() => setPairIcon(ic)}
-                  accessibilityRole="button" accessibilityState={{ selected: pairIcon === ic }} accessibilityLabel={`${ic} icon`}
+                  accessibilityRole="radio" accessibilityState={{ checked: pairIcon === ic, selected: pairIcon === ic }} accessibilityLabel={`${ic} icon`}
                   style={[st.iconPick, { borderColor: pairIcon === ic ? colors.primary : G.chipEdge, backgroundColor: pairIcon === ic ? brandAlpha(0.14) : G.paneFaint }]}
                 >
                   <Ionicons name={ic} size={18} color={pairIcon === ic ? colors.primary : colors.textDim} />
@@ -517,7 +517,6 @@ const st = StyleSheet.create({
   },
   icon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   pair: { borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1, padding: 16, paddingBottom: 28, gap: 11 },
-  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
   input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, minHeight: 46, fontSize: 15 },
   iconRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   iconPick: { width: 42, height: 42, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },

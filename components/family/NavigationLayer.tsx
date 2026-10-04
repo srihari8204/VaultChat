@@ -114,9 +114,11 @@ export default function NavigationLayer(p: NavigationLayerProps) {
               accessibilityRole="button"
               accessibilityLabel="Done, end navigation"
               hitSlop={HIT}
-              style={[st.arrivalBtn, { backgroundColor: colors.success }]}
+              // Outlined, not a solid #22C55E fill: white on that green is
+              // ~2.3:1. goodText on the sheet clears AA in both themes.
+              style={[st.arrivalBtn, { backgroundColor: G.paneStrong, borderWidth: 1.5, borderColor: colors.success }]}
             >
-              <Text style={st.arrivalBtnTxt}>Done</Text>
+              <Text style={[st.arrivalBtnTxt, { color: G.goodText }]}>Done</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -193,7 +195,7 @@ export default function NavigationLayer(p: NavigationLayerProps) {
                 hitSlop={HIT}
                 style={[st.offRouteBtn, { backgroundColor: colors.primary }]}
               >
-                <Text style={st.offRouteBtnTxt}>Reroute</Text>
+                <Text style={[st.offRouteBtnTxt, { color: colors.onPrimary }]}>Reroute</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -286,7 +288,7 @@ const st = StyleSheet.create({
   },
   offRouteTxt: { flex: 1, fontSize: 13.5, fontWeight: '600' },
   offRouteBtn: { paddingHorizontal: 12, minHeight: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  offRouteBtnTxt: { color: '#fff', fontSize: 12.5, fontWeight: '800' },
+  offRouteBtnTxt: { fontSize: 12.5, fontWeight: '800' },
 
   follow: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
@@ -316,5 +318,5 @@ const st = StyleSheet.create({
   arrivalTitle: { fontSize: 18, fontWeight: '800' },
   arrivalSub: { fontSize: 13 },
   arrivalBtn: { paddingHorizontal: 18, minHeight: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  arrivalBtnTxt: { color: '#fff', fontSize: 14.5, fontWeight: '800' },
+  arrivalBtnTxt: { fontSize: 14.5, fontWeight: '800' },
 });

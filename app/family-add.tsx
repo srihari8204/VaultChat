@@ -196,7 +196,7 @@ export default function FamilyAddScreen() {
         </View>
         {!isMember && (
           <View style={[s.check, sel && s.checkSel]}>
-            {sel && <Ionicons name="checkmark" size={15} color="#FFFFFF" />}
+            {sel && <Ionicons name="checkmark" size={15} color={colors.onPrimary} />}
           </View>
         )}
       </TouchableOpacity>
@@ -236,14 +236,14 @@ export default function FamilyAddScreen() {
       </TouchableOpacity>
 
       {!!error && (
-        <View style={s.errorBar} accessibilityLiveRegion="polite">
-          <Text style={[s.errorTxt, { flex: 1 }]}>{error}</Text>
+        <View style={[s.errorBar, isFamily && { backgroundColor: G.paneStrong }]} accessibilityLiveRegion="polite">
+          <Text style={[s.errorTxt, isFamily && { color: G.dangerText }, { flex: 1 }]}>{error}</Text>
           <TouchableOpacity
             onPress={() => setAttempt((n) => n + 1)}
             accessibilityRole="button" accessibilityLabel="Retry loading contacts"
             hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
           >
-            <Text style={[s.errorTxt, { fontWeight: '800' }]}>Retry</Text>
+            <Text style={[s.errorTxt, isFamily && { color: G.dangerText }, { fontWeight: '800' }]}>Retry</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -285,8 +285,8 @@ export default function FamilyAddScreen() {
         style={[s.cta, { backgroundColor: selected.size && !busy ? colors.brandOnLight : colors.border }]}
       >
         {busy
-          ? <ActivityIndicator color="#fff" />
-          : <Text style={s.ctaTxt}>
+          ? <ActivityIndicator color={colors.onPrimary} />
+          : <Text style={[s.ctaTxt, { color: selected.size ? colors.onPrimary : colors.textDim }]}>
               {selected.size
                 ? `Invite ${selected.size} ${selected.size === 1 ? 'person' : 'people'}`
                 : 'Select contacts to invite'}
@@ -324,7 +324,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   checkSel: { backgroundColor: c.brandOnLight, borderColor: c.primary },
   empty: { alignItems: 'center', padding: 32, gap: 10 },
   emptyTxt: { color: c.textDim, fontSize: 13.5, textAlign: 'center', lineHeight: 19 },
-  errorBar: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: c.danger + '22', padding: 10, marginHorizontal: 14, borderRadius: 10 },
+  // A bordered pane, not a tinted wash: the border carries the danger hue, so
+  // the message text can use the AA-safe danger ink on any ground.
+  errorBar: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: c.glassSoft, borderWidth: 1, borderColor: c.danger, padding: 10, marginHorizontal: 14, borderRadius: 10 },
   errorTxt: { color: c.danger, fontSize: 12.5 },
   codeRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
@@ -336,5 +338,5 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     margin: 14, marginTop: 0, minHeight: 50, paddingVertical: 10, borderRadius: 13,
     alignItems: 'center', justifyContent: 'center',
   },
-  ctaTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  ctaTxt: { fontSize: 15, fontWeight: '800' },
 });

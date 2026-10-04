@@ -27,6 +27,8 @@ import { segmentTrips } from '../lib/family/status';
 import { useFamilyAlerts, loadAlerts, type FamilyAlert } from '../lib/family/alerts';
 import { historyAccess } from '../lib/groups/store';
 import { groupWithHistoryAccess } from '../lib/family/historyGate';
+import { fetchTraceDistance } from '../lib/nav/routing';
+import { traceShape } from '../lib/family/traceShape';
 import { getCurrentUserAsync } from './(constants)/authService';
 
 type Range = 'day' | 'week' | 'month';
@@ -164,8 +166,8 @@ export default function FamilyHistoryScreen() {
     let cancel = false;
     (async () => {
       try {
-        const { fetchTraceDistance } = require('../lib/nav/routing');
-        const r = await fetchTraceDistance(samples.map((p: any) => ({ lat: p.lat, lng: p.lng })));
+        // Rounded to ~11 m and de-duplicated before it leaves the phone.
+        const r = await fetchTraceDistance(traceShape(samples));
         if (!cancel) setRoadTravelledM(r?.distanceM ?? null);
       } catch { if (!cancel) setRoadTravelledM(null); }
     })();
@@ -183,9 +185,12 @@ export default function FamilyHistoryScreen() {
 
   // Timeline = the SHOWN member's events in range, newest first, grouped by
   // day — circle-wide it follows the picker, so the events always belong to
-  // the track on the map above them.
+  // the track on the map above them. Circle-wide, the circle's own SYSTEM
+  // events (no member behind them) stay listed too: they belong to the
+  // circle, not to whichever member the picker shows.
   const timeline = useMemo(() => {
-    const rows = alerts.filter((a: FamilyAlert) => a.at >= from && (!shownId || a.actorId === shownId));
+    const rows = alerts.filter((a: FamilyAlert) => a.at >= from
+      && (!shownId || a.actorId === shownId || (!userId && a.actorId === 'system')));
     const groups: { day: string; items: FamilyAlert[] }[] = [];
     for (const a of rows) {
       const label = dayLabel(a.at);
@@ -193,7 +198,7 @@ export default function FamilyHistoryScreen() {
       if (g) g.items.push(a); else groups.push({ day: label, items: [a] });
     }
     return groups;
-  }, [alerts, from, shownId]);
+  }, [alerts, from, shownId, userId]);
 
   return (
     <View style={{ flex: 1, backgroundColor: G.bgMid }}>
@@ -304,7 +309,7 @@ export default function FamilyHistoryScreen() {
           {!!trackKey && (
             <Text style={{ color: colors.textDim, fontSize: 11.5, marginTop: 6, lineHeight: 16 }}>
               {roadTravelledM != null
-                ? 'Distance is matched to roads by crazzychat’s routing server, which receives this track and does not store it.'
+                ? 'Distance is matched to roads by crazzychat’s routing server, which receives this track (rounded to about 10 m) and does not store it.'
                 : 'Distance is summed from the track points. Road matching uses crazzychat’s routing server, which does not store the track.'}
             </Text>
           )}

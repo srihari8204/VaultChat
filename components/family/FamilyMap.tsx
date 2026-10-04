@@ -188,26 +188,6 @@ function setRoute(pts){
   map.fitBounds(routeLine.getBounds().pad(0.25));
   fitted=true;
 }
-// ALWAYS-ON ROAD ROUTES me → every member, each in that member's colour with a
-// "2.4 km · 6 min" label. road:false entries are the straight-line fallback
-// (routing failed/loading) and draw dashed so a fallback never reads as a road.
-var mrLines=[], mrTags=[];
-function setMemberRoutes(list){
-  mrLines.forEach(function(l){ map.removeLayer(l); }); mrLines=[];
-  mrTags.forEach(function(t){ map.removeLayer(t); }); mrTags=[];
-  if(!list||!list.length) return;
-  list.forEach(function(r){
-    if(!r.pts||r.pts.length<2) return;
-    var ll=r.pts.map(function(p){ return [p.lat,p.lng]; });
-    mrLines.push(L.polyline(ll,{color:r.color,weight:r.road?3.5:2.5,opacity:.85,
-      dashArray:r.road?null:'6,6',lineJoin:'round',lineCap:'round'}).addTo(map));
-    if(r.label){
-      var mid=ll[Math.floor(ll.length/2)];
-      mrTags.push(L.marker(mid,{interactive:false,icon:L.divIcon({className:'',
-        html:'<div class="lnk">'+r.label+'</div>',iconSize:[0,0]})}).addTo(map));
-    }
-  });
-}
 function reportZoom(){ if(RN)RN.postMessage('zoom:'+map.getZoom()); }
 map.on('zoomend', reportZoom);
 if(RN)RN.postMessage('ready');
@@ -438,34 +418,6 @@ function setRoute(pts){
   map.fitBounds(b,{padding:70,duration:500});
   fitted=true;
 }
-// ALWAYS-ON ROAD ROUTES me → every member — see the Leaflet page. One source,
-// two layers: solid for real roads, dashed for the straight-line fallback
-// (dasharray cannot be data-driven, so the split is a filter, not a property).
-var mrTags=[];
-function setMemberRoutes(list){
-  mrTags.forEach(function(m){ m.remove(); }); mrTags=[];
-  var fc={type:'FeatureCollection',features:[]};
-  (list||[]).forEach(function(r){
-    if(!r.pts||r.pts.length<2) return;
-    fc.features.push({type:'Feature',properties:{color:r.color,road:r.road?1:0},
-      geometry:{type:'LineString',coordinates:r.pts.map(function(p){ return [p.lng,p.lat]; })}});
-    if(r.label){
-      var mid=r.pts[Math.floor(r.pts.length/2)];
-      var el=document.createElement('div'); el.className='lnk'; el.textContent=r.label;
-      mrTags.push(new maplibregl.Marker({element:el}).setLngLat([mid.lng,mid.lat]).addTo(map));
-    }
-  });
-  if(map.getSource('mroutes')) map.getSource('mroutes').setData(fc);
-  else{
-    map.addSource('mroutes',{type:'geojson',data:fc});
-    map.addLayer({id:'mroutes-r',type:'line',source:'mroutes',filter:['==',['get','road'],1],
-      paint:{'line-color':['get','color'],'line-width':3.5,'line-opacity':.85},
-      layout:{'line-join':'round','line-cap':'round'}});
-    map.addLayer({id:'mroutes-s',type:'line',source:'mroutes',filter:['==',['get','road'],0],
-      paint:{'line-color':['get','color'],'line-width':2.5,'line-opacity':.75,'line-dasharray':[2,2]},
-      layout:{'line-cap':'round'}});
-  }
-}
 function reportZoom(){ if(RN)RN.postMessage('zoom:'+Math.round(map.getZoom())); }
 map.on('zoomend',reportZoom);
 function userMoved(){ lastTouch=Date.now(); if(RN)RN.postMessage('usermove'); }
@@ -564,17 +516,8 @@ map.on('error',function(e){
 </script></body></html>`;
 }
 
-/** One always-on member route: my road to that member, in their colour. */
-export interface MemberRoute {
-  id: string;                                  // the member's id — colour follows the marker's
-  pts: { lat: number; lng: number }[];
-  label?: string;                              // "2.4 km · 6 min"
-  /** False = straight-line fallback (routing failed) — drawn dashed. */
-  road: boolean;
-}
-
 export default function FamilyMap({
-  members, onSelect, onUserMove, focusId, followId, followZoom, path, destination, linkFrom, route, memberRoutes, style,
+  members, onSelect, onUserMove, focusId, followId, followZoom, path, destination, linkFrom, route, style,
   headingDeg, cameraMode, camera3D = FAMILY_MAP_3D, controlsBottom = 12,
 }: {
   members: FamilyMarker[];
@@ -611,10 +554,6 @@ export default function FamilyMap({
   linkFrom?: { lat: number; lng: number } | null;
   /** Road-route polyline for ONE member, from Valhalla. Solid, not dashed. */
   route?: { lat: number; lng: number }[] | null;
-  /** Always-on road routes from me to EVERY member, each in the member's own
-   *  colour with a distance·time label. Replaces the dashed connectors when
-   *  supplied — the screen decides which picture it wants. */
-  memberRoutes?: MemberRoute[] | null;
   style?: any;
   /** Device heading. Rotates the basemap in 'follow' (heading-up) only. */
   headingDeg?: number | null;
@@ -741,30 +680,6 @@ export default function FamilyMap({
     ref.current.injectJavaScript(`setRoute(${JSON.stringify(route ?? [])});true;`);
   }, [ready, route]);
 
-  // Always-on member routes. Coloured HERE by the same rule the markers use
-  // (index order, self keeps the accent), so a route always matches its dot.
-  // Shapes are thinned before crossing the bridge — a 15 km route is hundreds
-  // of vertices and the line loses nothing at 100.
-  const memberRoutesJs = useMemo(() => {
-    if (!memberRoutes?.length) return '[]';
-    const colorOf = new Map(members.map((m, i) => [m.id, m.self ? colors.primary : COLORS[i % COLORS.length]]));
-    const thin = (pts: { lat: number; lng: number }[]) => {
-      const step = Math.ceil(pts.length / 100);
-      return step > 1 ? pts.filter((_, i) => i % step === 0 || i === pts.length - 1) : pts;
-    };
-    return JSON.stringify(memberRoutes.map((r) => ({
-      color: colorOf.get(r.id) ?? colors.primary,
-      label: r.label ?? '',
-      road: !!r.road,
-      pts: thin(r.pts).map((p) => ({ lat: p.lat, lng: p.lng })),
-    })));
-  }, [memberRoutes, members, colors.primary]);
-
-  useEffect(() => {
-    if (!ready || !ref.current) return;
-    ref.current.injectJavaScript(`setMemberRoutes(${memberRoutesJs});true;`);
-  }, [ready, memberRoutesJs]);
-
   // Camera + heading — MapLibre only. Leaflet has no setCamera/setHeading, and
   // calling them there would throw inside the page on every update.
   useEffect(() => {
@@ -779,7 +694,7 @@ export default function FamilyMap({
   // Light in BOTH app themes, deliberately: lib/map/tileProvider maps both
   // schemes to the full-colour style because the dark one hides road and
   // landmark detail at phone brightness. A map style, not app chrome.
-  const mapScheme = 'light' as const;
+  const mapScheme = 'light' as const;   // theme-exempt: a map style, light in both app themes (above)
   // Memoized: mlHtml concatenates the embedded MapLibre bundle (~1.1MB) into a
   // fresh string on every call, and this component re-renders on every 15s
   // presence ping and every marker selection — an unmemoized allocation here

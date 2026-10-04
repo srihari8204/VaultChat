@@ -35,7 +35,11 @@ import { getRelations, setRelation, RELATION_PRESETS } from '../lib/family/relat
 import { classifyDistance, zoneColor } from '../lib/lock/zoneMachine';
 import { fmtSpeed, gpsQuality, QUALITY_LABEL, QUALITY_COLOR } from '../lib/lock/format';
 import { initialOf } from '../lib/format';
-import { colorFor, ago } from '../lib/family/memberFormat';
+import { colorFor, ago, AVATAR_INK } from '../lib/family/memberFormat';
+// A namespace import, not named: lib/locationEgress.selftest.ts pins that the
+// first mention of the trace call in this file sits after the empty-track guard.
+import * as routing from '../lib/nav/routing';
+import { traceShape } from '../lib/family/traceShape';
 import { formatMetres as dist } from '../lib/family/distance';
 
 const REFRESH_MS = 15_000;
@@ -126,15 +130,17 @@ export default function FamilyMemberScreen() {
     return () => { live = false; };
   }, []);
 
+  /** The current render's pullOnce, so `pull` can stay keyed on the ids alone
+   *  (the focus poll restarts only when the circle or member changes). */
+  const pullOnceRef = useRef<() => Promise<void>>(async () => {});
   const pull = useCallback(async () => {
     if (!circleId || !userId) { setLoading(false); return; }
-    try { await pullOnce(); if (alive.current) setPullFailed(false); }
+    try { await pullOnceRef.current(); if (alive.current) setPullFailed(false); }
     catch {
       // getPlaces/getGroup/getTrack rejected: no endless spinner, no
       // unhandled rejection every 15 s from the interval.
       if (alive.current) { setPullFailed(true); setLoading(false); }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [circleId, userId]);
 
   const pullOnce = async () => {
@@ -174,6 +180,7 @@ export default function FamilyMemberScreen() {
     setPlaces(ps);
     setLoading(false);
   };
+  pullOnceRef.current = pullOnce;
 
   // Poll while focused: presence.ts keeps writing pings into history behind us.
   useFocusEffect(useCallback(() => {
@@ -237,8 +244,8 @@ export default function FamilyMemberScreen() {
     let cancel = false;
     (async () => {
       try {
-        const { fetchTraceDistance } = require('../lib/nav/routing');
-        const r = await fetchTraceDistance(today.map((s2: TrackSample) => ({ lat: s2.lat, lng: s2.lng })));
+        // Rounded to ~11 m and de-duplicated before it leaves the phone.
+        const r = await routing.fetchTraceDistance(traceShape(today));
         if (!cancel) setRoadTravelledM(r?.distanceM ?? null);
       } catch {
         if (!cancel) setRoadTravelledM(null);
@@ -268,12 +275,14 @@ export default function FamilyMemberScreen() {
     let cancel = false;
     (async () => {
       try {
-        const { fetchMatrix } = require('../lib/nav/routing');
         // Places are the ORIGINS and the member is the single target: the
         // matrix endpoint takes many-to-one, and road distance is symmetric
-        // enough for a display figure.
-        const res = await fetchMatrix(
-          places.map((p) => p.center), { lat: last.lat, lng: last.lng }, 'auto');
+        // enough for a display figure. Both rounded to ~110 m, like the key:
+        // the figure needs no more, and the routing server need not see the
+        // member's exact fix or my places' exact centres.
+        const q = (n: number) => Math.round(n * 1000) / 1000;
+        const res = await routing.fetchMatrix(
+          places.map((p) => ({ lat: q(p.center.lat), lng: q(p.center.lng) })), { lat: q(last.lat), lng: q(last.lng) }, 'auto');
         if (cancel) return;
         const next: Record<string, number> = {};
         for (const r of res) {
@@ -393,7 +402,7 @@ export default function FamilyMemberScreen() {
         {/* identity card */}
         <View style={[st.card, { backgroundColor: G.paneStrong, borderColor: G.edge }]}>
           <View style={[st.avatar, { backgroundColor: colorFor(userId) }]}>
-            <Text style={[st.avatarTxt, scheme === 'light' && { color: '#070A18' }]}>{initialOf(name)}</Text>
+            <Text style={[st.avatarTxt, { color: AVATAR_INK[scheme] }]}>{initialOf(name)}</Text>
           </View>
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -478,7 +487,7 @@ export default function FamilyMemberScreen() {
             what I call someone is mine — the same person is "Mother" to me and
             "Wife" to someone else in this circle, both true at once. */}
         <Text style={[st.h, { color: colors.textDim }]}>Relationship</Text>
-        <View style={st.relWrap}>
+        <View style={st.relWrap} accessibilityRole="radiogroup" accessibilityLabel={`${name}'s relationship to you`}>
           {RELATION_PRESETS.map((r) => {
             const on = relation === r;
             return (
@@ -486,8 +495,8 @@ export default function FamilyMemberScreen() {
                 key={r}
                 onPress={() => chooseRelation(r)}
                 disabled={savingRel}
-                accessibilityRole="button"
-                accessibilityState={{ selected: on }}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: on, selected: on, disabled: savingRel }}
                 accessibilityLabel={`${name} is my ${r}`}
                 style={[st.relChip, {
                   borderColor: on ? colors.primary : G.chipEdge,
@@ -536,6 +545,15 @@ export default function FamilyMemberScreen() {
             <Text style={[st.statLbl, { color: colors.textDim }]}>Events</Text>
           </View>
         </View>
+        {/* Said where it happens, as family-history does: the travelled figure
+            is the one part of this screen that sends the track off the phone. */}
+        {!!trackKey && (
+          <Text style={{ color: colors.textDim, fontSize: 11.5, marginTop: 6, lineHeight: 16 }}>
+            {roadTravelledM != null
+              ? 'Travelled is matched to roads by crazzychat’s routing server, which receives today’s track (rounded to about 10 m) and does not store it.'
+              : 'Travelled is summed from the track points. Road matching uses crazzychat’s routing server, which does not store the track.'}
+          </Text>
+        )}
 
         {/* activity timeline */}
         <Text style={[st.h, { color: colors.textDim, marginTop: 22 }]}>Today&apos;s Activity</Text>
@@ -637,7 +655,7 @@ const st = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   card: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: 22, padding: 16, ...SPACE_SHADOW.raised },
   avatar: { width: 50, height: 50, borderRadius: 25, alignItems: 'center', justifyContent: 'center' },
-  avatarTxt: { color: '#fff', fontWeight: '800', fontSize: 20 },
+  avatarTxt: { fontWeight: '800', fontSize: 20 },
   // No fixed height and the text takes flex:1 beside the icon, so it simply
   // grows at font scale 1.5 and wraps on a 320dp screen.
   notice: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, padding: 12, borderWidth: 1, borderRadius: 16, marginTop: 12 },
