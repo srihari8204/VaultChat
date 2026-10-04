@@ -13,12 +13,14 @@
 // weaker option look equally strong would be the most damaging thing this
 // screen could do.
 
-import React, { useMemo, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+import React, { useState } from 'react';
+import { View, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+// AppText, not RN Text: it follows the vision-comfort scale the rest of the
+// status screen already gets.
+import { AppText as Text } from '../ui/Text';
 import { Ionicons } from '@expo/vector-icons';
 import { GRID_MIN, GRID_MAX, isAcceptableAnswer, ANSWER_MIN_LEN } from '../../lib/status/gate';
-import { AuroraDark, type Palette } from '../../constants/theme';
-import { useColors } from '../../lib/theme';
+import { AuroraDark } from '../../constants/theme';
 import { tint } from '../../lib/tintColor';
 
 export type GateDraft =
@@ -44,9 +46,9 @@ const ERROR_INK = AuroraDark.danger;
 type Ink = Pick<Props, 'accent' | 'text' | 'dim' | 'surface'>;
 
 // Hoisted out of render so React keeps one component identity across renders.
-function Opt({ kind, icon, title, sub, value, onChange, ink, S }: {
+function Opt({ kind, icon, title, sub, value, onChange, ink }: {
   kind: GateDraft['kind']; icon: React.ComponentProps<typeof Ionicons>['name']; title: string; sub: string;
-  value: GateDraft; onChange: (g: GateDraft) => void; ink: Ink; S: ReturnType<typeof makeS>;
+  value: GateDraft; onChange: (g: GateDraft) => void; ink: Ink;
 }) {
   const on = value.kind === kind;
   return (
@@ -73,13 +75,11 @@ function Opt({ kind, icon, title, sub, value, onChange, ink, S }: {
 }
 
 export default function GatePicker({ value, onChange, accent, text, dim, surface }: Props) {
-  const c = useColors();
-  const S = useMemo(() => makeS(c), [c]);
   // Hidden by default (shoulder-surfing), but the poster must be able to check
   // it: a typo here locks every viewer out and cannot be recovered.
   const [showAnswer, setShowAnswer] = useState(false);
   const ink: Ink = { accent, text, dim, surface };
-  const opt = { value, onChange, ink, S };
+  const opt = { value, onChange, ink };
 
   return (
     <View style={S.wrap} accessibilityRole="radiogroup">
@@ -180,7 +180,9 @@ export default function GatePicker({ value, onChange, accent, text, dim, surface
   );
 }
 
-const makeS = (c: Palette) => StyleSheet.create({
+// Static: every colour here comes from the props (the preview is always dark),
+// so the styles read nothing from the app palette.
+const S = StyleSheet.create({
   wrap: { gap: 8 },
   opt: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 14, borderWidth: 1.5 },
   optText: { flex: 1 },

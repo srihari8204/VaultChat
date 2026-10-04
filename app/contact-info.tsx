@@ -112,11 +112,22 @@ export default function ContactInfoScreen() {
   // The network refresh failed and there was no cached snapshot to show: the
   // empty sections below would otherwise read as "nothing was ever shared".
   const [loadFailed, setLoadFailed] = useState(false);
+  // The refresh failed but a cached snapshot is on screen: it may be stale.
+  const [staleShown, setStaleShown] = useState(false);
+  const [groupsFailed, setGroupsFailed] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
   const displayName = peer?.name || peerName || 'Contact';
 
-  useEffect(() => { if (peerUid) getCommonGroups(peerUid).then(setCommonGroups).catch(() => {}); }, [peerUid]);
+  useEffect(() => {
+    if (!peerUid) return;
+    let active = true;
+    setGroupsFailed(false);
+    getCommonGroups(peerUid)
+      .then((g) => { if (active) setCommonGroups(g); })
+      .catch(() => { if (active) setGroupsFailed(true); });
+    return () => { active = false; };
+  }, [peerUid, reloadKey]);
 
   useEffect(() => {
     let active = true;
@@ -124,6 +135,7 @@ export default function ContactInfoScreen() {
     const cacheKey = 'contact-info:' + (chatId || peerUid || '');
     let painted = false;
     setLoadFailed(false);
+    setStaleShown(false);
     (async () => {
       // Local-first: paint the last-known snapshot instantly, before the network.
       // readCache can throw (e.g. a locked DEK, see profile.tsx); outside a try
@@ -143,9 +155,11 @@ export default function ContactInfoScreen() {
 
       try {
 
-        const tasks: Promise<any>[] = [listBlocks()];
-        if (chatId) tasks.push(getChat(chatId), getMessages(chatId, { limit: 200 }));
-        const [blocks, chat, msgs] = await Promise.all(tasks);
+        const [blocks, chat, msgs] = await Promise.all([
+          listBlocks(),
+          chatId ? getChat(chatId) : null,
+          chatId ? getMessages(chatId, { limit: 200 }) : null,
+        ]);
 
         if (!active) return;
 
@@ -154,7 +168,7 @@ export default function ContactInfoScreen() {
         let nextBlocked = cached?.blocked ?? false;
         let nextMuted = cached?.muted ?? false;
         let nextPeer = cached?.peer ?? null;
-        if (peerUid) { nextBlocked = (blocks as any[]).some(b => b.userId === peerUid); setBlocked(nextBlocked); }
+        if (peerUid) { nextBlocked = blocks.some(b => b.userId === peerUid); setBlocked(nextBlocked); }
         if (chat) {
           nextMuted = !!chat.muted;
           setMuted(nextMuted);
@@ -166,7 +180,7 @@ export default function ContactInfoScreen() {
         // nulls a delivered body and the media sweep purges its bytes, so the
         // server list alone drops shared media the device can still render —
         // and writing that back to the cache erased it for good.
-        const unioned = await unionWithLocalHistory(chatId, (msgs as Message[]) ?? [], 400);
+        const unioned = await unionWithLocalHistory(chatId, msgs ?? [], 400);
         const buckets = unioned.length ? classify(unioned)
           : { media: cached?.media ?? [], files: cached?.files ?? [], links: cached?.links ?? [] };
         if (!active) return;
@@ -182,7 +196,8 @@ export default function ContactInfoScreen() {
         }
       } catch {
         // Non-fatal: header still renders from params (and cache, if painted).
-        if (active && !painted) setLoadFailed(true);
+        // A painted cache is said to be stale rather than passed off as fresh.
+        if (active) { if (painted) setStaleShown(true); else setLoadFailed(true); }
       } finally {
         if (active && !painted) setLoading(false);
       }
@@ -277,9 +292,9 @@ export default function ContactInfoScreen() {
         </View>
 
         <View style={s.actionsRow}>
-          <ActionButton icon="call-outline" label="Call" onPress={() => router.push({ pathname: '/voicecall', params: { chatId, peerUid, peerName: displayName } } as any)} />
-          <ActionButton icon="videocam-outline" label="Video" onPress={() => router.push({ pathname: '/videocall', params: { chatId, peerUid, peerName: displayName } } as any)} />
-          <ActionButton icon="search-outline" label="Search" onPress={() => router.push({ pathname: '/in-chat-search', params: { chatId } } as any)} />
+          <ActionButton icon="call-outline" label="Call" onPress={() => router.push({ pathname: '/voicecall', params: { chatId, peerUid, peerName: displayName } })} />
+          <ActionButton icon="videocam-outline" label="Video" onPress={() => router.push({ pathname: '/videocall', params: { chatId, peerUid, peerName: displayName } })} />
+          <ActionButton icon="search-outline" label="Search" onPress={() => router.push({ pathname: '/in-chat-search', params: { chatId } })} />
           <ActionButton icon={muted ? 'notifications-off-outline' : 'notifications-outline'} label={muted ? 'Unmute' : 'Mute'} active={muted} onPress={toggleMute} />
           <ActionButton icon={blocked ? 'lock-closed-outline' : 'ban-outline'} label={blocked ? 'Unblock' : 'Block'} active={blocked} onPress={toggleBlock} />
         </View>
@@ -289,10 +304,10 @@ export default function ContactInfoScreen() {
           <Text style={s.sectionTitle}>Privacy</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8 }}>
             <View style={{ flex: 1, paddingRight: 12 }}>
-              <Text style={{ color: colors.text, fontSize: 15, fontWeight: '600' }}>Share my viewing status</Text>
-              <Text style={{ color: colors.textDim, fontSize: 12, marginTop: 2 }}>Let {displayName} see when you’re viewing this chat right now</Text>
+              <Text style={s.prefTitle}>Share my viewing status</Text>
+              <Text style={s.prefSub}>Let {displayName} see when you’re viewing this chat right now</Text>
             </View>
-            <Switch accessibilityLabel="Share my viewing status" value={shareViewing} onValueChange={toggleShareViewing} trackColor={{ true: colors.primary, false: colors.border }} thumbColor="#fff" />
+            <Switch accessibilityLabel="Share my viewing status" value={shareViewing} onValueChange={toggleShareViewing} trackColor={{ true: colors.primary, false: colors.border }} thumbColor={colors.onPrimary} />
           </View>
         </View>
 
@@ -312,13 +327,20 @@ export default function ContactInfoScreen() {
             <Text style={s.loadErrTxt}>Couldn’t load shared media, files and links. Tap to retry.</Text>
           </TouchableOpacity>
         )}
+        {(staleShown || groupsFailed) && !loading && (
+          <TouchableOpacity style={[s.section, s.loadErr]} onPress={() => setReloadKey(k => k + 1)}
+            accessibilityRole="button" accessibilityLabel={`${staleShown ? 'Showing saved info; couldn’t refresh' : 'Couldn’t load groups in common'}. Tap to retry.`}>
+            <Ionicons name="cloud-offline-outline" size={18} color={colors.textDim} />
+            <Text style={s.staleTxt}>{staleShown ? 'Showing saved info — couldn’t refresh.' : 'Couldn’t load groups in common.'} Tap to retry.</Text>
+          </TouchableOpacity>
+        )}
 
         {/* Shared Media */}
         {media.length > 0 && (
           <View style={s.section}>
             <View style={s.sectionHeader}>
               <Text style={s.sectionTitle}>Shared Media</Text>
-              <TouchableOpacity onPress={() => router.push({ pathname: '/media-gallery', params: { chatId } } as any)}
+              <TouchableOpacity onPress={() => router.push({ pathname: '/media-gallery', params: { chatId } })}
                 accessibilityRole="button" accessibilityLabel="See all shared media" hitSlop={12}>
                 <Text style={s.seeAll}>See All</Text>
               </TouchableOpacity>
@@ -339,7 +361,7 @@ export default function ContactInfoScreen() {
                 and picks the in-app viewer (lib/docOpen) — one copy of that path. */}
             {files.map(f => (
               <TouchableOpacity key={f.id} style={s.fileRow} activeOpacity={0.7}
-                onPress={() => router.push({ pathname: '/media-gallery', params: { chatId, tab: 'files' } } as any)}
+                onPress={() => router.push({ pathname: '/media-gallery', params: { chatId, tab: 'files' } })}
                 accessibilityRole="button" accessibilityLabel={`${f.name}. Open in shared files`}>
                 <View style={s.fileIcon}><Ionicons name="document-text-outline" size={20} color={colors.textDim} /></View>
                 <Text style={s.fileName} numberOfLines={1}>{f.name}</Text>
@@ -379,7 +401,7 @@ export default function ContactInfoScreen() {
             <Text style={s.sectionTitle}>{commonGroups.length} group{commonGroups.length > 1 ? 's' : ''} in common</Text>
             {commonGroups.map(g => (
               <TouchableOpacity key={g.id} style={s.fileRow} activeOpacity={0.7}
-                onPress={() => router.push({ pathname: '/group-info', params: { id: g.id } } as any)}
+                onPress={() => router.push({ pathname: '/group-info', params: { id: g.id } })}
                 accessibilityRole="button" accessibilityLabel={`${g.name || 'Group'}, group info`}>
                 <Avatar uri={g.photoURL && authHeader ? attachmentUrl(g.photoURL) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={g.name || 'Group'} size={40} ring />
                 <Text style={s.fileName} numberOfLines={1}>{g.name || 'Group'}</Text>
@@ -395,7 +417,7 @@ export default function ContactInfoScreen() {
             style={s.encryptionCard}
             activeOpacity={E2EE_ENABLED && peerUid ? 0.7 : 1}
             disabled={!E2EE_ENABLED || !peerUid}
-            onPress={() => router.push({ pathname: '/verify-contact' as any, params: { peerId: peerUid, peerName: displayName } })}
+            onPress={() => router.push({ pathname: '/verify-contact', params: { peerId: peerUid, peerName: displayName } })}
             accessibilityRole="button"
             accessibilityState={{ disabled: !E2EE_ENABLED || !peerUid }}
           >
@@ -417,11 +439,11 @@ export default function ContactInfoScreen() {
           <TouchableOpacity
             style={[s.encryptionCard, s.ghostCard]}
             activeOpacity={0.7}
-            onPress={() => router.push({ pathname: '/ghost-mode' as any, params: { targetId: peerUid, targetName: displayName } })}
+            onPress={() => router.push({ pathname: '/ghost-mode', params: { targetId: peerUid, targetName: displayName } })}
             accessibilityRole="button"
             accessibilityLabel="Ghost Mode. Hide your online status, typing, read receipts, and last seen from this contact."
           >
-            <Text style={{ fontSize: 22 }} accessible={false} importantForAccessibility="no">{'👻'}</Text>
+            <Text style={s.ghostEmoji} accessible={false} importantForAccessibility="no">{'👻'}</Text>
             <View style={{ flex: 1, marginLeft: 12 }}>
               <Text style={[s.encTitle, { color: colors.purple }]}>Ghost Mode</Text>
               <Text style={s.encSubtitle}>Hide your online status, typing, read receipts, and last seen from this contact.</Text>
@@ -481,4 +503,8 @@ const makeStyles = (c: Palette, SW: number) => StyleSheet.create({
   loadErr: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   loadErrTxt: { flex: 1, color: c.danger, fontSize: 13, lineHeight: 18 },
   dangerText: { color: c.danger, fontSize: 15, fontWeight: '600' },
+  staleTxt: { flex: 1, color: c.textDim, fontSize: 13, lineHeight: 18 },
+  prefTitle: { color: c.text, fontSize: 15, fontWeight: '600' },
+  prefSub: { color: c.textDim, fontSize: 12, marginTop: 2 },
+  ghostEmoji: { fontSize: 22 },
 });

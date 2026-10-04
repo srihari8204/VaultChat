@@ -85,7 +85,7 @@ export default function QRContactScreen() {
           onPress: async () => {
             try {
               const { id } = await createDirectChat({ userId: peer.userId });
-              router.replace({ pathname: '/chat', params: { id, peerUid: peer.userId, peerName: peer.name || vaultId } } as any);
+              router.replace({ pathname: '/chat', params: { id, peerUid: peer.userId, peerName: peer.name || vaultId } });
             } catch (e: any) {
               Alert.alert('Error', e?.message ?? 'Could not start chat');
               setScanned(false);
@@ -94,7 +94,10 @@ export default function QRContactScreen() {
         },
       ]);
     } catch (e: any) {
-      Alert.alert('Not found', e?.message ?? 'No crazzychat user with that ID.');
+      // Only a 404 means "no such user"; anything else (offline, a server
+      // error) must not tell the user the code is wrong. Same split as /add.
+      if (e?.status === 404) Alert.alert('Not found', 'No crazzychat user with that ID.');
+      else Alert.alert('Couldn’t look up this code', `${e?.message ?? 'Check your connection.'} Try scanning again.`);
       setScanned(false);
     } finally {
       setProcessing(false);
@@ -113,7 +116,7 @@ export default function QRContactScreen() {
         <View style={{ width: 44 }} />
       </View>
 
-      <View style={s.tabs}>
+      <View style={s.tabs} accessibilityRole="tablist">
         <TouchableOpacity style={[s.tab, tab === 'my' && s.tabActive]} onPress={() => setTab('my')}
           accessibilityRole="tab" accessibilityState={{ selected: tab === 'my' }}>
           <Text style={[s.tabTxt, tab === 'my' && s.tabTxtActive]}>My QR</Text>
@@ -203,7 +206,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   tab: { flex: 1, paddingVertical: 10, minHeight: 44, justifyContent: 'center', alignItems: 'center', borderRadius: 10 },
   tabActive: { backgroundColor: c.primary },
   tabTxt: { color: c.textDim, fontSize: 14, fontWeight: '700' },
-  tabTxtActive: { color: '#FFFFFF' },
+  tabTxtActive: { color: c.onPrimary },
   myQR: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   qrCard: { backgroundColor: c.glassSoft, borderRadius: 24, padding: 32, alignItems: 'center', width: '100%', maxWidth: 320, borderWidth: 1, borderColor: c.glassStroke },
   qrName: { color: c.text, fontSize: 20, fontWeight: '900', marginBottom: 4 },

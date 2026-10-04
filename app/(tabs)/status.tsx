@@ -19,10 +19,13 @@
 
 import { useAuthHeader } from '../../hooks/useAuthHeader';
 import { AppText as Text } from '../../components/ui/Text';
-import { HEADER_TOP, SCREEN_BOTTOM, TAB_BAR_SPACE } from '../../constants/layout';
+import { HEADER_TOP, TAB_BAR_SPACE } from '../../constants/layout';
 import * as ImagePicker from 'expo-image-picker';
 import { compressForStatus } from '../../lib/media/compressMedia';
-import GatePicker, { type GateDraft } from '../../components/status/GatePicker';
+import { type GateDraft } from '../../components/status/GatePicker';
+import TextStatusComposer from '../../components/status/TextStatusComposer';
+import MediaStatusPreview, { type PreviewAsset } from '../../components/status/MediaStatusPreview';
+import { puzzleFrameUri } from '../../lib/status/puzzleFrame';
 import { putStoryFeed, FEED_CACHE_KEY } from '../../lib/storyFeedCache';
 import { lockKeyWithAnswer } from '../../lib/status/gateKey';
 import { wrapPayloadForViewers, wrapStoryKeyForViewers } from '../../lib/storyKeys';
@@ -30,24 +33,21 @@ import { isAcceptableAnswer } from '../../lib/status/gate';
 import { type StoryGate as StoryGateOut, addStory, addEncryptedStory, getStoryAudience, attachmentUrl, listStoriesFeed, postTextStory, uploadAttachment, type StoryFeedEntry } from '../../lib/chatService';
 
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   FlatList,
   Image,
-  Modal,
   RefreshControl,
-  ScrollView,
   StyleSheet,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { StoryRing } from '../../components/StoryRing';
-import { AuroraDark, type Palette } from '../../constants/theme';
+import { type Palette } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
 import { useVisionComfort } from '../../lib/visionComfort';
 import { initialOf } from '../../lib/format';
@@ -57,7 +57,6 @@ import { uploadEncryptedAttachment } from '../../lib/mediaAttachments';
 import { putMediaKey } from '../../lib/mediaKeyStore';
 import { AuroraBackground } from '../../components/ui';
 import { permissionDenied } from '../../lib/permissionDenied';
-import { KeyboardSafe } from '../../components/ui/KeyboardSafe';
 
 /** The gate for an UNENCRYPTED story. A question gate is impossible here — with
  *  no content key to lock there is nothing for the answer to protect, so it
@@ -68,16 +67,17 @@ function plainGate(g: GateDraft): StoryGateOut | undefined {
 
 // Text-status backgrounds are the story's own artwork (white text on top in
 // every theme), not app chrome, so they are fixed colours.
-const TEXT_BGS = ['#0B0B10', '#7E57C2', '#26A69A', '#EF5350', '#42A5F5', '#FFA726', '#5C6BC0'];
-const TEXT_BG_NAMES = ['Black', 'Purple', 'Teal', 'Red', 'Blue', 'Orange', 'Indigo'];
-const QUICK_EMOJIS = ['😀','😂','🥰','😍','😎','🤔','😅','😭','😡','👍','🙏','👏','🔥','✨','🎉','❤️','💔','💯','🙌','😴','🥳','😇','🤩','😱','😬','🤗','😉','😏','🤨','😌','💪','👀','🌟','⚡','🌈','☀️','🌙','⭐','💜','💙'];
+const TEXT_SWATCHES = [
+  { color: '#0B0B10', name: 'Black' }, { color: '#7E57C2', name: 'Purple' }, { color: '#26A69A', name: 'Teal' },
+  { color: '#EF5350', name: 'Red' }, { color: '#42A5F5', name: 'Blue' }, { color: '#FFA726', name: 'Orange' },
+  { color: '#5C6BC0', name: 'Indigo' },
+] as const;
+const TEXT_BG_DEFAULT = TEXT_SWATCHES[0].color;
 const FEED_CACHE = FEED_CACHE_KEY;   // shared with the viewer; never re-declare the literal
 // Status mutes are DEVICE-LOCAL (AsyncStorage only; there is no server field),
 // so they do not follow the account to another phone. The mute dialog says so.
 const MUTED_KEY  = 'vc_muted_status';
 const RECENT_EMOJI_KEY = 'vc_recent_emojis';
-
-type PreviewAsset = { uri: string; type: 'image' | 'video'; filename: string; mime: string; caption: string; width?: number; height?: number };
 
 function useS() {
   const { colors } = useTheme();
@@ -98,8 +98,7 @@ export default function StatusScreen() {
   // Text status (WhatsApp) compose
   const [textOpen,   setTextOpen]   = useState(false);
   const [storyText,  setStoryText]  = useState('');
-  const [storyBg,    setStoryBg]    = useState(TEXT_BGS[0]);
-  const [emojiOpen,  setEmojiOpen]  = useState(false);
+  const [storyBg,    setStoryBg]    = useState<string>(TEXT_BG_DEFAULT);
   const [recentEmojis, setRecentEmojis] = useState<string[]>([]);
   const [previewAssets, setPreviewAssets] = useState<PreviewAsset[]>([]);   // picked media awaiting caption + post
   const [previewIdx, setPreviewIdx] = useState(0);
@@ -129,14 +128,20 @@ export default function StatusScreen() {
     ]);
   }, [muted]);
 
+  // load() also runs from pull-to-refresh, the socket and after posting, any of
+  // which can settle after the tab is gone; only the focus effect had a guard.
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+
   const load = useCallback(async () => {
     try {
       const f = await listStoriesFeed();
+      putStoryFeed(f);   // offline cache AND the viewer's warm start — see lib/storyFeedCache.ts
+      if (!alive.current) return;
       setFeed(f);
       setError(null);
-      putStoryFeed(f);   // offline cache AND the viewer's warm start — see lib/storyFeedCache.ts
     } catch (e: any) {
-      setError(e?.message ?? 'Failed to load stories');
+      if (alive.current) setError(e?.message ?? 'Failed to load stories');
     }
   }, []);
 
@@ -158,7 +163,7 @@ export default function StatusScreen() {
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await load();
-    setRefreshing(false);
+    if (alive.current) setRefreshing(false);
   }, [load]);
 
   // Realtime: a contact posting a new status refreshes the feed live.
@@ -187,7 +192,7 @@ export default function StatusScreen() {
     setPosting(true);
     try {
       await postTextStory(t, storyBg);
-      setTextOpen(false); setStoryText(''); setStoryBg(TEXT_BGS[0]);
+      setTextOpen(false); setStoryText(''); setStoryBg(TEXT_BG_DEFAULT);
       await load();
     } catch (e: any) {
       Alert.alert('Could not post', e?.message ?? 'Try again');
@@ -228,6 +233,15 @@ export default function StatusScreen() {
     setPreviewIdx(0);
     setGate({ kind: 'none' });   // a previous batch's lock must never carry over
     setPreviewAssets(assets);   // opens the preview modal
+    // A video cannot be drawn by <Image>: extract a still for the preview and
+    // the filmstrip (the same 1s-then-0 extractor the puzzle gate uses). No
+    // still is fine — the preview shows a video placeholder instead.
+    for (const a of assets) {
+      if (a.type !== 'video') continue;
+      puzzleFrameUri(a.uri, 'video').then((poster) => {
+        if (poster && alive.current) setPreviewAssets(prev => prev.map(p => (p.uri === a.uri ? { ...p, poster } : p)));
+      }).catch(() => {});
+    }
   }, [posting]);
 
   // Closing the composer or the preview throws away what was typed / picked:
@@ -367,7 +381,7 @@ export default function StatusScreen() {
 
   const openViewer = useCallback((entry: StoryFeedEntry) => {
     router.push({
-      pathname: '/story-viewer' as any,
+      pathname: '/story-viewer',
       params: {
         userId:   entry.userId,
         userName: entry.name || entry.email || '',
@@ -375,31 +389,7 @@ export default function StatusScreen() {
     });
   }, [router]);
 
-  // A status row (reused for recent + muted), with long-press to (un)mute.
-  const statusRow = useCallback((item: StoryFeedEntry) => {
-    const name = item.name || item.email || item.userId.slice(0, 8);
-    const unseen = item.stories.filter(st => !st.seen).length;
-    const isMuted = muted.has(item.userId);
-    return (
-    <TouchableOpacity style={S.row} onPress={() => openViewer(item)} onLongPress={() => toggleMute(item.userId, item.name || item.email || 'this person')} delayLongPress={350} activeOpacity={0.7}
-      accessibilityRole="button"
-      // The ring says seen/unseen by colour alone; the label says it in words.
-      accessibilityLabel={`${name}, ${item.stories.length} ${item.stories.length === 1 ? 'update' : 'updates'}${unseen ? `, ${unseen} unseen` : ''}, ${formatRelative(item.latestAt)}`}
-      accessibilityHint="Opens their status. Long-press to mute or unmute"
-      accessibilityActions={[{ name: 'mute', label: isMuted ? 'Unmute' : 'Mute' }]}
-      onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'mute') toggleMute(item.userId, item.name || item.email || 'this person'); }}>
-      <StoryRing size={60} segments={item.stories.map(s => s.seen)} color={colors.primary} seenColor={colors.textDim}>
-        {item.photoURL && authHeader
-          ? <Image source={{ uri: attachmentUrl(item.photoURL), headers: { Authorization: authHeader } }} style={S.avatarImg} />
-          : <View style={S.avatarFallback}><Text style={S.avatarFallbackTxt}>{initialOf(item.name, item.email)}</Text></View>}
-      </StoryRing>
-      <View style={{ flex: 1 }}>
-        <Text style={S.rowName}>{name}</Text>
-        <Text style={S.rowSub}>{item.stories.length} {item.stories.length === 1 ? 'update' : 'updates'} · {formatRelative(item.latestAt)}</Text>
-      </View>
-    </TouchableOpacity>
-    );
-  }, [S, colors, authHeader, openViewer, toggleMute, muted]);
+  const rowProps = { authHeader, onOpen: openViewer, onToggleMute: toggleMute };
 
   if (loading) {
     return <View style={[S.screen, S.center]}><ActivityIndicator color={colors.primary} size="large" /></View>;
@@ -413,7 +403,7 @@ export default function StatusScreen() {
         <View style={{ flexDirection: 'row', gap: 6 }}>
           {/* Privacy is the only status option, so the icon goes straight there
               instead of through a one-item menu. */}
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Status privacy" onPress={() => router.push('/status-privacy' as any)} activeOpacity={0.7} style={S.headerBtn}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Status privacy" onPress={() => router.push('/status-privacy')} activeOpacity={0.7} style={S.headerBtn}>
             <Ionicons name="lock-closed-outline" size={20} color={colors.text} />
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setTextOpen(true)} disabled={posting} activeOpacity={0.7} style={S.headerBtn} accessibilityRole="button" accessibilityLabel="Write a text status" accessibilityState={{ disabled: posting }}>
@@ -426,133 +416,20 @@ export default function StatusScreen() {
       </View>
 
       {/* Text status composer (WhatsApp) */}
-      <Modal visible={textOpen} transparent={false} animationType="slide" onRequestClose={closeTextComposer}>
-        <KeyboardSafe keyboardOnly>
-        <View style={[S.textCompose, { backgroundColor: storyBg }]}>
-          <View style={S.textComposeBar}>
-            <TouchableOpacity onPress={closeTextComposer} hitSlop={10} accessibilityRole="button" accessibilityLabel="Cancel"><Ionicons name="close" size={26} color="#fff" /></TouchableOpacity>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <TouchableOpacity onPress={() => setEmojiOpen(o => !o)} hitSlop={10} accessibilityRole="button" accessibilityLabel={emojiOpen ? 'Hide emoji' : 'Show emoji'} accessibilityState={{ expanded: emojiOpen }}>
-                <Ionicons name={emojiOpen ? 'happy' : 'happy-outline'} size={24} color="#fff" />
-              </TouchableOpacity>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                {TEXT_BGS.map((b, i) => (
-                  <TouchableOpacity hitSlop={11} key={b} onPress={() => setStoryBg(b)} style={[S.bgSwatch, { backgroundColor: b }, storyBg === b && S.bgSwatchOn]}
-                    accessibilityRole="radio" accessibilityLabel={`${TEXT_BG_NAMES[i]} background`} accessibilityState={{ checked: storyBg === b }} />
-                ))}
-              </View>
-            </View>
-          </View>
-          <TextInput
-            style={S.textComposeInput}
-            value={storyText}
-            onChangeText={setStoryText}
-            placeholder="Type a status"
-            placeholderTextColor="rgba(255,255,255,0.6)"
-            multiline
-            autoFocus={!emojiOpen}
-            maxLength={700}
-            textAlign="center"
-            accessibilityLabel="Status text"
-          />
-
-          {/* Emoji picker — recently-used first (WhatsApp), then the full set. */}
-          {emojiOpen && (
-            <View style={S.emojiPanel}>
-              <ScrollView contentContainerStyle={{ paddingBottom: 8 }} keyboardShouldPersistTaps="handled">
-                {recentEmojis.length > 0 && (
-                  <>
-                    <Text style={S.emojiSection}>RECENTLY USED</Text>
-                    <View style={S.emojiGrid}>
-                      {recentEmojis.map(e => (
-                        <TouchableOpacity key={`r-${e}`} onPress={() => addEmoji(e)} style={S.emojiBtn} accessibilityRole="button" accessibilityLabel={`Insert ${e}`}>
-                          <Text style={S.emojiTxt}>{e}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                    <Text style={S.emojiSection}>ALL</Text>
-                  </>
-                )}
-                <View style={S.emojiGrid}>
-                  {QUICK_EMOJIS.map(e => (
-                    <TouchableOpacity key={e} onPress={() => addEmoji(e)} style={S.emojiBtn} accessibilityRole="button" accessibilityLabel={`Insert ${e}`}>
-                      <Text style={S.emojiTxt}>{e}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </ScrollView>
-            </View>
-          )}
-
-          <TouchableOpacity style={[S.textPostBtn, (!storyText.trim() || posting) && { opacity: 0.5 }]} onPress={onPostText} disabled={!storyText.trim() || posting} accessibilityRole="button" accessibilityLabel="Post status" accessibilityState={{ disabled: !storyText.trim() || posting, busy: posting }}>
-            {posting ? <ActivityIndicator color="#fff" /> : <Ionicons name="send" size={24} color="#fff" />}
-          </TouchableOpacity>
-        </View>
-        </KeyboardSafe>
-      </Modal>
+      <TextStatusComposer
+        visible={textOpen}
+        text={storyText} onChangeText={setStoryText}
+        bg={storyBg} onChangeBg={setStoryBg} swatches={TEXT_SWATCHES}
+        recentEmojis={recentEmojis} onEmoji={addEmoji}
+        posting={posting} onPost={onPostText} onClose={closeTextComposer}
+      />
 
       {/* Media status preview + caption editor (WhatsApp). Supports multiple. */}
-      <Modal visible={previewAssets.length > 0} transparent={false} animationType="slide" onRequestClose={closePreview}>
-        <KeyboardSafe keyboardOnly>
-        <View style={S.previewScreen}>
-          <View style={S.previewBar}>
-            <TouchableOpacity onPress={closePreview} hitSlop={10} accessibilityRole="button" accessibilityLabel="Discard" accessibilityState={{ disabled: posting }}>
-              <Ionicons name="close" size={26} color="#fff" />
-            </TouchableOpacity>
-            {previewAssets.length > 1 && <Text style={S.previewCount}>{previewIdx + 1}/{previewAssets.length}</Text>}
-            <View style={{ width: 26 }} />
-          </View>
-
-          <View style={S.previewMain}>
-            {previewAssets[previewIdx] && (previewAssets[previewIdx].type === 'image'
-              ? <Image source={{ uri: previewAssets[previewIdx].uri }} style={S.previewImg} resizeMode="contain" />
-              : <View style={[S.previewImg, { alignItems: 'center', justifyContent: 'center' }]}>
-                  <Image source={{ uri: previewAssets[previewIdx].uri }} style={S.previewImg} resizeMode="contain" />
-                  <View style={S.previewPlay}><Ionicons name="play" size={34} color="#fff" /></View>
-                </View>)}
-          </View>
-
-          {/* Filmstrip of all selected (tap to switch) */}
-          {previewAssets.length > 1 && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={S.filmstrip} contentContainerStyle={{ gap: 8, paddingHorizontal: 12 }}>
-              {previewAssets.map((a, i) => (
-                <TouchableOpacity key={a.uri} onPress={() => setPreviewIdx(i)} style={[S.thumb, i === previewIdx && S.thumbOn]}
-                  accessibilityRole="button" accessibilityLabel={`${a.type === 'video' ? 'Video' : 'Photo'} ${i + 1} of ${previewAssets.length}`} accessibilityState={{ selected: i === previewIdx }}>
-                  <Image source={{ uri: a.uri }} style={S.thumbImg} />
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          )}
-
-          <ScrollView style={S.gateArea} contentContainerStyle={{ padding: 12 }} keyboardShouldPersistTaps="handled">
-            <GatePicker
-              value={gate}
-              onChange={setGate}
-              accent={colors.primary}
-              text="#fff"
-              dim="rgba(255,255,255,0.6)"
-              surface="rgba(255,255,255,0.08)"
-            />
-          </ScrollView>
-
-          <View style={S.captionRow}>
-            <TextInput
-              style={S.captionInput}
-              value={previewAssets[previewIdx]?.caption ?? ''}
-              onChangeText={setPreviewCaption}
-              placeholder="Add a caption…"
-              placeholderTextColor="rgba(255,255,255,0.6)"
-              multiline
-              maxLength={200}
-              accessibilityLabel="Caption"
-            />
-            <TouchableOpacity style={[S.sendFab, posting && { opacity: 0.6 }]} onPress={postPreview} disabled={posting} accessibilityRole="button" accessibilityLabel="Post status" accessibilityState={{ disabled: posting, busy: posting }}>
-              {posting ? <ActivityIndicator color="#fff" /> : <Ionicons name="send" size={22} color="#fff" />}
-            </TouchableOpacity>
-          </View>
-        </View>
-        </KeyboardSafe>
-      </Modal>
+      <MediaStatusPreview
+        assets={previewAssets} index={previewIdx} onIndex={setPreviewIdx}
+        gate={gate} onGate={setGate} onCaption={setPreviewCaption}
+        posting={posting} onPost={postPreview} onClose={closePreview}
+      />
 
       {error && (
         <TouchableOpacity onPress={onRefresh} disabled={refreshing} accessibilityRole="button" accessibilityLabel={`${error}. Tap to retry`}>
@@ -588,7 +465,7 @@ export default function StatusScreen() {
                 ) : (
                   <View style={S.avatarFallback}><Ionicons name="person" size={28} color={colors.textDim} /></View>
                 )}
-                <View style={S.cameraBadge}><Ionicons name="camera" size={13} color="#fff" /></View>
+                <View style={S.cameraBadge}><Ionicons name="camera" size={13} color={colors.onPrimary} /></View>
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={S.rowName}>My status</Text>
@@ -611,17 +488,49 @@ export default function StatusScreen() {
             </Text>
           </View>
         ) : null}
-        renderItem={({ item }) => statusRow(item)}
+        renderItem={({ item }) => <StatusRow item={item} isMuted={muted.has(item.userId)} {...rowProps} />}
         ListFooterComponent={mutedOthers.length > 0 ? (
           <View>
             <Text style={S.sectionLabel} accessibilityRole="header">MUTED UPDATES</Text>
-            {mutedOthers.map(item => <View key={item.userId}>{statusRow(item)}</View>)}
+            {mutedOthers.map(item => <StatusRow key={item.userId} item={item} isMuted {...rowProps} />)}
           </View>
         ) : null}
       />
     </View>
   );
 }
+
+// A status row (reused for recent + muted), with long-press to (un)mute.
+// Hoisted and memoised: it used to be a function rebuilt on every render.
+const StatusRow = memo(function StatusRow({ item, isMuted, authHeader, onOpen, onToggleMute }: {
+  item: StoryFeedEntry; isMuted: boolean; authHeader: string | null;
+  onOpen: (e: StoryFeedEntry) => void; onToggleMute: (userId: string, name: string) => void;
+}) {
+  const { colors } = useTheme();
+  const S = useS();
+  const name = item.name || item.email || item.userId.slice(0, 8);
+  const unseen = item.stories.filter(st => !st.seen).length;
+  const muteName = item.name || item.email || 'this person';
+  return (
+    <TouchableOpacity style={S.row} onPress={() => onOpen(item)} onLongPress={() => onToggleMute(item.userId, muteName)} delayLongPress={350} activeOpacity={0.7}
+      accessibilityRole="button"
+      // The ring says seen/unseen by colour alone; the label says it in words.
+      accessibilityLabel={`${name}, ${item.stories.length} ${item.stories.length === 1 ? 'update' : 'updates'}${unseen ? `, ${unseen} unseen` : ''}, ${formatRelative(item.latestAt)}`}
+      accessibilityHint="Opens their status. Long-press to mute or unmute"
+      accessibilityActions={[{ name: 'mute', label: isMuted ? 'Unmute' : 'Mute' }]}
+      onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'mute') onToggleMute(item.userId, muteName); }}>
+      <StoryRing size={60} segments={item.stories.map(s => s.seen)} color={colors.primary} seenColor={colors.textDim}>
+        {item.photoURL && authHeader
+          ? <Image source={{ uri: attachmentUrl(item.photoURL), headers: { Authorization: authHeader } }} style={S.avatarImg} />
+          : <View style={S.avatarFallback}><Text style={S.avatarFallbackTxt}>{initialOf(item.name, item.email)}</Text></View>}
+      </StoryRing>
+      <View style={{ flex: 1 }}>
+        <Text style={S.rowName}>{name}</Text>
+        <Text style={S.rowSub}>{item.stories.length} {item.stories.length === 1 ? 'update' : 'updates'} · {formatRelative(item.latestAt)}</Text>
+      </View>
+    </TouchableOpacity>
+  );
+});
 
 function formatRelative(iso: string): string {
   try {
@@ -641,34 +550,6 @@ const makeStyles = (c: Palette, m: ReturnType<typeof useVisionComfort>['metrics'
   header:       { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', paddingHorizontal: 20, paddingTop: HEADER_TOP, paddingBottom: 16, justifyContent: 'space-between' },
   title:        { flexShrink: 1, marginRight: 8, color: c.text, fontSize: 28, fontWeight: '800' },
   headerBtn:    { width: 44 * m.controlScale, height: 44 * m.controlScale, borderRadius: 22 * m.controlScale, backgroundColor: c.glassSoft, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.glassStroke },
-  // Text status composer
-  textCompose:      { flex: 1, paddingTop: HEADER_TOP },
-  textComposeBar:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 8 },
-  bgSwatch:         { width: 22, height: 22, borderRadius: 11, borderWidth: 1, borderColor: 'rgba(255,255,255,0.4)' },
-  bgSwatchOn:       { borderWidth: 3, borderColor: AuroraDark.text },
-  textComposeInput: { flex: 1, color: '#fff', fontSize: 26 * m.textScale, fontWeight: '700', paddingHorizontal: 24, textAlignVertical: 'center' },
-  textPostBtn:      { position: 'absolute', right: 20, bottom: SCREEN_BOTTOM + 20, width: 56 * m.controlScale, height: 56 * m.controlScale, borderRadius: 28 * m.controlScale, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
-  emojiPanel:       { maxHeight: 200, backgroundColor: 'rgba(0,0,0,0.35)', paddingVertical: 8 },
-  emojiGrid:        { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', paddingHorizontal: 8 },
-  emojiSection:     { color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: '700', letterSpacing: 1, paddingHorizontal: 14, paddingTop: 8, paddingBottom: 2 },
-
-  // Media editing intentionally stays dark: preview controls and gate labels are white.
-  previewScreen:    { flex: 1, backgroundColor: AuroraDark.bg, paddingTop: HEADER_TOP },
-  previewBar:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 8 },
-  previewCount:     { color: '#fff', fontSize: 14, fontWeight: '700' },
-  previewMain:      { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  previewImg:       { width: '100%', height: '100%' },
-  previewPlay:      { position: 'absolute', width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' },
-  filmstrip:        { maxHeight: 64, paddingVertical: 8 },
-  thumb:            { width: 48, height: 48, borderRadius: 8, overflow: 'hidden', borderWidth: 2, borderColor: 'transparent' },
-  thumbOn:          { borderColor: AuroraDark.text },
-  thumbImg:         { width: '100%', height: '100%' },
-  gateArea:         { maxHeight: 260, backgroundColor: 'rgba(0,0,0,0.35)' },
-  captionRow:       { flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingHorizontal: 12, paddingBottom: SCREEN_BOTTOM + 16, paddingTop: 8 },
-  captionInput:     { flex: 1, color: '#fff', fontSize: 16 * m.textScale, maxHeight: 120 * m.textScale, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 24, backgroundColor: 'rgba(255,255,255,0.12)' },
-  sendFab:          { width: 50 * m.controlScale, height: 50 * m.controlScale, borderRadius: 25 * m.controlScale, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
-  emojiBtn:         { width: 46, height: 46, alignItems: 'center', justifyContent: 'center' },
-  emojiTxt:         { fontSize: 28 },
 
   errorTxt:     { color: c.danger, paddingHorizontal: 16, paddingVertical: 8, fontSize: 12 },
 

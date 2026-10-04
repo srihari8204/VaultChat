@@ -28,8 +28,8 @@ import { logoutUser, sendPhoneOTP, verifyPhoneOTP } from '../(constants)/authSer
 import { api } from '../../lib/api';
 import { resetTo } from '../../lib/authNav';
 import { attachmentUrl, uploadAttachment } from '../../lib/chatService';
-import { unregisterPushToken } from '../../lib/push';
-import { disconnect as disconnectSocket } from '../../lib/socket';
+import { registerPushToken, unregisterPushToken } from '../../lib/push';
+import { disconnect as disconnectSocket, getSocket } from '../../lib/socket';
 import { readCache, writeCache } from '../../lib/localCache';
 import { AppText as Text } from '../../components/ui/Text';
 import { AuroraBackground, KeyboardSafe } from '../../components/ui';
@@ -68,6 +68,9 @@ export default function ProfileScreen() {
   const router = useRouter();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  // The profile could not be fetched and nothing was cached: shown inline with
+  // a retry, instead of an alert over an empty profile.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving,  setSaving]  = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
   const authHeader = useAuthHeader();
@@ -100,6 +103,7 @@ export default function ProfileScreen() {
       // parsed by the unchanged path in api(), with no second request. The
       // PUT calls below still send and receive JSON — they carry bodies.
       const p = await api<UserProfile>('/user/profile', { proto: profileFromProtobuf });
+      setLoadError(null);
       setProfile(p);
       setName(p.name ?? '');
       setStatus(p.status ?? '');
@@ -107,7 +111,7 @@ export default function ProfileScreen() {
       writeCache('my-profile', p);
     } catch (e: any) {
       // Keep cached data for offline read; only surface if nothing painted.
-      if (!cached) Alert.alert('Profile load failed', e?.message ?? 'Try again');
+      if (!cached) setLoadError(e?.message ?? 'Check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -251,12 +255,20 @@ export default function ProfileScreen() {
       [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Sign out', style: 'destructive', onPress: async () => {
+          // These two cannot wait for logoutUser() to succeed: unregistering
+          // the push token is an authenticated request, and logoutUser() drops
+          // the token; a live socket would keep writing incoming messages into
+          // the local store logoutUser() is purging. So they go first, and a
+          // failed sign-out puts them back (best effort; open screens re-attach
+          // their own socket listeners when they next mount).
           try { await unregisterPushToken(); } catch {}
           try { disconnectSocket(); } catch {}
           try {
             await logoutUser();
           } catch (e: any) {
-            Alert.alert('Could not sign out', e?.message ?? 'Something went wrong. Try again.');
+            registerPushToken().catch(() => {});
+            getSocket().catch(() => {});
+            Alert.alert('Could not sign out', `${e?.message ?? 'Something went wrong.'} You are still signed in. Try again.`);
             return;
           }
           // resetTo, not replace: anything pushed above the tabs stayed in the
@@ -277,13 +289,19 @@ export default function ProfileScreen() {
     );
   }
 
-  // Leaving a row without saving puts back what the account actually holds.
-  const cancelEdit = () => {
+  // Leaving a row without saving puts back what the account actually holds —
+  // by Cancel, or by starting to edit another row (which used to leave the
+  // first row's unsaved text showing as if it were saved).
+  const revertEditing = () => {
     if (editing === 'name') setName(profile?.name ?? '');
     else if (editing === 'status') setStatus(profile?.status ?? '');
     else if (editing === 'phone') { setPhone(profile?.phone ?? ''); setVerifyStep('idle'); setPhoneCode(''); }
-    setEditing(null);
   };
+  const cancelEdit = () => { revertEditing(); setEditing(null); };
+  const startEdit = (field: 'name' | 'status' | 'phone') => { if (editing !== field) revertEditing(); setEditing(field); };
+  // The number the account already holds is verified (sign-in is by phone OTP);
+  // only an edited number needs the SMS step.
+  const isAccountPhone = !!profile?.phone && phone.trim() === String(profile.phone).trim();
 
   // Phone is deliberately not in this chain: its first character is '+' or a
   // digit, which is a worse avatar than the '?' placeholder.
@@ -307,7 +325,7 @@ export default function ProfileScreen() {
             Hence the fallback: go back if there is history, otherwise go to
             Chats, which is where the bar would have taken you. */}
         <TouchableOpacity
-          onPress={() => { if (router.canGoBack()) router.back(); else router.replace('/(tabs)/chats' as any); }}
+          onPress={() => { if (router.canGoBack()) router.back(); else router.replace('/(tabs)/chats'); }}
           hitSlop={11}
           accessibilityRole="button"
           accessibilityLabel="Back"
@@ -316,11 +334,24 @@ export default function ProfileScreen() {
           <Ionicons name="arrow-back" size={22} color={colors.text} />
         </TouchableOpacity>
         <Text style={[S.title, { flex: 1 }]} accessibilityRole="header">Profile</Text>
-        <TouchableOpacity onPress={() => router.push('/settings' as any)} hitSlop={11} accessibilityRole="button" accessibilityLabel="Settings">
+        <TouchableOpacity onPress={() => router.push('/settings')} hitSlop={11} accessibilityRole="button" accessibilityLabel="Settings">
           <Ionicons name="settings-outline" size={22} color={colors.text} />
         </TouchableOpacity>
       </View>
 
+      {/* Nothing cached and the fetch failed: say so, with a retry, instead of
+          drawing an empty profile that looks like the account has no data.
+          Settings and Sign out below stay reachable. */}
+      {loadError && !profile ? (
+        <View style={S.loadErr} accessibilityLiveRegion="polite">
+          <Ionicons name="cloud-offline-outline" size={28} color={colors.danger} />
+          <Text style={S.loadErrTitle}>Couldn’t load your profile</Text>
+          <Text style={S.loadErrTxt}>{loadError}</Text>
+          <TouchableOpacity style={S.loadErrBtn} onPress={() => { setLoading(true); load(); }} accessibilityRole="button" accessibilityLabel="Try loading your profile again">
+            <Text style={S.btnTxt}>Try again</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (<>
       {/* Avatar with camera badge */}
       <View style={S.avatarWrap}>
         <TouchableOpacity onPress={onChangePhoto} activeOpacity={0.85} disabled={photoBusy}
@@ -331,9 +362,9 @@ export default function ProfileScreen() {
             ) : (
               <Text style={S.avatarTxt}>{avatarLetter}</Text>
             )}
-            {photoBusy && <View style={S.avatarBusy}><ActivityIndicator color="#fff" /></View>}
+            {photoBusy && <View style={S.avatarBusy}><ActivityIndicator color={colors.onPrimary} /></View>}
           </View>
-          <View style={S.cameraBadge}><Ionicons name="camera" size={18} color="#fff" /></View>
+          <View style={S.cameraBadge}><Ionicons name="camera" size={18} color={colors.onPrimary} /></View>
         </TouchableOpacity>
         <Text style={S.nameBig}>{name || 'Your name'}</Text>
         {/* Phone is the account; email is optional. Show whichever exists
@@ -355,13 +386,13 @@ export default function ProfileScreen() {
 
       {/* VaultID — your @handle others use to add you (Trusted Contacts, QR) */}
       {!!profile?.vaultId && (
-        <View style={[S.card, { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 14, gap: 12 }]}>
+        <View style={[S.card, S.vaultCard]}>
           <Ionicons name="at-circle-outline" size={22} color={colors.primary} />
           <View style={{ flex: 1 }}>
-            <Text style={{ color: colors.textDim, fontSize: 12 }}>Your VaultID</Text>
-            <Text style={{ color: colors.text, fontSize: 15, fontWeight: '700' }}>@{profile.vaultId}</Text>
+            <Text style={S.vaultLabel}>Your VaultID</Text>
+            <Text style={S.vaultId}>@{profile.vaultId}</Text>
           </View>
-          <TouchableOpacity hitSlop={10} style={{ padding: 6 }}
+          <TouchableOpacity hitSlop={10} style={S.vaultBtn}
             onPress={async () => {
               await Clipboard.setStringAsync('@' + (profile?.vaultId ?? ''));
               // A copy needs no acknowledgement — the OS toast is the native one
@@ -372,7 +403,7 @@ export default function ProfileScreen() {
             }} accessibilityRole="button" accessibilityLabel="Copy your VaultID">
             <Ionicons name="copy-outline" size={20} color={colors.primary} />
           </TouchableOpacity>
-          <TouchableOpacity hitSlop={10} style={{ padding: 6 }} onPress={() => router.push('/qr-contact' as any)} accessibilityRole="button" accessibilityLabel="Show your QR code">
+          <TouchableOpacity hitSlop={10} style={S.vaultBtn} onPress={() => router.push('/qr-contact')} accessibilityRole="button" accessibilityLabel="Show your QR code">
             <Ionicons name="qr-code-outline" size={20} color={colors.primary} />
           </TouchableOpacity>
         </View>
@@ -382,19 +413,19 @@ export default function ProfileScreen() {
       <View style={S.card}>
         <EditRow
           icon="person-outline" label="Name" value={name} placeholder="Your name"
-          editing={editing === 'name'} onEdit={() => setEditing('name')} onCancel={cancelEdit}
+          editing={editing === 'name'} onEdit={() => startEdit('name')} onCancel={cancelEdit}
           onChangeText={setName} onSave={saveField} saving={saving} maxLength={100}
         />
         <View style={S.rowSep} />
         <EditRow
           icon="information-circle-outline" label="About" value={status} placeholder="Hey, I'm on crazzychat"
-          editing={editing === 'status'} onEdit={() => setEditing('status')} onCancel={cancelEdit}
+          editing={editing === 'status'} onEdit={() => startEdit('status')} onCancel={cancelEdit}
           onChangeText={setStatus} onSave={saveField} saving={saving} maxLength={200} multiline
         />
         <View style={S.rowSep} />
         <EditRow
           icon="call-outline" label="Phone" value={phone} placeholder="Add phone number"
-          editing={editing === 'phone'} onEdit={() => setEditing('phone')} onCancel={cancelEdit}
+          editing={editing === 'phone'} onEdit={() => startEdit('phone')} onCancel={cancelEdit}
           onChangeText={(v) => {
             setPhone(v);
             // A code was sent to the OLD number: editing it must not let that
@@ -403,7 +434,7 @@ export default function ProfileScreen() {
           }}
           onSave={saveField} saving={saving} maxLength={20} keyboardType="phone-pad"
           // Only the number the account actually has is verified — not an edit.
-          verified={!!profile?.phone && phone.trim() === String(profile.phone).trim()}
+          verified={isAccountPhone}
         />
       </View>
       <Text style={S.cardHint}>Your phone number is your account — it is how people find you and start a direct chat.</Text>
@@ -422,7 +453,7 @@ export default function ProfileScreen() {
       )}
 
       {/* Phone verification (kept) */}
-      {!!phone.trim() && verifyStep !== 'done' && (verifyStep === 'idle' ? (
+      {!!phone.trim() && verifyStep !== 'done' && !(verifyStep === 'idle' && isAccountPhone) && (verifyStep === 'idle' ? (
         <TouchableOpacity onPress={onSendPhoneOtp} disabled={verifying || !phone.trim()} style={[S.verifyRow, (verifying || !phone.trim()) && { opacity: 0.5 }]} activeOpacity={0.7}
           accessibilityRole="button" accessibilityState={{ disabled: verifying || !phone.trim(), busy: verifying }}>
           <Ionicons name="shield-checkmark-outline" size={18} color={colors.primary} />
@@ -441,7 +472,7 @@ export default function ProfileScreen() {
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <TouchableOpacity style={[S.btn, { flex: 1 }, verifying && S.btnOff]} onPress={onVerifyPhoneOtp} disabled={verifying} activeOpacity={0.85}
               accessibilityRole="button" accessibilityLabel="Verify" accessibilityState={{ disabled: verifying, busy: verifying }}>
-              {verifying ? <ActivityIndicator color="#fff" /> : <Text style={S.btnTxt}>Verify</Text>}
+              {verifying ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={S.btnTxt}>Verify</Text>}
             </TouchableOpacity>
             <TouchableOpacity onPress={() => { setVerifyStep('idle'); setPhoneCode(''); }} style={[S.btn, S.btnGhost, { flex: 0.5 }]} disabled={verifying} activeOpacity={0.85}
               accessibilityRole="button" accessibilityState={{ disabled: verifying }}>
@@ -468,9 +499,10 @@ export default function ProfileScreen() {
         <InfoRow k="User ID" v={profile?.id ?? '—'} small />
         <InfoRow k="Created" v={profile?.createdAt ? new Date(profile.createdAt).toLocaleString() : '—'} small />
       </View>
+      </>)}
 
       {/* Actions */}
-      <TouchableOpacity style={S.actionRow} onPress={() => router.push('/settings' as any)} activeOpacity={0.85} accessibilityRole="button">
+      <TouchableOpacity style={S.actionRow} onPress={() => router.push('/settings')} activeOpacity={0.85} accessibilityRole="button">
         <Ionicons name="settings-outline" size={20} color={colors.text} />
         <Text style={S.actionTxt}>Privacy & settings</Text>
         <Ionicons name="chevron-forward" size={18} color={colors.textDim} style={{ marginLeft: 'auto' }} />
@@ -482,17 +514,17 @@ export default function ProfileScreen() {
 
       {/* Version footer — long-press opens the hidden perf/debug screen. */}
       <TouchableOpacity
-        onLongPress={() => router.push('/perf-debug' as any)}
+        onLongPress={() => router.push('/perf-debug')}
         delayLongPress={800}
         activeOpacity={1}
         accessibilityRole="text"
         accessibilityActions={[{ name: 'longpress', label: 'Open diagnostics' }]}
-        onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'longpress') router.push('/perf-debug' as any); }}
-        style={{ alignItems: 'center', paddingVertical: 24 }}
+        onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'longpress') router.push('/perf-debug'); }}
+        style={S.versionRow}
       >
         {/* Read, never hardcoded: this line said 1.1.1 while the build was
             1.2.15, and it is the number a user quotes in a bug report. */}
-        <Text style={{ color: colors.textDim, fontSize: 12 }}>
+        <Text style={S.versionTxt}>
           {`crazzychat${currentVersionName() ? ` ${currentVersionName()}` : ''}`}
         </Text>
       </TouchableOpacity>
@@ -567,7 +599,7 @@ const makeStyles = (c: Palette, m: ReturnType<typeof useVisionComfort>['metrics'
   avatarWrap:   { alignItems: 'center', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 20 },
   avatar:       { width: 120, height: 120, borderRadius: 60, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   avatarImg:    { width: '100%', height: '100%' },
-  avatarTxt:    { color: '#fff', fontSize: 46, fontWeight: '800' },
+  avatarTxt:    { color: c.onPrimary, fontSize: 46, fontWeight: '800' },
   avatarBusy:   { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.4)' },
   cameraBadge:  { position: 'absolute', right: 2, bottom: 2, width: 36, height: 36, borderRadius: 18, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: c.bg },
   nameBig:      { maxWidth: '100%', color: c.text, fontSize: 22, fontWeight: '800', marginTop: 14, textAlign: 'center' },
@@ -600,8 +632,20 @@ const makeStyles = (c: Palette, m: ReturnType<typeof useVisionComfort>['metrics'
   btn:          { backgroundColor: c.primary, paddingVertical: 14, borderRadius: 16, alignItems: 'center' },
   btnGhost:     { backgroundColor: c.glassSoft },
   btnOff:       { opacity: 0.5 },
-  btnTxt:       { color: '#fff', fontWeight: '800', fontSize: 14 },
+  btnTxt:       { color: c.onPrimary, fontWeight: '800', fontSize: 14 },
 
   actionRow:    { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 16, marginTop: 12, paddingHorizontal: 16, paddingVertical: 15 * m.spacingScale, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, backgroundColor: c.glassSoft },
   actionTxt:    { flex: 1, color: c.text, fontWeight: '700', fontSize: 15 },
+
+  vaultCard:    { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 14, gap: 12 },
+  vaultLabel:   { color: c.textDim, fontSize: 12 },
+  vaultId:      { color: c.text, fontSize: 15, fontWeight: '700' },
+  // 32dp glyph box + hitSlop 10 = a 52dp target.
+  vaultBtn:     { padding: 6 },
+  versionRow:   { alignItems: 'center', paddingVertical: 24 },
+  versionTxt:   { color: c.textDim, fontSize: 12 },
+  loadErr:      { marginHorizontal: 16, marginTop: 12, padding: 16, gap: 10, alignItems: 'center', borderRadius: 16, borderWidth: 1, borderColor: c.danger, backgroundColor: c.glassSoft },
+  loadErrTitle: { color: c.text, fontSize: 15, fontWeight: '700', textAlign: 'center' },
+  loadErrTxt:   { color: c.textDim, fontSize: 13, lineHeight: 18, textAlign: 'center' },
+  loadErrBtn:   { minHeight: 44, paddingHorizontal: 24, justifyContent: 'center', borderRadius: 14, backgroundColor: c.primary },
 });

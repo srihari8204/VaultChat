@@ -1,18 +1,21 @@
 // app/verify-contact.tsx — Verify safety number (#101).
 //
 // Shows the 60-digit safety number derived from both parties' public identity
-// keys. If it matches what the contact sees on their device (read aloud or
-// compared, or copied into a trusted channel), there is no man-in-the-middle. The "verified" decision is the
-// user's own and is persisted (synced across their devices).
+// keys. If it matches what the contact sees on their device (scanned as a QR
+// code side by side, read aloud, or copied over a different channel), there is
+// no man-in-the-middle. The "verified" decision is the user's own and is
+// persisted (synced across their devices).
 
 import { HEADER_TOP } from '../constants/layout';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, ToastAndroid, TouchableOpacity, View,
+  ActivityIndicator, Alert, Modal, Platform, ScrollView, StyleSheet, ToastAndroid, TouchableOpacity, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { type Palette } from '../constants/theme';
+import QRCode from 'react-native-qrcode-svg';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import { AuroraDark, type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { getCachedUser } from '../lib/api';
 import { computeSafetyNumber, formatSafetyNumber } from '../services/security/safetyNumber';
@@ -20,6 +23,8 @@ import { fetchIdentityKey, getVerifiedContacts, setContactVerified } from '../li
 import { AuroraBackground } from '../components/ui';
 import { AppText as Text } from '../components/ui/Text';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
+import { compareSafetyQr, safetyQrPayload } from '../lib/safetyQr';
+import { permissionDenied } from '../lib/permissionDenied';
 
 type State =
   | { kind: 'loading' }
@@ -42,27 +47,37 @@ export default function VerifyContactScreen() {
   const [state, setState] = useState<State>({ kind: 'loading' });
   const [verified, setVerified] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showQr, setShowQr] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
+  const [camPerm, requestCamPerm] = useCameraPermissions();
+  // One result per scanner opening: the camera reports the same code many times a second.
+  const scanned = useRef(false);
+  // The key fetches can settle after Back.
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
 
   const load = useCallback(async () => {
     setState({ kind: 'loading' });
+    const set = (next: State) => { if (alive.current) setState(next); };
     try {
       const me = await getCachedUser();
       const myId = me?.id;
-      if (!myId || !peerId) { setState({ kind: 'unavailable', reason: 'Missing account or contact.', retryable: false }); return; }
+      if (!myId || !peerId) { set({ kind: 'unavailable', reason: 'Missing account or contact.', retryable: false }); return; }
 
       const [myKey, peerKey, verifiedList] = await Promise.all([
         fetchIdentityKey(myId),
         fetchIdentityKey(peerId),
         getVerifiedContacts().catch(() => [] as string[]),
       ]);
+      if (!alive.current) return;
 
-      if (!myKey) { setState({ kind: 'unavailable', reason: 'Your encryption keys aren’t published yet. Open a chat once to set up E2EE, then try again.', retryable: true }); return; }
-      if (!peerKey) { setState({ kind: 'unavailable', reason: `${peerName} hasn’t set up end-to-end encryption yet, so there’s no safety number to compare.`, retryable: true }); return; }
+      if (!myKey) { set({ kind: 'unavailable', reason: 'Your encryption keys aren’t published yet. Open a chat once to set up E2EE, then try again.', retryable: true }); return; }
+      if (!peerKey) { set({ kind: 'unavailable', reason: `${peerName} hasn’t set up end-to-end encryption yet, so there’s no safety number to compare.`, retryable: true }); return; }
 
       setVerified(verifiedList.includes(peerId));
-      setState({ kind: 'ready', number: computeSafetyNumber(myId, myKey, peerId, peerKey) });
+      set({ kind: 'ready', number: computeSafetyNumber(myId, myKey, peerId, peerKey) });
     } catch (e: any) {
-      setState({ kind: 'unavailable', reason: e?.message ?? 'Could not load the safety number.', retryable: true });
+      set({ kind: 'unavailable', reason: e?.message ?? 'Could not load the safety number.', retryable: true });
     }
   }, [peerId, peerName]);
 
@@ -93,6 +108,35 @@ export default function VerifyContactScreen() {
       Alert.alert('Could not copy', 'Try again.');
     }
   }, []);
+
+  // Scan the contact's code: both devices show the same number, so their QR
+  // must equal ours. A match offers to mark verified; it never does so itself.
+  const openScanner = useCallback(async () => {
+    const p = camPerm?.granted ? camPerm : await requestCamPerm();
+    if (!p.granted) {
+      permissionDenied('Camera needed', `Allow camera access to scan ${peerName}’s code.`, p.canAskAgain);
+      return;
+    }
+    scanned.current = false;
+    setScanOpen(true);
+  }, [camPerm, requestCamPerm, peerName]);
+
+  const onScanned = useCallback(({ data }: { data: string }) => {
+    if (scanned.current || state.kind !== 'ready') return;
+    scanned.current = true;
+    setScanOpen(false);
+    const result = compareSafetyQr(data, state.number);
+    if (result === 'match') {
+      Alert.alert('Numbers match', `${peerName}’s safety number is the same as yours.`, verified
+        ? [{ text: 'OK' }]
+        : [{ text: 'Not now', style: 'cancel' }, { text: 'Mark as verified', onPress: () => { toggleVerified(); } }]);
+    } else if (result === 'mismatch') {
+      Alert.alert('Numbers don’t match',
+        `This is not the safety number your device has for ${peerName}. Their keys may have changed, or this is someone else’s code. Don’t mark this contact as verified.`);
+    } else {
+      Alert.alert('Not a safety-number code', `Ask ${peerName} to open Verify for your chat and show the QR code there.`);
+    }
+  }, [state, peerName, verified, toggleVerified]);
 
   return (
     <View style={S.container}>
@@ -128,15 +172,32 @@ export default function VerifyContactScreen() {
               <Text style={S.numberLabel}>Safety number</Text>
               {/* Read in five-digit groups, not as one 60-digit number. */}
               <Text style={S.number} accessibilityLabel={`Safety number: ${formatSafetyNumber(state.number).split(/\s+/).join(', ')}`}>{formatSafetyNumber(state.number)}</Text>
-              <TouchableOpacity onPress={() => copyNumber(state.number)} style={S.copyBtn} accessibilityRole="button" accessibilityLabel="Copy safety number">
-                <Ionicons name="copy-outline" size={16} color={colors.primary} />
-                <Text style={S.copyTxt}>Copy</Text>
-              </TouchableOpacity>
+              {showQr && (
+                <View style={S.qrBox} accessible accessibilityRole="image" accessibilityLabel="Your safety number as a QR code">
+                  <QRCode value={safetyQrPayload(state.number)} size={200} backgroundColor="#FFFFFF" color="#0A0A0F" />
+                </View>
+              )}
+              <View style={S.cardBtns}>
+                <TouchableOpacity onPress={() => copyNumber(state.number)} style={S.copyBtn} accessibilityRole="button" accessibilityLabel="Copy safety number">
+                  <Ionicons name="copy-outline" size={16} color={colors.primary} />
+                  <Text style={S.copyTxt}>Copy</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setShowQr(v => !v)} style={S.copyBtn} accessibilityRole="button"
+                  accessibilityLabel={showQr ? 'Hide QR code' : 'Show QR code'} accessibilityState={{ expanded: showQr }}>
+                  <Ionicons name="qr-code-outline" size={16} color={colors.primary} />
+                  <Text style={S.copyTxt}>{showQr ? 'Hide QR' : 'Show QR'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={openScanner} style={S.copyBtn} accessibilityRole="button" accessibilityLabel={`Scan ${peerName}’s code`}>
+                  <Ionicons name="scan-outline" size={16} color={colors.primary} />
+                  <Text style={S.copyTxt}>Scan</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             <Text style={S.explain}>
-              Compare this 60-digit number with {peerName} in person or over a trusted channel
-              (read it aloud, screen-share, or copy it into a chat you already trust). If it matches on both devices, your conversation is
+              Compare this 60-digit number with {peerName}: in person, show your QR code and scan
+              theirs; otherwise read it aloud, or copy it to them over a different app or channel
+              (not this chat — a pasted number here proves nothing). If it matches on both devices, your conversation is
               not being intercepted. If the numbers ever differ, the keys changed — do not trust
               the chat until you re-verify.
             </Text>
@@ -151,15 +212,15 @@ export default function VerifyContactScreen() {
               accessibilityState={{ checked: verified, busy: saving, disabled: saving }}
             >
               {saving ? (
-                <ActivityIndicator size="small" color={verified ? '#fff' : colors.primary} />
+                <ActivityIndicator size="small" color={verified ? colors.onPrimary : colors.primary} />
               ) : (
                 <>
                   <Ionicons
                     name={verified ? 'shield-checkmark' : 'shield-outline'}
                     size={18}
-                    color={verified ? '#fff' : colors.primary}
+                    color={verified ? colors.onPrimary : colors.primary}
                   />
-                  <Text style={[S.verifyBtnText, { color: verified ? '#fff' : colors.primary }]}>
+                  <Text style={[S.verifyBtnText, { color: verified ? colors.onPrimary : colors.primary }]}>
                     {verified ? 'Verified — tap to clear' : 'Mark as verified'}
                   </Text>
                 </>
@@ -168,6 +229,19 @@ export default function VerifyContactScreen() {
           </>
         )}
       </ScrollView>
+
+      {/* Scanner: a camera viewfinder, always dark. */}
+      <Modal visible={scanOpen} animationType="slide" onRequestClose={() => setScanOpen(false)}>
+        <View style={S.scanWrap}>
+          <CameraView style={StyleSheet.absoluteFill} facing="back" barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+            onBarcodeScanned={scanOpen ? onScanned : undefined} />
+          <View style={S.scanFrame} pointerEvents="none" />
+          <Text style={S.scanHint}>Point the camera at the QR code on {peerName}’s Verify screen</Text>
+          <TouchableOpacity onPress={() => setScanOpen(false)} style={S.scanClose} accessibilityRole="button" accessibilityLabel="Close scanner">
+            <Ionicons name="close" size={28} color={AuroraDark.text} />
+          </TouchableOpacity>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -178,6 +252,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   title: { color: c.text, fontSize: 17, fontWeight: '800' },
   backBtn: { width: 44, height: 44, justifyContent: 'center' },
   copyBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44, paddingHorizontal: 14 },
+  cardBtns: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center' },
+  // The code itself is dark-on-white in both themes (scanners need that); this
+  // is only the frame around it.
+  qrBox: { padding: 12, borderRadius: 12, backgroundColor: c.card },
+  scanWrap: { flex: 1, backgroundColor: AuroraDark.bg, alignItems: 'center', justifyContent: 'center' },
+  scanFrame: { width: 250, height: 250, borderWidth: 2, borderColor: c.primary, borderRadius: 20 },
+  scanHint: { color: AuroraDark.text, fontSize: 14, fontWeight: '600', marginTop: 20, paddingHorizontal: 32, textAlign: 'center' },
+  scanClose: { position: 'absolute', top: HEADER_TOP, right: 16, width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   copyTxt: { color: c.primary, fontSize: 14, fontWeight: '700' },
   center: { paddingVertical: 60, alignItems: 'center' },
 

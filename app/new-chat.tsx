@@ -27,11 +27,12 @@ type Contact = { chatId: string; userId: string; name: string; photoURL: string 
 function ActionRow({ icon, title, onPress, expanded }: {
   icon: React.ComponentProps<typeof Ionicons>['name']; title: string; onPress: () => void; expanded?: boolean;
 }) {
+  const { colors } = useTheme();
   const S = useS();
   return (
     <TouchableOpacity style={S.action} onPress={onPress} activeOpacity={0.7} accessibilityRole="button"
       accessibilityState={expanded === undefined ? undefined : { expanded }}>
-      <View style={S.actionIcon}><Ionicons name={icon} size={22} color="#fff" /></View>
+      <View style={S.actionIcon}><Ionicons name={icon} size={22} color={colors.onPrimary} /></View>
       <Text style={S.actionTitle}>{title}</Text>
     </TouchableOpacity>
   );
@@ -75,7 +76,7 @@ export default function NewChatScreen() {
         );
       }
     }
-    const to = { pathname: '/chat', params: { id: chatId } } as any;
+    const to = { pathname: '/chat' as const, params: { id: chatId } };
     if (replace) router.replace(to); else router.push(to);
   };
 
@@ -107,16 +108,17 @@ export default function NewChatScreen() {
     setLoadingList(true);
     try {
       let list: ChatSummary[];
+      let offline = false;
       try {
         list = await listChats();
-        setListError(false);
       } catch {
         // Offline: fall back to the cached chat list (as the Chats tab does)
         // and say so, instead of claiming there are no contacts.
-        setListError(true);
+        offline = true;
         list = ((await getCachedChats().catch(() => [])) ?? []) as ChatSummary[];
       }
       if (isCancelled()) return;
+      setListError(offline);
       const seen = new Set<string>();
       const out: Contact[] = [];
       for (const c of list) {
@@ -204,8 +206,8 @@ export default function NewChatScreen() {
             <View>
               {/* Group, community and address book do not carry the TTL, so in
                   temporary mode they would quietly make a NORMAL chat. Hidden. */}
-              {!ttlSeconds && <ActionRow icon="people" title="New group" onPress={() => router.push('/create-group' as any)} />}
-              {!ttlSeconds && <ActionRow icon="people-circle" title="New community" onPress={() => router.push('/communities' as any)} />}
+              {!ttlSeconds && <ActionRow icon="people" title="New group" onPress={() => router.push('/create-group')} />}
+              {!ttlSeconds && <ActionRow icon="people-circle" title="New community" onPress={() => router.push('/communities')} />}
               <ActionRow icon="person-add" title="New contact" onPress={() => setAddOpen(v => !v)} expanded={addOpen} />
 
               {addOpen && (
@@ -213,13 +215,13 @@ export default function NewChatScreen() {
                   <PhoneField dialCode={dialCode} national={national} onChange={(d, n) => { if (d !== dialCode) dialTouched.current = true; setDialCode(d); setNational(n); }} />
                   <TouchableOpacity style={[S.cta, !e164 && S.ctaOff]} onPress={startByPhone} disabled={!e164 || adding} activeOpacity={0.85}
                     accessibilityRole="button" accessibilityState={{ disabled: !e164 || adding, busy: adding }}>
-                    {adding ? <ActivityIndicator color="#fff" /> : <Text style={S.ctaTxt}>Start chat</Text>}
+                    {adding ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={S.ctaTxt}>Start chat</Text>}
                   </TouchableOpacity>
                   <Text style={S.hint}>The number must belong to someone on crazzychat.</Text>
                 </View>
               )}
 
-              {!ttlSeconds && <ActionRow icon="book" title="Find from address book" onPress={() => router.push('/contacts' as any)} />}
+              {!ttlSeconds && <ActionRow icon="book" title="Find from address book" onPress={() => router.push('/contacts')} />}
 
               {listError && (
                 <TouchableOpacity onPress={() => loadContacts(() => !mounted.current)} accessibilityRole="button" accessibilityLabel="Couldn't refresh contacts. Tap to retry">
@@ -274,7 +276,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   addBox: { paddingHorizontal: 18, paddingVertical: 8, gap: 4 },
   cta: { marginTop: 12, minHeight: 50, paddingVertical: 10, borderRadius: 14, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
   ctaOff: { opacity: 0.4 },
-  ctaTxt: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  ctaTxt: { color: c.onPrimary, fontSize: 16, fontWeight: '800' },
   hint: { color: c.textFaint, fontSize: 12, marginTop: 8, lineHeight: 17 },
   sectionLabel: { color: c.textDim, fontSize: 12, fontWeight: '700', letterSpacing: 1, paddingHorizontal: 18, paddingTop: 14, paddingBottom: 4 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 14, marginBottom: 8, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 16, backgroundColor: c.glass, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },

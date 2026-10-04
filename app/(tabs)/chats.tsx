@@ -6,23 +6,19 @@
 // pin/archive/mute/hidden, unread) is preserved from the previous version.
 
 import { useAuthHeader } from '../../hooks/useAuthHeader';
-import { HEADER_TOP, TAB_BAR_SPACE } from '../../constants/layout';
+import { TAB_BAR_SPACE } from '../../constants/layout';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type ComponentProps, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 // RN Text, not AppText, on purpose: every font size below is already multiplied
-// by the vision-comfort scale (makeStyles `v`), and AppText applies that scale
-// again, which would double it.
+// by the vision-comfort scale (components/chats/chatListStyles `v`), and AppText
+// applies that scale again, which would double it.
 import { ActivityIndicator, Alert, AppState, InteractionManager, Modal, Pressable, RefreshControl, ScrollView, SectionList, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { Image } from 'expo-image';
-import { Swipeable } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
-import { type Palette, brandAlpha } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
-import { useVisionComfort } from '../../lib/visionComfort';
-import { Avatar, AuroraBackground, GlassChip } from '../../components/ui';
+import { AuroraBackground, GlassChip } from '../../components/ui';
 import { canSplit } from '../../lib/responsive';
 import {
-  archiveChat, attachmentUrl, listChats, listStoriesFeed, muteChat, pinChat, setFavourite, setHidden,
+  archiveChat, listChats, listStoriesFeed, muteChat, pinChat, setFavourite, setHidden,
   hydrateOwnPreviews,
   myInvitations,
   type ChatSummary,
@@ -40,13 +36,11 @@ import { applyLocalReadPointers, setUnreadTotal } from '../../lib/unreadStore';
 import { getDraftMap } from '../../lib/drafts';
 import { getLastMessagePerChat, getCachedChats, cacheChats } from '../../lib/localDb';
 import { getCurrentUserAsync } from '../(constants)/authService';
-import { isFamEvent } from '../../lib/family/alerts';
-import { NOTE_PREFIX } from '../../lib/groups/notes';
-import { TASK_PREFIX } from '../../lib/groups/tasks';
-import { initialOf } from '../../lib/format';
-import { tint } from '../../lib/tintColor';
-
-type LastMsg = { content: string | null; type: string | null; senderId: string | null; id: number };
+// The row, the avatar popup and the styles live in components/chats/ (split
+// 2026-10-04 to keep this screen under ~800 lines; behaviour unchanged).
+import { ChatListRow, ChatListSeparator, type LastMsg } from '../../components/chats/ChatListRow';
+import { AvatarPopup } from '../../components/chats/AvatarPopup';
+import { useChatListStyles } from '../../components/chats/chatListStyles';
 
 type FolderId = 'all' | 'unread' | 'favourites' | 'groups' | 'pinned' | 'archive';
 const FOLDERS: { id: FolderId; label: string }[] = [
@@ -58,7 +52,7 @@ const FOLDERS: { id: FolderId; label: string }[] = [
   { id: 'archive', label: 'Archive' },
 ];
 
-// P1.2: the ChatRow memo compares `a.chat === b.chat` (object identity), so a
+// P1.2: the ChatListRow memo compares `a.chat === b.chat` (object identity), so a
 // full `setChats(freshList)` — brand-new objects on every socket event —
 // re-rendered EVERY visible row even when only one chat changed. mergeChats
 // reuses the previous object for any chat whose fields are unchanged, so the
@@ -83,14 +77,10 @@ function mergeChats(prev: ChatSummary[], next: ChatSummary[]): ChatSummary[] {
 
 function afterInteractions(task: () => void): () => void {
   const handle = InteractionManager.runAfterInteractions(task);
-  return () => { try { (handle as any).cancel?.(); } catch {} };
+  return () => { try { handle.cancel(); } catch {} };
 }
 
-function useS() {
-  const { colors } = useTheme();
-  const { metrics, profile } = useVisionComfort();
-  return useMemo(() => makeStyles(colors, metrics, profile.highContrast), [colors, metrics, profile.highContrast]);
-}
+const useS = useChatListStyles;
 
 export default function ChatsScreen() {
   const router = useRouter();
@@ -237,10 +227,12 @@ export default function ChatsScreen() {
         // stays, offline) for exactly the chats you just finished reading.
         try {
           const { readPointers } = await import('../../lib/receipts');
+          // `as any` is a no-op (getCachedChats returns any[]) kept because
+          // lib/chatUnreadCursor.selftest.ts pins this exact line.
           applyLocalReadPointers(cached as any, await readPointers());
         } catch {}
         if (!cancel && cached.length) {
-          setChats(cached as any); setLoading(false);
+          setChats(cached); setLoading(false);
           mark('chats_paint_cache', { rows: cached.length });
         } else if (!cancel) mark('chats_cache_empty');
       } catch {}
@@ -298,7 +290,7 @@ export default function ChatsScreen() {
             `A cloud backup${meta.messageCount != null ? ` with ${meta.messageCount} messages` : ''} was found for this account. Restore it on this device?`,
             [
               { text: 'Not now', style: 'cancel' },
-              { text: 'Restore', onPress: () => router.push('/chat-backup' as any) },
+              { text: 'Restore', onPress: () => router.push('/chat-backup') },
             ],
           );
         }
@@ -401,69 +393,73 @@ export default function ChatsScreen() {
   }), []);
 
   const onRefresh = useCallback(async () => { setRefreshing(true); await fetchList(); setRefreshing(false); }, [fetchList]);
-  const onOpenChat = (id: string) => router.push({ pathname: '/chat', params: { id } } as any);
-  const onNewChat = () => router.push('/new-chat' as any);
+  const onOpenChat = useCallback((id: string) => router.push({ pathname: '/chat', params: { id } }), [router]);
+  const onNewChat = () => router.push('/new-chat');
 
   // Temporary chat: choose the lifetime here, choose the person on /new-chat.
   const [tempSheet, setTempSheet] = useState(false);
   const startTemporary = useCallback((seconds: number) => {
     setTempSheet(false);
-    router.push({ pathname: '/new-chat', params: { ttl: String(seconds) } } as any);
+    router.push({ pathname: '/new-chat', params: { ttl: String(seconds) } });
   }, [router]);
 
   const openCode = useCallback((mode: 'share' | 'enter') => {
     setTempSheet(false);
-    router.push({ pathname: '/chat-code', params: { mode } } as any);
+    router.push({ pathname: '/chat-code', params: { mode } });
   }, [router]);
 
   // Avatar tap (WhatsApp): peer has a story → open it; else show photo popup.
   const [avatarView, setAvatarView] = useState<ChatSummary | null>(null);
   // Who has a story, remembered for a minute: a second avatar tap answers at
   // once instead of waiting on /stories/feed again. `avatarBusy` drops taps
-  // that land while a lookup is still in flight (no double push).
+  // that land while a lookup is still in flight (no double push), and
+  // `avatarLoadingId` shows that wait on the row that was tapped.
   const storyUsers = useRef<{ at: number; ids: Set<string> } | null>(null);
   const avatarBusy = useRef(false);
+  const [avatarLoadingId, setAvatarLoadingId] = useState<string | null>(null);
   const onAvatarPress = useCallback(async (chat: ChatSummary) => {
     if (avatarBusy.current) return;
     if (chat.type === 'direct' && chat.peerUserId) {
       avatarBusy.current = true;
       try {
         if (!storyUsers.current || Date.now() - storyUsers.current.at > 60_000) {
+          setAvatarLoadingId(chat.id);
           const feed = await listStoriesFeed();
           storyUsers.current = { at: Date.now(), ids: new Set(feed.map(e => e.userId)) };
         }
         if (storyUsers.current.ids.has(chat.peerUserId)) {
-          router.push({ pathname: '/story-viewer' as any, params: { userId: chat.peerUserId, userName: chat.peerName ?? chat.name ?? '' } });
+          router.push({ pathname: '/story-viewer', params: { userId: chat.peerUserId, userName: chat.peerName ?? chat.name ?? '' } });
           return;
         }
-      } catch {} finally { avatarBusy.current = false; }
+      } catch {} finally { avatarBusy.current = false; setAvatarLoadingId(null); }
     }
     setAvatarView(chat);
   }, [router]);
 
-  // Optimistic chat-row actions with rollback.
-  const patch = (id: string, fields: Partial<ChatSummary>) =>
-    setChats(prev => prev.map(c => c.id === id ? { ...c, ...fields } : c));
+  // Optimistic chat-row actions with rollback. Stable (useCallback), so the
+  // memoised ChatListRow is not re-rendered by a fresh handler on every list update.
+  const patch = useCallback((id: string, fields: Partial<ChatSummary>) =>
+    setChats(prev => prev.map(c => c.id === id ? { ...c, ...fields } : c)), []);
 
-  const doPin = async (chat: ChatSummary) => {
+  const doPin = useCallback(async (chat: ChatSummary) => {
     const next = !chat.pinned;
     patch(chat.id, { pinned: next });
     try { await pinChat(chat.id, next); await fetchList(); }
     catch (e: any) { patch(chat.id, { pinned: !next }); setError(e?.message ?? 'Pin failed'); }
-  };
-  const doMute = async (chat: ChatSummary) => {
+  }, [patch, fetchList]);
+  const doMute = useCallback(async (chat: ChatSummary) => {
     const next = !chat.muted;
     patch(chat.id, { muted: next });
     try { await muteChat(chat.id, next); await fetchList(); }
     catch (e: any) { patch(chat.id, { muted: !next }); setError(e?.message ?? 'Mute failed'); }
-  };
-  const doArchive = async (chat: ChatSummary) => {
+  }, [patch, fetchList]);
+  const doArchive = useCallback(async (chat: ChatSummary) => {
     const next = !chat.archived;
     patch(chat.id, { archived: next });
     try { await archiveChat(chat.id, next); await fetchList(); }
     catch (e: any) { patch(chat.id, { archived: !next }); setError(e?.message ?? 'Archive failed'); }
-  };
-  const doDelete = (chat: ChatSummary) => {
+  }, [patch, fetchList]);
+  const doDelete = useCallback((chat: ChatSummary) => {
     Alert.alert(
       'Delete chat?',
       'This removes it from your list. It stays reachable from Hidden chats.',
@@ -478,19 +474,24 @@ export default function ChatsScreen() {
         },
       ],
     );
-  };
+  }, [fetchList]);
 
   // ── Multi-select (WhatsApp-style bulk actions) ───────────────────────
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const exitSelect = () => { setSelectMode(false); setSelected(new Set()); };
-  const enterSelect = (id: string) => { setSelectMode(true); setSelected(new Set([id])); };
-  const toggleSelect = (id: string) => setSelected(prev => {
+  const enterSelect = useCallback((id: string) => { setSelectMode(true); setSelected(new Set([id])); }, []);
+  const toggleSelect = useCallback((id: string) => setSelected(prev => {
     const n = new Set(prev);
     if (n.has(id)) n.delete(id); else n.add(id);
     if (n.size === 0) setSelectMode(false);
     return n;
-  });
+  }), []);
+  // The row's three taps, rebuilt only when selection mode flips (which
+  // re-renders every row anyway, through its selectMode prop).
+  const onRowPress = useCallback((c: ChatSummary) => { if (selectMode) toggleSelect(c.id); else onOpenChat(c.id); }, [selectMode, toggleSelect, onOpenChat]);
+  const onRowAvatar = useCallback((c: ChatSummary) => { if (selectMode) toggleSelect(c.id); else onAvatarPress(c); }, [selectMode, toggleSelect, onAvatarPress]);
+  const onRowLongPress = useCallback((c: ChatSummary) => { if (selectMode) toggleSelect(c.id); else enterSelect(c.id); }, [selectMode, toggleSelect, enterSelect]);
   // Per-item failures used to vanish into `catch {}` (2026-09-22). The
   // ROLLBACK was never the missing half — fetchList() refetches and replaces
   // the optimistic patch with server truth — the TELLING was: the selection is
@@ -598,7 +599,7 @@ export default function ChatsScreen() {
             {splitReady && selected.size <= 2 && (
               <TouchableOpacity
                 disabled={selected.size !== 2}
-                onPress={() => { const [a, b] = [...selected]; exitSelect(); router.push({ pathname: '/split', params: { a, b } } as any); }}
+                onPress={() => { const [a, b] = [...selected]; exitSelect(); router.push({ pathname: '/split', params: { a, b } }); }}
                 style={[S.headerBtn, { flexDirection: 'row', alignItems: 'center', gap: 4 }]}
                 hitSlop={4}
                 accessibilityRole="button"
@@ -649,15 +650,15 @@ export default function ChatsScreen() {
                 <Ionicons name="git-compare-outline" size={22} color={colors.text} />
               </TouchableOpacity>
             )}
-            <ChatHeaderAction action="search" label="Search" onPress={() => router.push('/search' as any)} />
-            <ChatHeaderAction action="alerts" label="Alerts" onPress={() => router.push('/alerts' as any)} />
+            <ChatHeaderAction action="search" label="Search" onPress={() => router.push('/search')} />
+            <ChatHeaderAction action="alerts" label="Alerts" onPress={() => router.push('/alerts')} />
             {/* Was the Mini Apps shortcut. Dropped, not lost — /mini is the
                 centre tab ("Apps"), so it already had a permanent home and this
                 was a second door to the same room. The header slot buys more as
                 a temporary chat, which has no entry point at all otherwise. */}
             <ChatHeaderAction action="temporary" label="Start a temporary chat" onPress={() => setTempSheet(true)} />
-            <ChatHeaderAction action="contacts" label="Contacts" onPress={() => router.push('/contacts' as any)} />
-            <ChatHeaderAction action="broadcast" label="New broadcast" onPress={() => router.push('/broadcast' as any)} />
+            <ChatHeaderAction action="contacts" label="Contacts" onPress={() => router.push('/contacts')} />
+            <ChatHeaderAction action="broadcast" label="New broadcast" onPress={() => router.push('/broadcast')} />
           </View>
         </View>
       )}
@@ -670,7 +671,7 @@ export default function ChatsScreen() {
           app to accept it. Hidden entirely at zero. */}
       {pendingInvites > 0 && (
         <TouchableOpacity
-          onPress={() => router.push('/group-invitations' as any)}
+          onPress={() => router.push('/group-invitations')}
           activeOpacity={0.8}
           style={S.inviteBanner}
           accessibilityRole="button"
@@ -734,7 +735,7 @@ export default function ChatsScreen() {
             sections.length > 1 || section.title !== 'All Chats'
               ? <Text numberOfLines={1} style={S.sectionHeader} accessibilityRole="header">{section.title}</Text> : <View style={{ height: 4 }} />}
           renderItem={({ item }) => (
-            <ChatRow
+            <ChatListRow
               chat={item}
               authHeader={authHeader}
               draft={drafts[item.id]}
@@ -743,16 +744,17 @@ export default function ChatsScreen() {
               isTyping={typingChats.has(item.id)}
               selectMode={selectMode}
               isSelected={selected.has(item.id)}
-              onPress={() => selectMode ? toggleSelect(item.id) : onOpenChat(item.id)}
-              onAvatarPress={() => selectMode ? toggleSelect(item.id) : onAvatarPress(item)}
-              onLongPress={() => selectMode ? toggleSelect(item.id) : enterSelect(item.id)}
-              onPin={() => doPin(item)}
-              onMute={() => doMute(item)}
-              onArchive={() => doArchive(item)}
-              onDelete={() => doDelete(item)}
+              avatarBusy={avatarLoadingId === item.id}
+              onPress={onRowPress}
+              onAvatarPress={onRowAvatar}
+              onLongPress={onRowLongPress}
+              onPin={doPin}
+              onMute={doMute}
+              onArchive={doArchive}
+              onDelete={doDelete}
             />
           )}
-          ItemSeparatorComponent={() => <View style={S.separator} />}
+          ItemSeparatorComponent={ChatListSeparator}
           contentContainerStyle={{ paddingBottom: TAB_BAR_SPACE + 16 }}
           refreshControl={<RefreshControl tintColor={colors.primary} refreshing={refreshing} onRefresh={onRefresh} />}
           removeClippedSubviews
@@ -763,7 +765,7 @@ export default function ChatsScreen() {
       )}
 
       <TouchableOpacity style={S.fab} onPress={onNewChat} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel="New chat">
-        <Ionicons name="create-outline" size={26} color="#fff" />
+        <Ionicons name="create-outline" size={26} color={colors.onPrimary} />
       </TouchableOpacity>
 
       {/* DELETED 2026-09-22: a long-press action sheet that could never open.
@@ -783,8 +785,11 @@ export default function ChatsScreen() {
           timer, not a new mechanism: the server already expires on
           chats.disappearing_seconds. */}
       <Modal visible={tempSheet} transparent animationType="fade" onRequestClose={() => setTempSheet(false)}>
-        <Pressable style={S.sheetBackdrop} onPress={() => setTempSheet(false)} accessibilityRole="button" accessibilityLabel="Close">
-          <Pressable style={S.sheet} onPress={() => {}} accessibilityViewIsModal>
+        {/* The scrim is a sibling of the sheet, not its parent, so a screen
+            reader reaches the sheet's rows instead of one "Close" around them. */}
+        <View style={S.sheetBackdrop}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setTempSheet(false)} accessibilityRole="button" accessibilityLabel="Close" />
+          <View style={S.sheet} accessibilityViewIsModal>
             <View style={S.sheetHandle} />
             <Text style={S.sheetTitle}>TEMPORARY CHAT — MESSAGES DELETE THEMSELVES</Text>
             <SheetItem icon="timer-outline" label="1 hour" onPress={() => startTemporary(3600)} />
@@ -797,61 +802,17 @@ export default function ChatsScreen() {
             <View style={S.sheetDivider} />
             <SheetItem icon="key-outline" label="Share a code" onPress={() => openCode('share')} />
             <SheetItem icon="keypad-outline" label="Enter a code" onPress={() => openCode('enter')} />
-          </Pressable>
-        </Pressable>
+          </View>
+        </View>
       </Modal>
 
       {/* Avatar photo popup (WhatsApp-style) — photo + quick actions */}
-      <Modal visible={!!avatarView} transparent animationType="fade" onRequestClose={() => setAvatarView(null)}>
-        <Pressable style={S.avBackdrop} onPress={() => setAvatarView(null)} accessibilityRole="button" accessibilityLabel="Close">
-          {avatarView && (() => {
-            const av = avatarView;
-            const isDirect = av.type === 'direct';
-            const avTitle = isDirect ? (av.peerName || av.name || 'Direct chat') : (av.name || 'Group chat');
-            const avPhoto = isDirect ? av.peerPhotoURL : av.photoURL;
-            const peerUid = av.peerUserId ?? '';
-            const go = (fn: () => void) => { setAvatarView(null); fn(); };
-            return (
-              <Pressable style={S.avCard} onPress={() => {}} accessibilityViewIsModal>
-                <View style={S.avImgWrap}>
-                  {avPhoto && authHeader ? (
-                    <Image source={{ uri: attachmentUrl(avPhoto), headers: { Authorization: authHeader } }} style={S.avImg} contentFit="cover" cachePolicy="memory-disk" />
-                  ) : (
-                    <View style={[S.avImg, S.avInitials]}><Text style={S.avInitialsTxt}>{initialOf(avTitle)}</Text></View>
-                  )}
-                  <View style={S.avNameBar}><Text style={S.avNameTxt} numberOfLines={1}>{avTitle}</Text></View>
-                </View>
-                <View style={S.avActions}>
-                  <TouchableOpacity style={S.avActionBtn} onPress={() => go(() => onOpenChat(av.id))} accessibilityRole="button" accessibilityLabel={`Message ${avTitle}`}>
-                    <Ionicons name="chatbubble-ellipses" size={22} color={colors.primary} /><Text style={S.avActionTxt}>Message</Text>
-                  </TouchableOpacity>
-                  {isDirect && (
-                    <>
-                      <TouchableOpacity style={S.avActionBtn} onPress={() => go(() => router.push({ pathname: '/voicecall' as any, params: { chatId: av.id, peerUid, peerName: avTitle } }))} accessibilityRole="button" accessibilityLabel={`Voice call ${avTitle}`}>
-                        <Ionicons name="call" size={22} color={colors.primary} /><Text style={S.avActionTxt}>Audio</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity style={S.avActionBtn} onPress={() => go(() => router.push({ pathname: '/videocall' as any, params: { chatId: av.id, peerUid, peerName: avTitle } }))} accessibilityRole="button" accessibilityLabel={`Video call ${avTitle}`}>
-                        <Ionicons name="videocam" size={22} color={colors.primary} /><Text style={S.avActionTxt}>Video</Text>
-                      </TouchableOpacity>
-                    </>
-                  )}
-                  <TouchableOpacity style={S.avActionBtn} accessibilityRole="button" accessibilityLabel={`${avTitle} info`} onPress={() => go(() => isDirect
-                    ? router.push({ pathname: '/contact-info' as any, params: { chatId: av.id, peerUid, peerName: avTitle } })
-                    // group-info reads `id`, not `chatId` — see app/chat.tsx.
-                    : router.push({ pathname: '/group-info' as any, params: { id: av.id } }))}>
-                    <Ionicons name="information-circle" size={22} color={colors.primary} /><Text style={S.avActionTxt}>Info</Text>
-                  </TouchableOpacity>
-                </View>
-              </Pressable>
-            );
-          })()}
-        </Pressable>
-      </Modal>
+      <AvatarPopup chat={avatarView} authHeader={authHeader} onClose={() => setAvatarView(null)} onMessage={onOpenChat} />
     </View>
   );
 }
 
-function SheetItem({ icon, label, onPress, danger }: { icon: any; label: string; onPress: () => void; danger?: boolean }) {
+function SheetItem({ icon, label, onPress, danger }: { icon: ComponentProps<typeof Ionicons>['name']; label: string; onPress: () => void; danger?: boolean }) {
   const { colors } = useTheme();
   const S = useS();
   return (
@@ -861,303 +822,3 @@ function SheetItem({ icon, label, onPress, danger }: { icon: any; label: string;
     </TouchableOpacity>
   );
 }
-
-const ChatRow = memo(function ChatRow({
-  chat, authHeader, draft, lastMsg, meId, isTyping, selectMode, isSelected, onPress, onAvatarPress, onLongPress, onPin, onMute, onArchive, onDelete,
-}: {
-  chat: ChatSummary; authHeader: string | null; draft?: string; lastMsg?: LastMsg; meId?: string | null; isTyping?: boolean;
-  selectMode?: boolean; isSelected?: boolean;
-  onPress: () => void; onAvatarPress: () => void; onLongPress: () => void; onPin: () => void; onMute: () => void; onArchive: () => void; onDelete: () => void;
-}) {
-  const { colors } = useTheme();
-  const S = useS();
-  const swipeRef = useRef<Swipeable>(null);
-  const title = chat.type === 'direct' ? (chat.peerName || chat.name || 'Direct chat') : (chat.name || 'Group chat');
-  const photoId = chat.type === 'direct' ? chat.peerPhotoURL : chat.photoURL;
-  const showPhoto = !!photoId && !!authHeader;
-  const time = chat.lastMessageAt ? formatRelative(chat.lastMessageAt) : '';
-  const draftText = draft && draft.trim() ? draft.trim() : '';
-  // Real last-message preview from the local plaintext cache (WhatsApp-style).
-  const previewBody = (() => {
-    if (!lastMsg) return chat.lastMessageId ? 'Tap to open chat' : 'No messages yet';
-    // famEvent envelopes are hidden from the thread, so they must not become a
-    // row's "last message" TEXT either. This is a PREVIEW-ONLY fix: the row's
-    // sort position and unread badge come from the server's chat.lastMessageAt/
-    // unreadCount, which the server cannot correct for famEvent specifically —
-    // it never sees plaintext content (E2EE), so it cannot tell a famEvent
-    // system message apart from any other. A crossing can still bump a chat to
-    // the top and mark it unread; opening it then shows nothing new. Accepted
-    // trade-off, not silently swept: the alternative (client-side markRead up
-    // to the famEvent's id) would also retroactively mark any REAL unread
-    // message with a lower id as read, which is worse.
-    // Group notes/tasks ops are hidden from the thread for the same reason.
-    if (isFamEvent(lastMsg.type, lastMsg.content)
-      || (typeof lastMsg.content === 'string'
-        && (lastMsg.content.startsWith(NOTE_PREFIX) || lastMsg.content.startsWith(TASK_PREFIX)))) {
-      return 'Tap to open chat';
-    }
-    const t = lastMsg.type;
-    // content is null for a text message whose ciphertext couldn't be decrypted
-    // (the cache layer withholds raw envelopes) — show a lock, never blank/JSON.
-    const textFallback = lastMsg.content || (chat.lastMessageId ? '🔒 Encrypted message' : '');
-    const label = t === 'image' ? '📷 Photo'
-      : t === 'video' ? '🎥 Video'
-      : t === 'audio' ? '🎙️ Voice message'
-      : t === 'file' ? '📎 File'
-      : t === 'vaultbeam' ? '📦 File'
-      : t === 'location' ? '📍 Location'
-      : t === 'poll' ? '📊 Poll'
-      : t === 'sticker' ? 'Sticker'
-      : textFallback;
-    const mine = !!meId && lastMsg.senderId === meId;
-    return (mine ? 'You: ' : '') + label;
-  })();
-  const preview = draftText || previewBody;
-
-  const close = () => swipeRef.current?.close();
-  const act = (fn: () => void) => { close(); fn(); };
-
-  const leftActions = () => (
-    <View style={S.actionsRow}>
-      <TouchableOpacity style={[S.action, { backgroundColor: colors.primary }]} onPress={() => act(onPin)} accessibilityRole="button">
-        <Ionicons name={chat.pinned ? 'pin' : 'pin-outline'} size={20} color="#fff" /><Text style={S.actionLbl}>{chat.pinned ? 'Unpin' : 'Pin'}</Text>
-      </TouchableOpacity>
-      <TouchableOpacity style={[S.action, { backgroundColor: colors.purple }]} onPress={() => act(onMute)} accessibilityRole="button">
-        <Ionicons name={chat.muted ? 'notifications-outline' : 'notifications-off-outline'} size={20} color="#fff" /><Text style={S.actionLbl}>{chat.muted ? 'Unmute' : 'Mute'}</Text>
-      </TouchableOpacity>
-    </View>
-  );
-  const rightActions = () => (
-    <View style={S.actionsRow}>
-      {/* Neutral, not accent: the ink is the theme's text colour, so it holds
-          contrast on surfaceSolid in both themes (white vanished in light). */}
-      <TouchableOpacity style={[S.action, { backgroundColor: colors.surfaceSolid }]} onPress={() => act(onArchive)} accessibilityRole="button">
-        <Ionicons name={chat.archived ? 'archive' : 'archive-outline'} size={20} color={colors.text} /><Text style={[S.actionLbl, { color: colors.text }]}>{chat.archived ? 'Unarchive' : 'Archive'}</Text>
-      </TouchableOpacity>
-      <TouchableOpacity style={[S.action, { backgroundColor: colors.danger }]} onPress={() => act(onDelete)} accessibilityRole="button">
-        <Ionicons name="trash-outline" size={20} color="#fff" /><Text style={S.actionLbl}>Delete</Text>
-      </TouchableOpacity>
-    </View>
-  );
-
-  return (
-    <Swipeable ref={swipeRef} enabled={!selectMode} renderLeftActions={leftActions} renderRightActions={rightActions} overshootLeft={false} overshootRight={false} friction={2}>
-      <TouchableOpacity style={[S.row, isSelected && S.rowSelected]} onPress={onPress} onLongPress={onLongPress} delayLongPress={250} activeOpacity={0.7}
-        accessibilityRole="button"
-        // Name, preview, time and unread in one announcement; the swipe-only
-        // actions are offered as accessibility actions too.
-        accessibilityLabel={`${title}${chat.unreadCount > 0 ? `, ${chat.unreadCount} unread` : ''}${draftText ? ', draft' : ''}. ${preview}${time ? `. ${time}` : ''}`}
-        accessibilityState={selectMode ? { selected: !!isSelected } : undefined}
-        accessibilityHint={selectMode ? 'Toggles selection' : 'Opens the chat. Long-press for more options'}
-        accessibilityActions={selectMode ? undefined : [
-          { name: 'pin', label: 'Pin or unpin' },
-          { name: 'mute', label: 'Mute or unmute' },
-          { name: 'archive', label: 'Archive' },
-          { name: 'delete', label: 'Delete' },
-        ]}
-        onAccessibilityAction={(e) => {
-          const n = e.nativeEvent.actionName;
-          if (n === 'pin') onPin(); else if (n === 'mute') onMute(); else if (n === 'archive') onArchive(); else if (n === 'delete') onDelete();
-        }}>
-        <TouchableOpacity style={S.avatarWrap} activeOpacity={0.7} onPress={onAvatarPress} accessibilityRole="button" accessibilityLabel={selectMode ? `Select ${title}` : `${title}: story or profile photo`}>
-          <Avatar
-            ring
-            uri={showPhoto ? attachmentUrl(photoId!) : null}
-            headers={authHeader ? { Authorization: authHeader } : undefined}
-            name={title}
-            size={50}
-            presence={chat.type === 'direct' && chat.peerOnline ? 'online' : null}
-            anon={!!chat.anonMasked}
-          />
-          {selectMode && (
-            <View style={[S.selBadge, isSelected ? S.selBadgeOn : S.selBadgeOff]}>
-              {isSelected && <Ionicons name="checkmark" size={13} color="#fff" />}
-            </View>
-          )}
-        </TouchableOpacity>
-
-        <View style={S.rowBody}>
-          <View style={S.rowTop}>
-            <Text style={S.rowName} numberOfLines={1}>{title}</Text>
-            {/* THE FLAGS SHARE ONE BOX, and it is not decoration.
-                rowTop has `gap`, which applies between EVERY child — so three
-                loose icons cost four gaps plus their own marginLefts, ~31dp of
-                spacing in the row where the name is competing for width. The
-                name is the only flexible child, so every one of those pixels
-                came out of it and turned readable names into ellipses.
-                Grouped, the outer row has three children and two gaps, and the
-                cluster spaces itself tightly. flexShrink: 0 because status must
-                not be squeezed away — the NAME is what may truncate. */}
-            {(chat.expiresAt || chat.muted || chat.pinned) && (
-              <View style={S.rowFlags}>
-                {/* This chat deletes itself (migration 120). A timer icon in the
-                    list, not just inside the chat: the whole conversation is
-                    about to go, and finding that out only by opening it is
-                    finding out too late. */}
-                {chat.expiresAt && (
-                  <Ionicons
-                    name="timer-outline"
-                    size={14}
-                    color={new Date(chat.expiresAt).getTime() - Date.now() <= 600_000 ? colors.danger : colors.textFaint}
-                  />
-                )}
-                {chat.muted && <Ionicons name="volume-mute" size={15} color={colors.textFaint} />}
-                {chat.pinned && <Ionicons name="pin" size={14} color={colors.textFaint} />}
-              </View>
-            )}
-            {/* Capped and unshrinkable. A timestamp is a fixed-width fact, but
-                at a 130% system font scale it grew ~25% wider and took that
-                width straight off the name. 1.15 keeps it legible without
-                letting it eat the thing people actually read. */}
-            <Text
-              style={[S.rowTime, chat.unreadCount > 0 && { color: colors.primary, fontWeight: '700' }]}
-              numberOfLines={1}
-              maxFontSizeMultiplier={1.15}
-            >
-              {time}
-            </Text>
-          </View>
-          <View style={S.rowBottom}>
-            {isTyping ? (
-              <Text style={[S.rowPreview, { color: colors.primary }]} numberOfLines={1}>typing…</Text>
-            ) : (
-              <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-                {!draftText && !!lastMsg && !!meId && lastMsg.senderId === meId && chat.type === 'direct' && (
-                  <Ionicons
-                    name={((chat.peerLastReadMessageId ?? 0) >= lastMsg.id || (chat.peerLastDeliveredMessageId ?? 0) >= lastMsg.id) ? 'checkmark-done' : 'checkmark'}
-                    size={15}
-                    color={(chat.peerLastReadMessageId ?? 0) >= lastMsg.id ? colors.accentOn : colors.textDim}
-                    style={{ marginRight: 3 }}
-                  />
-                )}
-                <Text style={[S.rowPreview, chat.unreadCount > 0 && S.rowPreviewUnread]} numberOfLines={1}>
-                  {draftText ? <Text style={S.draftLabel}>Draft: </Text> : null}{preview}
-                </Text>
-              </View>
-            )}
-            {chat.unreadCount > 0 && (
-              <View style={S.unreadBadge}><Text style={S.unreadTxt}>{chat.unreadCount > 99 ? '99+' : chat.unreadCount}</Text></View>
-            )}
-          </View>
-        </View>
-      </TouchableOpacity>
-    </Swipeable>
-  );
-}, (a, b) =>
-  // Re-render a row ONLY when its own data changes — not when an unrelated chat
-  // updates (typing, draft, unread on another row). Handler props are inline
-  // closures keyed by the stable chat id, so we deliberately ignore them.
-  a.chat === b.chat &&
-  a.authHeader === b.authHeader &&
-  a.draft === b.draft &&
-  a.lastMsg === b.lastMsg &&
-  a.meId === b.meId &&
-  a.isTyping === b.isTyping &&
-  a.selectMode === b.selectMode &&
-  a.isSelected === b.isSelected,
-);
-
-function formatRelative(iso: string): string {
-  try {
-    const d = new Date(iso); const diff = Date.now() - d.getTime();
-    if (diff < 60_000) return 'now';
-    if (diff < 86400_000) return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    if (diff < 7 * 86400_000) return d.toLocaleDateString([], { weekday: 'short' });
-    return d.toLocaleDateString([], { day: '2-digit', month: 'short' });
-  } catch { return ''; }
-}
-
-const makeStyles = (c: Palette, v = { textScale: 1, lineScale: 1, spacingScale: 1, controlScale: 1, bold: false }, highContrast = false) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
-  center: { justifyContent: 'center', alignItems: 'center' },
-  header: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 22, paddingTop: HEADER_TOP, paddingBottom: 14 },
-  title: { color: c.text, fontSize: 28 * v.textScale, fontWeight: '800', flexShrink: 1 },
-  // 40dp to keep six of them on one line; each carries hitSlop up to 44+.
-  headerBtn: { minWidth: 40 * v.controlScale, minHeight: 40 * v.controlScale, borderRadius: 20, backgroundColor: c.glassSoft, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
-  // Avatar photo popup. The scrim and the name bar over the photo are dark in
-  // both themes on purpose: they sit over an arbitrary photo, under white text.
-  avBackdrop:   { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', alignItems: 'center', justifyContent: 'center', padding: 28 },
-  avCard:       { width: '100%', maxWidth: 360, borderRadius: 16, overflow: 'hidden', backgroundColor: c.surfaceSolid },
-  avImgWrap:    { width: '100%', aspectRatio: 1, backgroundColor: c.primary },
-  avImg:        { width: '100%', height: '100%' },
-  avInitials:   { alignItems: 'center', justifyContent: 'center', backgroundColor: c.primary },
-  avInitialsTxt:{ color: '#fff', fontSize: 84, fontWeight: '800' },
-  avNameBar:    { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: 'rgba(0,0,0,0.45)' },
-  avNameTxt:    { color: '#fff', fontSize: 19 * v.textScale, fontWeight: '700' },
-  avActions:    { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 12, backgroundColor: c.surfaceSolid },
-  avActionBtn:  { alignItems: 'center', justifyContent: 'center', gap: 4, paddingHorizontal: 6, minWidth: 44, minHeight: 44 },
-  avActionTxt:  { color: c.primary, fontSize: 12 * v.textScale, fontWeight: '600' },
-  inviteBanner: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    paddingHorizontal: 16, paddingVertical: 11,
-    backgroundColor: brandAlpha(0.10),
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke,
-  },
-  inviteBannerTxt: { flex: 1, color: c.text, fontSize: 14 * v.textScale, fontWeight: '600' },
-  inviteBannerCta: { color: c.primary, fontSize: 13 * v.textScale, fontWeight: '800' },
-  errorBar: { backgroundColor: tint(c.danger, 0.12), borderColor: tint(c.danger, 0.4), borderWidth: 1, marginHorizontal: 16, padding: 10, borderRadius: 10 },
-  errorTxt: { color: c.danger, fontSize: 12 * v.textScale },
-
-  emptyTitle: { color: c.text, fontSize: 18 * v.textScale, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
-  emptySub: { color: c.textDim, fontSize: 14 * v.textScale, textAlign: 'center', lineHeight: Math.ceil(20 * v.textScale * v.lineScale), marginBottom: 24 },
-  emptyBtn: { backgroundColor: c.primary, paddingHorizontal: 28, paddingVertical: 12, borderRadius: 24 },
-  emptyBtnTxt: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 * v.textScale },
-
-  folderScroll: { flexGrow: 0 },
-  folderRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 22, paddingVertical: 8, gap: 8 },
-
-  sectionHeader: { color: highContrast ? c.text : c.textFaint, fontSize: 11 * v.textScale, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase', paddingHorizontal: 22, paddingTop: 14, paddingBottom: 6, backgroundColor: 'transparent' },
-  // Inset = paddingLeft 12 + avatar 50 + gap 12, so the rule starts under the
-  // text exactly like spec §6.4's 79. Was 88, left over from the 22pt padding.
-  separator: { height: StyleSheet.hairlineWidth, backgroundColor: c.hairline, marginLeft: 74 },
-
-  // Aurora Glass: rows are undecorated on purpose. No fill, no border, no
-  // shadow — the ground and the avatar ring carry the design, so the list stays
-  // legible at a glance and costs nothing to scroll.
-  // Geometry from Figma `ChatRow` (node 5:2) = WhatsApp spec §6.4: a FIXED
-  // 72pt row, 12 padding, 12 gap. Was 76/22/14 — drift, not a decision.
-  // minHeight, NOT height. The design says 72 and lib/responsiveLayout's
-  // guard says never pin a row that holds text: at 130% OS font scale a
-  // fixed 72 clips the name and the preview, which spec §10 forbids and
-  // which this repo already has a failing test for. 72 is the resting
-  // height — the rhythm the design wants — and the row grows only for a
-  // reader who needs it.
-  row: { flexDirection: 'row', minHeight: 72, paddingHorizontal: 12, paddingVertical: 8 * v.spacingScale, alignItems: 'center', gap: 12, backgroundColor: 'transparent' },
-  rowSelected: { backgroundColor: brandAlpha(0.14) },
-  avatarWrap: { width: 50, height: 50 },
-  selBadge: { position: 'absolute', right: -2, bottom: -2, width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: c.bg },
-  selBadgeOn: { backgroundColor: c.primary },
-  selBadgeOff: { backgroundColor: c.surfaceSolid, borderColor: c.textDim },
-
-  rowBody: { flex: 1, minWidth: 0, gap: 3 * v.spacingScale },
-  rowTop: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  rowName: { color: c.text, fontSize: 17 * v.textScale, lineHeight: Math.ceil(22 * v.textScale * v.lineScale), fontWeight: v.bold ? '700' : '600', flex: 1, minWidth: 0 },
-  // flexShrink: 0 — the name is the flexible child and the only thing that may
-  // truncate. marginLeft:'auto' is gone: it dates from when the name took its
-  // natural width, and with the name at flex:1 there is no free space left for
-  // an auto margin to absorb.
-  rowTime: { color: highContrast ? c.text : c.textFaint, fontSize: 12.5 * v.textScale, lineHeight: Math.ceil(16 * v.textScale * v.lineScale), flexShrink: 0 },
-  // One box for the timer/mute/pin glyphs, tightly spaced among themselves, so
-  // rowTop's gap is paid twice instead of four times.
-  rowFlags: { flexDirection: 'row', alignItems: 'center', gap: 3, flexShrink: 0 },
-  rowBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
-  rowPreview: { color: highContrast ? c.text : c.textDim, fontSize: 14 * v.textScale, lineHeight: Math.ceil(19 * v.textScale * v.lineScale), flex: 1, minWidth: 0 },
-  rowPreviewUnread: { color: c.text, fontWeight: '600' },
-  // Temporary-chat sheet
-  sheetBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: c.surfaceSolid, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 32, paddingTop: 10 },
-  sheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: c.border, alignSelf: 'center', marginBottom: 8 },
-  sheetTitle: { color: c.textDim, fontSize: 13 * v.textScale, fontWeight: '700', paddingHorizontal: 20, paddingVertical: 10 },
-  sheetDivider: { height: StyleSheet.hairlineWidth, backgroundColor: c.border, marginVertical: 6, marginHorizontal: 20 },
-  sheetItem: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingHorizontal: 20, paddingVertical: 15, minHeight: 44 },
-  sheetItemTxt: { color: c.text, fontSize: 16 * v.textScale, fontWeight: '500' },
-  draftLabel: { color: c.danger, fontWeight: '700' },
-  unreadBadge: { backgroundColor: c.primary, borderRadius: 11, minWidth: 22 * v.controlScale, minHeight: 22 * v.controlScale, paddingHorizontal: 7, alignItems: 'center', justifyContent: 'center' },
-  unreadTxt: { color: '#FFFFFF', fontSize: 11 * v.textScale, lineHeight: Math.ceil(14 * v.textScale * v.lineScale), fontWeight: '600' },
-
-  actionsRow: { flexDirection: 'row' },
-  action: { width: 76, alignItems: 'center', justifyContent: 'center', gap: 4 },
-  actionLbl: { color: '#fff', fontSize: 11 * v.textScale, fontWeight: '700' },
-
-  fab: { position: 'absolute', right: 22, bottom: TAB_BAR_SPACE + 18, width: 60 * v.controlScale, height: 60 * v.controlScale, borderRadius: 30 * v.controlScale, backgroundColor: c.accentDeep, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, elevation: 8, shadowColor: c.accentDeep, shadowOpacity: 0.55, shadowOffset: { width: 0, height: 10 }, shadowRadius: 24 },
-});

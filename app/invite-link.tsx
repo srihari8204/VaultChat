@@ -85,8 +85,13 @@ export default function InviteLinkScreen() {
     }
   };
 
-  const shareLink = (code: string) =>
-    Share.share({ message: `Join ${groupName || 'our group'} on crazzychat!\n${JOIN_BASE}${code}` });
+  const shareLink = async (code: string) => {
+    try {
+      await Share.share({ message: `Join ${groupName || 'our group'} on crazzychat!\n${JOIN_BASE}${code}` });
+    } catch {
+      Alert.alert('Could not share', 'Try again, or use Copy.');
+    }
+  };
 
   const copyLink = async (code: string) => {
     try {
@@ -101,10 +106,14 @@ export default function InviteLinkScreen() {
     Alert.alert('Revoke link?', 'This link will no longer work.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Revoke', style: 'destructive', onPress: async () => {
-        const prev = links;
         setLinks(list => list.map(l => l.id === link.id ? { ...l, revoked: true } : l));
         try { await revokeInviteLink(chatId!, link.id); }
-        catch (e: any) { setLinks(prev); Alert.alert('Error', e?.message ?? 'Revoke failed'); }
+        catch (e: any) {
+          // Undo only this row: restoring a snapshot taken at the tap would also
+          // undo anything else that changed meanwhile (a new link, another revoke).
+          setLinks(list => list.map(l => l.id === link.id ? { ...l, revoked: link.revoked } : l));
+          Alert.alert('Error', e?.message ?? 'Revoke failed');
+        }
       } },
     ]);
   };
@@ -162,7 +171,9 @@ export default function InviteLinkScreen() {
         </View>
         {creating && <ActivityIndicator color={colors.primary} style={{ marginTop: 12 }} />}
 
-        <Text style={[s.sectionTitle, { marginTop: 16 }]}>ACTIVE LINKS ({activeCount})</Text>
+        {/* The list holds revoked and expired links too, so the title counts
+            only the ones that still work. */}
+        <Text style={[s.sectionTitle, { marginTop: 16 }]}>LINKS · {activeCount} ACTIVE</Text>
         {loading ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
         ) : (
@@ -170,36 +181,40 @@ export default function InviteLinkScreen() {
             data={links}
             keyExtractor={l => String(l.id)}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} colors={[colors.primary]} />}
-            renderItem={({ item }) => (
-              <View style={[s.linkRow, item.revoked && { opacity: 0.45 }]}>
+            renderItem={({ item }) => {
+              // An expired link no longer works either: nothing to copy, share or show.
+              const dead = item.revoked || isExpired(item);
+              return (
+              <View style={[s.linkRow, dead && { opacity: 0.45 }]}>
                 <Text style={s.linkCode} numberOfLines={1}>vaultchat.app/join/{item.code}</Text>
                 <View style={{ flexDirection: 'row', gap: 12, marginTop: 4 }}>
                   <Text style={s.linkMeta}>{item.uses} joins</Text>
                   <Text style={s.linkMeta}>{formatExpiry(item.expiresAt)}</Text>
                   {item.revoked && <Text style={[s.linkMeta, { color: colors.danger }]}>Revoked</Text>}
                 </View>
-                {!item.revoked && (
+                {!dead && (
                   <View style={s.linkBtns}>
-                    <TouchableOpacity style={s.linkBtn} accessibilityRole="button" accessibilityLabel="Copy link" onPress={() => copyLink(item.code)}>
+                    <TouchableOpacity style={s.linkBtn} accessibilityRole="button" accessibilityLabel={`Copy link ${item.code}`} onPress={() => copyLink(item.code)}>
                       <Ionicons name="copy-outline" size={15} color={colors.text} />
                       <Text style={s.linkBtnTxt}>Copy</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={s.linkBtn} accessibilityRole="button" accessibilityLabel="Share link" onPress={() => shareLink(item.code)}>
+                    <TouchableOpacity style={s.linkBtn} accessibilityRole="button" accessibilityLabel={`Share link ${item.code}`} onPress={() => shareLink(item.code)}>
                       <Ionicons name="share-social-outline" size={15} color={colors.text} />
                       <Text style={s.linkBtnTxt}>Share</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={s.linkBtn} accessibilityRole="button" accessibilityLabel="Show QR code" onPress={() => setQrCode(item.code)}>
+                    <TouchableOpacity style={s.linkBtn} accessibilityRole="button" accessibilityLabel={`Show QR code for link ${item.code}`} onPress={() => setQrCode(item.code)}>
                       <Ionicons name="qr-code-outline" size={15} color={colors.text} />
                       <Text style={s.linkBtnTxt}>QR</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={s.linkBtn} accessibilityRole="button" accessibilityLabel="Revoke link" onPress={() => revoke(item)}>
+                    <TouchableOpacity style={s.linkBtn} accessibilityRole="button" accessibilityLabel={`Revoke link ${item.code}`} onPress={() => revoke(item)}>
                       <Ionicons name="trash-outline" size={15} color={colors.danger} />
                       <Text style={[s.linkBtnTxt, { color: colors.danger }]}>Revoke</Text>
                     </TouchableOpacity>
                   </View>
                 )}
               </View>
-            )}
+              );
+            }}
             ListEmptyComponent={<View style={{ alignItems: 'center', padding: 30 }}><Text style={s.empty}>No invite links yet</Text></View>}
           />
         )}
@@ -253,5 +268,5 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   qrBox: { backgroundColor: c.glassSoft, padding: 16, borderRadius: 16 },
   qrCode: { color: c.textDim, fontSize: 12, fontFamily: 'monospace', marginTop: 16 },
   qrClose: { marginTop: 20, paddingVertical: 12, paddingHorizontal: 40, borderRadius: 14, backgroundColor: c.primary },
-  qrCloseTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  qrCloseTxt: { color: c.onPrimary, fontSize: 15, fontWeight: '800' },
 });

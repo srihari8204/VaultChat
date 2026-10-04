@@ -38,14 +38,20 @@ export default function SearchScreen() {
   const router = useRouter();
   const [query, setQuery] = useState('');
   const [chats, setChats] = useState<ChatSummary[]>([]);
-  const [msgs, setMsgs] = useState<MsgHit[]>([]);
+  // The hits AND the query that produced them. The input runs ~220 ms ahead
+  // of the debounced search, so highlighting against the live query could
+  // miss the match in a hit that is still on screen from the previous query.
+  const [found, setFound] = useState<{ q: string; hits: MsgHit[] }>({ q: '', hits: [] });
+  const msgs = found.hits;
   const [loading, setLoading] = useState(true);
   // listChats failed: chat names below come from the device cache.
   const [chatsOffline, setChatsOffline] = useState(false);
   // The on-device message search threw: "Nothing found" would be a lie.
   const [msgError, setMsgError] = useState(false);
+  // Bumped by the failure notice's retry, which re-runs the search below.
+  const [retry, setRetry] = useState(0);
   const authHeader = useAuthHeader();
-  const debounce = useRef<any>(null);
+  const debounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     let cancel = false;
@@ -69,16 +75,16 @@ export default function SearchScreen() {
   useEffect(() => {
     clearTimeout(debounce.current);
     const q = query.trim();
-    if (q.length < 2) { setMsgs([]); setMsgError(false); return; }
+    if (q.length < 2) { setFound({ q: '', hits: [] }); setMsgError(false); return; }
     // `stale` stops an older, slower search from overwriting a newer query's hits.
     let stale = false;
     debounce.current = setTimeout(() => {
       searchAllMessages(q, 50)
-        .then((hits) => { if (!stale) { setMsgs(hits); setMsgError(false); } })
-        .catch(() => { if (!stale) { setMsgs([]); setMsgError(true); } });
+        .then((hits) => { if (!stale) { setFound({ q, hits }); setMsgError(false); } })
+        .catch(() => { if (!stale) { setFound({ q, hits: [] }); setMsgError(true); } });
     }, 220);
     return () => { stale = true; clearTimeout(debounce.current); };
-  }, [query]);
+  }, [query, retry]);
 
   const chatTitle = useMemo(() => {
     const m = new Map<string, ChatSummary>();
@@ -101,7 +107,7 @@ export default function SearchScreen() {
 
   const openChat = (id: string, jumpTo?: number) => {
     if (jumpTo) setPendingJump(id, jumpTo);   // chat.tsx consumes this on focus → scrolls to the message
-    router.push({ pathname: '/chat', params: { id } } as any);
+    router.push({ pathname: '/chat', params: { id } });
   };
 
   return (
@@ -124,13 +130,18 @@ export default function SearchScreen() {
         />
       </View>
 
-      {(chatsOffline || msgError) && !loading && (
+      {chatsOffline && !loading && (
         <View style={S.notice} accessibilityLiveRegion="polite">
           <Ionicons name="alert-circle-outline" size={16} color={colors.textDim} />
-          <Text style={S.noticeTxt}>
-            {[chatsOffline && 'Offline: chat names are from this device.', msgError && 'Couldn’t search messages. Try again.'].filter(Boolean).join(' ')}
-          </Text>
+          <Text style={S.noticeTxt}>Offline: chat names are from this device.</Text>
         </View>
+      )}
+      {msgError && !loading && (
+        <TouchableOpacity style={S.notice} onPress={() => setRetry(n => n + 1)} accessibilityLiveRegion="polite"
+          accessibilityRole="button" accessibilityLabel="Couldn't search messages. Tap to try again">
+          <Ionicons name="refresh" size={16} color={colors.textDim} />
+          <Text style={S.noticeTxt}>Couldn’t search messages. Tap to try again.</Text>
+        </TouchableOpacity>
       )}
 
       {loading ? (
@@ -165,7 +176,7 @@ export default function SearchScreen() {
             }
             const h = item as MsgHit;
             const c = chatTitle.get(h.chatId);
-            const snip = searchSnippet(h.content ?? '', query);
+            const snip = searchSnippet(h.content ?? '', found.q);
             const photoId = c?.type === 'direct' ? c?.peerPhotoURL : c?.photoURL;
             return (
               <TouchableOpacity style={S.row} onPress={() => openChat(h.chatId, h.id)} activeOpacity={0.7}
@@ -199,6 +210,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   rowTitle:   { color: c.text, fontSize: 16, fontWeight: '600' },
   rowSub:     { color: c.textDim, fontSize: 13, lineHeight: 19, marginTop: 4 },
   hit:        { color: c.text, fontWeight: '800' },
-  notice:     { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginTop: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, backgroundColor: c.glassSoft },
+  notice:     { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginTop: 8, paddingHorizontal: 12, paddingVertical: 8, minHeight: 44, borderRadius: 12, backgroundColor: c.glassSoft },
   noticeTxt:  { flex: 1, color: c.textDim, fontSize: 12.5, lineHeight: 17 },
 });

@@ -28,7 +28,7 @@ import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import * as Contacts from 'expo-contacts';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -107,12 +107,18 @@ export default function ContactsScreen() {
   // When the rows on screen were matched (from the cache or a scan just now).
   const [scannedAt,  setScannedAt]    = useState<number | null>(null);
 
+  // A scan can run for minutes on a large address book: leaving the screen
+  // stops the hashing loop and every later state update.
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+
   // ── Request permission + scan ─────────────────────────────
   const scan = useCallback(async () => {
     setScanning(true);
     setError(null);
     try {
       const { status, canAskAgain } = await Contacts.requestPermissionsAsync();
+      if (!alive.current) return;
       if (status !== 'granted') {
         setPermission('denied');
         setBlocked(!canAskAgain);
@@ -127,6 +133,7 @@ export default function ContactsScreen() {
         fields: [Contacts.Fields.Name, Contacts.Fields.PhoneNumbers],
         pageSize: 0, // all
       });
+      if (!alive.current) return;
 
       // Flatten to per-phone-number entries (one contact can have many phones)
       const withPhones = data.filter(c => c.phoneNumbers?.length);
@@ -142,6 +149,7 @@ export default function ContactsScreen() {
           if (!hash) continue;
           entries.push({ hash, contactId: c.id || raw, contactName, rawPhone: raw });
         }
+        if (!alive.current) return;
         // Every 25, not every one: 1000 setStates would cost more than the work.
         if (i % 25 === 0 || i === withPhones.length - 1) setProgress({ done: i + 1, total: withPhones.length });
       }
@@ -171,6 +179,7 @@ export default function ContactsScreen() {
           chunkFailed = true;
           console.warn('[contacts] match chunk failed:', err?.message);
         }
+        if (!alive.current) return;
       }
 
       const matchedHashSet = new Set(results.map(r => r.phoneHash));
@@ -199,7 +208,7 @@ export default function ContactsScreen() {
       // A failed chunk means we do not know who is on the app: listing those
       // contacts under "Invite" would be wrong, so show the error instead.
       setInvite(chunkFailed ? [] : inviteRows);
-      if (chunkFailed) setError("Couldn't check all your contacts — you may be offline. Tap refresh to try again.");
+      if (chunkFailed) setError("Couldn't check all your contacts — you may be offline.");
       else {
         // Only a complete scan is cached; a partial one would hide contacts.
         const at = Date.now();
@@ -207,10 +216,9 @@ export default function ContactsScreen() {
         writeSealedCache<CachedScan>(CACHE_KEY, { at, matched: matchedRows, invite: inviteRows });
       }
     } catch (e: any) {
-      setError(e?.message ?? 'Contact scan failed');
+      if (alive.current) setError(e?.message ?? 'Contact scan failed');
     } finally {
-      setScanning(false);
-      setProgress(null);
+      if (alive.current) { setScanning(false); setProgress(null); }
     }
   }, []);
 
@@ -245,9 +253,9 @@ export default function ContactsScreen() {
         router.replace({
           pathname: call === 'video' ? '/videocall' : '/voicecall',
           params: { chatId: res.id, peerUid: m.id, peerName: m.contactName || m.name || 'crazzychat user' },
-        } as any);
+        });
       } else {
-        router.replace({ pathname: '/chat', params: { id: res.id } } as any);
+        router.replace({ pathname: '/chat', params: { id: res.id } });
       }
     } catch (e: any) {
       Alert.alert(call ? 'Could not start the call' : 'Could not open chat', e?.message ?? 'Try again');
@@ -366,10 +374,12 @@ export default function ContactsScreen() {
         </View>
       )}
 
+      {/* The bar is the retry itself (its copy used to point at the refresh button). */}
       {error && permission === 'granted' && (
-        <View style={S.errorBar} accessibilityLiveRegion="polite">
-          <Text style={S.errorTxt}>{error}</Text>
-        </View>
+        <TouchableOpacity style={S.errorBar} onPress={scan} disabled={scanning} accessibilityLiveRegion="polite"
+          accessibilityRole="button" accessibilityLabel={`${error} Tap to scan again`} accessibilityState={{ disabled: scanning, busy: scanning }}>
+          <Text style={S.errorTxt}>{error} Tap to scan again.</Text>
+        </TouchableOpacity>
       )}
 
       {sections.length > 0 && (
@@ -408,7 +418,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   sub:           { color: c.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 8 },
   scanHint:      { color: c.textDim, fontSize: 13, marginTop: 8 },
 
-  errorBar:      { backgroundColor: tint(c.danger, 0.12), borderColor: tint(c.danger, 0.4), borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 10 },
+  errorBar:      { backgroundColor: tint(c.danger, 0.12), borderColor: tint(c.danger, 0.4), borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 10, minHeight: 44, justifyContent: 'center', borderRadius: 10 },
   errorTxt:      { color: c.danger, fontSize: 12 },
 
   sectionHeader: { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 8 },
@@ -417,7 +427,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   avatar:        { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   avatarOnApp:   { backgroundColor: c.primary },
   avatarInvite:  { backgroundColor: c.glassSoft, borderWidth: 1, borderColor: c.glassStroke },
-  avatarTxt:     { color: '#fff', fontSize: 16, fontWeight: '700' },
+  avatarTxt:     { color: c.onPrimary, fontSize: 16, fontWeight: '700' },
   // The invite disc is glass, not accent: white initials vanished on it in light mode.
   avatarInviteTxt: { color: c.text },
   rowBody:       { flex: 1 },
@@ -427,5 +437,5 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   actionInvite:  { color: c.textDim },
 
   ctaBtn:        { marginTop: 16, backgroundColor: c.primary, paddingHorizontal: 28, paddingVertical: 12, borderRadius: 24 },
-  ctaTxt:        { color: '#fff', fontWeight: '700', fontSize: 14 },
+  ctaTxt:        { color: c.onPrimary, fontWeight: '700', fontSize: 14 },
 });

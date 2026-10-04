@@ -72,6 +72,11 @@ export default function PuzzleBoard({ uri, grid, size, onSolved, accent, dim }: 
         key={slot}
         activeOpacity={0.85}
         onPress={() => tap(slot)}
+        // The picture cannot be spoken, but each slot can be named and picked:
+        // "row 2, column 3", selected while it waits for its swap partner.
+        accessibilityRole="button"
+        accessibilityLabel={`Piece at row ${Math.floor(slot / grid) + 1}, column ${(slot % grid) + 1}`}
+        accessibilityState={{ selected: picked === slot, disabled: done }}
         style={[
           S.slot,
           {
@@ -95,14 +100,14 @@ export default function PuzzleBoard({ uri, grid, size, onSolved, accent, dim }: 
         </View>
       </TouchableOpacity>
     );
-  }), [order, picked, grid, tile, size, uri, accent, tap]);
+  }), [order, picked, done, grid, tile, size, uri, accent, tap]);
 
   return (
     <View>
       <View style={[S.board, { width: size, height: size, borderColor: dim }]}>
         {tiles}
       </View>
-      <Text style={[S.hint, { color: dim }]}>
+      <Text style={[S.hint, { color: dim }]} accessibilityLiveRegion="polite">
         {done ? 'Solved' : picked === null ? 'Tap a piece, then tap where it goes' : 'Now tap its place'}
       </Text>
     </View>

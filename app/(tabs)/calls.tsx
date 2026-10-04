@@ -96,6 +96,8 @@ export default function CallsScreen() {
 
   useFocusEffect(useCallback(() => {
     let alive = true;
+    // A retry hides the old notice while it runs; a new failure shows it again.
+    if (syncTry > 0) setSyncFailed(false);
     // The device log paints FIRST, on its own, before anything touches the
     // network. It is already on disk, so the list is never blank waiting on a
     // request — and on an offline device or an unmigrated server, this is the
@@ -125,12 +127,12 @@ export default function CallsScreen() {
         if (server.length && me?.id) {
           getCallLog().then(local => {
             if (alive) setLog(mergeCallHistory(local, server, me.id, { get: (id) => byChat.get(id) }, hidden));
-          }).catch(() => {});
+          // The merge could not run, so the list is the device log alone —
+          // exactly what the sync notice says.
+          }).catch(() => { if (alive) setSyncFailed(true); });
         }
       }).catch(() => { if (alive) setSyncFailed(true); });
     return () => { alive = false; };
-    // syncTry is the retry trigger, not read inside.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [syncTry]));
 
   // Group consecutive calls with the same person (WhatsApp "(3)"), or with the
@@ -153,13 +155,13 @@ export default function CallsScreen() {
   ) => {
     if (g.group) {
       router.push({
-        pathname: '/group-calls' as any,
+        pathname: '/group-calls',
         params: { chatId: g.chatId ?? '', groupName: g.peerName, mode: kind === 'video' ? 'video' : 'voice' },
       });
       return;
     }
     const path = kind === 'video' ? '/videocall' : '/voicecall';
-    router.push({ pathname: path as any, params: { chatId: g.chatId ?? '', peerUid: g.peerUid, peerName: g.peerName } });
+    router.push({ pathname: path, params: { chatId: g.chatId ?? '', peerUid: g.peerUid, peerName: g.peerName } });
   }, [router]);
 
   // Removing a row has to reach BOTH sources. Local entries are deleted from
@@ -308,8 +310,8 @@ export default function CallsScreen() {
         />
       )}
 
-      <TouchableOpacity style={S.fab} activeOpacity={0.85} onPress={() => router.push({ pathname: '/contacts', params: { mode: 'call' } } as any)} accessibilityRole="button" accessibilityLabel="New call">
-        <Ionicons name="call" size={24} color="#fff" />
+      <TouchableOpacity style={S.fab} activeOpacity={0.85} onPress={() => router.push({ pathname: '/contacts', params: { mode: 'call' } })} accessibilityRole="button" accessibilityLabel="New call">
+        <Ionicons name="call" size={24} color={colors.onPrimary} />
       </TouchableOpacity>
 
       {/* Call info — every call with this person */}

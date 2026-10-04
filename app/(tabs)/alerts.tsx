@@ -27,19 +27,21 @@ import { AppText as Text } from '../../components/ui/Text';
 import { AuroraBackground } from '../../components/ui';
 import { tint } from '../../lib/tintColor';
 
-// Severity ink per theme. Critical/low reuse the palette's danger/success; the
-// three hues the palette has no role for get a darker light-theme variant so the
-// icon and the SEVERITY label stay readable on the light ground.
-const SEV_INK: Record<'high' | 'medium' | 'info', { light: string; dark: string }> = {
-  high:   { light: '#B45309', dark: '#F59E0B' },
-  medium: { light: '#A16207', dark: '#FBBF24' },
-  info:   { light: '#0E7490', dark: '#06B6D4' },
-};
+// Severity ink. Critical, high, low and info use palette roles (danger,
+// warning, success, accentOn — each AA on this theme's ground). Medium is the
+// one level with no palette role: a yellow kept distinct from high's amber,
+// with a darker light-theme variant so the icon and SEVERITY label stay
+// readable on the light ground.
+const MEDIUM_INK = { light: '#A16207', dark: '#FBBF24' };
 function sevColor(sev: AuditSeverity, c: Palette, scheme: 'light' | 'dark'): string {
   if (sev === 'critical') return c.danger;
+  if (sev === 'high') return c.warning;
+  if (sev === 'medium') return MEDIUM_INK[scheme];
   if (sev === 'low') return c.success;
-  return (SEV_INK[sev] ?? SEV_INK.info)[scheme];
+  return c.accentOn;
 }
+
+const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message) || fallback;
 
 function iconForType(type: string): keyof typeof Ionicons.glyphMap {
   switch (type) {
@@ -100,8 +102,8 @@ export default function AlertsScreen() {
       if (!alive.current) return;
       setEvents(evs);
       setStatus(st);
-    } catch (e: any) {
-      if (alive.current) setError(e?.message || 'Could not load security events');
+    } catch (e) {
+      if (alive.current) setError(errText(e, 'Could not load security events'));
     } finally {
       if (alive.current) setLoading(false);
     }
@@ -137,7 +139,7 @@ export default function AlertsScreen() {
         // Same routing as the launch scan in app/_layout.tsx. /blocked reads the
         // held verdict, not route params (a crafted link must not fake one).
         holdSecurityVerdict(report);
-        router.replace('/blocked' as any);
+        router.replace('/blocked');
         return;
       }
       Alert.alert(
@@ -146,8 +148,8 @@ export default function AlertsScreen() {
           ? 'This device passed the integrity scan. The result is in the log below.'
           : `${report.threats.length} low-risk signal${report.threats.length === 1 ? '' : 's'} noted (for example developer options). Nothing was blocked; details are in the log below.`,
       );
-    } catch (e: any) {
-      Alert.alert('Scan failed', e?.message || 'The device scan could not run. Nothing was changed — try again.');
+    } catch (e) {
+      Alert.alert('Scan failed', errText(e, 'The device scan could not run. Nothing was changed — try again.'));
     } finally {
       setScanning(false);
       load();
@@ -227,8 +229,8 @@ export default function AlertsScreen() {
           accessibilityState={{ disabled: scanning, busy: scanning }}
         >
           {scanning
-            ? <ActivityIndicator size="small" color="#fff" />
-            : <Ionicons name="shield-checkmark" size={16} color="#fff" />}
+            ? <ActivityIndicator size="small" color={colors.onPrimary} />
+            : <Ionicons name="shield-checkmark" size={16} color={colors.onPrimary} />}
           <Text style={S.scanBtnText}>{scanning ? 'Scanning…' : 'Scan device'}</Text>
         </TouchableOpacity>
       </View>
@@ -306,7 +308,7 @@ const makeStyles = (c: Palette, m: ReturnType<typeof useVisionComfort>['metrics'
   title:    { color: c.text, fontSize: 28, fontWeight: '800' },
   subtitle: { color: c.textDim, fontSize: 13, marginTop: 2 },
   scanBtn:  { minHeight: 44 * m.controlScale, flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.primary, paddingHorizontal: 14, paddingVertical: 9 * m.controlScale, borderRadius: 12 },
-  scanBtnText: { flexShrink: 1, color: '#fff', fontWeight: '700', fontSize: 13 },
+  scanBtnText: { flexShrink: 1, color: c.onPrimary, fontWeight: '700', fontSize: 13 },
 
   banner:   { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10, borderWidth: 1 },
   bannerOk: { backgroundColor: brandAlpha(0.08), borderColor: brandAlpha(0.3) },

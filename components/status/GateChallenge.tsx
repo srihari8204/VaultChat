@@ -15,15 +15,13 @@
 // The poster never sees their own gate: they hold the raw key locally
 // (putMediaKey at post time), so their own status opens straight away.
 
-import React, { useCallback, useState, useMemo } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import PuzzleBoard from './PuzzleBoard';
-import type { Palette } from '../../constants/theme';
-import { useColors } from '../../lib/theme';
 
 interface Props {
   kind: 'puzzle' | 'question';
@@ -56,8 +54,6 @@ interface Props {
 export default function GateChallenge({
   kind, grid, previewUri, previewPending, prompt, onAnswer, onSolved, onDismiss, accent,
 }: Props) {
-  const c = useColors();
-  const S = useMemo(() => makeS(c), [c]);
   const insets = useSafeAreaInsets();
   const [answer, setAnswer] = useState('');
   const [busy, setBusy] = useState(false);
@@ -160,7 +156,7 @@ export default function GateChallenge({
   );
 }
 
-const makeS = (c: Palette) => StyleSheet.create({
+const S = StyleSheet.create({
   // The gate sits on the story viewer's always-black stage and every glyph
   // here is white, so the surface is black in both themes (c.bg was white in
   // light theme: white title and input on white).

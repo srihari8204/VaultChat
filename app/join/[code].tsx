@@ -25,6 +25,8 @@ import { joinViaInvite, previewInvite } from '../../lib/chatService';
 import { AuroraBackground } from '../../components/ui';
 import { AppText as Text } from '../../components/ui/Text';
 
+const PREVIEW_WAIT_MS = 4000;
+
 type Phase =
   | { kind: 'confirm' }
   | { kind: 'joining' }
@@ -38,6 +40,10 @@ export default function JoinScreen() {
   const { code } = useLocalSearchParams<{ code: string }>();
   const [phase, setPhase] = useState<Phase>({ kind: 'confirm' });
   const [preview, setPreview] = useState<{ name: string; memberCount: number; requiresApproval: boolean } | null>(null);
+  // Join waits (briefly) for the preview, so nobody consents to "this group" a
+  // moment before its name would have appeared. Settles on any answer, or after
+  // PREVIEW_WAIT_MS against a slow or older server.
+  const [previewSettled, setPreviewSettled] = useState(false);
   // Set by Cancel (and on unmount). The request cannot be recalled once sent,
   // but its result must not pull the user into a chat they walked away from.
   const cancelledRef = useRef(false);
@@ -54,10 +60,12 @@ export default function JoinScreen() {
       if (res.pending) { setPhase({ kind: 'pending' }); return; }
       // Joined (or already a member) — go straight to the chat, replacing this
       // screen so Back doesn't bounce through the redeem flow.
-      router.replace({ pathname: '/chat', params: { id: res.chatId } } as any);
+      router.replace({ pathname: '/chat', params: { id: res.chatId } });
     } catch (e: any) {
       if (cancelledRef.current) return;
-      setPhase({ kind: 'error', message: e?.message ?? 'This link is invalid, expired, or revoked.', retry: true });
+      // 410 = revoked, expired or used up (as the preview says): retrying the
+      // same code cannot work. Anything else (offline, a 5xx) can.
+      setPhase({ kind: 'error', message: e?.message ?? 'This link is invalid, expired, or revoked.', retry: e?.status !== 410 });
     }
   }, [code, router]);
 
@@ -66,16 +74,17 @@ export default function JoinScreen() {
     const clean = String(code ?? '').trim();
     if (!clean) { setPhase({ kind: 'error', message: 'This invite link is missing its code.', retry: false }); return; }
     let dead = false;
+    const settle = setTimeout(() => { if (!dead) setPreviewSettled(true); }, PREVIEW_WAIT_MS);
     previewInvite(clean).then((p) => { if (!dead) setPreview(p); }).catch((e: any) => {
       if (dead) return;
       // 410 = revoked, expired, used up or unknown: there is nothing to join.
       // Anything else (offline, an older server) keeps the generic confirm.
       if (e?.status === 410) setPhase({ kind: 'error', message: 'This invite link is invalid, expired, or revoked.', retry: false });
-    });
-    return () => { dead = true; };
+    }).finally(() => { if (!dead) setPreviewSettled(true); });
+    return () => { dead = true; clearTimeout(settle); };
   }, [code]);
 
-  const goHome = () => router.replace('/(tabs)/chats' as any);
+  const goHome = () => router.replace('/(tabs)/chats');
 
   return (
     <View style={s.container}>
@@ -98,7 +107,11 @@ export default function JoinScreen() {
               Someone shared a group invite link with you. If you join, the group&apos;s members will see you
               and your messages there.
             </Text>
-            <TouchableOpacity style={[s.cta, { backgroundColor: colors.primary }]} onPress={redeem} activeOpacity={0.85} accessibilityRole="button">
+            {!previewSettled && (
+              <Text style={s.sub} accessibilityLiveRegion="polite">Loading group details…</Text>
+            )}
+            <TouchableOpacity style={[s.cta, { backgroundColor: colors.primary }, !previewSettled && { opacity: 0.5 }]} onPress={redeem}
+              disabled={!previewSettled} activeOpacity={0.85} accessibilityRole="button" accessibilityState={{ disabled: !previewSettled, busy: !previewSettled }}>
               <Text style={s.ctaTxt}>Join group</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.ghost} onPress={goHome} activeOpacity={0.7} accessibilityRole="button">
@@ -164,7 +177,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   // a pinned 52 and clipped, leaving the only retry on a failed invite unreadable.
   // 52 stays the floor and the padding keeps the pill identical at scale 1.0.
   cta: { marginTop: 20, minHeight: 52, paddingVertical: 10, borderRadius: 14, backgroundColor: c.accent, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, minWidth: 200 },
-  ctaTxt: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  ctaTxt: { color: c.onPrimary, fontSize: 16, fontWeight: '800' },
   ghost: { marginTop: 6, paddingVertical: 10, paddingHorizontal: 16, minHeight: 44, justifyContent: 'center' },
   ghostTxt: { color: c.textDim, fontSize: 14, fontWeight: '600' },
 });

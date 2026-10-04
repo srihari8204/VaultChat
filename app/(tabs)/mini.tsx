@@ -32,10 +32,9 @@ import { GLOW } from '../../constants/glass';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
-// ── Mini Apps matching PDF (page 12) ─────────────────────────────
-// Row 1: Watch, Walkie, Screen
-// Row 2: Notes, Scanner, Location
-// Row 3: Current Loc, Cloud, Security Hub
+// ── Mini app tiles, in grid order (3/4/5 columns by width) ─────
+// Each gradient is the tile's own brand artwork under a white glyph, the same
+// in both themes.
 const MINI_APPS_MAIN = [
   // Broadcast. The ONLY mode that is not end-to-end encrypted \u2014 app/live.tsx
   // states that before anything is published, rather than leaving someone to
@@ -62,10 +61,11 @@ const MINI_APPS_MAIN = [
 // The Todo List's saved items are still on device under `vc_miniapp_todos`,
 // sealed with the cache DEK. NOT deleted with the feature: that key holds the
 // user's own text, and removing a screen is reversible while destroying what
-// someone wrote is not. It is also not in purgeAccountData()'s scoped list, so
-// it already outlived sign-out before this change. Decision (2026-10-04): it
-// stays on device (never destroyed by a UI change); removing it at sign-out
-// belongs in purgeAccountData(), next to the other user content it purges.
+// someone wrote is not. It is not in purgeAccountData()'s scoped list, so it
+// outlives sign-out (unreadable without the cache key sign-out drops). Whether
+// sign-out should erase it is an open product decision
+// (2026-10-04_fix_status.md §5, "Mini-app to-dos"); if yes, the key goes into
+// purgeAccountData() next to the other user content it purges.
 
 export default function MiniAppsScreen() {
   const c = useColors();
@@ -85,7 +85,7 @@ export default function MiniAppsScreen() {
     if (!flagEnabled(`mini.${appId}`)) return;
     // Every entry has a route (the `satisfies` above); there is no "Soon" tile.
     const mainApp = MINI_APPS_MAIN.find(a => a.id === appId);
-    if (mainApp) router.push(mainApp.route as any);
+    if (mainApp) router.push(mainApp.route);
   };
 
   // ── Main grid view ────────────────────────────────────────────
@@ -96,7 +96,9 @@ export default function MiniAppsScreen() {
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* ── Header ────────────────────────────────── */}
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} accessibilityRole="button" accessibilityLabel="Back">
+          {/* Fallback as on Profile: a deep link straight to this tab has no
+              history, and the tab bar is hidden here (app/(tabs)/_layout.tsx). */}
+          <TouchableOpacity onPress={() => { if (router.canGoBack()) router.back(); else router.replace('/(tabs)/chats'); }} style={styles.backBtn} accessibilityRole="button" accessibilityLabel="Back">
             <Ionicons name="arrow-back" size={20} color={c.text} />
           </TouchableOpacity>
           <View style={{ flex: 1, minWidth: 0 }}>
@@ -108,7 +110,7 @@ export default function MiniAppsScreen() {
           </View>
         </View>
 
-        {/* ── Mini Apps 3x3 Grid (matching PDF page 12) ─── */}
+        {/* ── Mini app grid ─── */}
         <AppText variant="h3" style={styles.sectionTitle}>Mini Apps</AppText>
         <View style={styles.grid}>
           {/* AUDIT F11. Each tile is behind a kill switch keyed on its id, so a
@@ -172,9 +174,9 @@ const makeStyles = (c: Palette, width: number, m: ReturnType<typeof useVisionCom
     marginBottom: 24,
   },
   backBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 44 * m.controlScale,
+    height: 44 * m.controlScale,
+    borderRadius: 22 * m.controlScale,
     backgroundColor: c.glassSoft,
     justifyContent: 'center',
     alignItems: 'center',
@@ -201,7 +203,7 @@ const makeStyles = (c: Palette, width: number, m: ReturnType<typeof useVisionCom
     marginBottom: 14,
   },
 
-  // ── 3-column Grid (matching PDF page 12) ───────────
+  // ── Grid: 3 columns on phones, 4/5 on wider windows ───────────
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -209,7 +211,7 @@ const makeStyles = (c: Palette, width: number, m: ReturnType<typeof useVisionCom
   },
   appCard: {
     width: appCardW,
-    minHeight: 104,
+    minHeight: 104 * m.controlScale,
     backgroundColor: c.glass,
     borderRadius: 20,
     paddingHorizontal: 8,
@@ -225,8 +227,8 @@ const makeStyles = (c: Palette, width: number, m: ReturnType<typeof useVisionCom
     elevation: 3,
   },
   appIconWrap: {
-    width: 50,
-    height: 50,
+    width: 50 * m.controlScale,
+    height: 50 * m.controlScale,
     borderRadius: 18,
     justifyContent: 'center',
     alignItems: 'center',

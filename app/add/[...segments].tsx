@@ -24,11 +24,6 @@ function useS() {
   return useMemo(() => makeStyles(colors), [colors]);
 }
 
-/** A malformed `%` sequence must not throw during render. */
-function safeDecode(s: string): string {
-  try { return decodeURIComponent(s); } catch { return s; }
-}
-
 type Phase =
   | { k: 'resolving' }
   | { k: 'confirm'; userId: string; name: string }
@@ -42,12 +37,16 @@ export default function AddByVaultIdScreen() {
   const { segments } = useLocalSearchParams<{ segments?: string | string[] }>();
   const [phase, setPhase] = useState<Phase>({ k: 'resolving' });
   const ran = useRef(false);
+  // Cancel during the lookup navigates away; the lookup must not keep setting
+  // state on a screen that is gone.
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
 
-  // First path segment is the VaultID; a second (optional) is a display name
-  // hint we only use for the resolving label until the server name comes back.
+  // First path segment is the VaultID. A second (the QR's display name) is
+  // ignored on purpose: anyone can craft a link that says "Mum", so nothing is
+  // shown but the VaultID until the SERVER's name for it comes back.
   const parts = Array.isArray(segments) ? segments : segments ? [segments] : [];
   const vaultId = (parts[0] ?? '').replace(/^@/, '').trim();
-  const nameHint = parts[1] ? safeDecode(parts[1]) : '';
 
   const resolve = useCallback(async () => {
     if (!vaultId) { setPhase({ k: 'error', msg: 'This link is missing a VaultID.', retry: false }); return; }
@@ -55,18 +54,19 @@ export default function AddByVaultIdScreen() {
     // must not put arbitrary text into the lookup path.
     if (!isVaultId(vaultId)) { setPhase({ k: 'error', msg: 'This link does not contain a valid VaultID.', retry: false }); return; }
     setPhase({ k: 'resolving' });
+    const set = (p: Phase) => { if (alive.current) setPhase(p); };
     try {
       const me = await getMyProfile();
       if (me.vaultId && me.vaultId.replace(/^@/, '') === vaultId) {
-        setPhase({ k: 'error', msg: "That's your own VaultID.", retry: false });
+        set({ k: 'error', msg: "That's your own VaultID.", retry: false });
         return;
       }
       const peer = await resolveVaultId(vaultId);
-      setPhase({ k: 'confirm', userId: peer.userId, name: peer.name || `@${vaultId}` });
+      set({ k: 'confirm', userId: peer.userId, name: peer.name || `@${vaultId}` });
     } catch (e: any) {
-      if (e?.status === 404) setPhase({ k: 'error', msg: `No crazzychat user found for @${vaultId}.`, retry: false });
-      else if (e?.status === 401) setPhase({ k: 'error', msg: 'Sign in first, then open this link again.', retry: false });
-      else setPhase({ k: 'error', msg: e?.message ?? 'Could not look up this contact.', retry: true });
+      if (e?.status === 404) set({ k: 'error', msg: `No crazzychat user found for @${vaultId}.`, retry: false });
+      else if (e?.status === 401) set({ k: 'error', msg: 'Sign in first, then open this link again.', retry: false });
+      else set({ k: 'error', msg: e?.message ?? 'Could not look up this contact.', retry: true });
     }
   }, [vaultId]);
 
@@ -82,9 +82,10 @@ export default function AddByVaultIdScreen() {
     setPhase({ k: 'opening', userId, name });
     try {
       const { id } = await createDirectChat({ userId });
-      router.replace({ pathname: '/chat', params: { id, peerUid: userId, peerName: name } } as any);
+      if (!alive.current) return;
+      router.replace({ pathname: '/chat', params: { id, peerUid: userId, peerName: name } });
     } catch (e: any) {
-      setPhase({ k: 'error', msg: e?.message ?? 'Could not open this chat.', retry: true });
+      if (alive.current) setPhase({ k: 'error', msg: e?.message ?? 'Could not open this chat.', retry: true });
     }
   }, [phase, router]);
 
@@ -120,7 +121,7 @@ export default function AddByVaultIdScreen() {
             accessibilityLabel={`Open chat with ${phase.name}`}
             accessibilityState={{ busy: phase.k === 'opening', disabled: phase.k === 'opening' }}
           >
-            {phase.k === 'opening' ? <ActivityIndicator color="#fff" /> : <Text style={S.btnTxt}>Open chat</Text>}
+            {phase.k === 'opening' ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={S.btnTxt}>Open chat</Text>}
           </TouchableOpacity>
           <TouchableOpacity style={S.ghost} onPress={goChats} disabled={phase.k === 'opening'} activeOpacity={0.85} accessibilityRole="button">
             <Text style={S.ghostTxt}>Cancel</Text>
@@ -129,7 +130,7 @@ export default function AddByVaultIdScreen() {
       ) : (
         <>
           <ActivityIndicator color={colors.primary} size="large" />
-          <Text style={S.sub} accessibilityLiveRegion="polite">Looking up {nameHint || `@${vaultId}`}…</Text>
+          <Text style={S.sub} accessibilityLiveRegion="polite">Looking up @{vaultId}…</Text>
           <TouchableOpacity style={S.ghost} onPress={goChats} activeOpacity={0.85} accessibilityRole="button">
             <Text style={S.ghostTxt}>Cancel</Text>
           </TouchableOpacity>
@@ -146,7 +147,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   title:  { color: c.text, fontSize: 20, fontWeight: '800', textAlign: 'center' },
   sub:    { color: c.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20 },
   btn:    { marginTop: 12, backgroundColor: c.primary, borderRadius: 12, minHeight: 48, paddingVertical: 14, paddingHorizontal: 28, alignItems: 'center', justifyContent: 'center' },
-  btnTxt: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  btnTxt: { color: c.onPrimary, fontSize: 15, fontWeight: '700' },
   ghost:  { minHeight: 44, paddingVertical: 10, paddingHorizontal: 20, alignItems: 'center', justifyContent: 'center' },
   ghostTxt: { color: c.textDim, fontSize: 15, fontWeight: '600' },
 });

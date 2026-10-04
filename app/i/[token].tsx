@@ -13,6 +13,11 @@
 //
 // The token is a forwardable credential (lib/chatService.ts redeemInvitation),
 // so opening the link only ASKS; joining happens on an explicit tap.
+//
+// Not done here, and why: the confirm cannot name the group, because the
+// server has no token-bound preview (join/[code] has /chats/join/:code/preview);
+// and whether this legacy route gets a retirement date or a producer again is
+// a product decision. Both are listed in the round-4 fix log.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
@@ -22,12 +27,15 @@ import { useTheme } from '../../lib/theme';
 import { type Palette } from '../../constants/theme';
 import { tint } from '../../lib/tintColor';
 import { redeemInvitation } from '../../lib/chatService';
+import { AuroraBackground } from '../../components/ui';
 import { AppText as Text } from '../../components/ui/Text';
 
 type Phase =
   | { kind: 'confirm' }
   | { kind: 'redeeming' }
-  | { kind: 'error'; message: string };
+  // `retry` is false when trying again cannot help: no token, or the server
+  // said the invitation is expired, superseded or not valid (410).
+  | { kind: 'error'; message: string; retry: boolean };
 
 export default function InviteTokenScreen() {
   const { colors } = useTheme();
@@ -42,14 +50,14 @@ export default function InviteTokenScreen() {
 
   const redeem = useCallback(async () => {
     const t = String(token ?? '').trim();
-    if (!t) { setPhase({ kind: 'error', message: 'This invitation link is missing its code.' }); return; }
+    if (!t) { setPhase({ kind: 'error', message: 'This invitation link is missing its code.', retry: false }); return; }
     cancelledRef.current = false;
     setPhase({ kind: 'redeeming' });
     try {
       const res = await redeemInvitation(t);
       if (cancelledRef.current) return;
       // Replace, so Back does not bounce the user through the redeem screen.
-      router.replace({ pathname: '/chat', params: { id: res.chatId } } as any);
+      router.replace({ pathname: '/chat', params: { id: res.chatId } });
     } catch (e: any) {
       if (cancelledRef.current) return;
       setPhase({
@@ -57,18 +65,20 @@ export default function InviteTokenScreen() {
         // The server distinguishes expired / superseded / full; surface its
         // wording rather than flattening every case to "invalid".
         message: e?.message ?? 'This invitation is no longer valid.',
+        retry: e?.status !== 410 && e?.status !== 400,
       });
     }
   }, [token, router]);
 
   useEffect(() => {
-    if (!String(token ?? '').trim()) setPhase({ kind: 'error', message: 'This invitation link is missing its code.' });
+    if (!String(token ?? '').trim()) setPhase({ kind: 'error', message: 'This invitation link is missing its code.', retry: false });
   }, [token]);
 
-  const goChats = () => router.replace('/(tabs)/chats' as any);
+  const goChats = () => router.replace('/(tabs)/chats');
 
   return (
     <View style={st.wrap}>
+      <AuroraBackground />
       {/* The root Stack hides headers, so this screen draws its own exits. */}
       <Stack.Screen options={{ headerShown: false }} />
       {phase.kind === 'confirm' ? (
@@ -107,13 +117,21 @@ export default function InviteTokenScreen() {
           </View>
           <Text style={st.title} accessibilityRole="header">Cannot join</Text>
           <Text style={st.msg}>{phase.message}</Text>
-          <TouchableOpacity onPress={redeem} style={st.btn} accessibilityRole="button">
-            <Ionicons name="refresh" size={17} color="#fff" />
-            <Text style={st.btnTxt}>Try again</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={goChats} style={st.link} accessibilityRole="button">
-            <Text style={st.linkPrimary}>Go to chats</Text>
-          </TouchableOpacity>
+          {phase.retry ? (
+            <>
+              <TouchableOpacity onPress={redeem} style={st.btn} accessibilityRole="button">
+                <Ionicons name="refresh" size={17} color={colors.onPrimary} />
+                <Text style={st.btnTxt}>Try again</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={goChats} style={st.link} accessibilityRole="button">
+                <Text style={st.linkPrimary}>Go to chats</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <TouchableOpacity onPress={goChats} style={st.btn} accessibilityRole="button">
+              <Text style={st.btnTxt}>Go to chats</Text>
+            </TouchableOpacity>
+          )}
         </>
       )}
     </View>
@@ -121,14 +139,15 @@ export default function InviteTokenScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  wrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 28, gap: 12, backgroundColor: c.bg },
+  // Transparent over AuroraBackground, like the other link screens (join, add).
+  wrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 28, gap: 12, backgroundColor: 'transparent' },
   badge: { width: 74, height: 74, borderRadius: 37, alignItems: 'center', justifyContent: 'center' },
   badgeOk: { backgroundColor: tint(c.primary, 0.1) },
   badgeErr: { backgroundColor: tint(c.danger, 0.1) },
   title: { color: c.text, fontSize: 19, fontWeight: '800' },
   msg: { color: c.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20 },
   btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 48, borderRadius: 13, paddingHorizontal: 28, marginTop: 10, backgroundColor: c.primary },
-  btnTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  btnTxt: { color: c.onPrimary, fontSize: 15, fontWeight: '800' },
   link: { padding: 10, minHeight: 44, justifyContent: 'center' },
   linkDim: { color: c.textDim, fontWeight: '600' },
   linkPrimary: { color: c.primary, fontWeight: '600' },
