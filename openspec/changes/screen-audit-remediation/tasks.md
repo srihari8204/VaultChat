@@ -98,8 +98,10 @@ updated ratings it links. No backend file is changed by this change.
 
 ## 5. Validation
 
-- [x] 5.1 `tsc` 0 errors; `expo lint` 0 errors / 158 warnings; `npm test` 380/384, where the four
-      failures are the environmental baseline; 29 new selftest suites — **written**
-- [ ] 5.2 Independent re-rating of every changed screen; results in `2026-10-04_fix_status.md` — **written**
+- [x] 5.1 `tsc` 0 errors; `expo lint` 0 errors / 158 warnings; `npm test` 386/390, where the four
+      failures are the environmental baseline; 35 new selftest suites — **written**
+- [x] 5.2 Independent re-rating of every changed screen, in two rounds (147, then 36 screens).
+      Regressions found in round 1 were fixed in round 2. Mean of the 174 remaining screens:
+      6.2 → 7.1; 132 up, 42 unchanged, 0 down. Results in `2026-10-04_fix_status.md` — **written**
 - [ ] 5.3 Device pass on Android and iOS for the items marked above
 - [ ] 5.4 Ship in an app release; sync `screen-integrity` to `openspec/specs` only after 5.3
