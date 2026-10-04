@@ -30,7 +30,11 @@ export async function ensureNotifyPermission(): Promise<boolean> {
  */
 function triggerFor(freq: ReminderFreq, at: number): any {
   const { trigger: t } = osTriggerFor(freq, at, Date.now());
-  return t.type === 'date' ? { date: new Date(t.at) } : t;
+  // expo-notifications rejects a date trigger without its type (one-off and
+  // snooze reminders were never scheduled), as app/message-reminder.tsx does.
+  return t.type === 'date'
+    ? { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(t.at) }
+    : t;
 }
 
 /** Schedule a (possibly recurring) local notification. Returns its id, or null. */

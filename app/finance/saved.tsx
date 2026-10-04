@@ -77,7 +77,13 @@ export default function Saved() {
           title: `${r.type === 'simple' ? 'Simple' : 'Compound'} interest`,
           sub: `${rateText(r)} · ${r.time_years} yr · ${fmtDate(r.created_at)}`,
           amount: r.total_amount, at: r.created_at,
-          onPress: () => viewCalc(r), onDelete: () => deleteCalc(r),
+          onPress: () => viewCalc(r),
+          // The screen-reader Delete action has no sheet in front of it, so it
+          // asks here; the sheet's own Delete button is its confirmation.
+          onDelete: () => Alert.alert('Delete this calculation?', 'This cannot be undone.', [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Delete', style: 'destructive', onPress: () => deleteCalc(r) },
+          ]),
         })),
         ...groups.map(g => ({
           id: g.id, kind: 'chitti' as Kind,
