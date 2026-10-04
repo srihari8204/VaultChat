@@ -11,7 +11,7 @@ import { AuroraBackground } from '../components/ui';
 
 import { BRAND_ACCENT } from '../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   View, TouchableOpacity, StyleSheet,
   FlatList, Alert, Vibration, ActivityIndicator,
@@ -32,6 +32,7 @@ import type { Palette } from '../constants/theme';
 import { useColors, useTheme } from '../lib/theme';
 import { HEADER_TOP } from '../constants/layout';
 import { permissionDenied } from '../lib/permissionDenied';
+import { parseVaultManifest } from '../lib/vaultManifestParse';
 
 // ─────────────────────────────────────────────────────────────────
 // Types
@@ -189,6 +190,12 @@ export default function VaultScreen() {
   const [vaultKeys,   setVaultKeys]   = useState<VaultKeys | null>(null);
   const [activeTab,   setActiveTab]   = useState<VaultTab>('Documents');
   const [files,       setFiles]       = useState<VaultFile[]>([]);
+  // Latest saved manifest, so an add or delete never builds on a stale render.
+  const filesRef = useRef<VaultFile[]>([]);
+  // Writes are allowed only after a good read: saving over a manifest we could
+  // not read would orphan every earlier .enc file.
+  const [manifestState, setManifestState] = useState<'loading' | 'ok' | 'failed'>('loading');
+  const adding = useRef(false);
   const [loading,     setLoading]     = useState(false);
   const [loadingText, setLoadingText] = useState('Encrypting…');
   const [showBackup,  setShowBackup]  = useState(false);
@@ -225,14 +232,21 @@ export default function VaultScreen() {
   };
 
   const loadManifest = async () => {
+    setManifestState('loading');
     try {
-      const raw = await SecureStore.getItemAsync(MANIFEST_KEY);
-      if (raw) setFiles(JSON.parse(raw));
-    } catch {}
+      const list = parseVaultManifest<VaultFile>(await SecureStore.getItemAsync(MANIFEST_KEY));
+      filesRef.current = list;
+      setFiles(list);
+      setManifestState('ok');
+    } catch {
+      setManifestState('failed');
+    }
   };
 
   const saveManifest = async (updated: VaultFile[]) => {
+    if (manifestState !== 'ok') throw new Error('The vault file list did not load. Retry before changing it.');
     await SecureStore.setItemAsync(MANIFEST_KEY, JSON.stringify(updated));
+    filesRef.current = updated;
     setFiles(updated);
   };
 
@@ -274,8 +288,12 @@ export default function VaultScreen() {
         id: fileId, name, size, type,
         encPath, addedAt: Date.now(), mimeType,
       };
-      const updated = [...files, newFile];
-      await saveManifest(updated);
+      try {
+        await saveManifest([...filesRef.current, newFile]);
+      } catch (e) {
+        await FileSystem.deleteAsync(encPath, { idempotent: true }).catch(() => {});
+        throw e;
+      }
 
       Alert.alert('Added to Vault', `${name} encrypted and stored.`);
     } catch (e: any) {
@@ -287,6 +305,12 @@ export default function VaultScreen() {
 
   // ── Add file handlers per tab ─────────────────────────────────
   const handleAdd = async () => {
+    if (adding.current || loading || manifestState !== 'ok') return;
+    adding.current = true;
+    try { await pickAndAdd(); } finally { adding.current = false; }
+  };
+
+  const pickAndAdd = async () => {
     if (activeTab === 'Photos') {
       const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
@@ -386,6 +410,7 @@ export default function VaultScreen() {
 
   // ── Delete file ───────────────────────────────────────────────
   const handleDelete = (file: VaultFile) => {
+    if (manifestState !== 'ok') return;
     Alert.alert(
       'Delete File',
       `Permanently delete "${file.name}" from Vault?`,
@@ -396,8 +421,7 @@ export default function VaultScreen() {
           onPress: async () => {
             try {
               await FileSystem.deleteAsync(file.encPath, { idempotent: true });
-              const updated = files.filter(f => f.id !== file.id);
-              await saveManifest(updated);
+              await saveManifest(filesRef.current.filter(f => f.id !== file.id));
             } catch (e: any) {
               Alert.alert('Not deleted', e?.message ?? 'The file could not be removed. Try again.');
             }
@@ -535,7 +559,28 @@ export default function VaultScreen() {
       </View>
 
       {/* File list */}
-      {loading ? (
+      {manifestState !== 'ok' && !loading ? (
+        <View style={styles.loadingWrap}>
+          {manifestState === 'loading' ? (
+            <ActivityIndicator color={c.primary} size="large" accessibilityLabel="Loading vault files" />
+          ) : (
+            <>
+              <Text style={styles.keyNotice} accessibilityRole="alert">
+                The vault file list could not be read. Your files are untouched; adding and deleting
+                are paused until it loads.
+              </Text>
+              <TouchableOpacity
+                style={styles.retryBtn}
+                onPress={loadManifest}
+                accessibilityRole="button"
+                accessibilityLabel="Retry loading vault files"
+              >
+                <Text style={styles.retryText}>Retry</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+      ) : loading ? (
         <View style={styles.loadingWrap}>
           <ActivityIndicator color={c.primary} size="large" />
           <Text style={styles.loadingText}>{loadingText}</Text>
@@ -597,7 +642,14 @@ export default function VaultScreen() {
       )}
 
       {/* Add file FAB */}
-      <TouchableOpacity accessibilityRole="button" accessibilityLabel="Add to vault" style={styles.fab} onPress={handleAdd}>
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel="Add to vault"
+        accessibilityState={{ disabled: loading || manifestState !== 'ok' }}
+        disabled={loading || manifestState !== 'ok'}
+        style={[styles.fab, (loading || manifestState !== 'ok') && styles.fabDisabled]}
+        onPress={handleAdd}
+      >
         <Ionicons name="add" size={28} color="#FFFFFF" />
       </TouchableOpacity>
 
@@ -785,6 +837,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     justifyContent: 'center', alignItems: 'center',
     elevation: 6,
   },
+  fabDisabled: { opacity: 0.4 },
+  retryBtn: { minHeight: 44, paddingHorizontal: 24, borderRadius: 12, backgroundColor: c.primary, justifyContent: 'center', alignItems: 'center' },
+  retryText: { color: '#FFFFFF', fontWeight: 'bold', fontSize: 15 },
   fabText: { fontSize: 28, color: '#FFFFFF', fontWeight: 'bold', lineHeight: 32 },
 
   // Backup modal

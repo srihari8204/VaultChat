@@ -17,6 +17,7 @@ import {
   type Reminder, type ReminderFreq,
 } from '../../db/reminders';
 import { scheduleReminder, scheduleAt, cancel, snoozedNotifIds } from '../../components/finance/notify';
+import { isUnscheduled } from '../../components/finance/notifyIds';
 
 const FREQ_LABEL: Record<ReminderFreq, string> = { once: 'Once', daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', yearly: 'Yearly' };
 
@@ -140,7 +141,7 @@ export default function Reminders() {
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={s.title} numberOfLines={2}>{r.title}</Text>
                 <Text style={s.sub}>{fmtDateTime(r.next_at)}</Text>
-                {!r.notif_id && <Text style={[s.sub, { color: FIN.bad }]}>Not scheduled: notifications are off</Text>}
+                {isUnscheduled(r.freq, r.notif_id) && <Text style={[s.sub, { color: FIN.bad }]}>Not scheduled: notifications are off</Text>}
               </View>
             </View>
             <View style={s.actions}>

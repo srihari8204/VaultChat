@@ -1,6 +1,6 @@
 // npx tsx components/finance/notifyIds.selftest.ts
 import assert from 'node:assert/strict';
-import { snoozedNotifIds, splitNotifIds } from './notifyIds';
+import { isUnscheduled, snoozedNotifIds, splitNotifIds } from './notifyIds';
 
 // recurring: the recurrence survives a snooze
 assert.deepEqual(snoozedNotifIds('monthly', 'R1', 'S1'), { keep: 'R1,S1', cancel: null });
@@ -18,5 +18,14 @@ assert.deepEqual(snoozedNotifIds('once', null, null), { keep: null, cancel: null
 assert.deepEqual(splitNotifIds('R1,S1'), ['R1', 'S1']);
 assert.deepEqual(splitNotifIds(',S1'), ['S1']);
 assert.deepEqual(splitNotifIds(null), []);
+// the "Not scheduled" warning survives a snooze of a recurrence that never scheduled
+assert.equal(isUnscheduled('weekly', null), true);
+assert.equal(isUnscheduled('weekly', snoozedNotifIds('weekly', null, 'S1').keep), true);
+assert.equal(isUnscheduled('weekly', ',S1'), true);
+assert.equal(isUnscheduled('monthly', 'R1'), false);
+assert.equal(isUnscheduled('monthly', 'R1,S1'), false);
+// a one-off is scheduled when its (snooze) id exists
+assert.equal(isUnscheduled('once', null), true);
+assert.equal(isUnscheduled('once', 'S1'), false);
 
 console.log('notifyIds selftest: all passed');

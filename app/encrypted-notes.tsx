@@ -296,6 +296,12 @@ export default function EncryptedNotesScreen() {
   }, [pendingLock, lockTry]);
 
   const openEditor = (note?: Note, unlocked = false) => {
+    // No editing (and so no attaching, which would mint a stand-in key) until
+    // the stored notes have opened — see saveNotes.
+    if (!loadOk.current) {
+      Alert.alert('Notes not open', 'Your existing notes could not be opened, so editing is turned off to avoid overwriting them. Open Backup to recover the key.');
+      return;
+    }
     // A locked note goes to the challenge instead of the editor. Without this
     // the padlock badge promised a protection that did not exist.
     if (note?.isLocked && !unlocked) {
@@ -358,6 +364,7 @@ export default function EncryptedNotesScreen() {
   };
 
   const addAttachmentMenu = () => {
+    if (!loadOk.current) return;
     Alert.alert('Add attachment', 'Encrypted with your notes key before it touches disk.', [
       { text: 'Photo / Image', onPress: attachImage },
       { text: 'File', onPress: attachFile },
@@ -807,7 +814,15 @@ export default function EncryptedNotesScreen() {
       </TouchableOpacity>
 
       {/* FAB */}
-      <TouchableOpacity style={s.fab} onPress={() => openEditor()} accessibilityLabel="New note" activeOpacity={0.8}>
+      <TouchableOpacity
+        style={[s.fab, loadState !== 'ok' && { opacity: 0.4 }]}
+        onPress={() => openEditor()}
+        disabled={loadState !== 'ok'}
+        accessibilityRole="button"
+        accessibilityLabel="New note"
+        accessibilityState={{ disabled: loadState !== 'ok' }}
+        activeOpacity={0.8}
+      >
         <Ionicons name="add" size={28} color="#FFF" />
       </TouchableOpacity>
 
@@ -824,7 +839,7 @@ export default function EncryptedNotesScreen() {
               <TouchableOpacity onPress={() => setEdPreview(p => !p)}>
                 <Text style={[s.editorCancel, edPreview && { color: colors.primary }]}>{edPreview ? 'Edit' : 'Preview'}</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={saveNote} accessibilityRole="button" accessibilityState={{ disabled: loadState !== 'ok' }}>
+              <TouchableOpacity onPress={saveNote} disabled={loadState !== 'ok'} accessibilityRole="button" accessibilityState={{ disabled: loadState !== 'ok' }}>
                 <Text style={s.editorSave}>Save</Text>
               </TouchableOpacity>
             </View>
@@ -884,7 +899,7 @@ export default function EncryptedNotesScreen() {
             <View style={s.edSection}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Text style={s.edLabel}>Attachments {edAttachments.length > 0 ? `(${edAttachments.length})` : ''}</Text>
-                <TouchableOpacity onPress={addAttachmentMenu} disabled={attaching} style={s.attachBtn}>
+                <TouchableOpacity onPress={addAttachmentMenu} disabled={attaching || loadState !== 'ok'} style={s.attachBtn} accessibilityRole="button" accessibilityLabel="Attach a file" accessibilityState={{ disabled: attaching || loadState !== 'ok', busy: attaching }}>
                   {attaching ? <ActivityIndicator size="small" color={colors.primary} /> : <Text style={s.attachBtnTxt}>＋ Attach</Text>}
                 </TouchableOpacity>
               </View>

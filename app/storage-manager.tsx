@@ -62,7 +62,13 @@ async function walk(
   perChat?: { map: Record<string, string>; sizes: Record<string, number> },
 ): Promise<void> {
   let names: string[] = [];
-  try { names = await FileSystem.readDirectoryAsync(dir); } catch { return; }
+  // A root that does not exist yet holds nothing; any other read failure must
+  // reach the caller, or the screen reports "No app files on disk yet".
+  try { names = await FileSystem.readDirectoryAsync(dir); } catch (e) {
+    const info = await FileSystem.getInfoAsync(dir).catch(() => null);
+    if (info && !info.exists) return;
+    throw e;
+  }
   for (const name of names) {
     const uri = dir + (dir.endsWith('/') ? '' : '/') + name;
     let info: any;
@@ -277,7 +283,7 @@ export default function StorageManagerScreen() {
             <Ionicons name="pie-chart-outline" size={28} color={colors.accent} />
             <View style={{ marginLeft: 12, flex: 1 }}>
               <Text style={s.cardTitle}>crazzychat Storage Used</Text>
-              <Text style={s.storageBig}>{formatBytes(totalUsed)}</Text>
+              <Text style={s.storageBig}>{loadFailed ? '—' : formatBytes(totalUsed)}</Text>
             </View>
           </View>
           {freeSpace > 0 && (

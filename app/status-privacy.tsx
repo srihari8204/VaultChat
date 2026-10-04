@@ -15,6 +15,7 @@ import {
   getStatusPrivacy, setStatusPrivacy, listChats, attachmentUrl,
   type StatusPrivacyMode,
 } from '../lib/chatService';
+import { privacyUserIds, selectionAfterModeSwitch } from '../lib/statusPrivacySelection';
 
 type Contact = { id: string; name: string; photoURL: string | null };
 const MODES: { key: StatusPrivacyMode; label: string; sub: string }[] = [
@@ -74,14 +75,16 @@ export default function StatusPrivacyScreen() {
     if (saving) return;
     const prevMode = mode, prevSelected = selected;
     setMode(m); setSelected(ids); setSaving(true);
-    try { await setStatusPrivacy(m, m === 'contacts' ? [] : [...ids]); }
+    try { await setStatusPrivacy(m, privacyUserIds(m, ids)); }
     catch (e: any) {
       if (mounted.current) { setMode(prevMode); setSelected(prevSelected); }
       Alert.alert('Could not save', e?.message ?? 'Try again');
     } finally { if (mounted.current) setSaving(false); }
   }, [saving, mode, selected]);
 
-  const pickMode = (m: StatusPrivacyMode) => { if (m !== mode) commit(m, selected); };
+  // Each mode starts from an empty list: the excluded people must never become
+  // the only people who can see the status (lib/statusPrivacySelection).
+  const pickMode = (m: StatusPrivacyMode) => { if (m !== mode) commit(m, selectionAfterModeSwitch(mode, m, selected)); };
   const toggle = (id: string) => {
     const n = new Set(selected);
     if (n.has(id)) n.delete(id); else n.add(id);
@@ -133,6 +136,11 @@ export default function StatusPrivacyScreen() {
               {mode !== 'contacts' && (
                 <Text style={S.sectionLabel}>
                   {mode === 'except' ? 'EXCLUDED' : 'SHARED WITH'} · {selected.size}
+                </Text>
+              )}
+              {mode === 'only' && selected.size === 0 && (
+                <Text style={[S.modeSub, { marginHorizontal: 16, marginBottom: 4 }]} accessibilityLiveRegion="polite">
+                  Nobody can see your status until you pick people below.
                 </Text>
               )}
             </View>

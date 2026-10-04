@@ -1825,9 +1825,14 @@ export async function postTextStory(text: string, bgColor: string): Promise<any>
 }
 
 export type StatusPrivacyMode = 'contacts' | 'except' | 'only';
+// Throws on failure: a default here would read as the user's real choice, and
+// the next save would overwrite their server list (app/status-privacy.tsx).
 export async function getStatusPrivacy(): Promise<{ mode: StatusPrivacyMode; userIds: string[] }> {
-  try { return await api<{ mode: StatusPrivacyMode; userIds: string[] }>('/stories/privacy'); }
-  catch { return { mode: 'contacts', userIds: [] }; }
+  const r = await api<{ mode?: StatusPrivacyMode; userIds?: string[] }>('/stories/privacy');
+  if (!r || (r.mode !== 'contacts' && r.mode !== 'except' && r.mode !== 'only')) {
+    throw new Error('Status privacy came back in an unexpected form');
+  }
+  return { mode: r.mode, userIds: Array.isArray(r.userIds) ? r.userIds : [] };
 }
 export async function setStatusPrivacy(mode: StatusPrivacyMode, userIds: string[]): Promise<void> {
   await api('/stories/privacy', { method: 'PUT', json: { mode, userIds } });

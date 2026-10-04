@@ -24,3 +24,13 @@ export function snoozedNotifIds(
   const keep = snoozeId ? `${recurring},${snoozeId}` : (recurring || null);
   return { keep, cancel: oldSnoozes.filter(Boolean).join(',') || null };
 }
+
+/**
+ * True when the reminder will not alert on its own schedule: a one-off with no
+ * id, or a recurring reminder whose recurrence slot is empty. A snooze id alone
+ * (",S1") does not make a recurring reminder scheduled — it fires once.
+ */
+export function isUnscheduled(freq: ReminderFreq, stored: string | null): boolean {
+  if (freq === 'once') return splitNotifIds(stored).length === 0;
+  return !(stored ?? '').split(',')[0];
+}

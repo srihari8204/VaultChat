@@ -13,6 +13,11 @@ import { Buffer } from 'buffer';
 
 const DEK_KEY = 'vc_notes_dek_v1';
 let dekCache: Uint8Array | null = null;
+// Set while a sealed notes blob has failed to open in this process. A new key
+// minted then (e.g. by attaching a file) would sit in SecureStore and make the
+// real key's recovery look like a conflict, so creation is refused until the
+// notes open or a key is imported.
+let storeUnreadable = false;
 
 // A key is only ever CREATED on the encrypt paths. Reading (decrypt) with no key
 // used to mint a fresh one: the notes failed to open, and the new key then sat
@@ -25,6 +30,7 @@ async function getDEK(create = true): Promise<Uint8Array | null> {
   let hex = await SecureStore.getItemAsync(DEK_KEY);
   if (!hex) {
     if (!create) return null;
+    if (storeUnreadable) throw new Error('Your notes key is missing on this device. Recover it from Backup first.');
     const dek = randomBytes(32);
     hex = bytesToHex(dek);
     await SecureStore.setItemAsync(DEK_KEY, hex);
@@ -66,12 +72,14 @@ export async function decryptNotes(raw: string): Promise<{ text: string; wasEncr
 
   try {
     const key = await getDEK(false);
-    if (!key) return null;   // the key is missing — never invent one here
+    if (!key) { storeUnreadable = true; return null; }   // the key is missing — never invent one here
     const iv = Buffer.from(parsed.iv, 'base64');
     const ct = Buffer.from(parsed.ct, 'base64');
     const pt = gcm(key, iv).decrypt(ct);
+    storeUnreadable = false;
     return { text: new TextDecoder().decode(pt), wasEncrypted: true };
   } catch {
+    storeUnreadable = true;
     return null; // wrong/rotated key or tampered blob
   }
 }
@@ -132,6 +140,7 @@ export async function importDEKHex(hex: string, force = false): Promise<boolean>
   if (!force && await SecureStore.getItemAsync(DEK_KEY)) return false;
   await SecureStore.setItemAsync(DEK_KEY, hex.toLowerCase());
   dekCache = hexToBytes(hex.toLowerCase());
+  storeUnreadable = false;
   return true;
 }
 

@@ -3311,13 +3311,16 @@ function VerificationScreen({ onBack }: { onBack: () => void }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [loadErr, setLoadErr] = useState('');
+  // Nothing about the shop's status shows until a load has succeeded: the
+  // 'unverified' default would read "Not verified" for a verified shop.
+  const [loaded, setLoaded] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const r = await SB.shopDocuments();
       setDocs(r.documents); setAccepted(r.accepted ?? []);
-      setState(r.verifyState); setNote(r.verifyNote); setLoadErr('');
+      setState(r.verifyState); setNote(r.verifyNote); setLoadErr(''); setLoaded(true);
     } catch (e: any) { setLoadErr(e?.message ?? 'Could not load your documents'); }
     finally { setLoading(false); }
   }, []);
@@ -3380,6 +3383,8 @@ function VerificationScreen({ onBack }: { onBack: () => void }) {
       <ScrollView contentContainerStyle={s.body}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
         {!!loadErr && <ErrorState title="Could not load your documents" sub={loadErr} onRetry={load} />}
+        {!loaded && loading && !loadErr && <ActivityIndicator color={C.green} accessibilityLabel="Loading verification status" />}
+        {loaded && (<>
         <View style={s.panel}>
           <Text style={[s.panelTitle, { color: copy.tone }]}>{copy.label}</Text>
           <Text style={s.hint}>{copy.hint}</Text>
@@ -3427,11 +3432,13 @@ function VerificationScreen({ onBack }: { onBack: () => void }) {
         </Text>
 
         {(state === 'unverified' || state === 'rejected') && (
-          <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={submit}>
+          <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={submit}
+            accessibilityRole="button" accessibilityLabel="Submit for verification" accessibilityState={{ disabled: busy, busy }}>
             {busy ? <ActivityIndicator color="#fff" />
                   : <Text style={s.primaryBtnText}>Submit for verification</Text>}
           </TouchableOpacity>
         )}
+        </>)}
       </ScrollView>
     </>
   );

@@ -6,7 +6,7 @@
      After editing that script, recompute the hash, e.g.
      python3 -c "import re,hashlib,base64,sys;s=open(sys.argv[1]).read();print(base64.b64encode(hashlib.sha256(re.findall(r'<script>(.*?)</script>',s,re.S)[-1].encode()).digest()).decode())" FILE
      The page refuses to run its script until the hash matches. frame-ancestors cannot be set from a meta tag: send it as a header. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-y5kZuqCwL4lyK4K3unfSpZ7TVAnZnV84gr0ili4uUN4='; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-K1cdc/PRnVAqfP+0IrnK3+SqisG9gkRhrSujfJlRQiA='; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'" />
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>crazzychat Server Logs</title>
 <style>
@@ -123,7 +123,8 @@
   const state = {
     src: localStorage.getItem('lv_src') || 'go-api',
     sources: [],
-    timer: null,
+    timer: null,          // auto-refresh interval
+    retry: null,          // reconnect loop while not connected
     stick: true,          // stay glued to the bottom unless the user scrolls up
     connected: false,
     lastLines: [],
@@ -192,10 +193,12 @@
     if (state.stick) wrapEl.scrollTop = wrapEl.scrollHeight;
   }
 
+  const token = () => $('token').value.trim();
+
   async function api(path) {
     const r = await fetch(`${EP}${path}`, {
       cache: 'no-store',
-      headers: { 'X-Log-Token': $('token').value.trim() },
+      headers: { 'X-Log-Token': token() },
     });
     return r.json();
   }
@@ -210,6 +213,7 @@
   async function loadSources() {
     try {
       const d = await api('/sources');
+      if (!token()) return false;   // token forgotten while this was in flight
       if (!d.ok) { setConnected(false, d.error || 'unauthorized'); return false; }
       state.sources = d.sources || [];
       if (!state.sources.some((s) => s.id === state.src) && state.sources[0]) state.src = state.sources[0].id;
@@ -227,6 +231,7 @@
     try {
       const p = new URLSearchParams({ src: state.src, lines: $('lines').value, since: $('since').value });
       const d = await api(`/logs?${p}`);
+      if (!token()) return;          // token forgotten while this was in flight
       if (d.error === 'bad token') { setConnected(false, 'bad token'); return; }
       state.lastLines = d.ok ? d.lines : [`⚠  ${d.error || 'command failed'}`, ...(d.lines || [])];
       setConnected(true, 'connected');
@@ -238,8 +243,22 @@
 
   function schedule() {
     clearInterval(state.timer);
+    state.timer = null;
     const ms = +$('auto').value;
-    if (ms) state.timer = setInterval(load, ms);
+    if (ms && token()) state.timer = setInterval(load, ms);
+  }
+
+  // Polling runs only while there is a token; "forget token" stops all of it.
+  function startTimers() {
+    schedule();
+    clearInterval(state.retry);
+    state.retry = token()
+      ? setInterval(() => { if (!state.connected) loadSources().then((ok) => ok && load()); }, 3000)
+      : null;
+  }
+  function stopTimers() {
+    clearInterval(state.timer); clearInterval(state.retry);
+    state.timer = null; state.retry = null;
   }
 
   // ── wiring ──
@@ -248,8 +267,9 @@
   $('lines').onchange = load;
   $('since').onchange = load;
   $('auto').onchange = schedule;
-  $('token').onchange = () => { sessionStorage.setItem('lv_tok', $('token').value.trim()); state.sources = []; load(); };
+  $('token').onchange = () => { sessionStorage.setItem('lv_tok', token()); state.sources = []; load(); startTimers(); };
   $('forgetBtn').onclick = () => {
+    stopTimers();
     sessionStorage.removeItem('lv_tok'); $('token').value = '';
     state.sources = []; state.lastLines = []; $('log').innerHTML = ''; $('nav').innerHTML = '';
     setConnected(false, 'token cleared');
@@ -269,9 +289,7 @@
   });
 
   // keep retrying until the token/service is right, then settle into the cadence
-  load();
-  schedule();
-  setInterval(() => { if (!state.connected) loadSources().then((ok) => ok && load()); }, 3000);
+  if (token()) { load(); startTimers(); } else setConnected(false, 'no token');
 })();
 </script>
 </body>

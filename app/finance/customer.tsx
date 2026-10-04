@@ -5,7 +5,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { financeStatusColors, TABULAR, type FinancePalette } from '../../constants/financeTheme';
 import { FinHeader, HeroCard, StatTile, TileGrid, Pill, EmptyState, LoadingState, ErrorState } from '../../components/finance/ui';
@@ -45,6 +44,19 @@ export default function CustomerProfile() {
   }), [rows]);
 
   const mobile = rows.find(r => r.mobile)?.mobile ?? null;
+
+  // Without a name there is nothing to look up: reload never starts, and the
+  // spinner would turn forever.
+  if (!String(name ?? '').trim()) {
+    return (
+      <View style={s.screen}>
+        <FinHeader title="Customer" />
+        <View style={s.body}>
+          <EmptyState icon="person-outline" title="Customer not found" sub="Open a customer from one of their ledgers." />
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={s.screen}>
