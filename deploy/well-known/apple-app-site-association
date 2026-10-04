@@ -1,0 +1,14 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["REPLACE_WITH_APPLE_TEAM_ID.com.vaultchat.app"],
+        "components": [
+          { "/": "/add/*",  "comment": "VaultID contact link (app/add/[...segments])" },
+          { "/": "/join/*", "comment": "group invite link (app/join/[code])" },
+          { "/": "/live/join/*", "comment": "Private Live invitation (api.corefinite.com only)" }
+        ]
+      }
+    ]
+  }
+}

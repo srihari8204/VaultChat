@@ -1,0 +1,13 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.vaultchat.app",
+      "sha256_cert_fingerprints": [
+        "5F:C1:97:FC:3F:09:F6:84:C6:86:1B:7E:58:76:BE:58:24:D4:AA:CB:BC:26:CC:30:9F:D6:4A:97:DC:79:1A:59",
+        "REPLACE_WITH_PLAY_APP_SIGNING_KEY_SHA256"
+      ]
+    }
+  }
+]

@@ -523,12 +523,11 @@ func shiftGet(w http.ResponseWriter, r *http.Request) {
 	user := httpx.UserFrom(r)
 	chatID := r.PathValue("id")
 
+	// Any CURRENT member may read the shift (read-only): it is the window
+	// their own attendance is judged against. Left members and outsiders get
+	// 403. Only edit_settings may change it (shiftSet); canEdit says which.
 	mem := chatsRequireMem(w, r, 403, "You cannot see this space's shift", "Failed to load shift")
 	if mem == nil {
-		return
-	}
-	if !mem.can(groups.PermEditSettings) && !mem.can(groups.PermViewSpaceOps) {
-		httpx.Err(w, 403, "You cannot see this space's shift")
 		return
 	}
 	var start, end string
@@ -545,6 +544,7 @@ func shiftGet(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, 200, map[string]any{
 		"shiftStart": start, "shiftEnd": end,
 		"shiftGraceMinutes": grace, "runDelayThresholdMinutes": delay,
+		"canEdit": mem.can(groups.PermEditSettings),
 	})
 }
 

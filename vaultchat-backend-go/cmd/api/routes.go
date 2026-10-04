@@ -27,6 +27,7 @@ func registerRoutes(mux *http.ServeMux) {
 		routes.RegisterAuth(mux)
 		routes.RegisterUploads(mux)
 		routes.RegisterChannels(mux)
+		routes.RegisterNetSpeed(mux) // GET /net/speed/down, POST /net/speed/up (network test)
 		routes.RegisterVaultbeam(mux)
 		routes.RegisterUser(mux)
 		routes.RegisterAdmin(mux)

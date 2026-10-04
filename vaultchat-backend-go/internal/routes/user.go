@@ -38,6 +38,7 @@ import (
 	ccwirev1 "vaultchat/backend-go/internal/ccwire/gen/ccwire/v1"
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/httpx"
+	"vaultchat/backend-go/internal/redisx"
 	"vaultchat/backend-go/internal/vault"
 
 	"google.golang.org/protobuf/proto"
@@ -472,11 +473,14 @@ func userReportsPost(w http.ResponseWriter, r *http.Request) {
 
 var userExpoHTTP = &http.Client{Timeout: 15 * time.Second}
 
+// A var so a test can point the SOS send path at a fake provider.
+var userExpoPushURL = "https://exp.host/--/api/v2/push/send"
+
 func userExpoPostBatch(chunk []map[string]any) []map[string]any {
 	var lastErr error
 	for attempt := 1; attempt <= 3; attempt++ {
 		body, _ := json.Marshal(chunk)
-		req, err := http.NewRequest("POST", "https://exp.host/--/api/v2/push/send", strings.NewReader(string(body)))
+		req, err := http.NewRequest("POST", userExpoPushURL, strings.NewReader(string(body)))
 		if err != nil {
 			return nil
 		}
@@ -514,7 +518,10 @@ func userExpoPostBatch(chunk []map[string]any) []map[string]any {
 
 // userSendExpoPush ports push.js sendPushToTokens (batching, retries, dead-
 // token pruning). Errors never propagate — SOS logs and continues like Node.
-func userSendExpoPush(ctx context.Context, tokens []string, title, body string, data map[string]any) {
+// It returns the tokens Expo ACCEPTED (ticket status "ok"): the provider took
+// the notification for delivery. Not proof of display (that needs receipts).
+func userSendExpoPush(ctx context.Context, tokens []string, title, body string, data map[string]any) map[string]bool {
+	accepted := map[string]bool{}
 	valid := []string{}
 	for _, t := range tokens {
 		if strings.HasPrefix(t, "Expo") {
@@ -522,7 +529,7 @@ func userSendExpoPush(ctx context.Context, tokens []string, title, body string, 
 		}
 	}
 	if len(valid) == 0 {
-		return
+		return accepted
 	}
 	dead := []string{}
 	for i := 0; i < len(valid); i += 100 {
@@ -540,6 +547,9 @@ func userSendExpoPush(ctx context.Context, tokens []string, title, body string, 
 			if idx >= len(slice) || t == nil {
 				continue
 			}
+			if s, _ := t["status"].(string); s == "ok" {
+				accepted[slice[idx]] = true
+			}
 			if s, _ := t["status"].(string); s == "error" {
 				if d, _ := t["details"].(map[string]any); d != nil {
 					if e, _ := d["error"].(string); e == "DeviceNotRegistered" {
@@ -555,6 +565,7 @@ func userSendExpoPush(ctx context.Context, tokens []string, title, body string, 
 			log.Printf("[push] prune dead tokens: %v", err)
 		}
 	}
+	return accepted
 }
 
 // userJSFloat renders a float64 like JS template-literal number coercion for
@@ -633,24 +644,27 @@ func userSosPost(w http.ResponseWriter, r *http.Request) {
 		myName = *namePtr
 	}
 
-	notified := 0
+	notified, reached := 0, 0
 	if len(recipients) > 0 {
 		tokRows, err := db.Pool.Query(ctx,
-			`SELECT push_token FROM devices WHERE user_id = ANY($1::uuid[])`, recipients)
+			`SELECT user_id::text, push_token FROM devices WHERE user_id = ANY($1::uuid[])`, recipients)
 		if err != nil {
 			httpx.Err(w, 500, "Failed to send SOS")
 			return
 		}
 		tokens := []string{}
+		owner := map[string]string{} // token → contact, to count PEOPLE reached
 		for tokRows.Next() {
+			var uid string
 			var t *string
-			if err := tokRows.Scan(&t); err != nil {
+			if err := tokRows.Scan(&uid, &t); err != nil {
 				tokRows.Close()
 				httpx.Err(w, 500, "Failed to send SOS")
 				return
 			}
 			if t != nil && *t != "" {
 				tokens = append(tokens, *t)
+				owner[*t] = uid
 			}
 		}
 		tokRows.Close()
@@ -672,10 +686,15 @@ func userSosPost(w http.ResponseWriter, r *http.Request) {
 			if lng != nil {
 				lngV = *lng
 			}
-			userSendExpoPush(ctx, tokens, title,
+			accepted := userSendExpoPush(ctx, tokens, title,
 				fmt.Sprintf("%s %s.%s", myName, verb, mapURL),
 				map[string]any{"type": "sos", "test": test, "fromUserId": user.ID,
 					"latitude": latV, "longitude": lngV})
+			people := map[string]bool{}
+			for tk := range accepted {
+				people[owner[tk]] = true
+			}
+			reached = len(people)
 		}
 		notified = len(recipients)
 	}
@@ -704,15 +723,18 @@ func userSosPost(w http.ResponseWriter, r *http.Request) {
 	var id int64
 	var createdAt time.Time
 	err = db.Pool.QueryRow(ctx,
-		`INSERT INTO sos_events (user_id, type, contacts_notified)
-	     VALUES ($1, $2, $3) RETURNING id, created_at`,
-		user.ID, sosType, notified).Scan(&id, &createdAt)
+		`INSERT INTO sos_events (user_id, type, contacts_notified, contacts_reached)
+	     VALUES ($1, $2, $3, $4) RETURNING id, created_at`,
+		user.ID, sosType, notified, reached).Scan(&id, &createdAt)
 	if err != nil {
 		httpx.Err(w, 500, "Failed to send SOS")
 		return
 	}
 	httpx.JSON(w, 200, map[string]any{
+		// Addressed to (trusted contacts in scope) vs reached (the push
+		// provider accepted the alert for at least one of their devices).
 		"contactsNotified": notified,
+		"contactsReached":  reached,
 		"id":               strconv.FormatInt(id, 10),
 		"createdAt":        httpx.JSTime(createdAt),
 	})
@@ -723,7 +745,7 @@ func userSosGet(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := httpx.UserFrom(r)
 	rows, err := db.Pool.Query(ctx,
-		`SELECT id, type, latitude, longitude, contacts_notified, created_at
+		`SELECT id, type, latitude, longitude, contacts_notified, contacts_reached, created_at
 	       FROM sos_events WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20`,
 		user.ID)
 	if err != nil {
@@ -737,8 +759,9 @@ func userSosGet(w http.ResponseWriter, r *http.Request) {
 		var sosType string
 		var lat, lng *float64
 		var notified int
+		var reached *int // NULL before migration 144
 		var createdAt time.Time
-		if err := rows.Scan(&id, &sosType, &lat, &lng, &notified, &createdAt); err != nil {
+		if err := rows.Scan(&id, &sosType, &lat, &lng, &notified, &reached, &createdAt); err != nil {
 			httpx.Err(w, 500, "Failed to load SOS history")
 			return
 		}
@@ -748,6 +771,7 @@ func userSosGet(w http.ResponseWriter, r *http.Request) {
 			"latitude":         lat,
 			"longitude":        lng,
 			"contactsNotified": notified,
+			"contactsReached":  reached,
 			"createdAt":        httpx.JSTime(createdAt),
 		})
 	}
@@ -1245,6 +1269,12 @@ func userProfilePut(w http.ResponseWriter, r *http.Request) {
 
 var userPinRe = regexp.MustCompile(`^\d{4,8}$`)
 
+// POST /user/pin/verify: 5 wrong tries per 15 minutes per user, then 423.
+const (
+	userPinVerifyLimit  int64 = 5
+	userPinVerifyWindow int64 = 900
+)
+
 func userPinPost(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := httpx.UserFrom(r)
@@ -1283,6 +1313,20 @@ func userPinVerify(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, 200, map[string]any{"ok": false})
 		return
 	}
+	// Per-user attempt budget, fail-closed like authMpinCheck: this route also
+	// accepts the MPIN, so without a limit a stolen access token could grind it
+	// here at line rate. Its own key, so hidden-chat typos do not lock sign-in.
+	// ponytail: with "mpin:<id>" separate, an attacker gets 5 + 5 MPIN guesses
+	// per 15 min across the two routes; share one key if that ever matters.
+	key := "pinverify:" + user.ID
+	if gate := redisx.ConsumeSecure(ctx, key, userPinVerifyLimit, userPinVerifyWindow); !gate.Allowed {
+		reset := gate.ResetInSec
+		if reset <= 0 {
+			reset = userPinVerifyWindow
+		}
+		authEnvErrRetry(w, http.StatusLocked, "locked", fmt.Sprintf("Too many attempts. Try again in %ds", reset), reset)
+		return
+	}
 	var pinHash, mpinHash *string
 	err := db.Pool.QueryRow(ctx,
 		`SELECT pin_hash, mpin_hash FROM users WHERE id = $1 AND is_deleted = FALSE LIMIT 1`,
@@ -1301,6 +1345,9 @@ func userPinVerify(w http.ResponseWriter, r *http.Request) {
 	}
 	if !ok && mpinHash != nil && *mpinHash != "" {
 		ok = vault.VerifySecret(pin, *mpinHash)
+	}
+	if ok {
+		redisx.Reset(ctx, key)
 	}
 	httpx.JSON(w, 200, map[string]any{"ok": ok})
 }

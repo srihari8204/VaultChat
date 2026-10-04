@@ -1419,8 +1419,9 @@ func authLookup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var b struct {
-		Email any `json:"email"`
-		Phone any `json:"phone"`
+		Email       any `json:"email"`
+		Phone       any `json:"phone"`
+		PhoneTicket any `json:"phoneTicket"`
 	}
 	_ = httpx.Body(r, &b)
 	email := vault.NormalizeEmail(authStr(b.Email))
@@ -1514,6 +1515,12 @@ func authLookup(w http.ResponseWriter, r *http.Request) {
 		}
 		if email == "" || (h.el != nil && *h.el == el) {
 			authAudit(ctx, &h.id, ip, "lookup", true)
+			// The account id is handed out only to a caller who proved the
+			// number (or, until enforcement is on, to everyone, as before).
+			if authRequirePhoneTicket() && !vault.VerifyTicket(authStr(b.PhoneTicket), pl) {
+				httpx.JSON(w, 200, map[string]any{"exists": true, "otpRequired": true})
+				return
+			}
 			httpx.JSON(w, 200, map[string]any{"exists": true, "userId": h.id})
 			return
 		}
@@ -1952,6 +1959,66 @@ func authMpinSet(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, 200, map[string]any{"ok": true})
 }
 
+// ── possession factor (SMS OTP) before MPIN and recovery ───────────────
+//
+// The sign-in path the app ships is: number → /auth/lookup (answers userId,
+// unauthenticated) → /auth/mpin/verify. Nothing in it proves the caller holds
+// the number, so anyone who knows a number gets five MPIN guesses per 15
+// minutes on that account, can read its recovery questions, and can burn its
+// MPIN budget to lock the owner out. The OTP stack already mints exactly the
+// proof needed: /auth/onboard/verify-otp-phone's phoneTicket, an HMAC over the
+// number's lookup hash, valid 15 minutes.
+//
+// AUTH_REQUIRE_PHONE_TICKET=1 makes these routes demand it (or, for a device
+// that is already signed in as that account, its access token). OFF by default
+// so this can deploy before the app sends tickets; turn it on once the app
+// version that runs OTP first is the minimum (GET /app/version).
+func authRequirePhoneTicket() bool { return os.Getenv("AUTH_REQUIRE_PHONE_TICKET") == "1" }
+
+// authPossession reports whether the request proves possession for userID: a
+// phoneTicket minted for that account's number, or a live access token whose
+// subject IS that account. Unknown accounts are simply false.
+func authPossession(r *http.Request, userID, phoneTicket string) (bool, error) {
+	if h := r.Header.Get("Authorization"); len(h) > 7 && strings.EqualFold(h[:7], "bearer ") {
+		if sub, _, err := httpx.VerifyAccess(strings.TrimSpace(h[7:])); err == nil && sub == userID {
+			return true, nil
+		}
+	}
+	if phoneTicket == "" {
+		return false, nil
+	}
+	var pl *string
+	err := db.Pool.QueryRow(r.Context(),
+		`SELECT phone_lookup FROM users WHERE id::text = $1 AND is_deleted = FALSE`, userID).Scan(&pl)
+	if db.NoRows(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return pl != nil && *pl != "" && vault.VerifyTicket(phoneTicket, *pl), nil
+}
+
+// authPossessionGate answers 403 otp_required (not 401: lib/api.ts treats a
+// 401 as a dead session) and returns false when enforcement is on and the
+// request carries no proof. It runs BEFORE any attempt budget is charged, so
+// a caller without the number cannot lock the owner out either.
+func authPossessionGate(w http.ResponseWriter, r *http.Request, userID, phoneTicket string) bool {
+	if !authRequirePhoneTicket() {
+		return true
+	}
+	ok, err := authPossession(r, userID, phoneTicket)
+	if err != nil {
+		authEnvErr(w, 500, "server_error", "Verification failed")
+		return false
+	}
+	if !ok {
+		authEnvErr(w, http.StatusForbidden, "otp_required", "Verify your mobile number with the SMS code first")
+		return false
+	}
+	return true
+}
+
 // ── MPIN proof (shared) ────────────────────────────────────────────────
 
 type mpinResult int
@@ -2001,14 +2068,18 @@ func authMpinCheck(r *http.Request, userID, mpin string) (user *authUserRow, res
 func authMpinVerify(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var b struct {
-		UserID any `json:"userId"`
-		Mpin   any `json:"mpin"`
+		UserID      any `json:"userId"`
+		Mpin        any `json:"mpin"`
+		PhoneTicket any `json:"phoneTicket"`
 	}
 	_ = httpx.Body(r, &b)
 	userID := authStr(b.UserID)
 	mpin := authStr(b.Mpin)
 	if userID == "" || mpin == "" {
 		authEnvErr(w, 400, "bad_request", "userId and mpin required")
+		return
+	}
+	if !authPossessionGate(w, r, userID, authStr(b.PhoneTicket)) {
 		return
 	}
 
@@ -2078,6 +2149,10 @@ func authSecurityQuestionsGet(w http.ResponseWriter, r *http.Request) {
 		authEnvErrRetry(w, 429, "rate_limited", "Too many requests. Try again later.", perUser.ResetInSec)
 		return
 	}
+	// A header, not a query parameter: tickets do not belong in access logs.
+	if !authPossessionGate(w, r, userID, r.Header.Get("X-Phone-Ticket")) {
+		return
+	}
 	rows, err := db.Pool.Query(ctx,
 		`SELECT question_code FROM user_security_questions WHERE user_id = $1 ORDER BY created_at`,
 		userID)
@@ -2107,13 +2182,17 @@ func authSecurityQuestionsGet(w http.ResponseWriter, r *http.Request) {
 func authSecurityQuestionsVerify(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var b struct {
-		UserID  any              `json:"userId"`
-		Answers []authAnswerBody `json:"answers"`
+		UserID      any              `json:"userId"`
+		Answers     []authAnswerBody `json:"answers"`
+		PhoneTicket any              `json:"phoneTicket"`
 	}
 	_ = httpx.Body(r, &b)
 	userID := authStr(b.UserID)
 	if userID == "" || len(b.Answers) == 0 {
 		authEnvErr(w, 400, "bad_request", "answers required")
+		return
+	}
+	if !authPossessionGate(w, r, userID, authStr(b.PhoneTicket)) {
 		return
 	}
 

@@ -213,14 +213,19 @@ func TestSpaceZBEShiftGet(t *testing.T) {
 		`{"shiftStart":"08:30","shiftEnd":"16:00","shiftGraceMinutes":15,"runDelayThresholdMinutes":20}`); code != 200 {
 		t.Fatalf("patch: %d %v", code, out)
 	}
-	for _, uid := range []string{zsAdmin, zsMod} { // edit_settings, view_space_ops
+	// Round 4: any current member reads it; only edit_settings may change it.
+	for uid, canEdit := range map[string]bool{zsAdmin: true, zsMod: false, zsDriver: false} {
 		code, out = call(t, mux, uid, "GET", path, "")
 		if code != 200 || out["shiftStart"] != "08:30" || out["shiftEnd"] != "16:00" ||
-			out["shiftGraceMinutes"] != float64(15) || out["runDelayThresholdMinutes"] != float64(20) {
+			out["shiftGraceMinutes"] != float64(15) || out["runDelayThresholdMinutes"] != float64(20) ||
+			out["canEdit"] != canEdit {
 			t.Errorf("%s get: %d %v", uid, code, out)
 		}
 	}
-	for _, uid := range []string{zsDriver, zsLeft, zsOutside} { // plain member, left, never joined
+	if code, _ := call(t, mux, zsDriver, "PATCH", path, `{"shiftStart":"09:00"}`); code != 403 {
+		t.Errorf("plain member patch: %d, want 403", code)
+	}
+	for _, uid := range []string{zsLeft, zsOutside} { // left, never joined
 		if code, out = call(t, mux, uid, "GET", path, ""); code != 403 {
 			t.Errorf("%s get: %d %v, want 403", uid, code, out)
 		}

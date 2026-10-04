@@ -6,14 +6,21 @@
      After editing that script, recompute the hash, e.g.
      python3 -c "import re,hashlib,base64,sys;s=open(sys.argv[1]).read();print(base64.b64encode(hashlib.sha256(re.findall(r'<script>(.*?)</script>',s,re.S)[-1].encode()).digest()).decode())" FILE
      The page refuses to run its script until the hash matches. frame-ancestors cannot be set from a meta tag: send it as a header. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-cW3rzRw/7/TIzy1Hw82bZrfBLNjH0xAfw1yiOP8NeAM='; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https: http://localhost:* http://127.0.0.1:*; img-src data:; base-uri 'none'; form-action 'none'" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-cW3rzRw/7/TIzy1Hw82bZrfBLNjH0xAfw1yiOP8NeAM='; style-src 'unsafe-inline'; font-src 'self'; connect-src https: http://localhost:* http://127.0.0.1:*; img-src data:; base-uri 'none'; form-action 'none'" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="dark" />
 <title>crazzychat · Admin Console</title>
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=Nunito+Sans:wght@400;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
 <style>
+  /* Self-hosted: no Google Fonts request carries the admin's IP. The files are
+     the app's own (assets/fonts/), deployed to fonts/ next to this page — see
+     admin/LOGS_DEPLOY.md. Only these five weights exist in the repo: Sora
+     500/600 render with the 700 face, and JetBrains Mono falls back to the
+     system monospace (--mono). Missing files fall back to sans-serif. */
+  @font-face{font-family:'Sora';font-weight:700;font-display:swap;src:url(fonts/Sora_700Bold.ttf) format('truetype')}
+  @font-face{font-family:'Sora';font-weight:800;font-display:swap;src:url(fonts/Sora_800ExtraBold.ttf) format('truetype')}
+  @font-face{font-family:'Nunito Sans';font-weight:400;font-display:swap;src:url(fonts/NunitoSans_400Regular.ttf) format('truetype')}
+  @font-face{font-family:'Nunito Sans';font-weight:600;font-display:swap;src:url(fonts/NunitoSans_600SemiBold.ttf) format('truetype')}
+  @font-face{font-family:'Nunito Sans';font-weight:700;font-display:swap;src:url(fonts/NunitoSans_700Bold.ttf) format('truetype')}
   :root{
     --bg:#070B14; --panel:#0D1322; --panel2:#111A2E; --line:rgba(232,182,76,.14);
     --line2:rgba(255,255,255,.07); --gold:#E8B64C; --gold-dim:rgba(232,182,76,.12);

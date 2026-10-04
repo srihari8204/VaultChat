@@ -80,7 +80,7 @@ func calendarList(w http.ResponseWriter, r *http.Request) {
 	// A recurring event whose repeat has already ended is filtered out here so
 	// dead repeats stop travelling to every client on every fetch.
 	err := chatsQueryU(ctx, user.ID,
-		`SELECT id, created_by, month_key, payload, repeat_until, created_at, updated_at
+		`SELECT id, created_by, COALESCE(updated_by, created_by), month_key, payload, repeat_until, created_at, updated_at
 		   FROM group_events
 		  WHERE chat_id = $1
 		    AND deleted_at IS NULL
@@ -90,16 +90,19 @@ func calendarList(w http.ResponseWriter, r *http.Request) {
 		[]any{chatID, months}, func(rows pgx.Rows) error {
 			var (
 				id                   int64
-				createdBy, monthKey  *string
+				createdBy, updatedBy *string
+				monthKey             *string
 				payload              string
 				repeatUntil          *time.Time
 				createdAt, updatedAt time.Time
 			)
-			if e := rows.Scan(&id, &createdBy, &monthKey, &payload, &repeatUntil, &createdAt, &updatedAt); e != nil {
+			if e := rows.Scan(&id, &createdBy, &updatedBy, &monthKey, &payload, &repeatUntil, &createdAt, &updatedAt); e != nil {
 				return e
 			}
 			out = append(out, map[string]any{
-				"id": id, "createdBy": createdBy, "monthKey": monthKey,
+				// updatedBy: whose sender key sealed the CURRENT payload (an admin
+				// may edit another member's event; migration 143).
+				"id": id, "createdBy": createdBy, "updatedBy": updatedBy, "monthKey": monthKey,
 				"payload": payload, "repeatUntil": httpx.JST(repeatUntil),
 				"createdAt": httpx.JSTime(createdAt), "updatedAt": httpx.JSTime(updatedAt),
 			})
@@ -171,8 +174,8 @@ func calendarCreate(w http.ResponseWriter, r *http.Request) {
 
 	var id int64
 	if err := chatsQRow(ctx, user.ID,
-		`INSERT INTO group_events (chat_id, created_by, month_key, payload, repeat_until)
-		 VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+		`INSERT INTO group_events (chat_id, created_by, updated_by, month_key, payload, repeat_until)
+		 VALUES ($1, $2, $2, $3, $4, $5) RETURNING id`,
 		[]any{chatID, user.ID, monthKey, payload, repeatUntil}, &id); err != nil {
 		log.Printf("[events POST] %v", err)
 		httpx.Err(w, 500, "Failed to create event")
@@ -233,15 +236,15 @@ func calendarUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := chatsExecU(ctx, user.ID,
-		`UPDATE group_events SET payload = $1, month_key = $2, repeat_until = $3
+		`UPDATE group_events SET payload = $1, month_key = $2, repeat_until = $3, updated_by = $6
 		  WHERE id = $4 AND chat_id = $5 AND deleted_at IS NULL`,
-		payload, monthKey, repeatUntil, eventID, chatID); err != nil {
+		payload, monthKey, repeatUntil, eventID, chatID, user.ID); err != nil {
 		log.Printf("[events PATCH] %v", err)
 		httpx.Err(w, 500, "Failed to update event")
 		return
 	}
 	emitx.ChatEvent(chatID, "calendar_changed", map[string]any{"id": eventID, "by": user.ID})
-	httpx.JSON(w, 200, map[string]any{"ok": true, "id": eventID})
+	httpx.JSON(w, 200, map[string]any{"ok": true, "id": eventID, "updatedBy": user.ID})
 }
 
 func calendarDelete(w http.ResponseWriter, r *http.Request) {

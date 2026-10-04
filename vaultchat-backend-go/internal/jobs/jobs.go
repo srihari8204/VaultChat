@@ -174,6 +174,7 @@ func StartAll(ctx context.Context) {
 	run(services.Core, "media-retention", sweepInterval, sweepDeliveredAttachments)
 	run(services.Core, "sweep-expired-stories", sweepInterval, sweepExpiredStories)
 	run(services.Core, "sweep-screen-usage", sweepInterval, sweepScreenUsage)
+	run(services.Core, "sweep-receipt-log", sweepInterval, sweepReceiptLog)
 	run(services.Core, "scheduled-messages", schedInterval, sweepScheduledMessages)
 
 	// Keep the message_bodies partition window ahead of the clock. Creation
@@ -873,6 +874,17 @@ func sweepScreenUsage(ctx context.Context) {
 		`DELETE FROM screen_usage
 		  WHERE ctid IN (SELECT ctid FROM screen_usage
 		                  WHERE day < CURRENT_DATE - INTERVAL '2 years'
+		                  LIMIT $1)`)
+}
+
+// sweepReceiptLog keeps Message Info times for 30 days (migration 142). The
+// delivered/read pointers on chat_members are untouched, so older messages
+// keep their state and only lose the times.
+func sweepReceiptLog(ctx context.Context) {
+	batchedSweep(ctx, "sweep receipt-log",
+		`DELETE FROM chat_receipt_log
+		  WHERE ctid IN (SELECT ctid FROM chat_receipt_log
+		                  WHERE at < NOW() - INTERVAL '30 days'
 		                  LIMIT $1)`)
 }
 

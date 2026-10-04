@@ -98,6 +98,12 @@
 	# acceptance, and a recorded acceptance is worthless if the thing accepted
 	# is not reachable at a stable URL. The app records WHICH version a user
 	# accepted (VAULTCHAT_TERMS_VERSION); this page is what that version names.
+	#
+	# Never framed: these are the only HTML pages Caddy serves, and a page that
+	# can be framed can be overlaid (clickjacking the delete-account request).
+	# The ADMIN console is not behind Caddy: host nginx serves it from
+	# /var/www/admin.corefinite.com, and its matching headers are set there
+	# (admin/LOGS_DEPLOY.md, "Headers"). frame-ancestors cannot come from a meta tag.
 	@legal path /privacy /privacy.html /terms /terms.html /delete-account /delete-account.html
 	handle @legal {
 		root * /srv/public
@@ -105,6 +111,8 @@
 		rewrite /terms /terms.html
 		rewrite /delete-account /delete-account.html
 		header Content-Type "text/html; charset=utf-8"
+		header Content-Security-Policy "frame-ancestors 'none'"
+		header X-Frame-Options DENY
 		file_server
 	}
 

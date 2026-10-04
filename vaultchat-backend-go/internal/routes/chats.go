@@ -149,6 +149,7 @@ func RegisterChats(mux *http.ServeMux) {
 	id.HandleFunc("POST /chats/{id}/messages/{msgId}/vote", httpx.RequireAuth(chatsPollVote))
 	id.HandleFunc("DELETE /chats/{id}/messages/{msgId}/vote/{optionIndex}", httpx.RequireAuth(chatsPollUnvote))
 	id.HandleFunc("GET /chats/{id}/messages/{msgId}/votes", httpx.RequireAuth(chatsPollVotes))
+	id.HandleFunc("GET /chats/{id}/messages/{msgId}/receipts", httpx.RequireAuth(chatsMessageReceipts))
 	id.HandleFunc("GET /chats/{id}/poll-votes", httpx.RequireAuth(chatsPollVotesBulk))
 	id.HandleFunc("POST /chats/{id}/pin-message", httpx.RequireAuth(chatsPinMessage))
 	id.HandleFunc("POST /chats/{id}/sender-keys", httpx.RequireAuth(chatsSenderKeysPost))
@@ -306,6 +307,7 @@ type chatsMem struct {
 	Hidden            bool
 	ScreenshotMode    *string
 	VanishMode        bool
+	NotifSound        *string // the caller's per-chat sound; NULL = default
 	ChatType          string
 	SendPolicy        *string
 	SlowModeSeconds   int64
@@ -384,7 +386,7 @@ func chatsLoadMem(ctx context.Context, uid, chatID string) (*chatsMem, error) {
 	var overridesRaw, grantsRaw, defaultsRaw, catalogRaw []byte
 	err := chatsQRow(ctx, uid,
 		`SELECT cm.role, cm.joined_at, cm.last_read_message_id, cm.muted, cm.left_at,
-		        cm.hidden, cm.screenshot_mode, cm.vanish_mode,
+		        cm.hidden, cm.screenshot_mode, cm.vanish_mode, cm.notif_sound,
 		        c.type AS chat_type, c.send_policy, c.slow_mode_seconds,
 		        c.media_policy, c.add_members_policy, c.anti_spam_links, c.approve_members,
 		        c.approval_mode,
@@ -396,7 +398,7 @@ func chatsLoadMem(ctx context.Context, uid, chatID string) (*chatsMem, error) {
 		 WHERE cm.chat_id = $1 AND cm.user_id = $2`,
 		[]any{chatID, uid},
 		&m.Role, &m.JoinedAt, &m.LastReadMessageID, &m.Muted, &m.LeftAt,
-		&m.Hidden, &m.ScreenshotMode, &m.VanishMode,
+		&m.Hidden, &m.ScreenshotMode, &m.VanishMode, &m.NotifSound,
 		&m.ChatType, &m.SendPolicy, &m.SlowModeSeconds,
 		&m.MediaPolicy, &m.AddMembersPolicy, &m.AntiSpamLinks, &m.ApproveMembers,
 		&m.ApprovalModeRaw,

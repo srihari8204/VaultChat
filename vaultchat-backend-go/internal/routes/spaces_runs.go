@@ -225,7 +225,119 @@ func runsList(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 500, "Failed to load runs")
 		return
 	}
-	httpx.JSON(w, 200, out)
+	// ?include=riders,stops attaches each run's riders and/or stops in the SAME
+	// shapes and under the SAME per-rider visibility as GET /runs/{runId}, so
+	// the admin, ops-map and transport screens need one call instead of one
+	// per run. Guardians stay a driver-only extra of the single-run read.
+	inc := map[string]bool{}
+	for _, k := range strings.Split(r.URL.Query().Get("include"), ",") {
+		inc[strings.TrimSpace(k)] = true
+	}
+	if !inc["riders"] && !inc["stops"] {
+		httpx.JSON(w, 200, out)
+		return
+	}
+	ids := make([]string, len(out))
+	for i, s := range out {
+		ids[i] = s.ID
+	}
+	var riders, stops map[string][]map[string]any
+	if inc["riders"] {
+		if riders, err = runRidersFor(ctx, user.ID, chatID, ids); err != nil {
+			log.Printf("[runs GET riders] %v", err)
+			httpx.Err(w, 500, "Failed to load runs")
+			return
+		}
+	}
+	if inc["stops"] {
+		if stops, err = runStopsFor(ctx, user.ID, ids); err != nil {
+			log.Printf("[runs GET stops] %v", err)
+			httpx.Err(w, 500, "Failed to load runs")
+			return
+		}
+	}
+	type runWith struct {
+		runSummary
+		Riders *[]map[string]any `json:"riders,omitempty"`
+		Stops  *[]map[string]any `json:"stops,omitempty"`
+	}
+	full := make([]runWith, len(out))
+	for i, s := range out {
+		full[i].runSummary = s
+		if riders != nil {
+			rs := riders[s.ID]
+			if rs == nil {
+				rs = []map[string]any{}
+			}
+			full[i].Riders = &rs
+		}
+		if stops != nil {
+			ss := stops[s.ID]
+			if ss == nil {
+				ss = []map[string]any{}
+			}
+			full[i].Stops = &ss
+		}
+	}
+	httpx.JSON(w, 200, full)
+}
+
+// runStopsFor returns the stops of the given (already visibility-checked)
+// runs, keyed by run id, in GET /runs/{runId}'s shape.
+func runStopsFor(ctx context.Context, uid string, runIDs []string) (map[string][]map[string]any, error) {
+	out := map[string][]map[string]any{}
+	err := chatsQueryU(ctx, uid,
+		`SELECT run_id, id, seq, label, lat, lng, planned_at, arrived_at
+		   FROM run_stops WHERE run_id = ANY($1::uuid[]) ORDER BY run_id, seq`,
+		[]any{runIDs}, func(rows pgx.Rows) error {
+			var (
+				runID, id, label     string
+				seq                  int32
+				lat, lng             *float64
+				plannedAt, arrivedAt *time.Time
+			)
+			if e := rows.Scan(&runID, &id, &seq, &label, &lat, &lng, &plannedAt, &arrivedAt); e != nil {
+				return e
+			}
+			out[runID] = append(out[runID], map[string]any{
+				"id": id, "seq": seq, "label": label, "lat": lat, "lng": lng,
+				"plannedAt": httpx.JST(plannedAt), "arrivedAt": httpx.JST(arrivedAt),
+			})
+			return nil
+		})
+	return out, err
+}
+
+// runRidersFor is runGet's rider read for many runs: per RIDER visibility (the
+// run's driver, an ops viewer, or someone who may see that roster entry).
+func runRidersFor(ctx context.Context, uid, chatID string, runIDs []string) (map[string][]map[string]any, error) {
+	out := map[string][]map[string]any{}
+	err := chatsQueryU(ctx, uid,
+		`SELECT rr.run_id, rr.rider_id, rr.stop_id, rr.state, rr.state_at, rr.note, sr.display_name
+		   FROM run_riders rr
+		   JOIN space_roster sr ON sr.id = rr.rider_id
+		   JOIN runs r ON r.id = rr.run_id
+		  WHERE rr.run_id = ANY($1::uuid[]) AND r.chat_id = $3
+		    AND (r.driver_id = $2
+		         OR vc_space_ops_viewer(r.chat_id)
+		         OR space_can_view_roster(r.chat_id, $2, rr.rider_id))
+		  ORDER BY sr.display_name`,
+		[]any{runIDs, uid, chatID}, func(rows pgx.Rows) error {
+			var (
+				runID, riderID, state, name string
+				stopID, note                *string
+				stateAt                     *time.Time
+			)
+			if e := rows.Scan(&runID, &riderID, &stopID, &state, &stateAt, &note, &name); e != nil {
+				return e
+			}
+			out[runID] = append(out[runID], map[string]any{
+				"riderId": riderID, "stopId": stopID, "state": state,
+				"stateAt": httpx.JST(stateAt), "note": note, "displayName": name,
+			})
+			return nil
+		})
+	return out, err
 }
 
 // runGet returns one run with its stops and the manifest rows the caller may

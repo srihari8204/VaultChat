@@ -305,7 +305,7 @@ func membershipAccept(w http.ResponseWriter, r *http.Request) {
 	// enough — this cannot admit anyone who has not said yes themselves.
 	stranded := invites.Status(st) == invites.StatusAccepted && next == invites.StatusJoined
 	if !invites.CanAccept(invites.Status(st)) && !stranded {
-		httpx.Err(w, 409, membershipWhyNot(invites.Status(st), "accepted"))
+		membershipConflictStatus(w, invites.Status(st), "accepted")
 		return
 	}
 
@@ -339,25 +339,45 @@ func membershipAccept(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// membershipWhyNot turns a refused transition into something a person can act
-// on. "This invitation can no longer be accepted" leaves the user guessing;
-// telling them it was withdrawn, or that they already joined, does not.
-func membershipWhyNot(s invites.Status, verb string) string {
+// membershipWhyNotCode turns a refused transition into something a person can
+// act on. "This invitation can no longer be accepted" leaves the user guessing;
+// telling them it was withdrawn, or that they already joined, does not. The
+// stable code lets the app branch without matching the English message.
+func membershipWhyNotCode(s invites.Status, verb string) (code, msg string) {
 	switch s {
 	case invites.StatusJoined:
-		return "You are already in this group"
+		return "already_member", "You are already in this group"
 	case invites.StatusRejected:
-		return "This invitation was declined"
+		return "invitation_declined", "This invitation was declined"
 	case invites.StatusCancelled:
-		return "The invitation was withdrawn"
+		return "invitation_withdrawn", "The invitation was withdrawn"
 	case invites.StatusRevoked:
-		return "This invitation was revoked"
+		return "invitation_revoked", "This invitation was revoked"
 	case invites.StatusExpired:
-		return "This invitation has expired"
+		return "invitation_expired", "This invitation has expired"
 	case invites.StatusAccepted:
-		return "This invitation is waiting for an admin to approve it"
+		return "awaiting_approval", "This invitation is waiting for an admin to approve it"
 	}
-	return "This invitation can no longer be " + verb
+	return "invitation_closed", "This invitation can no longer be " + verb
+}
+
+// membershipConflict answers a 409 with the message (unchanged, for older
+// clients) plus a stable `code` (and any extra fields).
+func membershipConflict(w http.ResponseWriter, code, msg string, extra ...map[string]any) {
+	body := map[string]any{"code": code}
+	for _, e := range extra {
+		for k, v := range e {
+			body[k] = v
+		}
+	}
+	httpx.Err(w, 409, msg, body)
+}
+
+// membershipConflictStatus is membershipConflict for an invitation whose
+// status does not allow `verb`.
+func membershipConflictStatus(w http.ResponseWriter, s invites.Status, verb string) {
+	code, msg := membershipWhyNotCode(s, verb)
+	membershipConflict(w, code, msg)
 }
 
 // membershipGrantFailed maps a failed admission onto the right status code.
@@ -366,9 +386,9 @@ func membershipWhyNot(s invites.Status, verb string) string {
 func membershipGrantFailed(w http.ResponseWriter, where string, err error) {
 	switch {
 	case err == errMembershipRaced:
-		httpx.Err(w, 409, "This invitation was already settled")
+		membershipConflict(w, "invitation_settled", "This invitation was already settled")
 	case chatsCapExceeded(err):
-		httpx.Err(w, 409, "This group is full")
+		membershipConflict(w, "group_full", "This group is full")
 	default:
 		log.Printf("[membership %s] grant: %v", where, err)
 		httpx.Err(w, 500, "Failed to update membership")
@@ -408,14 +428,14 @@ func membershipApprove(w http.ResponseWriter, r *http.Request) {
 	// consent step exists to prevent.
 	if !invites.CanApprove(inv.Status) {
 		if inv.Status == invites.StatusPending {
-			httpx.Err(w, 409, "They have not accepted the invitation yet")
+			membershipConflict(w, "not_accepted_yet", "They have not accepted the invitation yet")
 			return
 		}
-		httpx.Err(w, 409, membershipWhyNot(inv.Status, "approved"))
+		membershipConflictStatus(w, inv.Status, "approved")
 		return
 	}
 	if inv.InviteeID == nil {
-		httpx.Err(w, 409, "This invitation is not addressed to a VaultChat account")
+		membershipConflict(w, "not_an_account", "This invitation is not addressed to a VaultChat account")
 		return
 	}
 
@@ -465,7 +485,7 @@ func membershipRejectByAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !invites.CanTransition(inv.Status, invites.StatusRejected) {
-		httpx.Err(w, 409, membershipWhyNot(inv.Status, "rejected"))
+		membershipConflictStatus(w, inv.Status, "rejected")
 		return
 	}
 	if err := chatsExecU(ctx, user.ID,
@@ -520,7 +540,7 @@ func membershipCancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !invites.CanCancel(inv.Status) {
-		httpx.Err(w, 409, membershipWhyNot(inv.Status, "cancelled"))
+		membershipConflictStatus(w, inv.Status, "cancelled")
 		return
 	}
 	if err := chatsExecU(ctx, user.ID,
@@ -599,6 +619,7 @@ func membershipPending(w http.ResponseWriter, r *http.Request) {
 				// have to reimplement the status machine to draw two buttons.
 				"canApprove": invites.CanApprove(invites.Status(status)),
 				"canReject":  invites.CanTransition(invites.Status(status), invites.StatusRejected),
+				"source":     "invitation",
 			})
 			return nil
 		})
@@ -607,7 +628,64 @@ func membershipPending(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 500, "Failed to load pending members")
 		return
 	}
+	// ?include=link merges invite-LINK join requests (approve-members groups,
+	// chat_join_requests) into this one queue. Opt-in, because those rows have
+	// no invitation id ("id": null) and are settled through
+	// /chats/{id}/join-requests/{userId}/approve|DELETE, which an older client
+	// reading this list would not know to call.
+	if strings.Contains(","+r.URL.Query().Get("include")+",", ",link,") {
+		links, err := membershipLinkRequests(r, chatID, mem.isAdmin())
+		if err != nil {
+			log.Printf("[membership pending] link requests: %v", err)
+			httpx.Err(w, 500, "Failed to load pending members")
+			return
+		}
+		seen := map[string]bool{}
+		for _, row := range out {
+			if uid, _ := row["userId"].(*string); uid != nil {
+				seen[*uid] = true
+			}
+		}
+		for _, row := range links {
+			// One row per person: an invitation already covers someone who also
+			// tapped the link.
+			if !seen[row["userId"].(string)] {
+				out = append(out, row)
+			}
+		}
+	}
 	httpx.JSON(w, 200, out)
+}
+
+// membershipLinkRequests lists chat_join_requests in the pending-row shape.
+// canApprove/canReject follow the join-request routes' own rule (owner or
+// admin), not invite_members, so a row never offers a button that would 403.
+func membershipLinkRequests(r *http.Request, chatID string, admin bool) ([]map[string]any, error) {
+	rows, err := db.Pool.Query(r.Context(),
+		`SELECT jr.user_id::text, jr.created_at, u.name, u.first_name_cipher, u.last_name_cipher, u.email_cipher, u.photo_url
+		   FROM chat_join_requests jr JOIN users u ON u.id = jr.user_id
+		  WHERE jr.chat_id = $1 ORDER BY jr.created_at LIMIT 200`, chatID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var userID string
+		var createdAt time.Time
+		var name, fnc, lnc, ec, photo *string
+		if err := rows.Scan(&userID, &createdAt, &name, &fnc, &lnc, &ec, &photo); err != nil {
+			return nil, err
+		}
+		ident := vault.IdentityFromRow(fnc, lnc, ec, nil, nil, nil, name, nil, nil, nil, nil)
+		out = append(out, map[string]any{
+			"id": nil, "userId": userID, "name": ident.Name, "photoURL": photo,
+			"status": string(invites.StatusAccepted), "requested": true, "inviterName": nil,
+			"createdAt": httpx.JSTime(createdAt), "acceptedAt": httpx.JSTime(createdAt),
+			"canApprove": admin, "canReject": admin, "source": "link",
+		})
+	}
+	return out, rows.Err()
 }
 
 // ── candidate search ────────────────────────────────────────────────
@@ -854,7 +932,7 @@ func membershipRequest(w http.ResponseWriter, r *http.Request) {
 	if invites.NormalizeMode(modeRaw) != invites.ModeAdminApproval {
 		// Any other mode admits people by invitation only. Saying so plainly
 		// beats a 403 that reads like a permissions bug.
-		httpx.Err(w, 409, "This group is invite-only")
+		membershipConflict(w, "invite_only", "This group is invite-only")
 		return
 	}
 
@@ -863,7 +941,7 @@ func membershipRequest(w http.ResponseWriter, r *http.Request) {
 		`SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL`,
 		chatID, user.ID).Scan(&one)
 	if e == nil {
-		httpx.Err(w, 409, "You are already in this group")
+		membershipConflict(w, "already_member", "You are already in this group")
 		return
 	}
 	if !db.NoRows(e) {
@@ -880,7 +958,7 @@ func membershipRequest(w http.ResponseWriter, r *http.Request) {
 		  WHERE chat_id = $1 AND user_id = $2 AND cooldown_until > NOW()`,
 		chatID, user.ID).Scan(&until)
 	if e == nil && until != nil {
-		httpx.Err(w, 409, "You cannot rejoin this group yet",
+		membershipConflict(w, "cooldown", "You cannot rejoin this group yet",
 			map[string]any{"cooldownUntil": httpx.JSTime(*until)})
 		return
 	}
@@ -906,7 +984,7 @@ func membershipRequest(w http.ResponseWriter, r *http.Request) {
 		// The live-invitation index is the real duplicate guard; asking twice
 		// in parallel loses on the index rather than on a check-then-insert.
 		if strings.Contains(err.Error(), "uq_chat_invitations_live_user") {
-			httpx.Err(w, 409, "You already have a request or invitation for this group")
+			membershipConflict(w, "already_requested", "You already have a request or invitation for this group")
 			return
 		}
 		log.Printf("[membership request] %v", err)
@@ -1004,7 +1082,7 @@ func membershipTransfer(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err == errMembershipRaced {
-		httpx.Err(w, 409, "Someone else just transferred this group")
+		membershipConflict(w, "transfer_raced", "Someone else just transferred this group")
 		return
 	}
 	if err != nil {

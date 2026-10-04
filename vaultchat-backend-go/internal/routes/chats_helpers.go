@@ -274,6 +274,9 @@ func chatsGet(w http.ResponseWriter, r *http.Request) {
 		"hidden":         mem.Hidden,
 		"screenshotMode": chatsStrDefault(mem.ScreenshotMode, "block"),
 		"vanishMode":     mem.VanishMode,
+		// The caller's own per-chat sound (PATCH /chats/{id}/notif-sound):
+		// "chime" | "bell" | "default". Same mapping that PATCH answers with.
+		"notifSound": chatsStrDefault(mem.NotifSound, "default"),
 	})
 }
 
@@ -1387,6 +1390,7 @@ func chatsDelivered(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err == nil {
+		chatsLogReceipt(ctx, chatID, user.ID, "d", updated)
 		emitx.ChatEvent(chatID, "message_delivered", map[string]any{
 			"userId":                 user.ID,
 			"lastDeliveredMessageId": fmt.Sprintf("%d", updated),
@@ -1504,6 +1508,7 @@ func chatsRead(w http.ResponseWriter, r *http.Request) {
 	// which is the actual test.
 	advanced := prevRead == nil || *prevRead < id
 	if err == nil && lastRead == id && advanced {
+		chatsLogReceipt(ctx, chatID, user.ID, "r", lastRead)
 		// Read-receipt reciprocity (server-side, WhatsApp).
 		suppressReceipt := chatType != nil && *chatType == "direct" &&
 			receiptsMutual != nil && !*receiptsMutual

@@ -34,6 +34,7 @@ import (
 	"strings"
 	"sync"
 
+	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/httpx"
 	"vaultchat/backend-go/internal/msg91"
 	"vaultchat/backend-go/internal/redisx"
@@ -450,5 +451,22 @@ func authOnboardVerifyOtpPhone(w http.ResponseWriter, r *http.Request) {
 		authEnvErr(w, 500, "server_error", "Verification failed")
 		return
 	}
-	httpx.JSON(w, 200, map[string]any{"ok": true, "phoneTicket": ticket})
+	// Possession is proven now, so this is the safe place to say whether the
+	// number already has an account (and which): the client can go straight
+	// to MPIN entry, carrying the ticket, without the unauthenticated lookup.
+	// "Exists" means sign-in-able (an MPIN is set), the same rule as
+	// /auth/lookup; a half-built row resumes through /auth/profile/init.
+	out := map[string]any{"ok": true, "phoneTicket": ticket, "exists": false}
+	var uid string
+	switch err := db.Pool.QueryRow(ctx,
+		`SELECT id::text FROM users WHERE phone_lookup = $1 AND is_deleted = FALSE AND mpin_hash IS NOT NULL LIMIT 1`,
+		lookup).Scan(&uid); {
+	case err == nil:
+		out["exists"], out["userId"] = true, uid
+	case !db.NoRows(err):
+		// The ticket is still good; the client can fall back to /auth/lookup.
+		log.Printf("[auth/onboard/verify-otp-phone] account lookup: %v", err)
+		delete(out, "exists")
+	}
+	httpx.JSON(w, 200, out)
 }

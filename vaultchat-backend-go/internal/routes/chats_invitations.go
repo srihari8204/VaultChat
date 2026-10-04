@@ -161,7 +161,7 @@ func invitationsCreate(w http.ResponseWriter, r *http.Request) {
 		`SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL`,
 		[]any{chatID, *target.userID}, &one)
 	if e == nil {
-		httpx.Err(w, 409, "They are already in this group")
+		membershipConflict(w, "already_member", "They are already in this group")
 		return
 	}
 	if !db.NoRows(e) {
@@ -180,7 +180,7 @@ func invitationsCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if until != nil {
-		httpx.Err(w, 409, "They were recently removed and cannot be re-invited yet",
+		membershipConflict(w, "cooldown", "They were recently removed and cannot be re-invited yet",
 			map[string]any{"cooldownUntil": httpx.JSTime(*until)})
 		return
 	}
@@ -210,7 +210,7 @@ func invitationsCreate(w http.ResponseWriter, r *http.Request) {
 		// be invited a second time either.
 		if strings.Contains(err.Error(), "uq_chat_invitations_live") ||
 			strings.Contains(err.Error(), "uq_chat_invitations_pending") {
-			httpx.Err(w, 409, "They already have an invitation for this group")
+			membershipConflict(w, "already_invited", "They already have an invitation for this group")
 			return
 		}
 		log.Printf("[invitations POST] %v", err)
@@ -348,7 +348,7 @@ func invitationsResend(w http.ResponseWriter, r *http.Request) {
 	// Resending an accepted invitation is meaningless; resending a revoked one
 	// would quietly undo a deliberate revocation.
 	if !invites.CanResend(invites.Status(status)) {
-		httpx.Err(w, 409, "This invitation can no longer be resent")
+		membershipConflict(w, "invitation_closed", "This invitation can no longer be resent")
 		return
 	}
 
@@ -416,7 +416,7 @@ func invitationsRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !invites.CanRevoke(invites.Status(status)) {
-		httpx.Err(w, 409, "This invitation can no longer be revoked")
+		membershipConflict(w, "invitation_closed", "This invitation can no longer be revoked")
 		return
 	}
 
@@ -551,7 +551,7 @@ func invitationsReject(w http.ResponseWriter, r *http.Request) {
 	// Monday and thought better of it on Tuesday should not have to join first
 	// and then leave.
 	if !invites.CanDecline(invites.Status(status)) {
-		httpx.Err(w, 409, "This invitation can no longer be declined")
+		membershipConflict(w, "invitation_closed", "This invitation can no longer be declined")
 		return
 	}
 	if err := chatsExecU(ctx, user.ID,
@@ -632,13 +632,13 @@ func invitationsRedeem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if rStatus == nil || *rStatus != "ok" {
-		msg, sc := "This invitation is no longer valid", http.StatusGone
 		if rStatus != nil && *rStatus == "full" {
 			// The group filled up while the invitation sat unread. Not the
 			// invitee's fault and not permanent — 409, not 410.
-			msg, sc = "This group is full", http.StatusConflict
+			membershipConflict(w, "group_full", "This group is full")
+			return
 		}
-		httpx.Err(w, sc, msg)
+		httpx.Err(w, http.StatusGone, "This invitation is no longer valid")
 		return
 	}
 

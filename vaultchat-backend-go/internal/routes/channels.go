@@ -30,6 +30,8 @@ func RegisterChannels(mux *http.ServeMux) {
 	mux.HandleFunc("POST /channels/join", httpx.RequireAuth(channelJoin))
 	mux.HandleFunc("GET /channels/{id}/posts", httpx.RequireAuth(channelPostsGet))
 	mux.HandleFunc("POST /channels/{id}/posts", httpx.RequireAuth(channelPostsPost))
+	mux.HandleFunc("DELETE /channels/{id}/posts/{postId}", httpx.RequireAuth(channelPostDelete))
+	mux.HandleFunc("POST /channels/{id}/leave", httpx.RequireAuth(channelLeave))
 }
 
 const channelCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" // no ambiguous chars
@@ -82,6 +84,7 @@ func (c channelRow) public(myID string, subCount *int64) channelPublic {
 
 type channelPostOut struct {
 	ID         string       `json:"id"` // BIGSERIAL → node-pg string
+	ChannelID  string       `json:"channelId"`
 	Text       string       `json:"text"`
 	AuthorID   string       `json:"authorId"`
 	AuthorName *string      `json:"authorName"`
@@ -317,7 +320,7 @@ func channelPostsGet(w http.ResponseWriter, r *http.Request) {
 		}
 		ident := vault.IdentityFromRow(fnc, lnc, ec, nil, nil, nil, name, nil, nil, nil, nil)
 		out = append(out, channelPostOut{
-			ID: fmt.Sprintf("%d", id), Text: text, AuthorID: authorID,
+			ID: fmt.Sprintf("%d", id), ChannelID: ch.ID, Text: text, AuthorID: authorID,
 			AuthorName: ident.Name, CreatedAt: httpx.JSTime(createdAt),
 		})
 	}
@@ -392,7 +395,7 @@ func channelPostsPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := channelPostOut{
-		ID: fmt.Sprintf("%d", postID), Text: postText, AuthorID: postAuthorID,
+		ID: fmt.Sprintf("%d", postID), ChannelID: ch.ID, Text: postText, AuthorID: postAuthorID,
 		AuthorName: vault.IdentityFromRow(fnc, lnc, ec, nil, nil, nil, name, nil, nil, nil, nil).Name,
 		CreatedAt:  httpx.JSTime(postCreatedAt),
 	}
@@ -547,4 +550,89 @@ func channelSendExpoPush(ctx context.Context, tokens []string, title, body strin
 			log.Printf("[push] prune dead tokens: %v", err)
 		}
 	}
+}
+
+// DELETE /channels/:id/posts/:postId — admin only. Removes one post, re-points
+// the channel's last-post preview at the newest remaining post, and tells
+// viewers (channel_post_deleted) so open screens drop it.
+func channelPostDelete(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := httpx.UserFrom(r)
+	ch, err := channelLoad(ctx, r.PathValue("id"))
+	if err != nil {
+		if db.NoRows(err) {
+			httpx.Err(w, 404, "Channel not found")
+		} else {
+			httpx.Err(w, 500, "Failed to delete post")
+		}
+		return
+	}
+	if ch.AdminID != user.ID {
+		httpx.Err(w, 403, "Only the admin can delete posts")
+		return
+	}
+	postID, ok := httpx.ParseIntPrefix(r.PathValue("postId"))
+	if !ok || postID <= 0 {
+		httpx.Err(w, 400, "invalid postId")
+		return
+	}
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		httpx.Err(w, 500, "Failed to delete post")
+		return
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck — no-op after Commit
+	// Scoped to THIS channel: post ids are one global sequence.
+	tag, err := tx.Exec(ctx, `DELETE FROM channel_posts WHERE id = $1 AND channel_id = $2`, postID, ch.ID)
+	if err != nil {
+		httpx.Err(w, 500, "Failed to delete post")
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		httpx.Err(w, 404, "Post not found")
+		return
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE channels c
+		    SET last_post = (SELECT LEFT(p.text, 80) FROM channel_posts p WHERE p.channel_id = c.id ORDER BY p.id DESC LIMIT 1),
+		        last_post_at = (SELECT p.created_at FROM channel_posts p WHERE p.channel_id = c.id ORDER BY p.id DESC LIMIT 1)
+		  WHERE c.id = $1`, ch.ID); err != nil {
+		httpx.Err(w, 500, "Failed to delete post")
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		httpx.Err(w, 500, "Failed to delete post")
+		return
+	}
+	idStr := fmt.Sprintf("%d", postID)
+	emitx.ToRooms([]string{"channel:" + ch.ID}, "channel_post_deleted",
+		map[string]any{"channelId": ch.ID, "id": idStr})
+	httpx.JSON(w, 200, map[string]any{"ok": true, "id": idStr, "channelId": ch.ID})
+}
+
+// POST /channels/:id/leave — a subscriber unsubscribes. Idempotent: leaving a
+// channel you are not in is still 200. The admin cannot leave (nobody else can
+// post or delete); a missing channel is 404.
+func channelLeave(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := httpx.UserFrom(r)
+	ch, err := channelLoad(ctx, r.PathValue("id"))
+	if err != nil {
+		if db.NoRows(err) {
+			httpx.Err(w, 404, "Channel not found")
+		} else {
+			httpx.Err(w, 500, "Failed to leave channel")
+		}
+		return
+	}
+	if ch.AdminID == user.ID {
+		httpx.Err(w, 409, "The admin cannot leave their own channel")
+		return
+	}
+	if _, err := db.Pool.Exec(ctx,
+		`DELETE FROM channel_subscribers WHERE channel_id = $1 AND user_id = $2`, ch.ID, user.ID); err != nil {
+		httpx.Err(w, 500, "Failed to leave channel")
+		return
+	}
+	httpx.JSON(w, 200, map[string]any{"ok": true})
 }
