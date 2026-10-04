@@ -40,6 +40,7 @@ import { getCurrentUserAsync } from './(constants)/authService';
 import { permissionDenied } from '../lib/permissionDenied';
 import { RADII, COORD_RE, describeZone, iconFor } from '../lib/family/placeOptions';
 import PlaceEditSheet, { ZoneChoice, st as formSt, type PlacePatch } from '../components/family/PlaceEditSheet';
+import { tint } from '../lib/tintColor';
 
 export default function FamilyPlacesScreen() {
   const { colors } = useTheme();
@@ -252,7 +253,7 @@ export default function FamilyPlacesScreen() {
       <SpaceGround />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
 
-        <Text style={[st.h, { color: colors.textDim }]}>Add a safe zone</Text>
+        <Text accessibilityRole="header" style={[st.h, { color: colors.textDim }]}>Add a safe zone</Text>
 
         <View style={[st.field, { borderColor: G.chipEdge, backgroundColor: G.paneFaint }]}>
           <Ionicons name={iconFor(name)} size={18} color={colors.textDim} />
@@ -288,7 +289,7 @@ export default function FamilyPlacesScreen() {
         </TouchableOpacity>
 
         <View style={st.secHead}>
-          <Text style={[st.h, { color: colors.textDim, marginBottom: 0 }]}>Places ({places.length})</Text>
+          <Text accessibilityRole="header" style={[st.h, { color: colors.textDim, marginBottom: 0 }]}>Places ({places.length})</Text>
           {places.length > 0 && (
             <Text style={{ color: colors.textDim, fontSize: 12 }}>{activeCount} active</Text>
           )}
@@ -343,7 +344,7 @@ export default function FamilyPlacesScreen() {
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                   <Text style={{ color: on ? colors.text : colors.textDim, fontWeight: '600' }} numberOfLines={1}>{p.name}</Text>
                   {lockedHere(p) && (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 2, backgroundColor: zoneColor(lock.state ?? 'safe') + '22' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 2, backgroundColor: tint(zoneColor(lock.state ?? 'safe'), 0.13) }}>
                       <Ionicons name="lock-closed" size={9} color={zoneColor(lock.state ?? 'safe')} />
                       <Text style={{ color: colors.text, fontSize: 11, fontWeight: '800' }}>
                         {(lock.state ?? 'safe') === 'safe' ? 'LOCKED · SAFE' : (lock.state ?? '').toUpperCase()}

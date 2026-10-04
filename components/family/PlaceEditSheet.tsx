@@ -67,9 +67,12 @@ export default function PlaceEditSheet({
   const [expiry, setExpiry] = useState<number | null>(null);
   /** Which timed lifetime chip was tapped in this edit (null = none / permanent). */
   const [life, setLife] = useState<string | null>(null);
-  // Reset the form whenever a (different) place is opened — during render, so
-  // the sheet never shows the previous place's values for a frame.
+  // Reset the form on every open — during render, so the sheet never shows the
+  // previous edit's values for a frame. Closing forgets which place the form
+  // was for, so reopening the SAME place drops edits abandoned with
+  // "Close without saving" instead of offering them to Save.
   const [formFor, setFormFor] = useState<Geofence | null>(null);
+  if (!place && formFor) setFormFor(null);
   if (place && place !== formFor) {
     setFormFor(place);
     setName(place.name);
@@ -132,7 +135,7 @@ export default function PlaceEditSheet({
             ))}
           </View>
 
-          <Text style={[st.h, { color: colors.textDim, marginTop: 20, marginBottom: 8 }]}>When it&apos;s active</Text>
+          <Text accessibilityRole="header" style={[st.h, { color: colors.textDim, marginTop: 20, marginBottom: 8 }]}>When it&apos;s active</Text>
           <View style={st.radii} accessibilityRole="radiogroup" accessibilityLabel="When it's active">
             {PRESETS.map((pr) => {
               // "Always" is the one with no schedule; the rest match on window.
@@ -177,7 +180,7 @@ export default function PlaceEditSheet({
             </>
           )}
 
-          <Text style={[st.h, { color: colors.textDim, marginTop: 20, marginBottom: 8 }]}>How long it lasts</Text>
+          <Text accessibilityRole="header" style={[st.h, { color: colors.textDim, marginTop: 20, marginBottom: 8 }]}>How long it lasts</Text>
           <View style={st.radii} accessibilityRole="radiogroup" accessibilityLabel="How long it lasts">
             {/* A timed zone reopened for editing: its CURRENT lifetime is a
                 chip of its own, selected until another is picked — the timed

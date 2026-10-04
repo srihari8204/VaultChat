@@ -12,6 +12,7 @@ import { useSpaceGlass } from '../spaces/SpaceGround';
 import { currentPlan } from '../../lib/family/presence';
 import { locationRationale } from '../../lib/spaces/layout';
 import { st } from './hubStyles';
+import { tint } from '../../lib/tintColor';
 
 export function HubShareRow({ share, onToggle, locDenied, groupType }: {
   share: boolean;
@@ -90,7 +91,7 @@ export function HubSosButton({ progress, onPressIn, onPressOut, onSend }: {
       ])}
       style={[st.sosBig, { borderColor: colors.danger, backgroundColor: colors.danger + (scheme === 'dark' ? '1F' : '14') }]}
     >
-      <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.danger + '55', transform: [{ scaleX: progress }] }]} />
+      <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: tint(colors.danger, 0.33), transform: [{ scaleX: progress }] }]} />
       <View style={[st.sosIcon, { backgroundColor: colors.danger }]}><Text style={{ fontSize: 20 }}>🆘</Text></View>
       <View style={{ flex: 1 }}>
         <Text style={{ color: G.dangerText, fontWeight: '900', fontSize: 15 }}>HOLD FOR SOS</Text>

@@ -21,6 +21,7 @@ import {
   useFamilyAlerts, loadAlerts, markAllRead, clearCircleAlerts,
   type AlertFilter, type AlertKind, type FamilyAlert,
 } from '../lib/family/alerts';
+import { tint as withAlpha } from '../lib/tintColor';
 
 const FILTERS: { key: AlertFilter; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -141,6 +142,17 @@ export default function FamilyAlertsScreen() {
         stickySectionHeadersEnabled={false}
         ListEmptyComponent={!ready ? (
           <View style={st.empty}><ActivityIndicator color={colors.primary} /></View>
+        ) : hasAny && filter !== 'all' ? (
+          // An empty FILTER is not an empty inbox: the All tab has rows.
+          <View style={st.empty}>
+            <Ionicons name="filter-outline" size={30} color={colors.textFaint} />
+            <Text style={{ color: colors.text, fontWeight: '700', marginTop: 10 }}>
+              No {FILTERS.find((f) => f.key === filter)?.label.toLowerCase()} alerts
+            </Text>
+            <Text style={{ color: colors.textDim, fontSize: 13, textAlign: 'center', marginTop: 4, paddingHorizontal: 40 }}>
+              Other alerts are under All.
+            </Text>
+          </View>
         ) : (
           <View style={st.empty}>
             <Ionicons name="notifications-off-outline" size={30} color={colors.textFaint} />
@@ -152,7 +164,7 @@ export default function FamilyAlertsScreen() {
         )}
         renderSectionHeader={({ section }) => (
           // Transparent: a solid strip over the gradient ground reads as a bug.
-          <Text numberOfLines={1} style={[st.sec, { color: colors.textDim }]}>{section.title}</Text>
+          <Text accessibilityRole="header" numberOfLines={1} style={[st.sec, { color: colors.textDim }]}>{section.title}</Text>
         )}
         renderItem={({ item }) => {
           // System rows ("sharing paused" etc.) have no member to open.
@@ -170,7 +182,7 @@ export default function FamilyAlertsScreen() {
             })}
             style={[st.row, { borderColor: G.line, backgroundColor: item.read ? 'transparent' : brandAlpha(0.07) }]}
           >
-            <View style={[st.icon, { backgroundColor: item.sev === 'critical' ? colors.danger + '22' : item.sev === 'important' ? brandAlpha(0.13) : G.paneFaint }]}>
+            <View style={[st.icon, { backgroundColor: item.sev === 'critical' ? withAlpha(colors.danger, 0.13) : item.sev === 'important' ? brandAlpha(0.13) : G.paneFaint }]}>
               <Ionicons name={ICON_FOR[item.kind] ?? 'notifications'} size={17} color={tint(item)} />
             </View>
             <View style={{ flex: 1 }}>

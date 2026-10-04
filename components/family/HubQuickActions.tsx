@@ -14,6 +14,7 @@ import { type SpaceSection } from '../../lib/spaces/layout';
 import { type Permission } from '../../lib/groups/permissions';
 import { type GroupRef } from '../../lib/groups/store';
 import { st } from './hubStyles';
+import { tint as withAlpha } from '../../lib/tintColor';
 
 type IconName = keyof typeof Ionicons.glyphMap;
 
@@ -28,7 +29,7 @@ function Tile({ icon, tint, title, sub, onPress, badge }: {
     <TouchableOpacity onPress={onPress} accessibilityRole="button"
       accessibilityLabel={`${title}, ${sub}`}
       style={[st.qa, { backgroundColor: G.pane, borderColor: G.edge }]}>
-      <View style={[st.qaIcon, { backgroundColor: c + '22' }]}>
+      <View style={[st.qaIcon, { backgroundColor: withAlpha(c, 0.13) }]}>
         <Ionicons name={icon} size={19} color={c} />
       </View>
       <Text style={[st.qaTitle, { color: colors.text }]}>{title}</Text>

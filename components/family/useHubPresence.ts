@@ -7,22 +7,11 @@ import React, { useEffect, useState } from 'react';
 import { AppState } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { setPresenceForeground, startPresence, stopPresence, subscribeCircle, type PresenceEvent } from '../../lib/family/presence';
-import { subscribeSpaceLocations, mergePresence, fetchSpaceSnapshot, type PlatformEvent } from '../../lib/location/live';
-import { markSharingOff } from '../../lib/family/status';
+import { subscribeSpaceLocations, fetchSpaceSnapshot } from '../../lib/location/live';
+import { foldPoint, foldSealed, type Presences } from '../../lib/family/presenceFold';
 import { startRefreshController } from '../../lib/family/refresh';
 import { startEscalationTicker, stopEscalationTicker } from '../../lib/family/escalationService';
-import { type MemberPresence } from '../../lib/family/types';
 import { type GroupRef } from '../../lib/groups/store';
-
-type Presences = Record<string, MemberPresence>;
-
-/** Fold one location-service event (a point, or an explicit stop) into the map. */
-const foldPoint = (prev: Presences, e: PlatformEvent): Presences => (e.point
-  ? mergePresence(prev, {
-    userId: e.userId, lat: e.point.pos.lat, lng: e.point.pos.lng,
-    ts: e.point.ts, spd: e.point.speed, acc: e.point.accuracy, bat: e.point.battery,
-  })
-  : markSharingOff(prev, e.userId));
 
 export function useHubPresence({ active, me, circles, share, onLocDenied }: {
   active: GroupRef | null;
@@ -55,12 +44,7 @@ export function useHubPresence({ active, me, circles, share, onLocDenied }: {
           // so it merges rather than overwrites (newest fix per member wins).
           // A stop is an explicit choice: retain the last-known fix, flagged,
           // instead of deleting the member's dot (spec: last known location).
-          setPresences((prev) => (e.presence
-            ? mergePresence(prev, {
-              userId: e.userId, lat: e.presence.pos.lat, lng: e.presence.pos.lng,
-              ts: e.presence.ts, spd: e.presence.speed, acc: e.presence.accuracy, bat: e.presence.battery,
-            })
-            : markSharingOff(prev, e.userId)));
+          setPresences((prev) => foldSealed(prev, e));
         });
         if (cancelled) u(); else unsub = u;
       } catch { /* the map degrades to "nobody live yet"; the space still works */ }

@@ -19,7 +19,7 @@ import { useTheme } from '../lib/theme';
 import { brandAlpha } from '../constants/theme';
 import SpaceGround, { useSpaceGlass } from '../components/spaces/SpaceGround';
 import { SPACE_SHADOW } from '../constants/spaceTheme';
-import { getTrack, summarize, type TrackSample, timeAtPlace } from '../lib/family/history';
+import { getTrack, summarize, type TrackSample } from '../lib/family/history';
 import { useFamilyAlerts, loadAlerts, type FamilyAlert } from '../lib/family/alerts';
 import { getPlaces } from '../lib/family/store';
 import { historyAccess } from '../lib/groups/store';
@@ -31,16 +31,15 @@ import { navigateTo } from '../lib/nav/openNavigation';
 import { haversine } from '../lib/nav/geo';
 import { freshnessOf } from '../lib/family/status';
 import { getRelations, setRelation, RELATION_PRESETS } from '../lib/family/relations';
-// v3 — shared Location Lock engine classifiers/formatters (same bands as Navigate)
-import { classifyDistance, zoneColor } from '../lib/lock/zoneMachine';
-import { fmtSpeed, gpsQuality, QUALITY_LABEL, QUALITY_COLOR } from '../lib/lock/format';
-import { initialOf } from '../lib/format';
-import { colorFor, ago, AVATAR_INK } from '../lib/family/memberFormat';
+import { colorFor, ago } from '../lib/family/memberFormat';
 // A namespace import, not named: lib/locationEgress.selftest.ts pins that the
 // first mention of the trace call in this file sits after the empty-track guard.
 import * as routing from '../lib/nav/routing';
 import { traceShape } from '../lib/family/traceShape';
 import { formatMetres as dist } from '../lib/family/distance';
+import {
+  MemberIdentityCard, MemberActivityList, MemberFixRow, MemberPlaceRow,
+} from '../components/family/MemberSections';
 
 const REFRESH_MS = 15_000;
 /** At most one /nav/trace map-matching upload per this much track time. The
@@ -50,15 +49,9 @@ const REFRESH_MS = 15_000;
 const TRACE_EVERY_MS = 60_000;
 
 const startOfToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); };
-const clock = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-const ICON_FOR: Record<string, keyof typeof Ionicons.glyphMap> = {
-  enter: 'enter-outline', leave: 'exit-outline', sos: 'alert-circle',
-  checkin: 'checkmark-done-circle', battery: 'battery-dead', sharing: 'navigate-circle',
-};
 
 export default function FamilyMemberScreen() {
-  const { colors, scheme } = useTheme();
+  const { colors } = useTheme();
   const G = useSpaceGlass();
   const router = useRouter();
   const params = useLocalSearchParams<{
@@ -400,40 +393,8 @@ export default function FamilyMemberScreen() {
         )}
 
         {/* identity card */}
-        <View style={[st.card, { backgroundColor: G.paneStrong, borderColor: G.edge }]}>
-          <View style={[st.avatar, { backgroundColor: colorFor(userId) }]}>
-            <Text style={[st.avatarTxt, { color: AVATAR_INK[scheme] }]}>{initialOf(name)}</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={{ color: colors.text, fontSize: 17, fontWeight: '800' }} numberOfLines={1}>{name}</Text>
-              {isGuardian && <Ionicons name="star" size={13} color={colors.primary} accessible accessibilityLabel="Guardian" />}
-            </View>
-            <Text style={{ color: fresh ? G.goodText : colors.textDim, fontSize: 12.5, marginTop: 2 }}>
-              {withheld ? 'Location not shared with you'
-                : unknown ? 'Location not loaded'
-                : tier === 'live' ? 'Online'
-                  : tier === 'recent' ? `Updated ${ago(last!.ts)}`
-                    : tier === 'stale' ? `Last known · ${ago(last!.ts)}`
-                      // Neutral on silence: this device cannot tell sharing-off
-                      // from offline/permission/no-GPS for another member.
-                      : 'No recent location'}
-              {currentPlace && tier !== 'unavailable' && tier !== 'stale' ? ` · at ${currentPlace.name}` : ''}
-            </Text>
-          </View>
-          {last?.bat != null && (
-            <View style={{ alignItems: 'center' }}>
-              <Ionicons
-                name={last.bat <= 20 ? 'battery-dead' : 'battery-half'}
-                size={20}
-                color={last.bat <= 20 ? G.dangerText : colors.textDim}
-              />
-              <Text style={{ color: last.bat <= 20 ? G.dangerText : colors.textDim, fontSize: 11, fontWeight: '700', fontVariant: ['tabular-nums'] }}>
-                {Math.round(last.bat)}%
-              </Text>
-            </View>
-          )}
-        </View>
+        <MemberIdentityCard name={name} userId={userId} isGuardian={isGuardian} withheld={withheld}
+          unknown={unknown} tier={tier} last={last} currentPlace={currentPlace} />
 
         {/* The honest version of the denied state. Same shape and the same
             plain wording as the lock notice on group-insights.tsx, because it
@@ -486,7 +447,7 @@ export default function FamilyMemberScreen() {
         {/* RELATIONSHIP. Stored per (space, viewer, member) on the server, so
             what I call someone is mine — the same person is "Mother" to me and
             "Wife" to someone else in this circle, both true at once. */}
-        <Text style={[st.h, { color: colors.textDim }]}>Relationship</Text>
+        <Text accessibilityRole="header" style={[st.h, { color: colors.textDim }]}>Relationship</Text>
         <View style={st.relWrap} accessibilityRole="radiogroup" accessibilityLabel={`${name}'s relationship to you`}>
           {RELATION_PRESETS.map((r) => {
             const on = relation === r;
@@ -526,7 +487,7 @@ export default function FamilyMemberScreen() {
             would state "0 m / nothing today / no places" as fact, so none render. */}
         {!unknown && (<>
         {!withheld && (<>
-        <Text style={[st.h, { color: colors.textDim }]}>Today</Text>
+        <Text accessibilityRole="header" style={[st.h, { color: colors.textDim }]}>Today</Text>
         <View style={[st.statRow, { backgroundColor: G.pane, borderColor: G.edge }]}>
           <View style={st.stat}>
             <Text style={[st.statVal, { color: colors.text }]}>
@@ -556,95 +517,24 @@ export default function FamilyMemberScreen() {
         )}
 
         {/* activity timeline */}
-        <Text style={[st.h, { color: colors.textDim, marginTop: 22 }]}>Today&apos;s Activity</Text>
-        {todaysActivity.length === 0 ? (
-          <Text style={{ color: colors.textDim, fontSize: 13.5 }}>
-            Nothing yet today. Arrivals, departures and check-ins show up here.
-          </Text>
-        ) : todaysActivity.map((a) => (
-          <View key={a.id} style={[st.evt, { borderColor: G.line }]}>
-            <View style={[st.evtIcon, { backgroundColor: brandAlpha(0.1) }]}>
-              <Ionicons
-                name={ICON_FOR[a.kind] ?? 'ellipse'}
-                size={15}
-                color={a.sev === 'critical' ? colors.danger : colors.primary}
-              />
-            </View>
-            <Text style={{ color: colors.text, fontSize: 13.5, flex: 1 }} numberOfLines={2}>{a.text}</Text>
-            <Text style={{ color: colors.textDim, fontSize: 11.5 }}>{clock(a.at)}</Text>
-          </View>
-        ))}
+        <Text accessibilityRole="header" style={[st.h, { color: colors.textDim, marginTop: 22 }]}>Today&apos;s Activity</Text>
+        <MemberActivityList activity={todaysActivity} />
         </>)}
 
         {/* location diagnostics (v3) — same data language as the lock engine */}
-        {last && (
-          <View style={[st.evt, { borderColor: G.line }]}>
-            <View style={[st.evtIcon, { backgroundColor: brandAlpha(0.1) }]}>
-              <Ionicons name="speedometer" size={15} color={colors.primary} />
-            </View>
-            <Text style={{ color: colors.text, fontSize: 13.5, flex: 1 }}>
-              {fmtSpeed((last.spd ?? 0) * 3.6)} · updated {ago(last.ts)}
-              {last.bat != null ? ` · battery ${Math.round(last.bat)}%` : ''}
-            </Text>
-            {last.acc != null && (
-              <View style={{ borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, backgroundColor: QUALITY_COLOR[gpsQuality(last.acc)] + '22' }}>
-                <Text style={{ color: colors.text, fontSize: 11, fontWeight: '800' }}>
-                  GPS {QUALITY_LABEL[gpsQuality(last.acc)].toUpperCase()} ±{Math.round(last.acc)}m
-                </Text>
-              </View>
-            )}
-          </View>
-        )}
+        {last && <MemberFixRow last={last} />}
 
         {/* places — zone status per place from the SHARED classifier, so a
             member's chip means exactly what Navigate's lock states mean */}
-        <Text style={[st.h, { color: colors.textDim, marginTop: 22 }]}>Safe Zones</Text>
+        <Text accessibilityRole="header" style={[st.h, { color: colors.textDim, marginTop: 22 }]}>Safe Zones</Text>
         {places.length === 0 ? (
           <Text style={{ color: colors.textDim, fontSize: 13.5 }}>
             No places yet. Add one in Places to get arrive/leave alerts.
           </Text>
-        ) : places.map((p) => {
-          const here = currentPlace?.id === p.id;
-          const d = last ? haversine(p.center, { lat: last.lat, lng: last.lng }) : null;
-          const zone = d != null && fresh ? classifyDistance(d, p.radiusM) : null;
-          const zc = zone ? zoneColor(zone) : colors.textFaint;
-          const zoneLabel = zone === 'safe' ? 'INSIDE' : zone === 'warning' ? 'NEAR EDGE' : zone === 'atLimit' ? 'AT LIMIT' : zone === 'outside' ? 'OUTSIDE' : null;
-          // Today's time at this place from the presence track (v3 statistics).
-          const tp = timeAtPlace(today, p);
-          const tpTxt = tp.timeMs > 0
-            ? ` · ${tp.timeMs >= 3_600_000 ? `${Math.floor(tp.timeMs / 3_600_000)}h ${Math.round((tp.timeMs % 3_600_000) / 60_000)}m` : `${Math.max(1, Math.round(tp.timeMs / 60_000))}m`} today${tp.firstArrival ? `, arrived ${clock(tp.firstArrival)}` : ''}`
-            : '';
-          return (
-            <View key={p.id} style={[st.evt, { borderColor: G.line }]}>
-              <View style={[st.evtIcon, { backgroundColor: (here ? colors.success : colors.textFaint) + '22' }]}>
-                <Ionicons name="location" size={15} color={here ? colors.success : colors.textDim} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text numberOfLines={1} style={{ color: colors.text, fontSize: 14, fontWeight: '600' }}>{p.name}</Text>
-                <Text style={{ color: colors.textDim, fontSize: 11.5 }}>
-                  {p.enabled === false ? 'Alerts off' : `${p.radiusM} m radius`}
-                  {/* BOTH numbers, each labelled, because they answer different
-                      questions and one cannot replace the other. The radius
-                      figure is a straight line — it is the value compared
-                      against the circle to produce the INSIDE/OUTSIDE badge
-                      beside it, and swapping in a road distance would let the
-                      row read "500 m radius · 2.1 km away · INSIDE" and
-                      contradict itself. The road figure is what it actually
-                      takes to get there, which is the useful number and the
-                      one that was missing. */}
-                  {d != null ? ` · ${dist(d)} direct` : ''}
-                  {roadToPlace[p.id] != null ? ` · ${dist(roadToPlace[p.id])} by road` : ''}
-                  {tpTxt}
-                </Text>
-              </View>
-              {zoneLabel && (
-                <View style={{ borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, backgroundColor: zc + '22' }}>
-                  <Text style={{ color: colors.text, fontSize: 11, fontWeight: '800' }}>{zoneLabel}</Text>
-                </View>
-              )}
-            </View>
-          );
-        })}
+        ) : places.map((p) => (
+          <MemberPlaceRow key={p.id} place={p} here={currentPlace?.id === p.id} last={last} fresh={fresh}
+            today={today} roadM={roadToPlace[p.id]} />
+        ))}
         </>)}
       </ScrollView>
     </View>
@@ -653,9 +543,6 @@ export default function FamilyMemberScreen() {
 
 const st = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  card: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: 22, padding: 16, ...SPACE_SHADOW.raised },
-  avatar: { width: 50, height: 50, borderRadius: 25, alignItems: 'center', justifyContent: 'center' },
-  avatarTxt: { fontWeight: '800', fontSize: 20 },
   // No fixed height and the text takes flex:1 beside the icon, so it simply
   // grows at font scale 1.5 and wraps on a 320dp screen.
   notice: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, padding: 12, borderWidth: 1, borderRadius: 16, marginTop: 12 },
@@ -668,8 +555,6 @@ const st = StyleSheet.create({
   statVal: { fontSize: 16, fontWeight: '800', fontVariant: ['tabular-nums'] },
   statLbl: { fontSize: 11 },
   statDiv: { width: 1, height: 28 },
-  evt: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 11, borderBottomWidth: StyleSheet.hairlineWidth },
-  evtIcon: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   relWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
   relChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, minHeight: 32, justifyContent: 'center' },
 });

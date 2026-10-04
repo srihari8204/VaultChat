@@ -94,8 +94,10 @@ export default function FamilySetupScreen() {
             accessibilityLabel="Circle name" maxLength={100}
             style={[st.input, { color: colors.text }]} returnKeyType="done" onSubmitEditing={create} />
         </View>
+        {/* Empty field: the button sits on `border`, where onPrimary white is
+            near-invisible in the light theme — the label dims instead. */}
         <TouchableOpacity onPress={create} disabled={!name.trim() || !!busy} accessibilityRole="button" accessibilityLabel={other ? 'Create family circle' : 'Create circle'} accessibilityState={{ disabled: !name.trim() || !!busy, busy: busy === 'create' }} style={[st.btn, { backgroundColor: name.trim() ? colors.primary : colors.border }]}>
-          {busy === 'create' ? <ActivityIndicator color={colors.onPrimary} /> : <><Ionicons name="add" size={18} color={colors.onPrimary} /><Text style={[st.btnTxt, { color: colors.onPrimary }]}>{other ? 'Create family circle' : 'Create circle'}</Text></>}
+          {busy === 'create' ? <ActivityIndicator color={colors.onPrimary} /> : <><Ionicons name="add" size={18} color={name.trim() ? colors.onPrimary : colors.textDim} /><Text style={[st.btnTxt, { color: name.trim() ? colors.onPrimary : colors.textDim }]}>{other ? 'Create family circle' : 'Create circle'}</Text></>}
         </TouchableOpacity>
 
         {/* Groups & Circles: the same flow, but typed — friends, office, riders,
@@ -119,7 +121,7 @@ export default function FamilySetupScreen() {
             autoCapitalize="none" autoCorrect={false} style={[st.input, { color: colors.text }]} returnKeyType="go" onSubmitEditing={join} />
         </View>
         <TouchableOpacity onPress={join} disabled={!code.trim() || !!busy} accessibilityRole="button" accessibilityLabel={`Join ${unit}`} accessibilityState={{ disabled: !code.trim() || !!busy, busy: busy === 'join' }} style={[st.btn, { backgroundColor: code.trim() ? colors.primary : colors.border }]}>
-          {busy === 'join' ? <ActivityIndicator color={colors.onPrimary} /> : <><Ionicons name="enter" size={18} color={colors.onPrimary} /><Text style={[st.btnTxt, { color: colors.onPrimary }]}>Join {unit}</Text></>}
+          {busy === 'join' ? <ActivityIndicator color={colors.onPrimary} /> : <><Ionicons name="enter" size={18} color={code.trim() ? colors.onPrimary : colors.textDim} /><Text style={[st.btnTxt, { color: code.trim() ? colors.onPrimary : colors.textDim }]}>Join {unit}</Text></>}
         </TouchableOpacity>
       </ScrollView>
     </KeyboardSafe>

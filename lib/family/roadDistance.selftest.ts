@@ -13,7 +13,7 @@
  *   - a garbage figure from the router must not overwrite a good straight line
  */
 import assert from 'node:assert/strict';
-import { mergeRoadDistances, type MemberDistance } from './distance';
+import { mergeRoadDistances, summarize, summaryBasis, type MemberDistance } from './distance';
 
 let n = 0;
 const ok = (label: string, cond: boolean) => { assert.ok(cond, label); n++; };
@@ -84,6 +84,18 @@ for (const bad of [NaN, Infinity, -1, -0.5]) {
 {
   const out = mergeRoadDistances([row({ id: 'a' })], { a: 6200.6 });
   ok('metres are whole', Number.isInteger(out[0].fromMe as number) && out[0].fromMe === 6201);
+}
+
+// ── the summary card names the kind of distance it shows ─────────────
+{
+  const rows = [row({ id: 'me', fromMe: null, self: true }), row({ id: 'a', fromMe: 4000 }), row({ id: 'b', fromMe: 900 })];
+  const none = summarize(rows);
+  ok('no road answers → straight-line', none.byRoad === 0 && summaryBasis(none) === 'Straight-line');
+  const some = summarize(mergeRoadDistances(rows, { a: 6200 }));
+  ok('one of two by road → says so', some.byRoad === 1 && summaryBasis(some) === 'By road (1 straight-line)');
+  const all = summarize(mergeRoadDistances(rows, { a: 6200, b: 1300 }));
+  ok('all by road → by road', all.byRoad === 2 && summaryBasis(all) === 'By road');
+  ok('self never counts', summarize(mergeRoadDistances(rows, { me: 5 })).byRoad === 0);
 }
 
 console.log(`roadDistance selftest: OK (${n} checks)`);

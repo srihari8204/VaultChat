@@ -31,6 +31,7 @@ import {
 } from '../../lib/nav/navPresentation';
 import type { OffRouteVerdict } from '../../lib/nav/routeProgress';
 import type { HapticEvent } from '../../lib/nav/hapticLanguage';
+import { tint } from '../../lib/tintColor';
 
 export interface NavigationLayerProps {
   /** False hides the whole layer — the map is then unobstructed. */
@@ -99,7 +100,7 @@ export default function NavigationLayer(p: NavigationLayerProps) {
       <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
         <View pointerEvents="box-none" style={[st.arrivalWrap, { paddingBottom: botPad }]}>
           <View style={[st.arrival, { backgroundColor: G.sheet, borderColor: colors.success }]}>
-            <View style={[st.arrivalIcon, { backgroundColor: colors.success + '22' }]}>
+            <View style={[st.arrivalIcon, { backgroundColor: tint(colors.success, 0.13) }]}>
               <Ionicons name="flag" size={22} color={colors.success} />
             </View>
             <View style={{ flex: 1, minWidth: 0 }}>
@@ -150,7 +151,7 @@ export default function NavigationLayer(p: NavigationLayerProps) {
             accessibilityRole="header"
             accessibilityLabel={`${p.instruction} in ${formatDistance(p.distanceToManeuverM)}${p.roadName ? `, ${p.roadName}` : ''}`}
           >
-            <View style={[st.capsuleIcon, { backgroundColor: colors.primary + '22' }]}>
+            <View style={[st.capsuleIcon, { backgroundColor: tint(colors.primary, 0.13) }]}>
               <Ionicons name={iconFor(p.event)} size={26} color={colors.primary} />
             </View>
             <View style={{ flex: 1, minWidth: 0 }}>
@@ -265,7 +266,7 @@ export default function NavigationLayer(p: NavigationLayerProps) {
             accessibilityRole="button"
             accessibilityLabel="End navigation"
             hitSlop={HIT}
-            style={[st.dockBtn, { borderColor: colors.danger + '55', backgroundColor: colors.danger + '18' }]}
+            style={[st.dockBtn, { borderColor: tint(colors.danger, 0.33), backgroundColor: tint(colors.danger, 0.09) }]}
           >
             <Ionicons name="close" size={19} color={G.dangerText} />
           </TouchableOpacity>

@@ -5,9 +5,12 @@
 // are somewhere" into "your keys are with Mother, last heard at Home".
 //
 // EVERY CALL DEGRADES TO LOCAL-ONLY. A 404 means a server that predates this
-// migration; anything else means offline or a bad moment. In both cases the
-// device-local finder keeps working exactly as it does today — sharing is an
-// enhancement to it, never a dependency of it.
+// migration: the call resolves empty (nothing is shared there, so nothing
+// failed). Anything else means offline or a bad moment, and the call REJECTS,
+// so the screen can say so — "by you", "removed" and an empty family list must
+// not be claimed on a failure. Either way the device-local finder keeps
+// working exactly as it does today — sharing is an enhancement to it, never a
+// dependency of it.
 
 import { api } from '../api';
 
@@ -34,8 +37,8 @@ async function call<T>(path: string, opts?: any): Promise<T | null> {
     supported = true;
     return r;
   } catch (e: any) {
-    if (e?.status === 404) supported = false;
-    return null;
+    if (e?.status === 404) { supported = false; return null; }
+    throw e;
   }
 }
 

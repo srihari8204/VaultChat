@@ -213,12 +213,12 @@ export default function FamilyHistoryScreen() {
       <SpaceGround />
 
       {/* range tabs */}
-      <View style={[st.tabs, { borderColor: G.line }]}>
+      <View style={[st.tabs, { borderColor: G.line }]} accessibilityRole="tablist">
         {RANGES.map((r) => {
           const on = r.key === range;
           return (
             <TouchableOpacity key={r.key} onPress={() => setRange(r.key)}
-              accessibilityRole="button" accessibilityState={{ selected: on }}
+              accessibilityRole="tab" accessibilityState={{ selected: on }}
               style={[st.tab, { backgroundColor: on ? brandAlpha(0.14) : G.paneFaint, borderColor: on ? colors.primary : G.chipEdge }]}>
               <Text style={{ color: on ? G.accentText : colors.textDim, fontWeight: on ? '800' : '600', fontSize: 13 }}>{r.label}</Text>
             </TouchableOpacity>
@@ -227,13 +227,15 @@ export default function FamilyHistoryScreen() {
       </View>
 
       {loading ? (
-        <View style={st.center}><ActivityIndicator color={colors.primary} /></View>
+        <View style={st.center}><ActivityIndicator color={colors.primary} accessibilityLabel="Loading history" /></View>
       ) : loadFailed ? (
         <View style={[st.center, { padding: 32 }]}>
           <Text style={{ color: colors.text, fontWeight: '700' }}>Couldn&apos;t load history</Text>
           <TouchableOpacity
+            // Retrying swaps this view for the labelled spinner above, so the
+            // button itself never sits in a busy state.
             onPress={() => { setLoading(true); setReload((n) => n + 1); }}
-            accessibilityRole="button"
+            accessibilityRole="button" accessibilityLabel="Retry loading history"
             style={[st.tab, { marginTop: 12, flex: 0, paddingHorizontal: 20, borderColor: colors.primary, backgroundColor: brandAlpha(0.14) }]}
           >
             <Text style={{ color: G.accentText, fontWeight: '800' }}>Retry</Text>
@@ -251,12 +253,13 @@ export default function FamilyHistoryScreen() {
         <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 6, paddingBottom: 40 }}>
           {/* member picker — circle-wide only, and only when there is a choice */}
           {owners.length > 1 && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 10 }}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 10 }}
+              accessibilityRole="radiogroup" accessibilityLabel="Whose track to show">
               {owners.map((id) => {
                 const on = id === shownId;
                 return (
                   <TouchableOpacity key={id} onPress={() => { setPick(id); setTripSel(null); }}
-                    accessibilityRole="radio" accessibilityState={{ selected: on }}
+                    accessibilityRole="radio" accessibilityState={{ checked: on, selected: on }}
                     accessibilityLabel={`Show ${nameOf(id)}'s track`}
                     style={[st.tab, { flex: 0, paddingHorizontal: 14, backgroundColor: on ? brandAlpha(0.14) : G.paneFaint, borderColor: on ? colors.primary : G.chipEdge }]}>
                     <Text style={{ color: on ? G.accentText : colors.textDim, fontWeight: on ? '800' : '600', fontSize: 13 }}>{nameOf(id)}</Text>
@@ -319,7 +322,7 @@ export default function FamilyHistoryScreen() {
               them; a trip with no speed data says nothing about speed. */}
           {trips.length > 0 && (
             <>
-              <Text style={[st.h, { color: colors.textDim }]}>Trips</Text>
+              <Text accessibilityRole="header" style={[st.h, { color: colors.textDim }]}>Trips</Text>
               {trips.map((t, i) => {
                 const on = tripSel === i;
                 return (
@@ -354,14 +357,14 @@ export default function FamilyHistoryScreen() {
           )}
 
           {/* timeline */}
-          <Text style={[st.h, { color: colors.textDim }]}>Timeline</Text>
+          <Text accessibilityRole="header" style={[st.h, { color: colors.textDim }]}>Timeline</Text>
           {timeline.length === 0 ? (
             <Text style={{ color: colors.textDim, fontSize: 13.5 }}>
               No arrivals, departures or check-ins recorded in this range.
             </Text>
           ) : timeline.map((g) => (
             <View key={g.day}>
-              <Text style={[st.day, { color: colors.textDim }]}>{g.day}</Text>
+              <Text accessibilityRole="header" style={[st.day, { color: colors.textDim }]}>{g.day}</Text>
               {g.items.map((a) => (
                 <View key={a.id} style={[st.evt, { borderColor: G.line }]}>
                   <Text style={{ color: colors.textDim, fontSize: 11.5, width: 52 }}>{clock(a.at)}</Text>

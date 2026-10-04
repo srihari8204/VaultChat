@@ -22,6 +22,7 @@ import { useTheme } from '../../lib/theme';
 import { useSpaceGlass } from '../spaces/SpaceGround';
 import { SPACE_SHADOW } from '../../constants/spaceTheme';
 import { initialOf } from '../../lib/format';
+import { tint } from '../../lib/tintColor';
 
 export interface SelectedMemberSheetProps {
   name: string;
@@ -67,7 +68,7 @@ export default function SelectedMemberSheet(p: SelectedMemberSheetProps) {
       hitSlop={HIT}
       style={[st.action, {
         borderColor: opts.on ? colors.primary : G.chipEdge,
-        backgroundColor: opts.on ? colors.primary + '22' : G.paneFaint,
+        backgroundColor: opts.on ? tint(colors.primary, 0.13) : G.paneFaint,
         opacity: opts.disabled ? 0.45 : 1,
       }]}
     >
@@ -84,7 +85,7 @@ export default function SelectedMemberSheet(p: SelectedMemberSheetProps) {
       accessibilityViewIsModal={false}
     >
       <View style={st.head}>
-        <View style={[st.avatar, { backgroundColor: colors.primary + '33' }]}>
+        <View style={[st.avatar, { backgroundColor: tint(colors.primary, 0.2) }]}>
           <Text style={[st.avatarTxt, { color: G.accentText }]}>{initial}</Text>
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>

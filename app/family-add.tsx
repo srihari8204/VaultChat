@@ -71,12 +71,18 @@ export default function FamilyAddScreen() {
       try {
         const [chats, members] = await Promise.all([
           listChats(),
-          circleId ? circleMembers(String(circleId)).catch(() => []) : Promise.resolve([]),
+          // null = the member list did not load (contacts still can).
+          circleId ? circleMembers(String(circleId)).catch(() => null) : Promise.resolve([]),
         ]);
         if (!live) return;
         // Members already in the circle are shown but not selectable — clearer
         // than hiding them, which reads as "this contact is missing".
-        setAlready(new Set(members.map((m: any) => String(m.id))));
+        setAlready(new Set((members ?? []).map((m: any) => String(m.id))));
+        // Without that list every contact looks selectable, and inviting an
+        // existing member fails later, one by one. Say so up front.
+        if (!members) {
+          setError(`Couldn't check who is already in this ${isFamily ? 'space' : 'group'}, so current members may be listed as selectable.`);
+        }
 
         const seen = new Map<string, Pick>();
         for (const c of chats) {
@@ -96,7 +102,7 @@ export default function FamilyAddScreen() {
       }
     })();
     return () => { live = false; };
-  }, [circleId, attempt]);
+  }, [circleId, attempt, isFamily]);
 
   const toggle = useCallback((id: string) => {
     if (already.has(id)) return;
@@ -240,7 +246,7 @@ export default function FamilyAddScreen() {
           <Text style={[s.errorTxt, isFamily && { color: G.dangerText }, { flex: 1 }]}>{error}</Text>
           <TouchableOpacity
             onPress={() => setAttempt((n) => n + 1)}
-            accessibilityRole="button" accessibilityLabel="Retry loading contacts"
+            accessibilityRole="button" accessibilityLabel="Retry loading"
             hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
           >
             <Text style={[s.errorTxt, isFamily && { color: G.dangerText }, { fontWeight: '800' }]}>Retry</Text>

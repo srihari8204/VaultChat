@@ -11,8 +11,8 @@
 //
 // WHAT REACHES THE ROUTING SERVER: one /nav/matrix call for the distance
 // figures on the connectors, with every position rounded to ~110 m; a full
-// route only for what the user asks for (a member's Route, the From-Home
-// route, a Meet Here / trip destination).
+// route only for what the user asks for (a member's Route — both ends rounded
+// to ~11 m — the From-Home route, a Meet Here / trip destination).
 
 import { AppText as Text } from '../components/ui/Text';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -28,8 +28,9 @@ import MeetHereSheet, { type MeetDestination } from '../components/family/MeetHe
 import { type MemberInput, formatMetres, formatRoute } from '../lib/family/distance';
 import { circleMembers } from '../lib/family/circle';
 import { subscribeCircle, type PresenceEvent } from '../lib/family/presence';
-import { freshnessOf, markSharingOff, zoomForSpeed } from '../lib/family/status';
-import { subscribeSpaceLocations, mergePresence, fetchSpaceSnapshot } from '../lib/location/live';
+import { freshnessOf, zoomForSpeed } from '../lib/family/status';
+import { subscribeSpaceLocations, fetchSpaceSnapshot } from '../lib/location/live';
+import { foldPoint, foldSealed } from '../lib/family/presenceFold';
 import { startRefreshController } from '../lib/family/refresh';
 import { useVisibleTick } from '../lib/family/useVisibleTick';
 import { type CircleMember, type MemberPresence } from '../lib/family/types';
@@ -159,12 +160,7 @@ export default function FamilyMapScreen() {
       try {
         const un = await subscribeCircle(circleId, myId, (e: PresenceEvent) => {
           if (!live) return;
-          setPresences((prev) => (e.presence
-            ? mergePresence(prev, {
-              userId: e.userId, lat: e.presence.pos.lat, lng: e.presence.pos.lng,
-              ts: e.presence.ts, spd: e.presence.speed, acc: e.presence.accuracy, bat: e.presence.battery,
-            })
-            : markSharingOff(prev, e.userId)));
+          setPresences((prev) => foldSealed(prev, e));
         });
         if (live) off = un; else un();
       } catch { /* map degrades to "nobody live yet" */ }
@@ -172,12 +168,7 @@ export default function FamilyMapScreen() {
       try {
         const un2 = await subscribeSpaceLocations(circleId, myId, (e) => {
           if (!live) return;
-          setPresences((prev) => (e.point
-            ? mergePresence(prev, {
-              userId: e.userId, lat: e.point.pos.lat, lng: e.point.pos.lng,
-              ts: e.point.ts, spd: e.point.speed, acc: e.point.accuracy, bat: e.point.battery,
-            })
-            : markSharingOff(prev, e.userId)));
+          setPresences((prev) => foldPoint(prev, e));
         });
         if (live) { const prevOff = off; off = () => { prevOff?.(); un2(); }; } else un2();
       } catch { /* platform absent — sealed relay stands alone */ }
@@ -282,7 +273,10 @@ export default function FamilyMapScreen() {
     if (!routeTo || !target || !from || !to) { setRouteShape(null); setRouteMans(null); setRouteInfo(null); return; }
     let live = true;
     setRouteBusy(true);
-    fetchRoute(from, to, 'auto')
+    // ~11 m (4 dp), as the history trace: the router snaps to the road anyway,
+    // and it need not see either exact position.
+    const r4 = (p: { lat: number; lng: number }) => ({ lat: Math.round(p.lat * 1e4) / 1e4, lng: Math.round(p.lng * 1e4) / 1e4 });
+    fetchRoute(r4(from), r4(to), 'auto')
       .then((r) => {
         if (!live) return;
         setRouteShape(r.shape);
@@ -620,12 +614,7 @@ export default function FamilyMapScreen() {
     return startRefreshController({
       onReconcile: async () => {
         for (const e of await fetchSpaceSnapshot(circleId, myId)) {
-          setPresences((prev) => (e.point
-            ? mergePresence(prev, {
-              userId: e.userId, lat: e.point.pos.lat, lng: e.point.pos.lng,
-              ts: e.point.ts, spd: e.point.speed, acc: e.point.accuracy, bat: e.point.battery,
-            })
-            : markSharingOff(prev, e.userId)));
+          setPresences((prev) => foldPoint(prev, e));
         }
       },
     });

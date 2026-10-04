@@ -16,6 +16,7 @@ import { initialOf } from '../../lib/format';
 import { colorFor, ago, AVATAR_INK } from '../../lib/family/memberFormat';
 import { type CircleMember } from '../../lib/family/types';
 import { st } from './hubStyles';
+import { tint } from '../../lib/tintColor';
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -147,7 +148,7 @@ export default function HubTop({
                 hitSlop={{ top: 4, bottom: 4 }}
                 style={[st.chip, { flexDirection: 'row', alignItems: 'center', gap: 6,
                   borderColor: on ? gi.color : G.chipEdge,
-                  backgroundColor: on ? gi.color + '26' : G.paneFaint }]}>
+                  backgroundColor: on ? tint(gi.color, 0.15) : G.paneFaint }]}>
                 <Ionicons name={gi.icon} size={13} color={on ? gi.color : colors.textDim} />
                 <Text numberOfLines={1} style={{ color: on ? colors.text : colors.textDim, fontWeight: on ? '700' : '500', fontSize: 13 }}>{c.name}</Text>
               </TouchableOpacity>
@@ -184,7 +185,7 @@ export default function HubTop({
       {/* status card — the hero pane: the strongest glass on the screen,
           with the identity aura bleeding through from the ground behind. */}
       <View style={[st.status, { backgroundColor: G.paneStrong, borderColor: G.edge }]}>
-        <View style={[st.statusIcon, { backgroundColor: (allGood ? colors.success : ident.color) + '26' }]}>
+        <View style={[st.statusIcon, { backgroundColor: tint(allGood ? colors.success : ident.color, 0.15) }]}>
           <Ionicons name={allGood ? 'shield-checkmark' : ident.icon} size={21} color={allGood ? colors.success : ident.color} />
         </View>
         <View style={{ flex: 1 }}>

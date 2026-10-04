@@ -204,6 +204,9 @@ export interface FamilySummary {
   averageM: number | null;
   /** Members with a usable position. */
   available: number;
+  /** How many of `available` carry a ROAD figure (the rest are straight-line),
+   *  so the card can say which kind of distance it is showing. */
+  byRoad: number;
   /** Everyone in the circle, including me and the unlocatable. */
   total: number;
 }
@@ -223,7 +226,7 @@ export function summarize(rows: MemberDistance[]): FamilySummary {
   const others = rows.filter((r) => !r.self);
   const located = others.filter((r) => r.fromMe != null) as (MemberDistance & { fromMe: number })[];
   if (!located.length) {
-    return { nearest: null, farthest: null, averageM: null, available: 0, total: rows.length };
+    return { nearest: null, farthest: null, averageM: null, available: 0, byRoad: 0, total: rows.length };
   }
   let nearest = located[0], farthest = located[0], sum = 0;
   for (const r of located) {
@@ -236,8 +239,20 @@ export function summarize(rows: MemberDistance[]): FamilySummary {
     farthest,
     averageM: Math.round(sum / located.length),
     available: located.length,
+    byRoad: located.filter((r) => r.byRoad).length,
     total: rows.length,
   };
+}
+
+/**
+ * What kind of distance the summary card shows, for its origin line. Rows turn
+ * into road figures one by one as the router answers (mergeRoadDistances), so
+ * the card can be all road, all straight-line, or a mix — and must say which.
+ */
+export function summaryBasis(s: Pick<FamilySummary, 'available' | 'byRoad'>): string {
+  if (s.byRoad <= 0) return 'Straight-line';
+  if (s.byRoad >= s.available) return 'By road';
+  return `By road (${s.available - s.byRoad} straight-line)`;
 }
 
 // ── self-check: `npx tsx lib/family/distance.ts` ───────────────────────────

@@ -5,7 +5,7 @@
 // sheet shares.
 
 import React from 'react';
-import { View, ScrollView, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ScrollView, ActivityIndicator, StyleSheet, useWindowDimensions } from 'react-native';
 import { AppText as Text } from '../ui/Text';
 import { useTheme } from '../../lib/theme';
 import { useSpaceGlass } from '../spaces/SpaceGround';
@@ -62,6 +62,11 @@ export default function MapRosterSheet({
 }) {
   const { colors } = useTheme();
   const G = useSpaceGlass();
+  // Sized to the window like the hub's roster (which takes 40%): a bit less
+  // here because the map above is the point of this screen. Never below the
+  // old fixed 148 dp, so a short phone keeps what it had.
+  const { height: winH } = useWindowDimensions();
+  const listMax = Math.max(148, Math.round(winH * 0.35));
   return (
     <View style={[st.sheet, { backgroundColor: G.sheet, borderColor: G.edge }]}>
       {!loaded && failed ? (
@@ -73,7 +78,7 @@ export default function MapRosterSheet({
       ) : !loaded ? (
         <View style={st.center}><ActivityIndicator color={colors.primary} accessibilityLabel="Loading the circle" /></View>
       ) : (
-        <ScrollView style={{ maxHeight: 148 }} contentContainerStyle={{ paddingBottom: 4 }}>
+        <ScrollView style={{ maxHeight: listMax }} contentContainerStyle={{ paddingBottom: 4 }}>
           {members.map((m) => {
             // My own row falls back to the OS's last known position. This
             // screen never starts a watcher (read-only by design), so

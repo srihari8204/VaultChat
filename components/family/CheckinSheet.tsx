@@ -10,6 +10,7 @@ import { KeyboardSafe } from '../ui';
 import { useTheme } from '../../lib/theme';
 import { useSpaceGlass } from '../spaces/SpaceGround';
 import { sheetSt } from './sheetStyles';
+import { tint } from '../../lib/tintColor';
 
 /** Status colours are semantic (safe / on the way / late / help), the same in
  *  both themes; the label text on each tile is theme text. */
@@ -59,7 +60,7 @@ export default function CheckinSheet({ visible, onClose, picked, onPick, note, o
                     accessibilityLabel={c.label}
                     style={[st.checkBtn, {
                       backgroundColor: c.color + (on ? '33' : '1e'),
-                      borderColor: on ? c.color : c.color + '55',
+                      borderColor: on ? c.color : tint(c.color, 0.33),
                       borderWidth: on ? 2 : 1,
                     }]}
                   >

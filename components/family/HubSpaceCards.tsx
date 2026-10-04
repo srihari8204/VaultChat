@@ -19,6 +19,7 @@ import { type Highlight } from './useHubFeeds';
 import { type Run as SpaceRun } from '../../lib/spaces/runs';
 import { foldParticipants, lastEta, everyoneArrived, minutesUntil, type Trip, type TripPing } from '../../lib/groups/trips';
 import { st } from './hubStyles';
+import { tint } from '../../lib/tintColor';
 
 type IconName = keyof typeof Ionicons.glyphMap;
 
@@ -132,7 +133,7 @@ export function RunCards({ runs, active, myId, canDrive, canOps }: {
           accessibilityLabel={`${r.vehicleLabel || r.name}, ${r.status === 'started' ? 'your run is in progress' : 'start your run'}`}
           style={[st.card, { backgroundColor: G.pane, borderColor: colors.primary, flexDirection: 'row', alignItems: 'center', gap: 12 }]}
         >
-          <View style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary + '22' }}>
+          <View style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: tint(colors.primary, 0.13) }}>
             <Ionicons name="bus" size={20} color={colors.primary} />
           </View>
           <View style={{ flex: 1, minWidth: 0 }}>
@@ -222,7 +223,7 @@ export function TripCard({ trip, tripPings, members, myId, active }: {
       accessibilityLabel={`Trip to ${trip.destinationName}. Opens the trip`}
       style={[st.card, { backgroundColor: G.pane, borderColor: done ? colors.success : colors.primary, flexDirection: 'row', alignItems: 'center', gap: 12 }]}
     >
-      <View style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: (done ? colors.success : colors.primary) + '22' }}>
+      <View style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: tint(done ? colors.success : colors.primary, 0.13) }}>
         <Ionicons name={done ? 'checkmark-done' : 'car'} size={20} color={done ? colors.success : colors.primary} />
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>

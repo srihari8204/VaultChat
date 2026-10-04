@@ -199,20 +199,32 @@ export default function FamilySpaceScreen() {
   // Keeps hetzner-deploy's dead-circle handling: a kicked member's phone must
   // not retry a 403 circle on every focus and highlights poll.
   const activeId = active?.id;
+  // The space on screen NOW: a roster request that answers after a quick
+  // switch belongs to the space that was left, and must not replace (or fail)
+  // the new space's roster.
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
   const refreshMembers = useCallback(() => {
     if (!activeId) return;
     const id = activeId;
     setMembersFailed(false);
-    circleMembers(id).then((m) => { setMembers(m); setMembersLoaded(true); }).catch(async (e: any) => {
+    circleMembers(id).then((m) => {
+      if (activeIdRef.current !== id) return;
+      setMembers(m); setMembersLoaded(true);
+    }).catch(async (e: any) => {
+      const current = activeIdRef.current === id;
       // Kicked, or the circle was deleted: the group now 403/404s forever.
       // Forget it locally instead of hammering the server from every focus
       // and highlights poll (seen live: one phone retrying a dead circle
       // every few seconds).
       if (e?.status === 403 || e?.status === 404) {
         await removeCircle(id);
-        await afterCircleGone();
+        // Already switched away: drop it from the switcher, but stay put.
+        if (current) await afterCircleGone();
+        else setCircles(await listGroups());
         return;
       }
+      if (!current) return;
       // Anything else — offline, a 500, a parse failure — used to vanish here
       // with no trace, leaving the fabricated one-person roster on screen and
       // nothing in the log to explain it. Say so, and leave `membersLoaded`

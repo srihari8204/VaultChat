@@ -9,7 +9,7 @@ import { AppText as Text } from '../ui/Text';
 import { useTheme } from '../../lib/theme';
 import { brandAlpha } from '../../constants/theme';
 import { useSpaceGlass } from '../spaces/SpaceGround';
-import { formatMetres, type SortMode, type FamilySummary } from '../../lib/family/distance';
+import { formatMetres, summaryBasis, type SortMode, type FamilySummary } from '../../lib/family/distance';
 import { type Geofence } from '../../lib/family/geofence';
 import { st } from './hubStyles';
 
@@ -91,9 +91,11 @@ export default function HubDistancePanel({
               total counts everyone — including the members we could not
               measure and who are therefore absent from the figures above. */}
           <Text style={{ color: colors.textDim, fontSize: 11.5, textAlign: 'center', marginTop: 8 }}>
-            {/* Names the ORIGIN, always. A distance with no stated origin
-                is the easiest number on this screen to misread. */}
-            Straight-line from {originName ?? 'you'} · {summary.available} of{' '}
+            {/* Names the ORIGIN and the KIND of distance, always: the figures
+                turn from straight-line into road ones as the router answers.
+                A distance with no stated origin is the easiest number on this
+                screen to misread. */}
+            {summaryBasis(summary)} from {originName ?? 'you'} · {summary.available} of{' '}
             {summary.total - (originName ? 0 : 1)} members located
           </Text>
         </View>

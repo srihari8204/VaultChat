@@ -32,8 +32,10 @@ import {
 } from '../lib/items/proximity';
 import { listItems, addItem, removeItem, patchItem, type TrackedItem } from '../lib/items/store';
 import {
-  startScan, ensureBlePermissions, isBluetoothOn, isBleAvailable, destroyScanner, bleLastError, type Seen,
+  startScan, ensureBlePermissions, bleNeverAskAgain, isBluetoothOn, isBleAvailable, destroyScanner, bleLastError,
+  type Seen,
 } from '../lib/items/scanner';
+import { permissionDenied } from '../lib/permissionDenied';
 import { getPlaces } from '../lib/family/store';
 import { getCurrentUserAsync } from './(constants)/authService';
 import {
@@ -58,6 +60,22 @@ function placeAt(places: Geofence[], pos: { lat: number; lng: number }): Geofenc
 type IconName = keyof typeof Ionicons.glyphMap;
 const ICONS: IconName[] = ['key', 'wallet', 'briefcase', 'bag-handle', 'bicycle', 'car', 'headset', 'laptop'];
 
+/** A list that could not be read: says so, with Retry — never an empty list. */
+function LoadFailed({ text, onRetry }: { text: string; onRetry: () => void }) {
+  const { colors } = useTheme();
+  const G = useSpaceGlass();
+  return (
+    <View style={[st.card, { backgroundColor: G.pane, borderColor: G.edge }]} accessibilityLiveRegion="polite">
+      <Ionicons name="cloud-offline-outline" size={18} color={colors.textDim} />
+      <Text style={{ flex: 1, color: colors.textDim, fontSize: 13 }}>{text}</Text>
+      <TouchableOpacity onPress={onRetry} accessibilityRole="button" accessibilityLabel={`Retry. ${text}`}
+        hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}>
+        <Text style={{ color: G.accentText, fontWeight: '800', fontSize: 13 }}>Retry</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 const BAND_COLOR = (b: ProximityBand, c: { success: string; primary: string; warning?: string; textDim: string }) =>
   b === 'immediate' ? c.success : b === 'near' ? c.primary : b === 'far' ? c.warning ?? c.primary : c.textDim;
 
@@ -68,6 +86,8 @@ export default function FamilyItemsScreen() {
   const circleId = String(params.circleId || '');
 
   const [items, setItems] = useState<TrackedItem[]>([]);
+  /** This phone's saved items could not be read — not the same as "none". */
+  const [itemsFailed, setItemsFailed] = useState(false);
   const [places, setPlaces] = useState<Geofence[]>([]);
   const [scanning, setScanning] = useState(false);
   const [nearby, setNearby] = useState<Map<string, Seen>>(new Map());
@@ -78,6 +98,8 @@ export default function FamilyItemsScreen() {
   /** What the SPACE knows — sightings by any member's phone. Empty when the
    *  server predates migration 114; the local finder is unaffected. */
   const [shared, setShared] = useState<SharedItem[]>([]);
+  /** The space's list could not be fetched (offline, 5xx) — a 404 server is not a failure. */
+  const [sharedFailed, setSharedFailed] = useState(false);
   const [me, setMe] = useState<string | null>(null);
   const [pairing, setPairing] = useState<Seen | null>(null);
   const [pairName, setPairName] = useState('');
@@ -86,14 +108,20 @@ export default function FamilyItemsScreen() {
   const [saving, setSaving] = useState(false);
   const stopRef = useRef<null | (() => void)>(null);
 
-  useEffect(() => {
-    listItems().then(setItems).catch(() => {});
-    getCurrentUserAsync().then((u) => setMe(u ? String(u.id) : null)).catch(() => {});
+  const loadLists = useCallback(() => {
+    setItemsFailed(false);
+    listItems().then(setItems).catch(() => setItemsFailed(true));
     if (circleId) {
-      getPlaces(circleId).then(setPlaces).catch(() => {});
-      fetchSharedItems(circleId).then(setShared).catch(() => {});
+      setSharedFailed(false);
+      fetchSharedItems(circleId).then(setShared).catch(() => setSharedFailed(true));
     }
   }, [circleId]);
+
+  useEffect(() => {
+    loadLists();
+    getCurrentUserAsync().then((u) => setMe(u ? String(u.id) : null)).catch(() => {});
+    if (circleId) getPlaces(circleId).then(setPlaces).catch(() => {});
+  }, [circleId, loadLists]);
 
   /** Advertisements seen since the last flush. Buffered in a ref, NEVER in
    *  state — see onSeen. */
@@ -141,7 +169,8 @@ export default function FamilyItemsScreen() {
         return;
       }
       if (!(await ensureBlePermissions())) {
-        Alert.alert('Permission needed', 'Allow “Nearby devices” so the app can hear your tags.');
+        // After "don't ask again" the OS stays silent: offer Settings.
+        permissionDenied('Permission needed', 'Allow “Nearby devices” so the app can hear your tags.', !bleNeverAskAgain());
         return;
       }
       if (!(await isBluetoothOn())) {
@@ -266,7 +295,8 @@ export default function FamilyItemsScreen() {
       registerSharedItem(circleId, pairing.id, name, pairIcon)
         .then((ok) => {
           if (!ok) throw new Error('rejected');
-          return fetchSharedItems(circleId).then(setShared);
+          // Shared; a failed re-read is only a stale list, not a failed share.
+          fetchSharedItems(circleId).then(setShared).catch(() => setSharedFailed(true));
         })
         .catch(() => Alert.alert(
           'Saved, but not shared',
@@ -291,7 +321,7 @@ export default function FamilyItemsScreen() {
       <ScrollView contentContainerStyle={{ padding: 14, paddingBottom: 40 }}>
         <TouchableOpacity
           onPress={scanning ? stop : start}
-          accessibilityRole="button"
+          accessibilityRole="button" accessibilityState={{ busy: scanning }}
           style={[st.scanBtn, { backgroundColor: scanning ? G.paneStrong : brandAlpha(0.1), borderColor: scanning ? colors.danger : colors.primary }]}
         >
           {scanning ? <ActivityIndicator size="small" color={colors.danger} /> : <Ionicons name="bluetooth" size={18} color={colors.primary} />}
@@ -301,7 +331,7 @@ export default function FamilyItemsScreen() {
         </TouchableOpacity>
 
         {/* ── PAIRED ITEMS: the finder ── */}
-        {items.length > 0 && <Text style={[st.h, { color: colors.textDim }]}>MY THINGS</Text>}
+        {items.length > 0 && <Text accessibilityRole="header" style={[st.h, { color: colors.textDim }]}>MY THINGS</Text>}
         {items.map((it) => {
           const seen = nearby.get(it.id);
           const r = rssiRef.current.get(it.id) ?? null;
@@ -357,7 +387,7 @@ export default function FamilyItemsScreen() {
                     // sightings of it. Say so rather than swallow it.
                     if (circleId) {
                       forgetSharedItem(circleId, it.id)
-                        .then(() => fetchSharedItems(circleId).then(setShared))
+                        .then(() => { fetchSharedItems(circleId).then(setShared).catch(() => setSharedFailed(true)); })
                         .catch(() => Alert.alert(
                           'Removed here only',
                           `"${it.name}" is gone from this phone, but your space could not be updated. Others may still see it — try again when you are back online.`,
@@ -375,7 +405,10 @@ export default function FamilyItemsScreen() {
           );
         })}
 
-        {items.length === 0 && !scanning && (
+        {itemsFailed && (
+          <LoadFailed text="Couldn't read the things saved on this phone." onRetry={loadLists} />
+        )}
+        {items.length === 0 && !scanning && !itemsFailed && (
           <Text style={{ color: colors.textDim, fontSize: 13.5, lineHeight: 19, paddingVertical: 10 }}>
             Attach any Bluetooth tag to your keys, wallet or bag — any brand works. Search
             to pair it, and this phone will remember where it last heard it.
@@ -384,7 +417,10 @@ export default function FamilyItemsScreen() {
 
         {/* ── FAMILY'S THINGS: other members' tags this phone helps find ── */}
         {family.length > 0 && (
-          <Text style={[st.h, { color: colors.textDim, marginTop: 18 }]}>FAMILY&apos;S THINGS</Text>
+          <Text accessibilityRole="header" style={[st.h, { color: colors.textDim, marginTop: 18 }]}>FAMILY&apos;S THINGS</Text>
+        )}
+        {sharedFailed && (
+          <LoadFailed text="Couldn't load your space's shared things, so other members' tags are not listed." onRetry={loadLists} />
         )}
         {family.map((f) => {
           const heardNow = scanning && nearby.has(f.bleId);
@@ -410,7 +446,7 @@ export default function FamilyItemsScreen() {
         {/* ── DISCOVERY ── */}
         {scanning && (
           <>
-            <Text style={[st.h, { color: colors.textDim, marginTop: 18 }]}>NEARBY DEVICES</Text>
+            <Text accessibilityRole="header" style={[st.h, { color: colors.textDim, marginTop: 18 }]}>NEARBY DEVICES</Text>
             {discoverable.length === 0 && (
               <Text style={{ color: colors.textDim, fontSize: 13 }}>Looking… hold the tag near the phone and press its button if it has one.</Text>
             )}
@@ -465,7 +501,7 @@ export default function FamilyItemsScreen() {
           <Pressable style={{ flex: 1 }} onPress={() => setPairing(null)}
             accessibilityRole="button" accessibilityLabel="Cancel pairing" />
           <View style={[st.pair, { backgroundColor: G.sheet, borderColor: G.edge }]}>
-            <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15 }}>Name this item</Text>
+            <Text accessibilityRole="header" style={{ color: colors.text, fontWeight: '800', fontSize: 15 }}>Name this item</Text>
             <TextInput
               value={pairName}
               onChangeText={setPairName}
