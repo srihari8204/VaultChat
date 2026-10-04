@@ -12,6 +12,7 @@ import type { LinkPreviewData } from '../../lib/linkPreview';
 import type { Viewer } from '../../hooks/useChatViewers';
 import { ViewerStack, type ResolvedViewer } from './ViewerStack';
 import { useS, type DisplayMessage } from './chatStyles';
+import { previewText } from './protectedText';
 
 /** @mention picker (W15) — appears while typing "@name" in a group. */
 export function MentionPicker({ candidates, onPick, screenAuthHeader }: {
@@ -157,7 +158,7 @@ export function ComposerBars({
                   : replyTo.type === 'video' ? 'Video'
                   : replyTo.type === 'file'  ? 'File'
                   : replyTo.type === 'vaultbeam' ? 'File'
-                  : replyTo.content ?? ''}
+                  : previewText(replyTo, replyTo.content ?? '')}
               </Text>
             </View>
           </View>

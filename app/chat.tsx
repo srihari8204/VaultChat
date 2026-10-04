@@ -2209,6 +2209,13 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         </View>
       )}
 
+      {/* Header, search and banners. Hidden from screen readers while the lock
+          veil is up, like the list and composer below: on Android TalkBack still
+          walks the veil's siblings, and ⋮ / Search here act on the locked chat. */}
+      <View
+        importantForAccessibility={lockState === 'open' ? 'auto' : 'no-hide-descendants'}
+        accessibilityElementsHidden={lockState !== 'open'}
+      >
       {/* Header — glass, so the thread scrolls visibly beneath it */}
       <ChatHeader
         embedded={embedded}
@@ -2270,6 +2277,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           }}
         />
       )}
+      </View>
 
       {/* Messages (inverted — newest at top of the array, visually at bottom).
           Hidden from screen readers until the lock veil is lifted. The rows stay
@@ -2348,6 +2356,8 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           }}
           accessibilityRole="button"
           accessibilityLabel={newSinceUp > 0 ? `Scroll to latest, ${newSinceUp} new` : 'Scroll to latest'}
+          importantForAccessibility={lockState === 'open' ? 'auto' : 'no-hide-descendants'}
+          accessibilityElementsHidden={lockState !== 'open'}
         >
           <Ionicons name="chevron-down" size={24} color={colors.text} />
           {newSinceUp > 0 && (

@@ -12,6 +12,7 @@ import { useTheme } from '../../lib/theme';
 import { navigateTo } from '../../lib/nav/openNavigation';
 import { looksEncrypted, type ChatMember } from '../../lib/chatService';
 import { useS, type DisplayMessage } from './chatStyles';
+import { isProtectedMessage } from './protectedText';
 
 type Members = Map<string, ChatMember>;
 
@@ -133,6 +134,7 @@ export function MemoryBanner({ messages, membersById, visible }: { messages: Dis
     for (const m of messages) {
       if (!m.createdAt || !m.content || m.deletedAt) continue;
       if (m.type !== 'text') continue;                  // anniversary banner is text-only
+      if (isProtectedMessage(m)) continue;              // Ink / view-once never quoted outside the bubble
       if (dismissedMemoryIds.has(m.id)) continue;
       const d = new Date(m.createdAt);
       if (Number.isNaN(d.getTime())) continue;

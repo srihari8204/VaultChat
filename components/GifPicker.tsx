@@ -127,10 +127,12 @@ export default function GifPicker({ visible, onClose, onSelect, initialTab = 'gi
   if (!visible) return null;
 
   return (
-    <Pressable style={s.overlay} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close stickers, emoji and GIFs">
-      {/* accessible={false}: a Pressable is one focus stop by default, which
-          would fold the whole sheet into a single unusable element. */}
-      <Pressable style={s.sheet} onPress={() => {}} accessible={false} accessibilityViewIsModal>
+    // The dismiss targets are SIBLINGS behind the sheet and the preview card,
+    // not their parents: an accessible Pressable is one focus stop, which would
+    // fold the whole sheet into a single unusable VoiceOver element.
+    <View style={s.overlay} accessibilityViewIsModal>
+      <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close stickers, emoji and GIFs" />
+      <View style={s.sheet}>
         <View style={s.handle} />
 
         <View style={s.searchRow}>
@@ -209,8 +211,9 @@ export default function GifPicker({ visible, onClose, onSelect, initialTab = 'gi
             here it sits directly under the content it is attributing, at full
             size, which is the clearest placement in the app. */}
         {preview && (
-          <Pressable style={s.previewBackdrop} onPress={() => setPreview(null)} accessibilityRole="button" accessibilityLabel="Close preview">
-            <Pressable style={s.previewCard} onPress={() => {}} accessible={false} accessibilityViewIsModal>
+          <View style={s.previewBackdrop} accessibilityViewIsModal>
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => setPreview(null)} accessibilityRole="button" accessibilityLabel="Close preview" />
+            <View style={s.previewCard}>
               <Image source={{ uri: preview.preview }} style={s.previewImg} resizeMode="contain" />
 
               <KlipyMark scheme={scheme} width={132} />
@@ -230,11 +233,11 @@ export default function GifPicker({ visible, onClose, onSelect, initialTab = 'gi
                   <Text style={s.previewSendTxt}>Send</Text>
                 </TouchableOpacity>
               </View>
-            </Pressable>
-          </Pressable>
+            </View>
+          </View>
         )}
-      </Pressable>
-    </Pressable>
+      </View>
+    </View>
   );
 }
 

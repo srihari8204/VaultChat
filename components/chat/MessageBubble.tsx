@@ -71,6 +71,7 @@ import { useConnectionState } from '../../lib/socket';
 import { useS, idealText, HL, type DisplayMessage } from './chatStyles';
 import { BRAND_ACCENT, brandAlpha } from '../../constants/theme';
 import { bubbleA11yLabel } from './bubbleA11yLabel';
+import { isProtectedMessage, previewText } from './protectedText';
 import { couldBeLongRead, readStats } from '../../lib/reader';
 // Vector, so the mark stays crisp and cannot be mis-scaled by a style box whose
 // ratio disagrees with a raster's — the failure that made this look absent.
@@ -1359,6 +1360,10 @@ function MessageBubble({
     );
   }
 
+  // In-chat search skips protected messages (InChatSearchBar), so the bubble
+  // must not highlight them either or the marks and the count disagree.
+  const searchHl = isProtectedMessage(msg) ? null : highlight;
+
   // One spoken summary for the whole bubble (sender, body, time, ticks). It
   // follows the bubble's own hiding rules — see bubbleA11yLabel.
   let a11yCaption = '';
@@ -1450,7 +1455,7 @@ function MessageBubble({
                   : replyTarget.type === 'video' ? '🎥 Video'
                   : replyTarget.type === 'file'  ? '📎 File'
                   : replyTarget.type === 'vaultbeam' ? '📦 File'
-                  : (replyPlain || '…')}
+                  : previewText(replyTarget, replyPlain || '…')}
               </Text>
             </View>
           </TouchableOpacity>
@@ -1619,7 +1624,7 @@ function MessageBubble({
             ) : (
               <>
                 <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, bubbleTxtColor ? { color: bubbleTxtColor } : null]}>
-                  {renderRichText(plain, highlight)}
+                  {renderRichText(plain, searchHl)}
                 </Text>
                 <ReaderAffordance
                   text={plain}
@@ -1698,7 +1703,7 @@ function MessageBubble({
           // background, so use the normal readable text color, not the on-orange white.
           return cap ? (
             <Text style={[S.bubbleTxt, { marginTop: 6, color: colors.text, paddingHorizontal: 4 }]}>
-              {renderRichText(cap, highlight)}
+              {renderRichText(cap, searchHl)}
             </Text>
           ) : null;
         })()}

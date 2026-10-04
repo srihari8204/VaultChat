@@ -1,8 +1,12 @@
 // components/chat/ChatModals.tsx — the chat screen's small modals: Message
 // Info, the profile-photo popup, the attach grid and the forward picker. Moved
 // out of app/chat.tsx unchanged; the screen owns their visibility and actions.
+//
+// Each backdrop's dismiss target is a SIBLING behind the sheet, not its parent
+// (as in MessageActionSheet): an accessible Pressable wrapping the sheet folds
+// every control in it into one VoiceOver element.
 
-import { ActivityIndicator, FlatList, Image, Modal, Pressable, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, FlatList, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../ui';
 import { useTheme } from '../../lib/theme';
@@ -19,8 +23,9 @@ export function MessageInfoModal({ infoMsg, onClose, otherMembers, screenAuthHea
   const { colors } = useTheme();
   return (
     <Modal visible={infoMsg != null} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={S.infoBackdrop} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close message info">
-        <Pressable style={S.infoSheet} onPress={() => {}} accessibilityViewIsModal>
+      <View style={S.infoBackdrop} accessibilityViewIsModal>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close message info" />
+        <View style={S.infoSheet}>
           <View style={S.sheetGrip} />
           <Text style={S.infoTitle}>Message info</Text>
           {infoMsg && (() => {
@@ -55,8 +60,8 @@ export function MessageInfoModal({ infoMsg, onClose, otherMembers, screenAuthHea
               </ScrollView>
             );
           })()}
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 }
@@ -70,8 +75,9 @@ export function ProfilePhotoModal({ visible, onClose, headerPhotoId, screenAuthH
   const { colors } = useTheme();
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={S.photoBackdrop} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close profile photo">
-        <Pressable style={S.photoCard} onPress={() => {}} accessibilityViewIsModal>
+      <View style={S.photoBackdrop} accessibilityViewIsModal>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close profile photo" />
+        <View style={S.photoCard}>
           <View style={S.photoImgWrap}>
             {headerPhotoId && screenAuthHeader ? (
               <Image source={{ uri: attachmentUrl(headerPhotoId), headers: { Authorization: screenAuthHeader } }} style={S.photoImg} resizeMode="cover" />
@@ -102,8 +108,8 @@ export function ProfilePhotoModal({ visible, onClose, headerPhotoId, screenAuthH
               <Text style={S.photoActionTxt}>Info</Text>
             </TouchableOpacity>
           </View>
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 }
@@ -116,8 +122,9 @@ export function AttachMenu({ visible, onClose, actions }: { visible: boolean; on
   const { colors } = useTheme();
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={S.attachBackdrop} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close attach menu">
-        <Pressable style={S.attachSheet} onPress={() => {}} accessibilityViewIsModal>
+      <View style={S.attachBackdrop} accessibilityViewIsModal>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close attach menu" />
+        <View style={S.attachSheet}>
           <View style={S.attachHandle} />
           <View style={S.attachGrid}>
             {actions.map((a) => (
@@ -136,8 +143,8 @@ export function AttachMenu({ visible, onClose, actions }: { visible: boolean; on
               </TouchableOpacity>
             ))}
           </View>
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 }
@@ -156,8 +163,9 @@ export function ForwardPicker({ forwardMsg, onClose, forwardChats, forwardLoadin
       animationType="slide"
       onRequestClose={onClose}
     >
-      <Pressable style={S.modalBackdrop} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close forward picker">
-        <Pressable style={S.forwardSheet} onPress={(e) => e.stopPropagation()} accessibilityViewIsModal>
+      <View style={S.modalBackdrop} accessibilityViewIsModal>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close forward picker" />
+        <View style={S.forwardSheet}>
           <Text style={S.forwardTitle}>Forward to…</Text>
           {/* AUDIT F10. Shown only for a message that has already travelled
               far — a warning on every forward is noise that trains people to
@@ -210,8 +218,8 @@ export function ForwardPicker({ forwardMsg, onClose, forwardChats, forwardLoadin
               )}
             />
           )}
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 }

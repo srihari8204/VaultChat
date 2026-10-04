@@ -54,8 +54,11 @@ export function ViewerStack({ viewers, resolve }: { viewers: Viewer[]; resolve: 
       </TouchableOpacity>
 
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-        <Pressable style={S.backdrop} onPress={() => setOpen(false)} accessibilityRole="button" accessibilityLabel="Close viewing now">
-          <Pressable style={[S.sheet, { paddingBottom: 28 + insets.bottom }]} onPress={() => {}} accessible={false} accessibilityViewIsModal>
+        {/* The dismiss target is a sibling behind the sheet, not its parent: an
+            accessible parent folds the whole sheet into one VoiceOver element. */}
+        <View style={S.backdrop} accessibilityViewIsModal>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setOpen(false)} accessibilityRole="button" accessibilityLabel="Close viewing now" />
+          <View style={[S.sheet, { paddingBottom: 28 + insets.bottom }]}>
             <View style={S.handle} />
             <View style={S.titleRow}>
               <Text style={[S.sheetTitle, { flex: 1 }]}>Viewing now · {viewers.length}</Text>
@@ -81,8 +84,8 @@ export function ViewerStack({ viewers, resolve }: { viewers: Viewer[]; resolve: 
               })}
             </ScrollView>
             <Text style={S.foot}>Live and private — never saved. Hide yours in chat info.</Text>
-          </Pressable>
-        </Pressable>
+          </View>
+        </View>
       </Modal>
     </>
   );

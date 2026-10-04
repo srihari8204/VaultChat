@@ -11,8 +11,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../lib/theme';
 import { countVisibleMatches } from '../../lib/inChatSearchCount';
 import { useS, type DisplayMessage } from './chatStyles';
+import { isProtectedMessage } from './protectedText';
 
-export function InChatSearchBar({ renderMessages, searchQ, setSearchQ, onClose, onGoTo }: {
+export function InChatSearchBar({ renderMessages: renderedRows, searchQ, setSearchQ, onClose, onGoTo }: {
   renderMessages: DisplayMessage[];
   searchQ: string;
   setSearchQ: (q: string) => void;
@@ -22,6 +23,9 @@ export function InChatSearchBar({ renderMessages, searchQ, setSearchQ, onClose, 
 }) {
   const S = useS();
   const { colors } = useTheme();
+  // View-once and Invisible Ink rows are never searched: a count or a jump to
+  // a hidden row would reveal what it says without the reveal.
+  const renderMessages = useMemo(() => renderedRows.filter(m => !isProtectedMessage(m)), [renderedRows]);
   // Matching rows, newest first (the list order). The per-row test IS the
   // counter's own test, so the stepping can never disagree with the count.
   const hits = useMemo(
@@ -57,7 +61,7 @@ export function InChatSearchBar({ renderMessages, searchQ, setSearchQ, onClose, 
       />
       {searchQ.length > 0 && (
         <Text style={S.inChatSearchCount} numberOfLines={1} accessibilityLiveRegion="polite">
-          {hit >= 0 && total > 0 ? `${hit + 1} of ${total}` : `${total} matches`}
+          {hit >= 0 && total > 0 ? `${hit + 1} of ${total}` : `${total} ${total === 1 ? 'match' : 'matches'}`}
         </Text>
       )}
       <TouchableOpacity
