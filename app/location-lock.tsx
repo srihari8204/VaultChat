@@ -20,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import notifee from '@notifee/react-native';
 import { useTheme } from '../lib/theme';
+import { tint } from '../lib/tintColor';
 import { userErrorText } from '../lib/userErrorText';
 import { permissionDenied } from '../lib/permissionDenied';
 import { ALARM } from '../lib/lock/alarmPalette';
@@ -250,7 +251,7 @@ export default function LocationLockScreen() {
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setPinMode((v) => !v)} accessibilityRole="switch" accessibilityState={{ checked: pinMode }}
             accessibilityLabel="Drop pin on map" accessibilityHint="When on, tap the map to place the lock point"
-            style={[st.srcBtn, { borderColor: pinMode ? colors.primary : colors.border, backgroundColor: pinMode ? colors.primary + '14' : 'transparent' }]}>
+            style={[st.srcBtn, { borderColor: pinMode ? colors.primary : colors.border, backgroundColor: pinMode ? tint(colors.primary, 0.08) : 'transparent' }]}>
             <Ionicons name="pin" size={16} color={pinMode ? colors.primary : colors.text} />
             <Text style={{ color: pinMode ? colors.primary : colors.text, fontSize: 13 }}>
               {pinMode ? 'Tap map to drop pin' : 'Drop pin on map'}
@@ -299,7 +300,7 @@ export default function LocationLockScreen() {
         )}
 
         {point && (
-          <View style={[st.destPill, { backgroundColor: colors.primary + '14' }]}>
+          <View style={[st.destPill, { backgroundColor: tint(colors.primary, 0.08) }]}>
             <Ionicons name="location" size={16} color={colors.primary} />
             <Text numberOfLines={1} style={{ color: colors.text, flex: 1 }}>{point.name}</Text>
             <Text style={{ color: colors.textDim, fontSize: 12 }}>
@@ -330,7 +331,7 @@ export default function LocationLockScreen() {
               style={[chipSt.chip, {
                 flexDirection: 'row', alignItems: 'center', gap: 5,
                 borderColor: settings.mode === m.key ? colors.primary : colors.border,
-                backgroundColor: settings.mode === m.key ? colors.primary + '1a' : 'transparent',
+                backgroundColor: settings.mode === m.key ? tint(colors.primary, 0.1) : 'transparent',
               }]}>
               <Ionicons name={m.icon} size={13} color={settings.mode === m.key ? colors.primary : colors.text} />
               <Text style={{ color: settings.mode === m.key ? colors.primary : colors.text, fontSize: 13, fontWeight: settings.mode === m.key ? '700' : '500' }}>{m.label}</Text>
@@ -361,7 +362,7 @@ export default function LocationLockScreen() {
           <Text style={{ color: colors.textDim, fontSize: 13 }}>→ {clampRadius(radius)} m</Text>
         </View>
         {accWarn && (
-          <View style={[st.warn, { backgroundColor: ALARM.grace + '22' }]}>
+          <View style={[st.warn, { backgroundColor: tint(ALARM.grace, 0.13) }]}>
             <Ionicons name="warning" size={15} color={ALARM.grace} />
             <Text style={{ color: colors.text, fontSize: 12.5, flex: 1 }}>
               GPS accuracy is ±{Math.round(accuracy!)} m — a {clampRadius(radius)} m radius may false-alarm.

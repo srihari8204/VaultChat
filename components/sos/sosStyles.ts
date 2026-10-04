@@ -6,6 +6,7 @@ import { StyleSheet } from 'react-native';
 import { brandAlpha, type Palette } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
 import { tint } from '../../lib/tintColor';
+import { SOS_BUTTON } from '../../constants/sosPalette';
 
 export function useSosStyles() {
   const { colors } = useTheme();
@@ -26,7 +27,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   sosHint: { color: c.textDim, fontSize: 14, marginBottom: 20, textAlign: 'center' },
   sosButton: { width: SOS_SIZE, height: SOS_SIZE, borderRadius: SOS_SIZE / 2, overflow: 'hidden', elevation: 10, shadowColor: c.danger, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.5, shadowRadius: 20 },
   sosGradient: { flex: 1, justifyContent: 'center', alignItems: 'center', borderRadius: SOS_SIZE / 2, borderWidth: 4, borderColor: tint(c.danger, 0.5) },
-  sosText: { color: c.onDanger, fontSize: 48, fontWeight: '900', letterSpacing: 6 },
+  // Fixed ink on the fixed SOS gradient (constants/sosPalette.ts), not onDanger.
+  sosText: { color: SOS_BUTTON.ink, fontSize: 48, fontWeight: '900', letterSpacing: 6 },
   testBtn: { marginTop: 20, paddingHorizontal: 24, paddingVertical: 10, minHeight: 44, justifyContent: 'center', borderRadius: 8, borderWidth: 1, borderColor: tint(c.warning, 0.3), backgroundColor: tint(c.warning, 0.08) },
   testBtnText: { color: c.warning, fontSize: 14, fontWeight: '600' },
 

@@ -9,6 +9,7 @@ import { View, TouchableOpacity, StyleSheet, FlatList, Alert, Share, TextInput, 
 import { Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
+import { tint } from '../lib/tintColor';
 import type { Palette } from '../constants/theme';
 import { zoneColor } from '../lib/lock/zoneMachine';
 import { ALARM } from '../lib/lock/alarmPalette';
@@ -19,7 +20,7 @@ import {
 } from '../lib/lock/lockStore';
 import { fmtDistance, type Units } from '../lib/lock/format';
 import { useLockSettings } from '../lib/lock/lockSettings';
-import { AppText as Text, AuroraBackground } from '../components/ui';
+import { AppText as Text, AuroraBackground, KeyboardSafe } from '../components/ui';
 
 const FILTERS: { key: HistoryFilter; label: string }[] = [
   { key: 'all', label: 'All' }, { key: 'exits', label: 'Exits' },
@@ -62,7 +63,7 @@ function Chip({ on, label, onPress, colors }: { on: boolean; label: string; onPr
   return (
     <TouchableOpacity onPress={onPress}
       accessibilityRole="radio" accessibilityState={{ checked: on }}
-      style={[st.chip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? colors.primary + '1a' : 'transparent' }]}>
+      style={[st.chip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? tint(colors.primary, 0.1) : 'transparent' }]}>
       <Text style={{ color: on ? colors.primary : colors.text, fontWeight: on ? '700' : '500', fontSize: 12.5 }}>{label}</Text>
     </TouchableOpacity>
   );
@@ -292,12 +293,17 @@ export default function LockHistoryScreen() {
   );
 
   return (
-    <View style={st.screen}>
+    // The note field sits inside the list: pad the screen by the keyboard so the
+    // list shrinks to the visible area and a lower session's note can scroll
+    // clear of it (native header: no resting bottom inset to add).
+    <KeyboardSafe style={st.screen} keyboardOnly>
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: true, title: 'Lock History', headerTitleAlign: 'center', headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text }} />
       <FlatList
         data={sessions}
         keyExtractor={(s) => String(s.id)}
+        // Save is tappable while the note's keyboard is open.
+        keyboardShouldPersistTaps="handled"
         ListHeaderComponent={header}
         // Progress for a filter, range or "Show more" reload of a listed history
         // (the empty list shows its own spinner; a Retry shows it in the banner).
@@ -433,7 +439,7 @@ export default function LockHistoryScreen() {
           </View>
         )}
       />
-    </View>
+    </KeyboardSafe>
   );
 }
 

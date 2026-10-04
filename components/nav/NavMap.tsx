@@ -19,7 +19,7 @@
 //                      setup flow.
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, type StyleProp, type ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { WebView } from 'react-native-webview';
 import { useTheme } from '../../lib/theme';
@@ -29,6 +29,9 @@ import { LEAFLET_JS_B64, LEAFLET_CSS_B64 } from './leafletAsset';
 import { MAPLIBRE_JS_B64, MAPLIBRE_CSS_B64 } from './maplibreAsset';
 import { NAV_MAP_3D } from '../../constants/flags';
 import { mapStyleUrl, buildings3DLayer, RASTER_FALLBACK_URL, ATTRIBUTION } from '../../lib/map/tileProvider';
+// Fixed marker, compass and credit colours drawn inside the pages; why they are
+// not theme tokens is documented there.
+import { NAV_MAP } from '../../constants/navMapPalette';
 
 // Tiles come from lib/map/tileProvider — the ONE place that names a provider.
 // MapLibre gets a vector STYLE URL; the Leaflet fallback below can only draw
@@ -50,22 +53,22 @@ function html(tileUrl: string, bg: string, accent: string): string {
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <link rel="stylesheet" href="data:text/css;base64,${LEAFLET_CSS_B64}"/>
 <style>html,body,#map{height:100%;margin:0;background:${bg}}
-.you{width:20px;height:20px;border-radius:50%;background:#2f7bff;border:3px solid #fff;box-shadow:0 0 0 6px rgba(47,123,255,.20),0 1px 4px rgba(0,0,0,.4)}
+.you{width:20px;height:20px;border-radius:50%;background:${NAV_MAP.you};border:3px solid ${NAV_MAP.ring};box-shadow:0 0 0 6px ${NAV_MAP.youHalo},0 1px 4px ${NAV_MAP.markerShadow}}
 .youwrap{width:20px;height:20px}
 .youarrow{position:absolute;left:50%;top:-9px;margin-left:-5px;width:0;height:0;
-  border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:9px solid #2f7bff;
-  filter:drop-shadow(0 0 1px #fff)}
+  border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:9px solid ${NAV_MAP.you};
+  filter:drop-shadow(0 0 1px ${NAV_MAP.ring})}
 #compass{position:absolute;top:12px;right:12px;z-index:1000;width:42px;height:42px;border-radius:21px;
-  background:rgba(20,22,28,.82);border:1px solid rgba(255,255,255,.25);display:none;
-  align-items:center;justify-content:center;box-shadow:0 1px 6px rgba(0,0,0,.35)}
+  background:${NAV_MAP.compassGround};border:1px solid ${NAV_MAP.compassEdge};display:none;
+  align-items:center;justify-content:center;box-shadow:0 1px 6px ${NAV_MAP.compassShadow}}
 #needle{width:26px;height:26px;position:relative;transition:transform .15s linear}
 #needle .n{position:absolute;left:50%;top:1px;margin-left:-4px;width:0;height:0;
-  border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:11px solid #ef4444}
+  border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:11px solid ${NAV_MAP.needleNorth}}
 #needle .s{position:absolute;left:50%;bottom:1px;margin-left:-4px;width:0;height:0;
-  border-left:4px solid transparent;border-right:4px solid transparent;border-top:11px solid #e5e7eb}
-#needle .dot{position:absolute;left:50%;top:50%;width:4px;height:4px;margin:-2px 0 0 -2px;border-radius:2px;background:#fff}
-.leaflet-control-attribution{font-size:9px;background:rgba(0,0,0,.35);color:#ddd}
-.leaflet-control-attribution a{color:#bbf}</style>
+  border-left:4px solid transparent;border-right:4px solid transparent;border-top:11px solid ${NAV_MAP.needleSouth}}
+#needle .dot{position:absolute;left:50%;top:50%;width:4px;height:4px;margin:-2px 0 0 -2px;border-radius:2px;background:${NAV_MAP.ring}}
+.leaflet-control-attribution{font-size:9px;background:${NAV_MAP.creditGround};color:${NAV_MAP.creditInk}}
+.leaflet-control-attribution a{color:${NAV_MAP.creditLink}}</style>
 </head><body><div id="map"></div>
 <div id="compass"><div id="needle"><div class="n"></div><div class="s"></div><div class="dot"></div></div></div>
 <script src="data:text/javascript;base64,${LEAFLET_JS_B64}"></script>
@@ -88,13 +91,13 @@ function setRoute(cs){ if(line)map.removeLayer(line); if(!cs||!cs.length)return;
   line=L.polyline(cs,{color:'${accent}',weight:6,opacity:.85,lineJoin:'round'}).addTo(map);
   if(!fitted){map.fitBounds(line.getBounds().pad(0.18));fitted=true;} }
 function setDest(la,ln){ if(flag)map.removeLayer(flag);
-  flag=L.circleMarker([la,ln],{radius:8,color:'#fff',weight:3,fillColor:'${accent}',fillOpacity:1}).addTo(map);
+  flag=L.circleMarker([la,ln],{radius:8,color:'${NAV_MAP.ring}',weight:3,fillColor:'${accent}',fillOpacity:1}).addTo(map);
   if(!fitted&&!line){map.setView([la,ln],14);} }
 function youIcon(){ var rot=isFinite(hdg)&&hdg>0?hdg:0;
   return L.divIcon({className:'',html:'<div class="youwrap" style="transform:rotate('+rot+'deg)"><div class="youarrow"></div><div class="you"></div></div>',iconSize:[20,20],iconAnchor:[10,10]}); }
 function setPos(la,ln,follow,acc){
   if(!you){you=L.marker([la,ln],{icon:youIcon(),zIndexOffset:1000}).addTo(map);}else{you.setLatLng([la,ln]);you.setIcon(youIcon());}
-  if(acc&&acc>0){ if(!accC){accC=L.circle([la,ln],{radius:acc,color:'#2f7bff',weight:1,opacity:.5,fillColor:'#2f7bff',fillOpacity:.12,interactive:false}).addTo(map);}else{accC.setLatLng([la,ln]);accC.setRadius(acc);} }
+  if(acc&&acc>0){ if(!accC){accC=L.circle([la,ln],{radius:acc,color:'${NAV_MAP.you}',weight:1,opacity:.5,fillColor:'${NAV_MAP.you}',fillOpacity:.12,interactive:false}).addTo(map);}else{accC.setLatLng([la,ln]);accC.setRadius(acc);} }
   else if(accC){map.removeLayer(accC);accC=null;}
   if(follow&&Date.now()-lastTouch>10000)map.setView([la,ln],Math.max(map.getZoom(),16),{animate:true}); }
 function setHeading(h){ hdg=h; var el=document.getElementById('needle');
@@ -133,17 +136,17 @@ function mlHtml(styleUrl: string, bg: string, accent: string, buildings: Record<
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <link rel="stylesheet" href="data:text/css;base64,${MAPLIBRE_CSS_B64}"/>
 <style>html,body,#map{height:100%;margin:0;background:${bg}}
-.you{width:20px;height:20px;border-radius:50%;background:#2f7bff;border:3px solid #fff;box-shadow:0 0 0 6px rgba(47,123,255,.20),0 1px 4px rgba(0,0,0,.4)}
+.you{width:20px;height:20px;border-radius:50%;background:${NAV_MAP.you};border:3px solid ${NAV_MAP.ring};box-shadow:0 0 0 6px ${NAV_MAP.youHalo},0 1px 4px ${NAV_MAP.markerShadow}}
 .youwrap{width:20px;height:20px;position:relative}
 .youarrow{position:absolute;left:50%;top:-9px;margin-left:-5px;width:0;height:0;
-  border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:9px solid #2f7bff;filter:drop-shadow(0 0 1px #fff)}
-.destdot{width:16px;height:16px;border-radius:50%;background:${accent};border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)}
+  border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:9px solid ${NAV_MAP.you};filter:drop-shadow(0 0 1px ${NAV_MAP.ring})}
+.destdot{width:16px;height:16px;border-radius:50%;background:${accent};border:3px solid ${NAV_MAP.ring};box-shadow:0 1px 4px ${NAV_MAP.markerShadow}}
 #compass{position:absolute;top:12px;right:12px;z-index:2;width:42px;height:42px;border-radius:21px;
-  background:rgba(20,22,28,.82);border:1px solid rgba(255,255,255,.25);display:none;align-items:center;justify-content:center;box-shadow:0 1px 6px rgba(0,0,0,.35)}
+  background:${NAV_MAP.compassGround};border:1px solid ${NAV_MAP.compassEdge};display:none;align-items:center;justify-content:center;box-shadow:0 1px 6px ${NAV_MAP.compassShadow}}
 #needle{width:26px;height:26px;position:relative;transition:transform .15s linear}
-#needle .n{position:absolute;left:50%;top:1px;margin-left:-4px;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:11px solid #ef4444}
-#needle .s{position:absolute;left:50%;bottom:1px;margin-left:-4px;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:11px solid #e5e7eb}
-#needle .dot{position:absolute;left:50%;top:50%;width:4px;height:4px;margin:-2px 0 0 -2px;border-radius:2px;background:#fff}
+#needle .n{position:absolute;left:50%;top:1px;margin-left:-4px;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:11px solid ${NAV_MAP.needleNorth}}
+#needle .s{position:absolute;left:50%;bottom:1px;margin-left:-4px;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:11px solid ${NAV_MAP.needleSouth}}
+#needle .dot{position:absolute;left:50%;top:50%;width:4px;height:4px;margin:-2px 0 0 -2px;border-radius:2px;background:${NAV_MAP.ring}}
 .maplibregl-ctrl-attrib{font-size:9px}</style>
 </head><body><div id="map"></div>
 <div id="compass"><div id="needle"><div class="n"></div><div class="s"></div><div class="dot"></div></div></div>
@@ -202,7 +205,7 @@ function applyCam(la,ln){
   map.easeTo(opts); }
 function setPos(la,ln,follow,acc){
   if(!you){you=new maplibregl.Marker({element:youEl}).setLngLat([ln,la]).addTo(map);}else you.setLngLat([ln,la]);
-  if(acc&&acc>0){ensureFill('acc','#2f7bff',circlePoly(la,ln,acc));}else{rmLayer('acc');}
+  if(acc&&acc>0){ensureFill('acc','${NAV_MAP.you}',circlePoly(la,ln,acc));}else{rmLayer('acc');}
   if(follow&&Date.now()-lastTouch>10000)applyCam(la,ln); }
 function setHeading(h){ hdg=h; var el=document.getElementById('needle');
   if(el)el.style.transform='rotate('+(-(map.getBearing()))+'deg)';
@@ -287,7 +290,7 @@ export default function NavMap({
   pin, pinMode = false, onPinDrop, zoomControls = false, imperialScale = false,
   cameraMode, camera3D = NAV_MAP_3D,
 }: {
-  style?: any;
+  style?: StyleProp<ViewStyle>;
   data?: NavGeo;
   follow?: boolean;
   lock?: LockOverlay | null;
@@ -459,7 +462,7 @@ export default function NavMap({
       {/* 3D camera toggle — MapLibre only; uncontrolled (hidden when a parent drives cameraMode). */}
       {engine === 'maplibre' && !cameraMode && (
         <TouchableOpacity onPress={cycleCam} accessibilityRole="button" accessibilityLabel="Change map view"
-          accessibilityValue={{ text: cam === 'follow' ? 'Follow, heading up' : cam === 'north' ? 'North up' : 'Route overview' }} style={[styles.fab, { bottom: zoomControls ? 120 : 66, backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
+          accessibilityValue={{ text: cam === 'follow' ? 'Follow, heading up' : cam === 'north' ? 'North up' : 'Route overview' }} style={[styles.fab, { bottom: zoomControls ? CAM_FAB_ABOVE_ZOOM : 66, backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
           <Ionicons name={camIcon} size={19} color={colors.primary} />
         </TouchableOpacity>
       )}
@@ -472,6 +475,11 @@ export default function NavMap({
   );
 }
 
+const ZOOM_BTN = 44;
+// The camera button sits above the zoom box (bottom 66, two buttons, borders,
+// separator) with a 10 pt gap. At 120 it overlapped "Zoom in".
+const CAM_FAB_ABOVE_ZOOM = 66 + 2 * ZOOM_BTN + 3 + 10;
+
 const styles = StyleSheet.create({
   wrap: { flex: 1, overflow: 'hidden' },
   fab: { position: 'absolute', right: 12, bottom: 12, width: 44, height: 44, borderRadius: 22, borderWidth: 1, alignItems: 'center', justifyContent: 'center', elevation: 3 },
@@ -479,10 +487,10 @@ const styles = StyleSheet.create({
   // 2026-09-18: height stays PINNED. +/- are Ionicons, not text, and they do not
   // font-scale; the slot is already boxed to zoomBox's fixed 44 width, so letting
   // the height grow would just turn two square buttons into ovals inside a
-  // capsule that cannot follow them.
+  // capsule that cannot follow them. 44 (was 40): square, and a full touch target.
   zoomBtn: {
     // layout-exempt: icon-only zoom control, no text to clip.
-    height: 40, alignItems: 'center', justifyContent: 'center',
+    height: ZOOM_BTN, alignItems: 'center', justifyContent: 'center',
   },
   zoomSep: { height: StyleSheet.hairlineWidth, marginHorizontal: 8 },
   // layout-exempt: absolute overlay sized by its edges; the text wraps and

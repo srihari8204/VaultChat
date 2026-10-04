@@ -21,6 +21,7 @@ import SosContacts, { type SosContact } from '../components/sos/SosContacts';
 import SosHistory from '../components/sos/SosHistory';
 import { useSosStyles } from '../components/sos/sosStyles';
 import { useReducedMotion } from '../lib/useReducedMotion';
+import { SOS_BUTTON } from '../constants/sosPalette';
 // Shared with app/notifications.tsx, so both SOS screens word a result the same way.
 import { sosReachedOf, sosSentAnnouncement, sosSentLine } from '../lib/sosReachCopy';
 
@@ -372,7 +373,7 @@ export default function EmergencySOSScreen() {
                     if (n === 'activate' || n === 'longpress') startCountdown(false);
                   }}
                 >
-                  <LinearGradient colors={['#FF2D2D', '#CC0000']} style={styles.sosGradient}>
+                  <LinearGradient colors={SOS_BUTTON.gradient} style={styles.sosGradient}>
                     <Text style={styles.sosText}>SOS</Text>
                   </LinearGradient>
                 </TouchableOpacity>

@@ -4,6 +4,7 @@
 import React from 'react';
 import { StyleSheet, TouchableOpacity } from 'react-native';
 import type { Palette } from '../../constants/theme';
+import { tint } from '../../lib/tintColor';
 import { AppText as Text } from '../ui';
 
 /** Radius (a radio) / navigate-back (an action) chip. `busy` is for an action
@@ -16,7 +17,7 @@ export function Chip({ active: on, busy = false, disabled = false, radio = false
     <TouchableOpacity onPress={onPress} disabled={disabled}
       accessibilityRole={radio ? 'radio' : 'button'}
       accessibilityState={radio ? { checked: on, disabled } : { busy, disabled }}
-      style={[chipSt.chip, { borderColor: lit ? colors.primary : colors.border, backgroundColor: lit ? colors.primary + '1a' : 'transparent', opacity: disabled && !busy ? 0.5 : 1 }]}>
+      style={[chipSt.chip, { borderColor: lit ? colors.primary : colors.border, backgroundColor: lit ? tint(colors.primary, 0.1) : 'transparent', opacity: disabled && !busy ? 0.5 : 1 }]}>
       <Text style={{ color: lit ? colors.primary : colors.text, fontWeight: lit ? '700' : '500', fontSize: 13.5 }}>{label}</Text>
     </TouchableOpacity>
   );

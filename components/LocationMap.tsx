@@ -23,12 +23,14 @@
 // still shows the coordinates, and offers a retry.
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { WebView } from 'react-native-webview';
 import { useTheme } from '../lib/theme';
 import { MAPLIBRE_JS_B64, MAPLIBRE_CSS_B64 } from './nav/maplibreAsset';
 import { mapStyleUrl } from '../lib/map/tileProvider';
+// Fixed pin and credit colours drawn inside the page (documented there).
+import { PIN_MAP } from '../constants/navMapPalette';
 
 export interface MapPoint { lat: number; lng: number }
 
@@ -45,14 +47,14 @@ function page(styleUrl: string, bg: string, accent: string, init: MapPoint): str
 <link rel="stylesheet" href="data:text/css;base64,${MAPLIBRE_CSS_B64}"/>
 <style>html,body,#map{height:100%;margin:0;background:${bg}}
 .pin{width:22px;height:22px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);
-  background:${accent};border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.45)}
+  background:${accent};border:3px solid ${PIN_MAP.ring};box-shadow:0 2px 6px ${PIN_MAP.pinShadow}}
 /* OpenStreetMap's licence requires the credit stay LEGIBLE. The recentre button
    is an RN overlay pinned bottom-RIGHT, so the attribution lives bottom-left
    (added below) and gets a plate to read against, not 9px over the tiles. */
 .maplibregl-ctrl-bottom-left{max-width:calc(100% - 60px)}
-.maplibregl-ctrl-attrib{font-size:10px;line-height:14px;background:rgba(255,255,255,.82);
-  color:#111;border-radius:4px 4px 0 0}
-.maplibregl-ctrl-attrib a{color:#0b57d0}</style>
+.maplibregl-ctrl-attrib{font-size:10px;line-height:14px;background:${PIN_MAP.creditGround};
+  color:${PIN_MAP.creditInk};border-radius:4px 4px 0 0}
+.maplibregl-ctrl-attrib a{color:${PIN_MAP.creditLink}}</style>
 </head><body><div id="map"></div>
 <script src="data:text/javascript;base64,${MAPLIBRE_JS_B64}"></script>
 <script>
@@ -125,7 +127,7 @@ export default function LocationMap({
   height?: number;
   /** What the screen knows. Defaults to ok/locating from `coord`. */
   status?: LocationMapStatus;
-  style?: any;
+  style?: StyleProp<ViewStyle>;
 }) {
   const { scheme, colors } = useTheme();
   const ref = useRef<WebView>(null);

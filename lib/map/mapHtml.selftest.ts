@@ -21,6 +21,7 @@
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { NAV_MAP } from '../../constants/navMapPalette';
 
 const A = (c: boolean, m: string) => { if (!c) throw new Error('mapHtml: ' + m); };
 
@@ -54,6 +55,7 @@ const STUB: Record<string, unknown> = {
   styleUrl: 'https://tiles.example.org/styles/x',
   tileUrl: '', bg: '#0d0f14', accent: '#7c5cff', selfColor: '#7c5cff', svKey: '',
   buildings: { id: 'building-3d', type: 'fill-extrusion' },
+  NAV_MAP, // NavMap's fixed marker/compass/credit colours: the real values
 };
 
 // Evaluate the actual shared marker CSS, including its day/night branch.

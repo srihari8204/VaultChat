@@ -7,6 +7,7 @@ import React, { useEffect } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, AccessibilityInfo, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../lib/theme';
+import { tint } from '../../lib/tintColor';
 import { useNavBanner } from '../../lib/nav/navigationService';
 import { type HapticEvent } from '../../lib/nav/hapticLanguage';
 
@@ -46,7 +47,7 @@ export default function NavBanner() {
   return (
     <View style={[styles.wrap, { backgroundColor: colors.glassSoft, borderBottomColor: colors.glassStroke }]}>
       <View style={styles.row}>
-        <View style={[styles.iconBox, { backgroundColor: colors.primary + '22' }]}>
+        <View style={[styles.iconBox, { backgroundColor: tint(colors.primary, 0.13) }]}>
           <Ionicons name={iconFor(b.event)} size={26} color={colors.primary} />
         </View>
         <View style={styles.mid}>
