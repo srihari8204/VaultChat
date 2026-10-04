@@ -61,7 +61,11 @@ function DashboardContent() {
   const radarAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
+  // One refresh at a time: the refresh button stays tappable while loading.
+  const inFlight = useRef(false);
   const load = useCallback(async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setError(null);
     // Local-first: paint last-known security overview instantly, then refresh.
     const cached = await readCache<SecurityOverview>('dashboard');
@@ -73,17 +77,21 @@ function DashboardContent() {
       writeCache('dashboard', fresh);
     }
     catch (e: any) { if (!cached) setError(e?.message ?? 'Failed to load'); }
-    finally { setLoading(false); }
+    finally { setLoading(false); inFlight.current = false; }
   }, []);
 
   useEffect(() => {
     load();
     Animated.timing(fadeAnim,{toValue:1,duration:500,useNativeDriver:true}).start();
-    Animated.loop(Animated.timing(radarAnim,{toValue:1,duration:3500,easing:Easing.linear,useNativeDriver:true})).start();
-    Animated.loop(Animated.sequence([
+    // Keep the loop handles so leaving the screen stops them (same leak as
+    // the one fixed in app/notifications.tsx).
+    const radar = Animated.loop(Animated.timing(radarAnim,{toValue:1,duration:3500,easing:Easing.linear,useNativeDriver:true}));
+    const pulse = Animated.loop(Animated.sequence([
       Animated.timing(pulseAnim,{toValue:1.04,duration:2500,easing:Easing.inOut(Easing.ease),useNativeDriver:true}),
       Animated.timing(pulseAnim,{toValue:1,duration:2500,easing:Easing.inOut(Easing.ease),useNativeDriver:true}),
-    ])).start();
+    ]));
+    radar.start(); pulse.start();
+    return () => { radar.stop(); pulse.stop(); };
   }, [load, fadeAnim, pulseAnim, radarAnim]);
 
   const handleNav = (item: (typeof NAV)[number]) => {
@@ -93,7 +101,7 @@ function DashboardContent() {
 
   const checks = overview ? buildChecks(overview) : [];
   const score = checks.length ? Math.round((checks.filter(c => c.ok).length / checks.length) * 100) : 0;
-  const scoreColor = score >= 80 ? colors.accent : score >= 50 ? colors.accent : colors.danger;
+  const scoreColor = score >= 80 ? colors.success : score >= 50 ? colors.accent : colors.danger;
   const radarDeg = radarAnim.interpolate({inputRange:[0,1],outputRange:['0deg','360deg']});
 
   return (
@@ -146,9 +154,16 @@ function DashboardContent() {
         </View>
 
           {loading && <ActivityIndicator color={colors.primary} style={{marginTop:30}} />}
-          {error && !loading && <Text style={{color:colors.danger,textAlign:'center',marginTop:24,fontSize:13}}>{error}</Text>}
+          {error && !loading && (
+            <View style={{alignItems:'center',marginTop:24,gap:12}}>
+              <Text style={{color:colors.danger,textAlign:'center',fontSize:13}}>{error}</Text>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Try loading the security overview again" onPress={load} style={S.retryBtn}>
+                <Text style={{color:colors.primary,fontSize:14,fontWeight:'700'}}>Try again</Text>
+              </TouchableOpacity>
+            </View>
+          )}
           {!loading && !error && checks.map((c,i)=>{
-            const col = c.ok ? colors.accent : colors.accent;
+            const col = c.ok ? colors.success : colors.danger;
             return (
               <View key={i} style={S.moduleRow}>
                 <View style={[S.modIcon,{backgroundColor:col+'18',borderColor:col+'44'}]}>
@@ -200,6 +215,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   header:{flexDirection:'row',alignItems:'center',paddingHorizontal:18,paddingTop:HEADER_TOP,paddingBottom:14,gap:10},
   title:{color:c.text,fontSize:20,fontWeight:'800'},
   backBtn:{width:44,height:44,borderRadius:16,backgroundColor:c.glassSoft,justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:c.glassStroke},
+  retryBtn:{minHeight:44,paddingHorizontal:20,justifyContent:'center',backgroundColor:c.glassSoft,borderRadius:16,borderWidth:1,borderColor:c.glassStroke},
   scanBtn:{width:44,height:44,alignItems:'center',justifyContent:'center',backgroundColor:c.glassSoft,borderRadius:16,borderWidth:1,borderColor:c.glassStroke},
   scoreArea:{alignItems:'center',paddingVertical:14},
   scoreRing:{minWidth:180,minHeight:180,padding:20,borderRadius:90,borderWidth:2,borderColor:c.glassStroke,backgroundColor:c.glassSoft,justifyContent:'center',alignItems:'center',overflow:'hidden',position:'relative'},

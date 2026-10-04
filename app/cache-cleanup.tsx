@@ -45,13 +45,21 @@ export default function CacheCleanupScreen() {
   const [clearLogout, setClearLogout] = useState(false);
   const [lastClean, setLastClean] = useState<number | null>(null);
 
+  const [loadFailed, setLoadFailed] = useState(false);
   const load = useCallback(async () => {
     setLoading(true);
-    const [s, days, logout, last] = await Promise.all([
-      measureCacheSizes(), getAutoCleanDays(), getClearOnLogout(), getLastCleanAt(),
-    ]);
-    setSizes(s); setAutoDays(days); setClearLogout(logout); setLastClean(last);
-    setLoading(false);
+    setLoadFailed(false);
+    // try/finally: a rejection used to leave the spinner up forever.
+    try {
+      const [s, days, logout, last] = await Promise.all([
+        measureCacheSizes(), getAutoCleanDays(), getClearOnLogout(), getLastCleanAt(),
+      ]);
+      setSizes(s); setAutoDays(days); setClearLogout(logout); setLastClean(last);
+    } catch {
+      setLoadFailed(true);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -111,12 +119,12 @@ export default function CacheCleanupScreen() {
 
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
         <View style={S.hero}>
-          <Text style={S.totalNum}>{formatBytes(summary.totalBytes)}</Text>
+          <Text style={S.totalNum}>{loading ? '…' : formatBytes(summary.totalBytes)}</Text>
           <Text style={S.totalLabel}>reclaimable cache{lastClean ? ` · last cleared ${new Date(lastClean).toLocaleDateString()}` : ''}</Text>
         </View>
 
         <View style={S.btnRow}>
-          <TouchableOpacity style={[S.actBtn, S.actPrimary]} onPress={onSmart} disabled={busy} activeOpacity={0.85}>
+          <TouchableOpacity style={[S.actBtn, S.actPrimary]} onPress={onSmart} disabled={busy || loading} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel="One-tap smart cleanup" accessibilityState={{ disabled: busy || loading, busy }}>
             {busy ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="flash" size={16} color="#fff" />}
             <Text style={S.actPrimaryText}>One-Tap Smart Cleanup</Text>
           </TouchableOpacity>
@@ -125,6 +133,13 @@ export default function CacheCleanupScreen() {
         <Text style={S.sectionTitle}>CATEGORIES</Text>
         {loading ? (
           <View style={S.center}><ActivityIndicator color={colors.primary} /></View>
+        ) : loadFailed ? (
+          <View style={[S.card, S.center, { gap: 10 }]}>
+            <Text style={S.rowDesc}>Cache sizes could not be measured.</Text>
+            <TouchableOpacity onPress={load} accessibilityRole="button" accessibilityLabel="Measure cache again" hitSlop={8}>
+              <Text style={[S.rowLabel, { color: colors.primary }]}>Try again</Text>
+            </TouchableOpacity>
+          </View>
         ) : (
           <View style={S.card}>
             {CACHE_CATEGORIES.map((c, i) => {
@@ -132,7 +147,7 @@ export default function CacheCleanupScreen() {
               const on = selected.has(c.id);
               return (
                 <View key={c.id}>
-                  <TouchableOpacity style={S.row} onPress={() => toggle(c.id)} activeOpacity={0.7}>
+                  <TouchableOpacity style={S.row} onPress={() => toggle(c.id)} activeOpacity={0.7} accessibilityRole="checkbox" accessibilityState={{ checked: on }} accessibilityLabel={`${c.label}, ${formatBytes(bytes)}`}>
                     <Ionicons name={on ? 'checkbox' : 'square-outline'} size={22} color={on ? colors.primary : colors.textFaint} />
                     <View style={{ flex: 1 }}>
                       <Text style={S.rowLabel}>{c.label}</Text>
@@ -147,7 +162,7 @@ export default function CacheCleanupScreen() {
           </View>
         )}
 
-        <TouchableOpacity style={[S.actBtn, S.actClear]} onPress={onSelected} disabled={busy || selectedPlan.items.length === 0} activeOpacity={0.85}>
+        <TouchableOpacity style={[S.actBtn, S.actClear]} onPress={onSelected} disabled={busy || selectedPlan.items.length === 0} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel={`Clear selected cache, ${formatBytes(selectedPlan.totalBytes)}`} accessibilityState={{ disabled: busy || selectedPlan.items.length === 0 }}>
           <Ionicons name="trash" size={16} color={colors.danger} />
           <Text style={[S.actClearText, { color: colors.danger }]}>Clear selected · {formatBytes(selectedPlan.totalBytes)}</Text>
         </TouchableOpacity>
@@ -158,7 +173,7 @@ export default function CacheCleanupScreen() {
             <Text style={S.rowLabel}>Auto-clear safe cache</Text>
             <View style={S.chips}>
               {AUTO_OPTIONS.map((d) => (
-                <TouchableOpacity key={d} onPress={() => chooseAutoDays(d)} style={[S.chip, autoDays === d && { backgroundColor: colors.primary, borderColor: colors.primary }]}>
+                <TouchableOpacity key={d} onPress={() => chooseAutoDays(d)} accessibilityRole="radio" accessibilityState={{ checked: autoDays === d }} accessibilityLabel={d === 0 ? 'Auto-clear off' : `Auto-clear every ${d} days`} style={[S.chip, autoDays === d && { backgroundColor: colors.primary, borderColor: colors.primary }]}>
                   <Text style={[S.chipText, autoDays === d && { color: '#fff' }]}>{d === 0 ? 'Off' : `${d}d`}</Text>
                 </TouchableOpacity>
               ))}
@@ -170,7 +185,7 @@ export default function CacheCleanupScreen() {
               <Text style={S.rowLabel}>Clear cache on logout</Text>
               <Text style={S.rowDesc}>Removes cache (not your data) when you sign out.</Text>
             </View>
-            <Switch value={clearLogout} onValueChange={toggleLogout} />
+            <Switch value={clearLogout} onValueChange={toggleLogout} accessibilityLabel="Clear cache on logout" trackColor={{ true: colors.primary, false: colors.border }} />
           </View>
         </View>
 

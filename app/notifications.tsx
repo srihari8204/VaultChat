@@ -55,6 +55,11 @@ function NotificationsContent() {
   const [sos,setSos]=useState<SOSHistoryItem[]>([]);
   const [contacts,setContacts]=useState<TrustedContact[]>([]);
   const [settings,setSettings]=useState<UserSettings|null>(null);
+  // Load failures are not "none": a failed contacts fetch must not tell the
+  // user to add contacts (or block the panic button), and a failed settings
+  // fetch must not leave the privacy tab blank.
+  const [contactsFailed,setContactsFailed]=useState(false);
+  const [settingsRetrying,setSettingsRetrying]=useState(false);
   const [loading,setLoading]=useState(true);
   const [panicArmed,setPanicArmed]=useState(false);
   const [panicCountdown,setPanicCountdown]=useState(0);
@@ -103,6 +108,7 @@ function NotificationsContent() {
         const contactsV = c ?? cached?.contacts ?? [];
         const settingsV = s ?? cached?.settings ?? null;
         setSos(sosV); setContacts(contactsV); setSettings(settingsV);
+        setContactsFailed(c === null && !cached?.contacts);
         writeCache('alerts', { sos: sosV, contacts: contactsV, settings: settingsV });
       } finally { if (!cancel) setLoading(false); }
     })();
@@ -152,7 +158,15 @@ function NotificationsContent() {
   const armPanic=()=>{
     if(sending) return;
     if(panicArmed){ setPanicArmed(false); setPanicCountdown(0); return; }
-    if(contacts.length === 0){ Alert.alert('No trusted contacts', 'Add at least one trusted contact before using the panic button.'); return; }
+    // Only block when we KNOW there are none. If the list failed to load, the
+    // server still knows who to alert, and an SOS must not wait on a refetch.
+    if(contacts.length === 0 && !contactsFailed){
+      Alert.alert('No trusted contacts', 'Add at least one trusted contact before using the panic button.', [
+        { text: 'Not now', style: 'cancel' },
+        { text: 'Add contacts', onPress: () => router.push('/trusted-contacts' as any) },
+      ]);
+      return;
+    }
     setPanicArmed(true); setPanicCountdown(3);
     Animated.sequence([Animated.timing(panicAnim,{toValue:0.94,duration:100,useNativeDriver:true}),Animated.timing(panicAnim,{toValue:1,duration:300,useNativeDriver:true})]).start();
   };
@@ -162,7 +176,16 @@ function NotificationsContent() {
     const next = { ...settings, [key]: !settings[key] };
     setSettings(next); // optimistic
     try { await updateSettings({ [key]: next[key] } as Partial<UserSettings>); }
-    catch { setSettings(settings); Alert.alert('Could not save', 'Setting was not updated.'); }
+    // Revert only this key, so a concurrent toggle that did save is kept.
+    catch { setSettings(cur => cur ? { ...cur, [key]: settings[key] } : cur); Alert.alert('Could not save', 'Setting was not updated.'); }
+  };
+
+  const retrySettings = async () => {
+    if (settingsRetrying) return;
+    setSettingsRetrying(true);
+    try { setSettings(await getSettings()); }
+    catch { Alert.alert('Could not load', 'Check your connection and try again.'); }
+    finally { setSettingsRetrying(false); }
   };
 
   const handleNav=(item:typeof NAV[0])=>{ setNavTab(item.id); if(item.id!=='alerts')router.push(item.route as any); };
@@ -209,6 +232,15 @@ function NotificationsContent() {
                 );
               }))}
 
+          {!loading && activeTab==='settings' && !settings && (
+            <View style={{alignItems:'center',marginTop:36,gap:12}}>
+              <Text style={{color:colors.textDim,textAlign:'center',fontSize:13}}>Your privacy settings could not be loaded.</Text>
+              <TouchableOpacity onPress={retrySettings} disabled={settingsRetrying} style={[S.settingRow,{paddingHorizontal:20,minHeight:44}]} accessibilityRole="button" accessibilityLabel="Try loading privacy settings again" accessibilityState={{ busy: settingsRetrying }}>
+                {settingsRetrying ? <ActivityIndicator color={colors.primary}/> : <Text style={{color:colors.primary,fontSize:14,fontWeight:'700'}}>Try again</Text>}
+              </TouchableOpacity>
+            </View>
+          )}
+
           {!loading && activeTab==='settings' && settings && (
             <View style={{marginTop:4}}>
               <Text style={{color:colors.textFaint,fontSize:9,fontWeight:'800',letterSpacing:2,marginBottom:10}}>PRIVACY</Text>
@@ -219,7 +251,7 @@ function NotificationsContent() {
                     <Text numberOfLines={1} style={{color:colors.text,fontSize:13,fontWeight:'700'}}>{d.title}</Text>
                     <Text style={{color:colors.textFaint,fontSize:10,marginTop:2}}>{d.desc}</Text>
                   </View>
-                  <Switch value={!!settings[d.key]} onValueChange={()=>toggleSetting(d.key)} trackColor={{false:colors.border,true:colors.primary}} thumbColor={colors.card}/>
+                  <Switch value={!!settings[d.key]} onValueChange={()=>toggleSetting(d.key)} trackColor={{false:colors.border,true:colors.primary}} thumbColor={colors.card} accessibilityLabel={d.title}/>
                 </View>
               ))}
 
@@ -257,7 +289,7 @@ function NotificationsContent() {
                   <Text numberOfLines={1} style={{color:colors.text,fontSize:13,fontWeight:'700'}}>Fetch previews for received links</Text>
                   <Text style={{color:colors.textFaint,fontSize:10,marginTop:2}}>Off: crazzychat&apos;s server never sees links people send you. Previews the sender attached still show.</Text>
                 </View>
-                <Switch value={remoteLinks} onValueChange={(v)=>{ setRemoteLinksState(v); setRemoteLinkPreviews(v); }} trackColor={{false:colors.border,true:colors.primary}} thumbColor={colors.card}/>
+                <Switch value={remoteLinks} onValueChange={(v)=>{ setRemoteLinksState(v); setRemoteLinkPreviews(v); }} trackColor={{false:colors.border,true:colors.primary}} thumbColor={colors.card} accessibilityLabel="Fetch previews for received links"/>
               </View>
             </View>
           )}
@@ -269,7 +301,7 @@ function NotificationsContent() {
                 <Text style={{color:colors.textDim,fontSize:12,lineHeight:18}}>Sends an emergency alert with your current location to your trusted contacts.</Text>
               </View>
               <Animated.View style={{borderRadius:22,borderWidth:2,borderColor:panicBorderColor,overflow:'hidden'}}>
-                <TouchableOpacity onPress={armPanic} activeOpacity={0.85} disabled={sending} accessibilityRole="button" accessibilityLabel="Panic alert">
+                <TouchableOpacity onPress={armPanic} activeOpacity={0.85} disabled={sending} accessibilityRole="button" accessibilityLabel={sending ? 'Sending emergency alert' : panicArmed ? `Panic alert armed, sending in ${panicCountdown} seconds. Tap to cancel` : 'Panic alert. Tap to arm, sends after 3 seconds'} accessibilityState={{ busy: sending, disabled: sending }} accessibilityLiveRegion="polite">
                   <LinearGradient colors={panicArmed?[colors.danger,colors.danger]:[colors.glass,colors.glassSoft]} style={{padding:28,alignItems:'center',gap:8}}>
                     <Animated.View style={{transform:[{scale:panicAnim}]}}><Ionicons name="warning-outline" size={52} color={colors.danger} /></Animated.View>
                     <Text style={{color:panicArmed?'#FFFFFF':colors.danger,fontSize:17,fontWeight:'900',letterSpacing:2}}>{sending?'SENDING…':panicArmed?'SENDING IN '+panicCountdown+'...':'PANIC ALERT'}</Text>
@@ -277,9 +309,13 @@ function NotificationsContent() {
                   </LinearGradient>
                 </TouchableOpacity>
               </Animated.View>
-              <Text style={{color:colors.textFaint,fontSize:9,fontWeight:'800',letterSpacing:2}}>TRUSTED CONTACTS ({contacts.length})</Text>
-              {contacts.length===0
-                ? <Text style={{color:colors.textFaint,fontSize:12}}>No trusted contacts yet. Add them from a contact’s profile so they’re alerted in an emergency.</Text>
+              <Text style={{color:colors.textFaint,fontSize:9,fontWeight:'800',letterSpacing:2}}>TRUSTED CONTACTS{contactsFailed ? '' : ` (${contacts.length})`}</Text>
+              {contactsFailed
+                ? <Text style={{color:colors.textDim,fontSize:12}}>Your trusted contacts could not be loaded. The panic button still alerts everyone you have added.</Text>
+                : contacts.length===0
+                ? <TouchableOpacity onPress={()=>router.push('/trusted-contacts' as any)} accessibilityRole="link" accessibilityLabel="Add trusted contacts">
+                    <Text style={{color:colors.textFaint,fontSize:12}}>No trusted contacts yet. <Text style={{color:colors.primary,fontWeight:'700'}}>Add trusted contacts</Text> so they’re alerted in an emergency.</Text>
+                  </TouchableOpacity>
                 : contacts.map((c)=>(
                     <View key={c.userId} style={[S.settingRow,{borderColor:'rgba(239,68,68,0.15)'}]}>
                       <Ionicons name="people-circle-outline" size={30} color={colors.danger} />
@@ -313,8 +349,6 @@ function useS() {
 }
 
 export default function NotificationsScreen() {
-  const { colors } = useTheme();
-  const S = useS();
   return (<ErrorBoundary fallbackTitle="Notifications Error" fallbackMessage="Notifications had a problem."><NotificationsContent/></ErrorBoundary>);
 }
 

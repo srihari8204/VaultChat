@@ -5,13 +5,14 @@
 
 import { HEADER_TOP } from '../constants/layout';
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Switch } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Switch, ActivityIndicator } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
 import {
-  getSoundPrefs, setSoundPrefs, previewRingtone, stopRingtone, RINGTONES, type SoundPrefs,
+  getSoundPrefs, setSoundPrefs, previewRingtone, stopRingtonePreview, RINGTONES,
+  SYSTEM_RINGTONE, systemRingtoneAvailable, type SoundPrefs,
 } from '../lib/sounds';
 import { AuroraBackground } from '../components/ui';
 
@@ -23,7 +24,8 @@ export default function NotificationSoundsScreen() {
 
   useEffect(() => {
     getSoundPrefs().then(setPrefs);
-    return () => { stopRingtone(); };
+    // Only the preview: stopRingtone() here also silenced a real incoming call.
+    return () => { void stopRingtonePreview(); };
   }, []);
 
   const patch = async (p: Partial<SoundPrefs>) => setPrefs(await setSoundPrefs(p));
@@ -33,7 +35,13 @@ export default function NotificationSoundsScreen() {
     previewRingtone(id);   // play it once so they hear the choice
   };
 
-  if (!prefs) return <View style={s.root} />;
+  if (!prefs) return <View style={[s.root, { justifyContent: 'center' }]}><ActivityIndicator color={colors.primary} /></View>;
+
+  // "Phone ringtone" only where the native ringer exists to play it.
+  const options = [
+    ...(systemRingtoneAvailable() ? [{ id: SYSTEM_RINGTONE, name: 'Phone ringtone', preview: false }] : []),
+    ...RINGTONES.map(r => ({ id: r.id, name: r.name, preview: true })),
+  ];
 
   return (
     <View style={s.root}>
@@ -58,6 +66,7 @@ export default function NotificationSoundsScreen() {
           <Switch
             value={prefs.messageSounds}
             onValueChange={(v) => patch({ messageSounds: v })}
+            accessibilityLabel="In-app message sounds"
             trackColor={{ true: colors.primary, false: colors.border }}
             thumbColor="#fff"
           />
@@ -73,28 +82,39 @@ export default function NotificationSoundsScreen() {
           <Switch
             value={prefs.vibrate}
             onValueChange={(v) => patch({ vibrate: v })}
+            accessibilityLabel="Vibrate on incoming call"
             trackColor={{ true: colors.primary, false: colors.border }}
             thumbColor="#fff"
           />
         </View>
 
         <Text style={[s.section, { marginTop: 18 }]}>RINGTONE</Text>
-        {RINGTONES.map(rt => {
-          const on = prefs.ringtone === rt.id;
+        {options.map(rt => {
+          // Without the native ringer a stored 'system' plays the first bundled tone.
+          const on = prefs.ringtone === rt.id
+            || (prefs.ringtone === SYSTEM_RINGTONE && !systemRingtoneAvailable() && rt.id === RINGTONES[0].id);
           return (
-            <TouchableOpacity key={rt.id} style={s.row} onPress={() => pickRingtone(rt.id)} activeOpacity={0.7}>
+            <TouchableOpacity
+              key={rt.id}
+              style={s.row}
+              onPress={() => pickRingtone(rt.id)}
+              activeOpacity={0.7}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: on }}
+              accessibilityLabel={rt.preview ? `${rt.name}, plays a preview` : rt.name}
+            >
               <Ionicons name={on ? 'radio-button-on' : 'radio-button-off'} size={22} color={on ? colors.primary : colors.textDim} />
               <View style={s.rowBody}>
                 <Text numberOfLines={1} style={s.rowTitle}>{rt.name}</Text>
               </View>
-              <Ionicons name="play-circle-outline" size={24} color={colors.textDim} />
+              {rt.preview && <Ionicons name="play-circle-outline" size={24} color={colors.textDim} />}
             </TouchableOpacity>
           );
         })}
 
         <Text style={s.note}>
-          Notifications when the app is closed use your phone’s system notification sound. A custom
-          per-chat notification sound is coming in a future build.
+          This ringtone plays while crazzychat is open. When the app is closed, incoming calls and
+          notifications use your phone’s own sounds.
         </Text>
       </ScrollView>
     </View>

@@ -279,7 +279,11 @@ function GroupCallEngine() {
     const snap = getSnapshot();
     const why = endMessage(snap.endReason, snap.error);
     if (why) Alert.alert('Call ended', why);
-    const t = setTimeout(() => router.back(), 200);
+    // A call answered from a notification has no history to go back to.
+    const t = setTimeout(() => {
+      if (router.canGoBack()) router.back();
+      else router.replace('/' as any);
+    }, 200);
     return () => clearTimeout(t);
   }, [status, router]);
 

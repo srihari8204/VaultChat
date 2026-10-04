@@ -18,7 +18,7 @@ import { chessTttLayout } from '../../lib/games/chessTttLayout';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Pressable, ScrollView, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Svg, { Path, Ellipse, Defs, LinearGradient as SvgLinear, Stop } from 'react-native-svg';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -559,7 +559,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
                   ink={th.ink}
                   dot={theme === 'glass' && !light ? 'rgba(240,248,242,.75)' : th.dot}
                   ring={theme === 'glass' && !light ? 'rgba(240,248,242,.85)' : th.ring}
-                  onPress={() => onSquare(idx)}
+                  onPress={onSquare}
                   stroke={stroke}
                   still={reduceMotion}
                 />
@@ -689,7 +689,10 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
               ]
             : [
                 { key: 'resign', ion: 'flag-outline', label: 'Resign', tone: 'danger',
-                  onPress: () => send({ t: 'resign' }) },
+                  onPress: () => Alert.alert('Resign this game?', 'Your opponent wins. This cannot be undone.', [
+                    { text: 'Keep playing', style: 'cancel' },
+                    { text: 'Resign', style: 'destructive', onPress: () => send({ t: 'resign' }) },
+                  ]) },
                 { key: 'draw', ion: 'hand-left-outline', label: 'Draw',
                   onPress: () => send({ t: 'draw-offer' }) },
                 { key: 'talk', ion: voice.muted ? 'mic-off-outline' : 'mic-outline',

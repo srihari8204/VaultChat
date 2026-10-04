@@ -441,7 +441,7 @@ export function VoiceSheet({
       </View>
 
       <Text style={{ color: C.muted, fontSize: 11.5, lineHeight: 17 }}>
-        Leaving voice keeps your seat. Audio goes straight between players’ phones — never through the games server — nothing is recorded, and the microphone is only requested when you join.
+        Leaving voice keeps your seat. Audio passes through crazzychat’s call server, encrypted in transit but not end-to-end, and anyone signed in who has this table’s code can join it. Nothing is recorded, and the microphone is only requested when you join.
       </Text>
     </Sheet>
   );

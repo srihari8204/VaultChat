@@ -12,17 +12,22 @@
 import { Audio } from 'expo-av';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Vibration, Platform, NativeModules } from 'react-native';
+import { SYSTEM_RINGTONE, RINGTONE_PREFS_VERSION, migrateRingtone, resolveRingtone } from './ringtoneChoice';
 
 // Native device-default ringtone (Android) — matches the killed-app ring.
 const VaultCalls: any = NativeModules.VaultCalls ?? null;
 const nativeRingAvailable = () => Platform.OS === 'android' && !!VaultCalls?.playSystemRingtone;
+/** Whether "Phone ringtone" can actually be played here (Android builds with the native module). */
+export const systemRingtoneAvailable = nativeRingAvailable;
+export { SYSTEM_RINGTONE };
 
 export interface SoundPrefs {
   messageSounds: boolean;   // play sent/received tones while app is open
-  ringtone: string;         // ringtone id (see RINGTONES) — global default
+  ringtone: string;         // SYSTEM_RINGTONE or a ringtone id (see RINGTONES)
   vibrate: boolean;         // vibrate on incoming call
+  ringtoneVersion?: number; // see lib/ringtoneChoice migrateRingtone
 }
-const DEFAULTS: SoundPrefs = { messageSounds: true, ringtone: 'ring_pulse', vibrate: true };
+const DEFAULTS: SoundPrefs = { messageSounds: true, ringtone: SYSTEM_RINGTONE, vibrate: true, ringtoneVersion: RINGTONE_PREFS_VERSION };
 const KEY = 'vc_sound_prefs';
 
 export const RINGTONES: { id: string; name: string; asset: number }[] = [
@@ -38,7 +43,10 @@ export async function getSoundPrefs(): Promise<SoundPrefs> {
   if (prefs) return prefs;
   try {
     const raw = await AsyncStorage.getItem(KEY);
-    prefs = raw ? { ...DEFAULTS, ...JSON.parse(raw) } : { ...DEFAULTS };
+    const stored = raw ? JSON.parse(raw) : null;
+    prefs = stored
+      ? { ...DEFAULTS, ...stored, ringtone: migrateRingtone(stored, 'ring_pulse'), ringtoneVersion: RINGTONE_PREFS_VERSION }
+      : { ...DEFAULTS };
   } catch { prefs = { ...DEFAULTS }; }
   return prefs;
 }
@@ -91,13 +99,15 @@ let ringSnd: Audio.Sound | null = null;
 export async function startRingtone(): Promise<void> {
   await stopRingtone();
   const p = await getSoundPrefs();
-  // Prefer the phone's OWN default ringtone on Android (what users expect);
-  // fall back to a bundled tone if the native module isn't available (Expo Go).
-  if (nativeRingAvailable()) {
+  // The user's pick wins. "Phone ringtone" (the default) plays the device's
+  // own ringtone through the native module, which also rings a killed app;
+  // without that module (iOS, Expo Go) a bundled tone stands in.
+  const plan = resolveRingtone(p.ringtone, nativeRingAvailable(), RINGTONES.map(r => r.id));
+  if (plan.kind === 'system') {
     try { VaultCalls.playSystemRingtone(); } catch {}
   } else {
     await ensureAudioMode();
-    const rt = RINGTONES.find(r => r.id === p.ringtone) || RINGTONES[0];
+    const rt = RINGTONES.find(r => r.id === plan.id) || RINGTONES[0];
     try {
       const { sound } = await Audio.Sound.createAsync(rt.asset, { isLooping: true, volume: 1.0, shouldPlay: true });
       ringSnd = sound;
@@ -117,15 +127,25 @@ export async function stopRingtone(): Promise<void> {
 }
 
 // ── Preview a ringtone once (settings screen) ───────────────────
+// Its own Sound, so leaving the settings screen stops the preview and never
+// a real call that is ringing.
+let previewSnd: Audio.Sound | null = null;
+export async function stopRingtonePreview(): Promise<void> {
+  if (!previewSnd) return;
+  const s = previewSnd; previewSnd = null;
+  try { await s.stopAsync(); await s.unloadAsync(); } catch {}
+}
+/** Bundled tones only — the phone ringtone is the one the user already knows. */
 export async function previewRingtone(id: string): Promise<void> {
-  await stopRingtone();
+  await stopRingtonePreview();
+  const rt = RINGTONES.find(r => r.id === id);
+  if (!rt) return;
   await ensureAudioMode();
-  const rt = RINGTONES.find(r => r.id === id) || RINGTONES[0];
   try {
     const { sound } = await Audio.Sound.createAsync(rt.asset, { volume: 1.0, shouldPlay: true });
-    ringSnd = sound;
+    previewSnd = sound;
     sound.setOnPlaybackStatusUpdate((st: any) => {
-      if (st?.isLoaded && st.didJustFinish) { sound.unloadAsync().catch(() => {}); if (ringSnd === sound) ringSnd = null; }
+      if (st?.isLoaded && st.didJustFinish) { sound.unloadAsync().catch(() => {}); if (previewSnd === sound) previewSnd = null; }
     });
   } catch {}
 }

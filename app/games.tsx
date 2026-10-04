@@ -38,6 +38,7 @@ import { useWallet } from '../lib/games/useWallet';
 import { useLiveTables, agoLabel } from '../lib/games/useLiveTables';
 import { openInvite } from '../lib/games/invite';
 import { newPrivateCode, type SeatIntent } from '../lib/games/rummyTable';
+import { parseTableCode } from '../lib/games/tableCode';
 import { Sheet, SettingRow } from '../components/games/feedback';
 import InviteSheet from '../components/games/InviteSheet';
 import HistorySheet from '../components/games/HistorySheet';
@@ -209,6 +210,8 @@ function Hub({ onBack, onOpen }: { onBack: () => void; onOpen: (g: GameKind, opt
   const [offer, setOffer] = React.useState<{ entry: Entry; roomId: string } | null>(null);
   // Which game the player tapped, waiting on HOW they want to play it.
   const [mode, setMode] = React.useState<Entry | null>(null);
+  // A typed room code that does not say which game it is for.
+  const [codeRoom, setCodeRoom] = React.useState<string | null>(null);
 
   // A found room is opened once, then the searching sheet is dismissed.
   //
@@ -233,12 +236,13 @@ function Hub({ onBack, onOpen }: { onBack: () => void; onOpen: (g: GameKind, opt
   const quick = (e: Entry) => { setSeeking(e); qm.start(e.kind); };
 
   const joinCode = () => {
-    const c = code.trim().replace(/[^A-Za-z0-9_-]/g, '');
-    if (!c) return;
-    // A bare code is ambiguous across games, so it opens the game the player
-    // last tapped rather than guessing; default to rummy's table naming.
-    onOpen('rummy', { room: c });
+    const parsed = parseTableCode(code);
+    if (!parsed) return;
     setCode('');
+    // An invite link names its game. A bare code is the same shape for every
+    // game, so ask instead of guessing (it used to always open rummy).
+    if (parsed.game) onOpen(parsed.game, { room: parsed.room });
+    else setCodeRoom(parsed.room);
   };
 
   return (
@@ -308,7 +312,7 @@ function Hub({ onBack, onOpen }: { onBack: () => void; onOpen: (g: GameKind, opt
         <Panel style={{ gap: S[3], marginTop: S[2] }}>
           <Text style={{ color: C.text, fontSize: t.md, fontWeight: '800' }}>Join a table by code</Text>
           <Text style={{ color: C.muted, fontSize: t.sm, lineHeight: 18 }}>
-            Someone shared a room code with you? Type it here.
+            Someone shared a room code or invite link with you? Paste it here.
           </Text>
           <View style={{ flexDirection: 'row', gap: S[2] }}>
             <TextInput
@@ -375,6 +379,20 @@ function Hub({ onBack, onOpen }: { onBack: () => void; onOpen: (g: GameKind, opt
           }}
           onClose={() => setMode(null)}
         />
+      )}
+
+      {codeRoom !== null && (
+        <Sheet visible title="Which game is this code for?" onClose={() => setCodeRoom(null)}>
+          {GAMES.map(g => (
+            <SettingRow
+              key={g.kind}
+              label={g.name}
+              hint={`Join table ${codeRoom}`}
+              value="Join"
+              onPress={() => { const room = codeRoom; setCodeRoom(null); void playSfx('select'); onOpen(g.kind, { room }); }}
+            />
+          ))}
+        </Sheet>
       )}
 
       {offer && (

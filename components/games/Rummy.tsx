@@ -33,7 +33,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AccessibilityInfo, ActivityIndicator, Pressable,
+  AccessibilityInfo, ActivityIndicator, Alert, Pressable,
   ScrollView, Text, TextInput, View, useWindowDimensions,
   type LayoutChangeEvent, type ViewStyle,
 } from 'react-native';
@@ -344,8 +344,8 @@ export default function Rummy({ tableId = '', auto, autoBot, seat }: { tableId?:
 
   /* ── voice ───────────────────────────────────────────────────────── */
 
-  // Voice signalling rides the GAME socket — the games server relays `voice-*`
-  // frames to the named peer, and there is no SFU to connect to instead.
+  // Voice goes through crazzychat's SFU, not the games socket — see
+  // lib/games/useTableVoice.ts for what that costs (no end-to-end encryption).
   const voice = useTableVoice('rummy', seated, { you: state.you, send, subscribe });
   const [voiceOpen, setVoiceOpen] = useState(false);
   voiceLeaveRef.current = voice.leave;
@@ -436,6 +436,13 @@ export default function Rummy({ tableId = '', auto, autoBot, seat }: { tableId?:
     setPending(key);
     send(msg as any);
   }, [pending, send]);
+  // Dropping forfeits the hand, and DROP sits beside Discard on the bar, so it
+  // asks first — the same way Declare does.
+  const confirmDrop = useCallback(() => Alert.alert(
+    'Drop this hand?',
+    'You forfeit this deal and drop points are scored against you. You stay at the table.',
+    [{ text: 'Keep playing', style: 'cancel' }, { text: 'Drop', style: 'destructive', onPress: () => act('drop', { t: 'drop' }) }],
+  ), [act]);
 
   /* ── the player's arrangement ────────────────────────────────────── */
 
@@ -1038,7 +1045,7 @@ export default function Rummy({ tableId = '', auto, autoBot, seat }: { tableId?:
         <View style={{ width: S[2] }} />
         <ActionBtn w={m.barBtnW} glyph="🗑" label="DISCARD" tone="blue" disabled={!mustDiscard || picked.length !== 1 || !!pending} onPress={() => discard(picked[0])} />
         <ActionBtn w={m.barBtnW} glyph="✓" label="DECLARE" tone="good" disabled={!mustDiscard || picked.length !== 1 || !!pending} onPress={() => setConfirmDeclare(true)} />
-        <ActionBtn w={m.barBtnW} glyph="⏻" label="DROP" tone="danger" disabled={!mine || !!pending} onPress={() => act('drop', { t: 'drop' })} />
+        <ActionBtn w={m.barBtnW} glyph="⏻" label="DROP" tone="danger" disabled={!mine || !!pending} onPress={confirmDrop} />
       </ScrollView>
       </ScrollView>
 
@@ -1156,7 +1163,7 @@ export default function Rummy({ tableId = '', auto, autoBot, seat }: { tableId?:
           label="Drop this hand"
           hint="Forfeits the deal and scores drop points against you. You stay at the table."
           value="Drop"
-          onPress={() => { setShowSettings(false); act('drop', { t: 'drop' }); }}
+          onPress={() => { setShowSettings(false); confirmDrop(); }}
         />
         <SettingRow
           label="Leave table"

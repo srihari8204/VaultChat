@@ -11,7 +11,7 @@
 // (then on external storage) — so it under-reported usage and offered no way to
 // delete the files that actually took up the space (audit F-6).
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Platform, Alert, ActivityIndicator } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -105,16 +105,23 @@ export default function StorageManagerScreen() {
   const [freeSpace, setFreeSpace] = useState(0);
   const [categories, setCategories] = useState<Category[]>([]);
   const [chatStores, setChatStores] = useState<ChatStore[]>([]);
+  // A failed measurement is not "0 B": it gets its own message and a retry.
+  const [loadFailed, setLoadFailed] = useState(false);
+  // The walk can outlive the screen; no state updates after leaving it.
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
 
   useEffect(() => { loadStorageData(); }, []);
 
   const loadStorageData = async () => {
     setLoading(true);
+    setLoadFailed(false);
     try {
       const acc: Record<string, number> = { img: 0, vid: 0, aud: 0, file: 0, other: 0 };
       const attMap = await getAttachmentChatMap().catch(() => ({} as Record<string, string>));
       const perChat = { map: attMap, sizes: {} as Record<string, number> };
       for (const root of measuredRoots()) await walk(toUri(root), acc, undefined, perChat);
+      if (!mounted.current) return;
 
       // Rank chats by how much media they hold (WhatsApp "Manage storage").
       try {
@@ -147,9 +154,9 @@ export default function StorageManagerScreen() {
 
       try { setFreeSpace(await FileSystem.getFreeDiskStorageAsync()); } catch { setFreeSpace(0); }
     } catch {
-      /* leave zeros */
+      if (mounted.current) setLoadFailed(true);
     } finally {
-      setLoading(false);
+      if (mounted.current) setLoading(false);
     }
   };
 
@@ -175,7 +182,7 @@ export default function StorageManagerScreen() {
             } catch {
               Alert.alert('Error', 'Failed to clear cache.');
             } finally {
-              setClearing(false);
+              if (mounted.current) setClearing(false);
             }
           },
         },
@@ -202,7 +209,7 @@ export default function StorageManagerScreen() {
             } catch {
               Alert.alert('Error', 'Failed to delete media.');
             } finally {
-              setClearing(false);
+              if (mounted.current) setClearing(false);
             }
           },
         },
@@ -227,7 +234,7 @@ export default function StorageManagerScreen() {
             } catch {
               Alert.alert('Error', 'Failed to delete old media.');
             } finally {
-              setClearing(false);
+              if (mounted.current) setClearing(false);
             }
           },
         },
@@ -252,7 +259,7 @@ export default function StorageManagerScreen() {
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
 
-      <LinearGradient colors={['#F9FAFB', colors.bg]} style={s.header}>
+      <LinearGradient colors={[colors.glassSoft, colors.bg]} style={s.header}>
         <View style={[s.headerRow, { marginTop: HEADER_TOP }]}>
           <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={16}>
             <Ionicons name="arrow-back" size={24} color={colors.text} />
@@ -265,7 +272,7 @@ export default function StorageManagerScreen() {
       <ScrollView style={s.scroll} contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
 
         {/* Total */}
-        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
+        <LinearGradient colors={[colors.glass, colors.glassSoft]} style={s.card}>
           <View style={s.storageHeader}>
             <Ionicons name="pie-chart-outline" size={28} color={colors.accent} />
             <View style={{ marginLeft: 12, flex: 1 }}>
@@ -282,9 +289,17 @@ export default function StorageManagerScreen() {
         </LinearGradient>
 
         {/* Breakdown */}
-        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
+        <LinearGradient colors={[colors.glass, colors.glassSoft]} style={s.card}>
           <Text style={s.cardTitle}>Storage Breakdown</Text>
-          {totalUsed === 0 ? (
+          {loadFailed ? (
+            <View style={{ gap: 12 }}>
+              <Text style={{ color: colors.danger, fontSize: 13 }}>Storage could not be measured just now.</Text>
+              <TouchableOpacity style={s.actionBtn} onPress={loadStorageData} accessibilityRole="button" accessibilityLabel="Measure storage again" activeOpacity={0.7}>
+                <Ionicons name="refresh-outline" size={20} color={colors.primary} />
+                <Text style={[s.actionText, { color: colors.primary }]}>Try again</Text>
+              </TouchableOpacity>
+            </View>
+          ) : totalUsed === 0 ? (
             <Text style={{ color: colors.textDim, fontSize: 13 }}>No app files on disk yet.</Text>
           ) : categories.map((cat, i) => (
             <View key={i} style={s.catRow}>
@@ -302,10 +317,11 @@ export default function StorageManagerScreen() {
 
         {/* Per-chat (WhatsApp "Manage storage") */}
         {chatStores.length > 0 && (
-          <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
+          <LinearGradient colors={[colors.glass, colors.glassSoft]} style={s.card}>
             <Text style={s.cardTitle}>Storage by Chat</Text>
             {chatStores.map(c => (
               <TouchableOpacity key={c.id} style={s.catRow} activeOpacity={0.7}
+                accessibilityRole="button" accessibilityLabel={`${c.name}, ${formatBytes(c.size)}. Open chat`}
                 onPress={() => router.push({ pathname: '/chat', params: { id: c.id } } as any)}>
                 <View style={s.catInfo}>
                   <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.primary} />
@@ -321,14 +337,14 @@ export default function StorageManagerScreen() {
         )}
 
         {/* Media */}
-        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
+        <LinearGradient colors={[colors.glass, colors.glassSoft]} style={s.card}>
           <Text style={s.cardTitle}>Media on this device</Text>
           <Text style={s.cardNote}>
             Downloaded and sent media is stored privately in the app and is removed when
             crazzychat is uninstalled. Use “Save to gallery” on a photo to keep your own copy.
           </Text>
 
-          <TouchableOpacity style={s.actionBtn} onPress={deleteAllMedia} disabled={clearing} activeOpacity={0.7}>
+          <TouchableOpacity style={s.actionBtn} onPress={deleteAllMedia} disabled={clearing} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Delete all media" accessibilityState={{ disabled: clearing, busy: clearing }}>
             <Ionicons name="images-outline" size={20} color={colors.danger} />
             <Text style={[s.actionText, { color: colors.danger }]}>
               {clearing ? 'Working…' : 'Delete all media'}
@@ -337,15 +353,15 @@ export default function StorageManagerScreen() {
         </LinearGradient>
 
         {/* Cache */}
-        <LinearGradient colors={['#0F2847', '#F9FAFB']} style={s.card}>
+        <LinearGradient colors={[colors.glass, colors.glassSoft]} style={s.card}>
           <Text style={s.cardTitle}>Cache Management</Text>
 
-          <TouchableOpacity style={s.actionBtn} onPress={() => router.push('/cache-cleanup' as any)} activeOpacity={0.7}>
+          <TouchableOpacity style={s.actionBtn} onPress={() => router.push('/cache-cleanup' as any)} disabled={clearing} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Cache cleanup by category" accessibilityState={{ disabled: clearing }}>
             <Ionicons name="sparkles-outline" size={20} color={colors.primary} />
             <Text style={[s.actionText, { color: colors.primary }]}>Cache cleanup — by category, Smart &amp; auto</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={s.actionBtn} onPress={clearCache} disabled={clearing} activeOpacity={0.7}>
+          <TouchableOpacity style={s.actionBtn} onPress={clearCache} disabled={clearing} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Clear cache" accessibilityState={{ disabled: clearing, busy: clearing }}>
             <Ionicons name="trash-outline" size={20} color={colors.danger} />
             <Text style={[s.actionText, { color: colors.danger }]}>
               {clearing ? 'Working…' : 'Clear Cache'}
@@ -361,6 +377,9 @@ export default function StorageManagerScreen() {
                 onPress={() => deleteOldMedia(d)}
                 disabled={clearing}
                 activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={`Delete cached files older than ${d} days`}
+                accessibilityState={{ disabled: clearing }}
               >
                 <Text style={s.dayBtnText}>{d} days</Text>
               </TouchableOpacity>
@@ -383,12 +402,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   scroll: { flex: 1 },
   scrollContent: { padding: 16, paddingBottom: 40 },
 
-  card: { borderRadius: 16, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: '#112240' },
+  card: { borderRadius: 16, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: c.glassStroke },
   cardTitle: { color: c.text, fontSize: 17, fontWeight: '700', marginBottom: 16 },
 
   storageHeader: { flexDirection: 'row', alignItems: 'center' },
   storageBig: { color: c.accent, fontSize: 28, fontWeight: '800', marginTop: 2 },
-  freeRow: { flexDirection: 'row', alignItems: 'center', marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#112240' },
+  freeRow: { flexDirection: 'row', alignItems: 'center', marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: c.glassStroke },
   freeText: { color: c.primary, fontSize: 13, marginLeft: 8 },
 
   catRow: { marginBottom: 14 },
@@ -398,7 +417,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   barBg: { height: 8, borderRadius: 4, backgroundColor: c.surfaceSolid, overflow: 'hidden' },
   barFill: { height: 8, borderRadius: 4 },
 
-  actionBtn: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#112240' },
+  actionBtn: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: c.glassStroke },
   actionText: { fontSize: 15, fontWeight: '600', marginLeft: 10 },
 
   cardNote:     { color: c.textDim, fontSize: 12, lineHeight: 17, marginTop: 8 },

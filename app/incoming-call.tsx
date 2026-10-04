@@ -7,7 +7,7 @@
 
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { BackHandler, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { CALL } from '../constants/callTheme';
@@ -109,13 +109,6 @@ export default function IncomingCallScreen() {
   // envelope. The push path (offer param empty) is unchanged: it was always the
   // path that worked, because it was the only one that reached this listener.
   const liveOfferRef = useRef(offer || '');
-  // Accept-before-offer: how long to wait for the caller's sealed offer before
-  // telling the user it did not come through. The caller re-emits every 3s for
-  // up to 9 rings, so this covers several attempts without stranding anyone.
-  const ACCEPT_OFFER_WAIT_MS = 12_000;
-  const [waitingForOffer, setWaitingForOffer] = useState(false);
-  const acceptWaitRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  useEffect(() => () => { if (acceptWaitRef.current) clearInterval(acceptWaitRef.current); }, []);
   useEffect(() => {
     let off: (() => void) | null = null;
     let dead = false;
@@ -156,7 +149,7 @@ export default function IncomingCallScreen() {
           decidedRef.current = true;
           stopRingtone();
           addCallLog({ chatId, peerUid, peerName: displayName, kind: type === 'video' ? 'video' : 'audio', direction: 'missed', at: Date.now(), durationSec: 0 }).catch(() => {});
-          router.back();
+          if (router.canGoBack()) router.back(); else router.replace('/' as any);
         }
       };
       // Same `dead` guard as the offer effect. This one is the reason it
@@ -169,7 +162,14 @@ export default function IncomingCallScreen() {
     return () => { dead = true; if (off) off(); };
   }, [peerUid, router]);
 
+  // Leave the ring screen even when it was the app's first screen (a
+  // notification launch has no history, and router.back() is then a no-op).
+  const leave = () => { if (router.canGoBack()) router.back(); else router.replace('/' as any); };
+
+  // One decision per ring: a double tap must not replace twice, or decline
+  // after accepting.
   const accept = () => {
+    if (decidedRef.current) return;
     decidedRef.current = true;
     stopRingtone();
     if (isWaiting) holdActiveCall();   // put the call we're on now on hold
@@ -202,6 +202,7 @@ export default function IncomingCallScreen() {
   };
 
   const decline = async () => {
+    if (decidedRef.current) return;
     decidedRef.current = true;
     stopRingtone();
     addCallLog({ chatId, peerUid, peerName: displayName, kind: type === 'video' ? 'video' : 'audio', direction: 'declined', at: Date.now(), durationSec: 0 }).catch(() => {});
@@ -209,8 +210,21 @@ export default function IncomingCallScreen() {
       const s = await getSocket();
       s.emit('webrtc_end', { to: peerUid, chatId });
     } catch {}
-    router.back();
+    leave();
   };
+
+  // Hardware back on a ringing call is a decline. Without this, back popped
+  // the screen with only the ringtone stopped: no webrtc_end, no call log, and
+  // the caller kept ringing.
+  const declineRef = useRef(decline);
+  declineRef.current = decline;
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (!decidedRef.current) void declineRef.current();
+      return true;
+    });
+    return () => sub.remove();
+  }, []);
 
   const initial = initialOf(displayName);
 
@@ -218,7 +232,7 @@ export default function IncomingCallScreen() {
     <View style={S.screen}>
       <StatusBar barStyle="light-content" />
 
-      <View style={S.body}>
+      <View style={[S.body, { paddingTop: insets.top }]}>
         <Text style={S.label}>{isWaiting ? 'On another call' : type === 'video' ? 'Incoming video call' : 'Incoming voice call'}</Text>
         <View style={S.avatar}><Text style={S.avatarTxt}>{initial}</Text></View>
         <Text numberOfLines={1} style={S.name}>{displayName}</Text>
@@ -226,20 +240,19 @@ export default function IncomingCallScreen() {
       </View>
 
       <View style={[S.controls, { paddingBottom: insets.bottom + 32 }]}>
-        <TouchableOpacity style={[S.btn, S.btnDecline]} onPress={decline} activeOpacity={0.85}>
+        <TouchableOpacity style={[S.btn, S.btnDecline]} onPress={decline} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel="Decline call">
           <Ionicons name="call" size={28} color="#fff" style={{ transform: [{ rotate: '135deg' }] }} />
           <Text style={S.btnLabel}>Decline</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[S.btn, S.btnAccept, waitingForOffer && { opacity: 0.6 }]}
+          style={[S.btn, S.btnAccept]}
           onPress={accept}
-          disabled={waitingForOffer}
           activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel={isWaiting ? 'Hold current call and accept' : 'Accept call'}
         >
           <Ionicons name={type === 'video' ? 'videocam' : 'call'} size={28} color="#fff" />
-          {/* Says what is actually happening while we wait for the caller's
-              offer, rather than looking like a dead button. */}
-          <Text style={S.btnLabel}>{waitingForOffer ? 'Connecting…' : isWaiting ? 'Hold & accept' : 'Accept'}</Text>
+          <Text style={S.btnLabel}>{isWaiting ? 'Hold & accept' : 'Accept'}</Text>
         </TouchableOpacity>
       </View>
     </View>

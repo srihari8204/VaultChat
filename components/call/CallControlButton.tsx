@@ -28,10 +28,12 @@ export interface CallControlButtonProps {
   danger?: boolean;
   /** 'voice' = 3 large buttons; 'video' = 7 compact buttons that wrap. */
   variant?: CallControlVariant;
+  /** Spoken label when the short visible one does not name the action. */
+  a11yLabel?: string;
 }
 
 function CallControlButtonImpl({
-  icon, label, onPress, active, danger, variant = 'voice',
+  icon, label, onPress, active, danger, variant = 'voice', a11yLabel,
 }: CallControlButtonProps) {
   const S = variant === 'video' ? VIDEO : VOICE;
   return (
@@ -39,6 +41,11 @@ function CallControlButtonImpl({
       style={[S.btn, active && S.btnActive, danger && S.btnDanger]}
       onPress={onPress}
       activeOpacity={0.85}
+      accessibilityRole="button"
+      accessibilityLabel={a11yLabel ?? label}
+      // Toggle state was conveyed only by colour. A button that never passes
+      // `active` (Flip, End) is not a toggle and announces no state.
+      accessibilityState={active === undefined ? undefined : { selected: active }}
     >
       <Ionicons name={icon as any} size={variant === 'video' ? 22 : 24} color="#fff" style={S.btnIcon} />
       <Text style={S.btnLabel} numberOfLines={variant === 'video' ? 1 : undefined}>{label}</Text>

@@ -15,7 +15,7 @@ import { KeyboardSafe } from '../components/ui';
 import {
   View, StyleSheet, TouchableOpacity, ActivityIndicator, Alert,
   ScrollView, TextInput, Platform,
-  useWindowDimensions, Share, Animated, PanResponder,
+  useWindowDimensions, Share, Animated, PanResponder, BackHandler,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
@@ -711,7 +711,7 @@ export default function LiveViewScreen() {
       try { await s.leave(); } catch {}
     }
     await endBroadcast(String(id), b?.viewerCount ?? 0, b?.peakViewers ?? 0);
-    router.back();
+    if (router.canGoBack()) router.back(); else router.replace('/live' as any);
   }, [id, b, router]);
 
   /**
@@ -745,6 +745,25 @@ export default function LiveViewScreen() {
     'Viewers will be disconnected.',
     [{ text: 'Keep going', style: 'cancel' }, { text: 'End', style: 'destructive', onPress: stop }],
   );
+
+  /**
+   * The one way off this screen, for every state.
+   *
+   * The OWNER of a broadcast that has not ended must end it on the way out, or
+   * it is left `starting`/`live` with nobody publishing. A failed start
+   * published nothing, so it ends without asking. Everyone else leaves through
+   * leaveAsViewer, which survives an empty history (invite-link arrivals).
+   */
+  const exitScreen = () => {
+    if (isOwner && !ended) { if (failed) void stop(); else confirmStop(); return; }
+    void leaveAsViewer();
+  };
+  const exitRef = useRef(exitScreen);
+  exitRef.current = exitScreen;
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => { exitRef.current(); return true; });
+    return () => sub.remove();
+  }, []);
 
   // ── THE IMMERSIVE STAGE ─────────────────────────────────────────
   //
@@ -1172,7 +1191,7 @@ export default function LiveViewScreen() {
         <View style={S.center}>
           <Ionicons name="checkmark-circle-outline" size={40} color="#94A3B8" />
           <AppText style={S.centerText}>This broadcast has ended.</AppText>
-          <TouchableOpacity onPress={() => router.back()} style={S.backBtn}>
+          <TouchableOpacity onPress={exitScreen} style={S.backBtn} accessibilityRole="button">
             <AppText style={S.backText}>Go back</AppText>
           </TouchableOpacity>
         </View>
@@ -1193,7 +1212,7 @@ export default function LiveViewScreen() {
                   : 'The broadcast could not start. Nothing was published.')
               : 'This stream is not available.'}
           </AppText>
-          <TouchableOpacity onPress={() => router.back()} style={S.backBtn}>
+          <TouchableOpacity onPress={exitScreen} style={S.backBtn} accessibilityRole="button">
             <AppText style={S.backText}>Go back</AppText>
           </TouchableOpacity>
         </View>
@@ -1303,7 +1322,7 @@ export default function LiveViewScreen() {
         <View style={S.center}>
           <Ionicons name="cloud-offline-outline" size={40} color="#94A3B8" />
           <AppText style={S.centerText}>This stream is not available.</AppText>
-          <TouchableOpacity onPress={() => router.back()} style={S.backBtn}>
+          <TouchableOpacity onPress={exitScreen} style={S.backBtn} accessibilityRole="button">
             <AppText style={S.backText}>Go back</AppText>
           </TouchableOpacity>
         </View>
@@ -1529,17 +1548,18 @@ export default function LiveViewScreen() {
                 leaveAsViewer, not router.back(): a viewer who arrived through
                 an invitation link got here via router.replace and has no
                 history, so back exits the app. */}
+            {/* Shown while waiting too: a host stuck on "Starting your
+                broadcast…" otherwise had no on-screen exit at all. */}
             {isOwner ? (
-              !waiting && (
-                <TouchableOpacity
-                  onPress={confirmStop}
-                  style={[S.icon, S.iconDanger]}
-                  accessibilityLabel="End broadcast"
-                  hitSlop={8}
-                >
-                  <Ionicons name="stop" size={18} color="#fff" />
-                </TouchableOpacity>
-              )
+              <TouchableOpacity
+                onPress={confirmStop}
+                style={[S.icon, S.iconDanger]}
+                accessibilityLabel="End broadcast"
+                accessibilityRole="button"
+                hitSlop={8}
+              >
+                <Ionicons name="stop" size={18} color="#fff" />
+              </TouchableOpacity>
             ) : (
               <TouchableOpacity
                 onPress={leaveAsViewer}

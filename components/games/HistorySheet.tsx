@@ -16,7 +16,7 @@ import { useGamePalette } from './appearance';
 
 import { AppText as Text } from '../ui/Text';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, View } from 'react-native';
 import { Sheet } from './feedback';
 import { Btn, useType } from './ui';
 import { S, R, mix, goldLine } from '../../lib/games/theme';
@@ -122,7 +122,10 @@ export default function HistorySheet({ visible, onClose }: { visible: boolean; o
           label="Clear"
           kind="danger"
           compact
-          onPress={() => { void clearHistory().then(load); }}
+          onPress={() => Alert.alert('Clear game history?', 'Removes every recent game and saved chess moves from this phone. This cannot be undone.', [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Clear', style: 'destructive', onPress: () => { void clearHistory().then(load); } },
+          ])}
         />
       )}
     </Sheet>

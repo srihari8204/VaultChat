@@ -24,7 +24,7 @@ import {
 import { getCurrentUserAsync } from './(constants)/authService';
 import { getIceServers } from '../lib/iceConfig';
 import { getSocket } from '../lib/socket';
-import { startCallForeground, stopCallForeground, dismissIncomingNotification, initiateCall, cancelCall, enterPipMode } from '../lib/CallService';
+import { startCallForeground, stopCallForeground, dismissIncomingNotification, initiateCall, cancelCall } from '../lib/CallService';
 import { newCallCipher, openCallOffer, plainCipher, type CallCipher } from '../lib/callCrypto';
 import { addCallLog } from '../lib/callLog';
 import { CallTimer, elapsedSeconds } from '../components/call/CallTimer';
@@ -33,7 +33,6 @@ import { CallExtras } from '../components/call/CallExtras';
 import { CallEncryptionBadge } from '../components/call/CallEncryptionBadge';
 import { CALL_ENGINE_V2 } from '../constants/flags';
 import * as engine from '../lib/call/engine';
-import { callFail, offerTag } from '../lib/call/diag';
 import { setRingingPeer, setRingScreenPeer } from '../lib/ringTracker';
 import { DISCONNECT_GRACE_MS } from '../lib/call/types';
 import {
@@ -519,7 +518,7 @@ function VideoCallEngine() {
         onLayout={e => setBarHeight(e.nativeEvent.layout.height)}
       >
         <CallControlButton variant="video" icon={muted ? 'mic-off' : 'mic'} label={muted ? 'Unmute' : 'Mute'} active={muted} onPress={engine.toggleMute} />
-        <CallControlButton variant="video" icon={cameraOff ? 'videocam-off' : 'videocam'} label={cameraOff ? 'Camera' : 'Off'} active={cameraOff} onPress={engine.toggleCamera} />
+        <CallControlButton variant="video" icon={cameraOff ? 'videocam-off' : 'videocam'} label={cameraOff ? 'Camera' : 'Off'} a11yLabel={cameraOff ? 'Turn camera on' : 'Turn camera off'} active={cameraOff} onPress={engine.toggleCamera} />
         {sharing
           ? <CallControlButton variant="video" icon="stop-circle" label="Stop" active onPress={toggleScreenShare} />
           : <CallControlButton variant="video" icon="camera-reverse" label="Flip" onPress={engine.flipCamera} />}
