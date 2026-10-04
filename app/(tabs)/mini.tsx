@@ -25,7 +25,8 @@ import {
   View,
 } from 'react-native';
 import { AppText, AuroraBackground } from '../../components/ui';
-import { AuroraLight, type Palette } from '../../constants/theme';
+import { type Palette } from '../../constants/theme';
+import { MINI_TILE_ART, type MiniTileArt } from '../../constants/miniAppPalette';
 import { useColors } from '../../lib/theme';
 import { useVisionComfort } from '../../lib/visionComfort';
 import { GLOW } from '../../constants/glass';
@@ -33,34 +34,30 @@ import { GLOW } from '../../constants/glass';
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
 // ── Mini app tiles, in grid order (3/4/5 columns by width) ─────
-// Each gradient is the tile's own brand artwork under a white glyph, the same
-// in both themes. Notes is the exception: white on its amber is 2.15:1 (under
-// the 3:1 a graphic needs), so its glyph is dark ink (≥5.58:1 on both stops).
-// The darkest remaining white-glyph tile (Shelf's #D97706 stop) is 3.19:1.
-const TILE_GLYPH = '#FFFFFF';
-const TILE_GLYPH_DARK = AuroraLight.text;
+// Each tile's gradient and glyph ink are its fixed brand artwork, the same in
+// both themes: constants/miniAppPalette.ts (contrast proven by its selftest).
 const MINI_APPS_MAIN = [
   // Broadcast. The ONLY mode that is not end-to-end encrypted \u2014 app/live.tsx
   // states that before anything is published, rather than leaving someone to
   // assume their stream has the same protection as their calls.
-  { id: 'live',        icon: 'radio-outline', name: 'Go Live', route: '/live', gradient: ['#EF4444', '#B91C1C'] as [string, string] },
-  { id: 'navigate',    icon: 'navigate-outline', name: 'Navigate', route: '/navigate', gradient: ['#1777FE', '#1D4ED8'] as [string, string] },
+  { id: 'live',        icon: 'radio-outline', name: 'Go Live', route: '/live', art: MINI_TILE_ART.live },
+  { id: 'navigate',    icon: 'navigate-outline', name: 'Navigate', route: '/navigate', art: MINI_TILE_ART.navigate },
   // Spaces absorbed the old Family Circle + SOS tiles \u2014 one app, one hub.
   // Renamed from "Family Space": family is one TYPE of space, alongside school
   // transport, offices and the rest. The route stays /family so existing deep
   // links and the tile's stored id keep working \u2014 renaming a route to match a
   // label is churn that breaks bookmarks.
-  { id: 'familyspace', icon: 'people-outline', name: 'Spaces', route: '/family', gradient: ['#7C3AED', '#2563EB'] as [string, string] },
-  { id: 'finance',     icon: 'cash-outline', name: 'Vault Finance', route: '/finance', gradient: ['#6D3FA8', '#1552E0'] as [string, string] },
-  { id: 'shopbook',    icon: 'storefront-outline', name: 'Shop Book', route: '/shop-book', gradient: ['#0B7A3B', '#16A34A'] as [string, string] },
-  { id: 'notes',       icon: 'document-text-outline', name: 'Notes',       route: '/encrypted-notes', gradient: ['#F59E0B', '#D97706'] as [string, string], darkGlyph: true },
-  { id: 'scanner',     icon: 'scan-outline', name: 'Scanner',     route: '/docscanner',     gradient: ['#1777FE', '#1D4ED8'] as [string, string] },
-  { id: 'shelf',       icon: 'library-outline', name: 'Shelf',        route: '/shelf',      gradient: ['#B45309', '#D97706'] as [string, string] },
+  { id: 'familyspace', icon: 'people-outline', name: 'Spaces', route: '/family', art: MINI_TILE_ART.familyspace },
+  { id: 'finance',     icon: 'cash-outline', name: 'Vault Finance', route: '/finance', art: MINI_TILE_ART.finance },
+  { id: 'shopbook',    icon: 'storefront-outline', name: 'Shop Book', route: '/shop-book', art: MINI_TILE_ART.shopbook },
+  { id: 'notes',       icon: 'document-text-outline', name: 'Notes',       route: '/encrypted-notes', art: MINI_TILE_ART.notes },
+  { id: 'scanner',     icon: 'scan-outline', name: 'Scanner',     route: '/docscanner',     art: MINI_TILE_ART.scanner },
+  { id: 'shelf',       icon: 'library-outline', name: 'Shelf',        route: '/shelf',      art: MINI_TILE_ART.shelf },
   // Hosted at games.corefinite.com, rendered in a WebView. Auth is not wired
   // yet by design \u2014 the site loads anonymously until it is.
-  { id: 'games',       icon: 'game-controller-outline', name: 'Games',       route: '/games',      gradient: ['#DB2777', '#7C3AED'] as [string, string] },
-  { id: 'security',    icon: 'shield-checkmark-outline', name: 'Security Hub', route: '/aiguardian', gradient: ['#0E7490', '#164E63'] as [string, string] },
-] satisfies readonly { id: string; icon: IoniconName; name: string; route: string; gradient: [string, string]; darkGlyph?: boolean }[];
+  { id: 'games',       icon: 'game-controller-outline', name: 'Games',       route: '/games',      art: MINI_TILE_ART.games },
+  { id: 'security',    icon: 'shield-checkmark-outline', name: 'Security Hub', route: '/aiguardian', art: MINI_TILE_ART.security },
+] satisfies readonly { id: string; icon: IoniconName; name: string; route: string; art: MiniTileArt }[];
 
 // The Todo List's saved items are still on device under `vc_miniapp_todos`,
 // sealed with the cache DEK. NOT deleted with the feature: that key holds the
@@ -134,8 +131,8 @@ export default function MiniAppsScreen() {
               accessibilityRole="button"
               accessibilityLabel={app.name}
             >
-              <LinearGradient colors={app.gradient} style={styles.appIconWrap}>
-                <Ionicons name={app.icon} size={24} color={'darkGlyph' in app && app.darkGlyph ? TILE_GLYPH_DARK : TILE_GLYPH} />
+              <LinearGradient colors={app.art.gradient} style={styles.appIconWrap}>
+                <Ionicons name={app.icon} size={24} color={app.art.glyph} />
               </LinearGradient>
               <AppText variant="tiny" style={styles.appName}>{app.name}</AppText>
             </TouchableOpacity>

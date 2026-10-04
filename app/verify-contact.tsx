@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import QRCode from 'react-native-qrcode-svg';
+import { QR_COLORS } from '../constants/qrPalette';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { AuroraDark, type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
@@ -211,7 +212,7 @@ export default function VerifyContactScreen() {
               <Text style={S.number} accessibilityLabel={`Safety number: ${formatSafetyNumber(state.number).split(/\s+/).join(', ')}`}>{formatSafetyNumber(state.number)}</Text>
               {showQr && (
                 <View style={S.qrBox} accessible accessibilityRole="image" accessibilityLabel="Your safety number as a QR code">
-                  <QRCode value={safetyQrPayload(state.number)} size={200} backgroundColor="#FFFFFF" color="#0A0A0F" />
+                  <QRCode value={safetyQrPayload(state.number)} size={200} {...QR_COLORS} />
                 </View>
               )}
               <View style={S.cardBtns}>

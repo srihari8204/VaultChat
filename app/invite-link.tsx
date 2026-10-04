@@ -11,6 +11,7 @@ import { View, TouchableOpacity, StyleSheet, FlatList, Alert, Share, ActivityInd
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import QRCode from 'react-native-qrcode-svg';
+import { QR_COLORS } from '../constants/qrPalette';
 import { useTheme } from '../lib/theme';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
 import { listInviteLinks, createInviteLink, revokeInviteLink, type InviteLink } from '../lib/chatService';
@@ -255,7 +256,7 @@ export default function InviteLinkScreen() {
           <View style={s.qrCard} accessibilityViewIsModal>
             <Text style={s.qrTitle} accessibilityRole="header">Scan to join {groupName || 'group'}</Text>
             <View style={s.qrBox} accessible accessibilityRole="image" accessibilityLabel={`QR code for the invite link vaultchat.app/join/${qrCode ?? ''}`}>
-              {qrCode && <QRCode value={JOIN_BASE + qrCode} size={220} backgroundColor="#FFFFFF" color="#0A0A0F" />}
+              {qrCode && <QRCode value={JOIN_BASE + qrCode} size={220} {...QR_COLORS} />}
             </View>
             <Text style={s.qrCode} numberOfLines={1}>vaultchat.app/join/{qrCode}</Text>
             <TouchableOpacity style={s.qrClose} onPress={() => setQrCode(null)} accessibilityRole="button">

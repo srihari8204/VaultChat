@@ -264,8 +264,9 @@ export default function ProfileScreen() {
           // the push token is an authenticated request, and logoutUser() drops
           // the token; a live socket would keep writing incoming messages into
           // the local store logoutUser() is purging. So they go first, and a
-          // failed sign-out puts them back (best effort; open screens re-attach
-          // their own socket listeners when they next mount).
+          // failed sign-out puts them back (best effort). The new socket gets
+          // every lib/socket addPersistentListener listener (calls, the Chats
+          // list); screens that use plain s.on() re-attach when they next mount.
           try { await unregisterPushToken(); } catch {}
           try { disconnectSocket(); } catch {}
           try {

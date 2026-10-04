@@ -58,6 +58,7 @@ import { putMediaKey } from '../../lib/mediaKeyStore';
 import { AuroraBackground } from '../../components/ui';
 import { permissionDenied } from '../../lib/permissionDenied';
 import { userErrorText } from '../../lib/userErrorText';
+import { TEXT_STORY_SWATCHES } from '../../constants/storyPalette';
 
 /** The gate for an UNENCRYPTED story. A question gate is impossible here — with
  *  no content key to lock there is nothing for the answer to protect, so it
@@ -67,13 +68,8 @@ function plainGate(g: GateDraft): StoryGateOut | undefined {
 }
 
 // Text-status backgrounds are the story's own artwork (white text on top in
-// every theme), not app chrome, so they are fixed colours.
-const TEXT_SWATCHES = [
-  { color: '#0B0B10', name: 'Black' }, { color: '#7E57C2', name: 'Purple' }, { color: '#26A69A', name: 'Teal' },
-  { color: '#EF5350', name: 'Red' }, { color: '#42A5F5', name: 'Blue' }, { color: '#FFA726', name: 'Orange' },
-  { color: '#5C6BC0', name: 'Indigo' },
-] as const;
-const TEXT_BG_DEFAULT = TEXT_SWATCHES[0].color;
+// every theme), not app chrome: fixed colours in constants/storyPalette.ts.
+const TEXT_BG_DEFAULT = TEXT_STORY_SWATCHES[0].color;
 const FEED_CACHE = FEED_CACHE_KEY;   // shared with the viewer; never re-declare the literal
 // Status mutes are DEVICE-LOCAL (AsyncStorage only; there is no server field),
 // so they do not follow the account to another phone. The mute dialog says so.
@@ -420,7 +416,7 @@ export default function StatusScreen() {
       <TextStatusComposer
         visible={textOpen}
         text={storyText} onChangeText={setStoryText}
-        bg={storyBg} onChangeBg={setStoryBg} swatches={TEXT_SWATCHES}
+        bg={storyBg} onChangeBg={setStoryBg} swatches={TEXT_STORY_SWATCHES}
         recentEmojis={recentEmojis} onEmoji={addEmoji}
         posting={posting} onPost={onPostText} onClose={closeTextComposer}
       />

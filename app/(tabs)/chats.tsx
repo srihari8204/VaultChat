@@ -29,7 +29,7 @@ import { ChatHeaderAction } from '../../components/chat/ChatHeaderAction';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { cloudBackupMeta } from '../../lib/cloudBackup';
 import { runScheduledBackupIfDue } from '../../lib/backupScheduler';
-import { getSocket } from '../../lib/socket';
+import { addPersistentListener, getSocket } from '../../lib/socket';
 import { mark } from '../../lib/perf';
 import { takePrimedChats } from '../../lib/chatsPrefetch';
 import { applyLocalReadPointers, setUnreadTotal } from '../../lib/unreadStore';
@@ -321,78 +321,70 @@ export default function ChatsScreen() {
 
   // Realtime: new messages refresh the list; presence patches in place.
   useEffect(() => {
-    let off: (() => void) | null = null;
     let cancelled = false;
-    (async () => {
-      try {
-        const s = await getSocket();
-        const refresh = () => scheduleRefresh();   // P1.2: coalesced, history-free refetch
-        const onPresence = (e: { userId: string; online: boolean; lastSeenAt: string | null }) => {
-          if (!e?.userId) return;
-          setChats(prev => prev.map(c => c.peerUserId === e.userId
-            ? { ...c, peerOnline: e.online, peerLastSeenAt: e.lastSeenAt ?? c.peerLastSeenAt } : c));
-        };
-        const onTyping = (e: { uid?: string; chatId?: string }) => {
-          // FAIL CLOSED WHEN WE DO NOT KNOW WHO WE ARE. `e.uid === null` is false
-          // for every real id, so without the first clause an event arriving
-          // before meId resolves skips the self-check entirely and the row shows
-          // "typing…" because YOU are typing. Dropping a typing event for the few
-          // ms before the id loads costs nothing — it is re-sent every keystroke.
-          if (!meIdRef.current) return;
-          if (!e?.chatId || !e.uid || e.uid === meIdRef.current) return;
-          setTypingChats(prev => { const n = new Set(prev); n.add(e.chatId!); return n; });
-          clearTimeout(typingTimers.current[e.chatId]);
-          typingTimers.current[e.chatId] = setTimeout(() =>
-            setTypingChats(prev => { const n = new Set(prev); n.delete(e.chatId!); return n; }), 6000);
-        };
-        const onTypingStop = (e: { chatId?: string }) => {
-          if (!e?.chatId) return;
-          clearTimeout(typingTimers.current[e.chatId]);
-          setTypingChats(prev => { const n = new Set(prev); n.delete(e.chatId!); return n; });
-        };
-        // RESYNC ON RECONNECT — the list has no other way to learn what it missed.
-        //
-        // Realtime events do not replay every event sent while a client was away, so a
-        // message that arrives during a drop (backgrounded, doze, a tunnel) is
-        // simply never seen by this screen. The only other refresh triggers are
-        // a socket event and useFocusEffect — and if the user is ALREADY sitting
-        // on the Chats tab, focus never changes, so the list stays stale
-        // indefinitely.
-        //
-        // For an existing chat that shows as a stale preview. For a chat that
-        // did not exist yet — someone messaging you for the first time — there
-        // is no row at all, so the whole conversation is invisible until
-        // something else happens to re-focus the tab. That is the reported bug:
-        // "not showing in chats page, but if I open it from Contacts I can see
-        // it" — navigating away and back is what silently fixed it.
-        //
-        // Same shape as the room re-join in lib/socket.ts, which exists because
-        // this identical gap once stopped live location dead after any reconnect.
-        const onReconnect = () => refresh();
-        // Check BEFORE attaching, not after (2026-09-17). The seven listeners
-        // below used to be registered first and the `if (!cancelled)` guard only
-        // decided whether to BUILD the detach function — so unmounting while
-        // getSocket() was still in flight left all seven attached with no way to
-        // remove them. Each leaked `refresh` then ran listChats() on every
-        // message in every chat for the rest of the process, and another seven
-        // leaked on each remount. Returning early is the whole fix.
-        if (cancelled) return;
-        s.on('connect', onReconnect);
-        s.on('new_message', refresh);
-        s.on('message_deleted', refresh);
-        s.on('message_edited', refresh);
-        s.on('presence_changed', onPresence);
-        s.on('typing_start', onTyping);
-        s.on('typing_stop', onTypingStop);
-        off = () => {
-          s.off('connect', onReconnect);
-          s.off('new_message', refresh); s.off('message_deleted', refresh);
-          s.off('message_edited', refresh); s.off('presence_changed', onPresence);
-          s.off('typing_start', onTyping); s.off('typing_stop', onTypingStop);
-        };
-      } catch (e: unknown) { if (!cancelled) setError(userErrorText(e, 'Realtime unavailable')); }
-    })();
-    return () => { cancelled = true; if (off) off(); };
+    const refresh = () => scheduleRefresh();   // P1.2: coalesced, history-free refetch
+    const onPresence = (e: { userId: string; online: boolean; lastSeenAt: string | null }) => {
+      if (!e?.userId) return;
+      setChats(prev => prev.map(c => c.peerUserId === e.userId
+        ? { ...c, peerOnline: e.online, peerLastSeenAt: e.lastSeenAt ?? c.peerLastSeenAt } : c));
+    };
+    const onTyping = (e: { uid?: string; chatId?: string }) => {
+      // FAIL CLOSED WHEN WE DO NOT KNOW WHO WE ARE. `e.uid === null` is false
+      // for every real id, so without the first clause an event arriving
+      // before meId resolves skips the self-check entirely and the row shows
+      // "typing…" because YOU are typing. Dropping a typing event for the few
+      // ms before the id loads costs nothing — it is re-sent every keystroke.
+      if (!meIdRef.current) return;
+      if (!e?.chatId || !e.uid || e.uid === meIdRef.current) return;
+      setTypingChats(prev => { const n = new Set(prev); n.add(e.chatId!); return n; });
+      clearTimeout(typingTimers.current[e.chatId]);
+      typingTimers.current[e.chatId] = setTimeout(() =>
+        setTypingChats(prev => { const n = new Set(prev); n.delete(e.chatId!); return n; }), 6000);
+    };
+    const onTypingStop = (e: { chatId?: string }) => {
+      if (!e?.chatId) return;
+      clearTimeout(typingTimers.current[e.chatId]);
+      setTypingChats(prev => { const n = new Set(prev); n.delete(e.chatId!); return n; });
+    };
+    // RESYNC ON RECONNECT — the list has no other way to learn what it missed.
+    //
+    // Realtime events do not replay every event sent while a client was away, so a
+    // message that arrives during a drop (backgrounded, doze, a tunnel) is
+    // simply never seen by this screen. The only other refresh triggers are
+    // a socket event and useFocusEffect — and if the user is ALREADY sitting
+    // on the Chats tab, focus never changes, so the list stays stale
+    // indefinitely.
+    //
+    // For an existing chat that shows as a stale preview. For a chat that
+    // did not exist yet — someone messaging you for the first time — there
+    // is no row at all, so the whole conversation is invisible until
+    // something else happens to re-focus the tab. That is the reported bug:
+    // "not showing in chats page, but if I open it from Contacts I can see
+    // it" — navigating away and back is what silently fixed it.
+    //
+    // Same shape as the room re-join in lib/socket.ts, which exists because
+    // this identical gap once stopped live location dead after any reconnect.
+    const onReconnect = () => refresh();
+    // PERSISTENT, not s.on(). lib/socket re-arms these on every socket it builds,
+    // so they survive a reconnect AND a socket replaced underneath this screen —
+    // profile's sign-out disconnects first and, when logoutUser() then fails,
+    // opens a new socket while Chats stays mounted. Plain s.on() listeners stayed
+    // on the dropped socket and the list went deaf until a remount. Attaching is
+    // synchronous, so an unmount can never race it and leak them (the 2026-09-17
+    // bug, when the seven listeners were attached after an awaited getSocket()).
+    const offConnect = addPersistentListener('connect', onReconnect);
+    const offs = [
+      addPersistentListener('new_message', refresh),
+      addPersistentListener('message_deleted', refresh),
+      addPersistentListener('message_edited', refresh),
+      addPersistentListener('presence_changed', onPresence),
+      addPersistentListener('typing_start', onTyping),
+      addPersistentListener('typing_stop', onTypingStop),
+    ];
+    // The listeners above keep retrying the connection themselves; this only
+    // says so when the first attempt fails.
+    getSocket().catch((e: unknown) => { if (!cancelled) setError(userErrorText(e, 'Realtime unavailable')); });
+    return () => { cancelled = true; offConnect(); offs.forEach(off => off()); };
   }, [scheduleRefresh]);
 
   // Resync when the app comes back to the foreground.

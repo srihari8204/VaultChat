@@ -8,7 +8,7 @@
 import { useMemo } from 'react';
 import { StyleSheet } from 'react-native';
 import { HEADER_TOP, TAB_BAR_SPACE } from '../../constants/layout';
-import { type Palette, brandAlpha } from '../../constants/theme';
+import { type Palette, ON_MEDIA_INK, brandAlpha } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
 import { useVisionComfort } from '../../lib/visionComfort';
 import { tint } from '../../lib/tintColor';
@@ -35,7 +35,7 @@ export const makeChatListStyles = (c: Palette, v = { textScale: 1, lineScale: 1,
   avInitials:   { alignItems: 'center', justifyContent: 'center', backgroundColor: c.primary },
   avInitialsTxt:{ color: c.onPrimary, fontSize: 84, fontWeight: '800' },
   avNameBar:    { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: 'rgba(0,0,0,0.45)' },
-  avNameTxt:    { color: '#fff', fontSize: 19 * v.textScale, fontWeight: '700' },
+  avNameTxt:    { color: ON_MEDIA_INK, fontSize: 19 * v.textScale, fontWeight: '700' },
   avActions:    { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 12, backgroundColor: c.surfaceSolid },
   avActionBtn:  { alignItems: 'center', justifyContent: 'center', gap: 4, paddingHorizontal: 6, minWidth: 44, minHeight: 44 },
   avActionTxt:  { color: c.primary, fontSize: 12 * v.textScale, fontWeight: '600' },

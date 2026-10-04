@@ -33,15 +33,25 @@ console.log('\nChat list resync\n');
 // A listener may be attached with s.on(...) on the current socket, or with
 // lib/socket's addPersistentListener(...), which re-arms it on every new socket
 // (e.g. after a failed sign-out replaced it). The persistent form must keep its
-// unsubscribe and call it, as s.off(...) is called for the plain form.
+// unsubscribe and call it, as s.off(...) is called for the plain form: either
+// `const offX = addPersistentListener('x', …)` with `offX()`, or an element of
+// `const offs = [addPersistentListener('x', …), …]` with `offs.forEach(…)`.
 const persistentUnsub = (ev: string) =>
   new RegExp(`(?:const|let)\\s+(\\w+)\\s*=\\s*addPersistentListener\\(\\s*'${ev}'\\s*,`).exec(SCREEN)?.[1] ?? null;
+const persistentList = (ev: string) => {
+  for (const m of SCREEN.matchAll(/(?:const|let)\s+(\w+)\s*=\s*\[([^\]]*)\]/g)) {
+    if (new RegExp(`addPersistentListener\\(\\s*'${ev}'\\s*,`).test(m[2])) return m[1];
+  }
+  return null;
+};
 const listens = (ev: string) =>
-  new RegExp(`s\\.on\\(\\s*'${ev}'\\s*,`).test(SCREEN) || persistentUnsub(ev) !== null;
+  new RegExp(`s\\.on\\(\\s*'${ev}'\\s*,`).test(SCREEN) || persistentUnsub(ev) !== null || persistentList(ev) !== null;
 const detaches = (ev: string) => {
   const unsub = persistentUnsub(ev);
+  const list = persistentList(ev);
   return new RegExp(`s\\.off\\(\\s*'${ev}'\\s*,`).test(SCREEN)
-    || (unsub !== null && new RegExp(`\\b${unsub}\\(\\)`).test(SCREEN));
+    || (unsub !== null && new RegExp(`\\b${unsub}\\(\\)`).test(SCREEN))
+    || (list !== null && new RegExp(`\\b${list}\\.forEach\\(\\s*(\\w+)\\s*=>\\s*\\1\\(\\)\\s*\\)`).test(SCREEN));
 };
 
 // ── recovery after a dropped socket ───────────────────────────────────
@@ -66,6 +76,7 @@ check('AppState is actually imported',
 
 // ── the triggers that were already there must stay ────────────────────
 check("still refetches on 'new_message'", listens('new_message'));
+check("...and detaches it on unmount", detaches('new_message'), 'listener leaks across remounts');
 check('still refetches on focus', /useFocusEffect\(/.test(SCREEN));
 
 // ── and the refetch must be the coalesced one ─────────────────────────

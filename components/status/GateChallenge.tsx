@@ -22,6 +22,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import PuzzleBoard from './PuzzleBoard';
+import { STORY_STAGE } from '../../constants/storyStage';
 
 interface Props {
   kind: 'puzzle' | 'question';
@@ -87,7 +88,7 @@ export default function GateChallenge({
   return (
     <View style={S.wrap}>
       <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close" style={[S.close, { bottom: 40 + insets.bottom }]} onPress={onDismiss} hitSlop={12}>
-        <Ionicons name="close" size={26} color="#fff" />
+        <Ionicons name="close" size={26} color={STORY_STAGE.ink} />
       </TouchableOpacity>
 
       {kind === 'puzzle' ? (
@@ -130,7 +131,7 @@ export default function GateChallenge({
             onChangeText={(t) => { setAnswer(t); setWrong(false); }}
             placeholder="Your answer"
             accessibilityLabel={prompt || 'Answer to unlock'}
-            placeholderTextColor="rgba(255,255,255,0.45)"
+            placeholderTextColor={STORY_STAGE.faint}
             style={S.input}
             autoCapitalize="none"
             autoCorrect={false}
@@ -147,7 +148,7 @@ export default function GateChallenge({
             accessibilityLabel="Unlock"
             accessibilityState={{ disabled: busy || !answer.trim(), busy }}
           >
-            {busy ? <ActivityIndicator color="#fff" /> : <Text style={S.btnText}>Unlock</Text>}
+            {busy ? <ActivityIndicator color={STORY_STAGE.ink} /> : <Text style={S.btnText}>Unlock</Text>}
           </TouchableOpacity>
           <Text style={S.hint}>Capitals and extra spaces don’t matter.</Text>
         </>
@@ -159,17 +160,17 @@ export default function GateChallenge({
 const S = StyleSheet.create({
   // The gate sits on the story viewer's always-black stage and every glyph
   // here is white, so the surface is black in both themes (c.bg was white in
-  // light theme: white title and input on white).
-  wrap: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center', padding: 24 }, // theme-exempt: dark media stage
+  // light theme: white title and input on white). constants/storyStage.ts.
+  wrap: { flex: 1, backgroundColor: STORY_STAGE.bg, alignItems: 'center', justifyContent: 'center', padding: 24 },
   // Bottom: at the top it sat underneath the story viewer's own top bar.
   close: { position: 'absolute', bottom: 40, left: 20, zIndex: 2 },
-  title: { color: '#fff', fontSize: 19, fontWeight: '600', marginTop: 14, textAlign: 'center', lineHeight: 26 },
+  title: { color: STORY_STAGE.ink, fontSize: 19, fontWeight: '600', marginTop: 14, textAlign: 'center', lineHeight: 26 },
   input: {
     width: '100%', marginTop: 20, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14,
-    backgroundColor: 'rgba(255,255,255,0.10)', color: '#fff', fontSize: 16,
+    backgroundColor: STORY_STAGE.field, color: STORY_STAGE.ink, fontSize: 16,
   },
-  wrong: { color: '#FF8A7A', marginTop: 10, fontSize: 13 },
+  wrong: { color: STORY_STAGE.error, marginTop: 10, fontSize: 13 },
   btn: { marginTop: 18, paddingHorizontal: 32, paddingVertical: 14, borderRadius: 999, minWidth: 160, alignItems: 'center' },
-  btnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  hint: { color: 'rgba(255,255,255,0.45)', fontSize: 12, marginTop: 14 },
+  btnText: { color: STORY_STAGE.ink, fontSize: 16, fontWeight: '700' },
+  hint: { color: STORY_STAGE.faint, fontSize: 12, marginTop: 14 },
 });

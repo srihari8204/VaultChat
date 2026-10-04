@@ -11,6 +11,7 @@ import { View, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Share, Li
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import QRCode from 'react-native-qrcode-svg';
+import { QR_COLORS, QR_SCAN_OVERLAY } from '../constants/qrPalette';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useTheme } from '../lib/theme';
 import { getMyProfile, resolveVaultId, createDirectChat } from '../lib/chatService';
@@ -155,7 +156,7 @@ export default function QRContactScreen() {
                 <Text style={s.qrId}>@{myVaultId || '…'}</Text>
                 <View style={s.qrBox} accessible={!!myVaultId} accessibilityRole="image" accessibilityLabel={myVaultId ? `Your QR code, VaultID ${myVaultId}` : undefined}>
                   {myVaultId
-                    ? <QRCode value={qrData} size={200} backgroundColor="#FFFFFF" color="#0A0A0F" />
+                    ? <QRCode value={qrData} size={200} {...QR_COLORS} />
                     : <Text style={{ color: colors.textDim }}>No VaultID yet</Text>}
                 </View>
                 <Text style={s.qrHint}>Show this to add you on crazzychat</Text>
@@ -250,7 +251,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   scanner: { flex: 1 },
   scanOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center' },
   scanFrame: { width: 250, height: 250, borderWidth: 2, borderColor: c.primary, borderRadius: 20, backgroundColor: 'transparent' },
-  scanHint: { color: '#fff', fontSize: 14, marginTop: 20, textAlign: 'center', fontWeight: '600', textShadowColor: '#000', textShadowRadius: 4 },
+  scanHint: { color: QR_SCAN_OVERLAY.ink, fontSize: 14, marginTop: 20, textAlign: 'center', fontWeight: '600', textShadowColor: QR_SCAN_OVERLAY.shadow, textShadowRadius: 4 },
   scanAgain: { position: 'absolute', bottom: 40, alignSelf: 'center' },
   foundCard: { position: 'absolute', left: 16, right: 16, bottom: 32, padding: 20, gap: 8, borderRadius: 20, alignItems: 'center', backgroundColor: c.surfaceSolid, borderWidth: 1, borderColor: c.glassStroke },
   foundTitle: { color: c.text, fontSize: 18, fontWeight: '800', textAlign: 'center' },
