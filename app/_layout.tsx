@@ -787,6 +787,11 @@ function RootLayoutInner() {
         if (initial?.notification?.data?.type === 'call') {
           onNotifeeAnswerOrDecline(initial.pressAction?.id === 'decline' ? 'decline' : 'answer', initial.notification.data);
         }
+        // A family alert tapped while the app was killed opens that circle's
+        // alerts, as a foreground tap does (lib/push.ts attachTapHandler).
+        else if (initial?.notification?.data?.type === 'family-alert') {
+          router.push({ pathname: '/family-alerts' as any, params: { circleId: String(initial.notification.data.circleId ?? '') } });
+        }
       } catch {}
       const pending = consumePendingCall();   // chosen from a bg notification action
       if (pending) onNotifeeAnswerOrDecline(pending.action, pending.data);
