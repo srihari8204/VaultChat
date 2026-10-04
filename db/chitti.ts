@@ -84,8 +84,9 @@ async function syncGroupStatuses(rows: ChittiGroup[]): Promise<ChittiGroup[]> {
     const next = groupStatusFor(g, t);
     if (next !== g.status) {
       const d = await financeDb();
-      await d.runAsync(`UPDATE chitti_groups SET status = ? WHERE id = ? AND status = ?`, [next, g.id, g.status]);
-      await addTimeline('chitti', g.id, 'status',
+      // Only the read whose UPDATE changed the row records it (overlapping reads).
+      const r = await d.runAsync(`UPDATE chitti_groups SET status = ? WHERE id = ? AND status = ?`, [next, g.id, g.status]);
+      if (r.changes > 0) await addTimeline('chitti', g.id, 'status',
         `Closed automatically · the last auction (month ${g.duration}) was on ${fmtDate(chittiTermEnd(g))}`);
       out.push({ ...g, status: next });
     } else out.push(g);

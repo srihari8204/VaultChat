@@ -97,8 +97,10 @@ async function syncLedgerStatuses(rows: LedgerEntry[]): Promise<LedgerEntry[]> {
     const next = ledgerStatusFor(e, t);
     if (next !== e.status) {
       const d = await financeDb();
-      await d.runAsync(`UPDATE ledger_entries SET status = ? WHERE id = ? AND status = ?`, [next, e.id, e.status]);
-      await addTimeline('ledger', e.id, 'status',
+      // The `AND status = ?` guard makes overlapping reads race safely: only the
+      // read whose UPDATE changed the row writes the timeline entry.
+      const r = await d.runAsync(`UPDATE ledger_entries SET status = ? WHERE id = ? AND status = ?`, [next, e.id, e.status]);
+      if (r.changes > 0) await addTimeline('ledger', e.id, 'status',
         next === 'overdue' ? `Marked overdue · the end date ${e.end_date ? fmtDate(e.end_date) : ''} has passed`
           : next === 'completed' ? 'Marked completed · nothing remains'
             : 'Running again · the end date is now later');
