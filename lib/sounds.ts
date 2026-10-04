@@ -50,10 +50,13 @@ export async function getSoundPrefs(): Promise<SoundPrefs> {
   } catch { prefs = { ...DEFAULTS }; }
   return prefs;
 }
+/** Saves the patch. If it cannot be persisted, the previous prefs stay in
+ *  effect and this rejects, so the caller can say it was not saved. */
 export async function setSoundPrefs(patch: Partial<SoundPrefs>): Promise<SoundPrefs> {
   const cur = await getSoundPrefs();
-  prefs = { ...cur, ...patch };
-  try { await AsyncStorage.setItem(KEY, JSON.stringify(prefs)); } catch {}
+  const next = { ...cur, ...patch };
+  await AsyncStorage.setItem(KEY, JSON.stringify(next));
+  prefs = next;
   return prefs;
 }
 

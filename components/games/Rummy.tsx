@@ -33,7 +33,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AccessibilityInfo, ActivityIndicator, Alert, Pressable,
+  ActivityIndicator, Alert, Pressable,
   ScrollView, Text, TextInput, View, useWindowDimensions,
   type LayoutChangeEvent, type ViewStyle,
 } from 'react-native';
@@ -50,7 +50,8 @@ import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { useGameSocket, type AutoStart } from '../../lib/games/useGameSocket';
-import { TableBackground, Panel, Btn, Banner, PlayerRow, RematchBtn, useType } from './ui';
+import { TableBackground, Panel, Btn, Banner, PlayerRow, RematchBtn, useType, useReduceMotion } from './ui';
+import { GAMES_HTTP } from '../../lib/games/origin';
 import { KeyboardSafe } from '../ui/KeyboardSafe';
 import { useCountdown } from '../../lib/games/useCountdown';
 import { useRematch, type Rematch } from '../../lib/games/useRematch';
@@ -1079,7 +1080,7 @@ export default function Rummy({ tableId = '', auto, autoBot, seat }: { tableId?:
 
       <Sheet visible={!!confirmLeave} title="Leave this table?" onClose={() => setConfirmLeave(null)}>
         <Text style={{ color: C.muted, fontSize: t.sm, lineHeight: 20 }}>
-          {`You are seated at a hand in progress. Leaving drops you from it, and the round is scored against you. The table list will show ${confirmLeave === 'bots' ? 'tables you can play a bot at' : confirmLeave === 'practice' ? 'practice tables' : 'tables played for coins'}.`}
+          {`You are seated at a hand in progress. It keeps running on the server without you, and turns you miss can time out and count against you. To give the hand up now, use Drop instead. The table list will show ${confirmLeave === 'bots' ? 'tables you can play a bot at' : confirmLeave === 'practice' ? 'practice tables' : 'tables played for coins'}.`}
         </Text>
         <Btn
           label="Leave and find another table"
@@ -1191,24 +1192,6 @@ function useColumn() {
     width: '100%' as const,
     alignSelf: 'center' as const,
   }), []);
-}
-
-/**
- * Honour the system's "reduce motion" setting.
- *
- * The spinning turn ring, the bobbing deck and the confetti are all decoration;
- * for a player who has asked the OS to stop animations they are a problem. The
- * game itself is unaffected.
- */
-function useReduceMotion(): boolean {
-  const [on, setOn] = useState(false);
-  useEffect(() => {
-    let alive = true;
-    AccessibilityInfo.isReduceMotionEnabled().then(v => { if (alive) setOn(!!v); }).catch(() => {});
-    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', v => setOn(!!v));
-    return () => { alive = false; sub?.remove?.(); };
-  }, []);
-  return on;
 }
 
 /* ── choosing a table ───────────────────────────────────────────────── */
@@ -1481,7 +1464,7 @@ function TableSelect({
   // empty "History" screen that never fills up.
   useEffect(() => {
     let alive = true;
-    fetch('https://games.corefinite.com/api/me', { credentials: 'include' })
+    fetch(`${GAMES_HTTP}/api/me`, { credentials: 'include' })
       .then(r => r.json())
       .then((d: any) => {
         if (!alive || !d?.ok) return;
@@ -2376,10 +2359,12 @@ function StandingsSheet({
 /** The house mark. Small, and the only branding on the screen. */
 function Wordmark() {
   return (
-    <View style={[onFelt('navy', { radius: 9 }), { paddingHorizontal: S[2], paddingVertical: 2, alignItems: 'center' }]}>
+    // Decorative branding: hidden from screen readers, which already hear the
+    // game's name from the top bar.
+    <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={[onFelt('navy', { radius: 9 }), { paddingHorizontal: S[2], paddingVertical: 2, alignItems: 'center' }]}>
       <Text style={{ color: C.gold2, fontSize: 8, lineHeight: 9 }}>♛</Text>
       <Text style={{ color: INK_ON_FELT, fontSize: 10, fontWeight: '800', letterSpacing: 1 }}>RUMMY</Text>
-      <Text style={{ color: C.gold, opacity: 0.8, fontSize: 5.5, fontWeight: '800', letterSpacing: 0.9 }}>PLAY SMART</Text>
+      <Text style={{ color: C.gold, opacity: 0.8, fontSize: 7, fontWeight: '800', letterSpacing: 0.6 }}>PLAY SMART</Text>
     </View>
   );
 }
@@ -2447,7 +2432,7 @@ function TablePanel({
     ]}>
       {rows.map(([k, v]) => (
         <View key={k}>
-          <Text style={{ color: INK_DIM, fontSize: 7.5, fontWeight: '800', letterSpacing: 0.4 }}>{k}</Text>
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={{ color: INK_DIM, fontSize: 9.5, fontWeight: '800', letterSpacing: 0.3 }}>{k}</Text>
           <Text numberOfLines={1} style={{ color: INK_ON_FELT, fontSize: 11, fontWeight: '800' }}>{v}</Text>
         </View>
       ))}
@@ -2525,7 +2510,7 @@ function ScorePanel({
           <Text style={{ color: tone, fontSize: 12 }}>{glyph}</Text>
           <Text style={{ color: tone, fontSize: 17, fontWeight: '800' }}>{value}</Text>
           <View style={{ flex: 1 }} />
-          <Text numberOfLines={1} style={{ color: tone, opacity: 0.8, fontSize: 6.5, fontWeight: '800', letterSpacing: 0.4 }}>{label}</Text>
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72} style={{ color: tone, opacity: 0.9, fontSize: 9, fontWeight: '800', letterSpacing: 0.3 }}>{label}</Text>
         </View>
       ))}
     </Pressable>
@@ -2606,7 +2591,7 @@ function Stat({
       }}
     >
       <Text style={{ color: tone, fontSize: 12.5, fontWeight: '800' }}>{`${glyph} ${value}`}</Text>
-      <Text style={{ color: tone, opacity: 0.7, fontSize: 6.5, fontWeight: '800', letterSpacing: 0.5 }}>{label}</Text>
+      <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72} style={{ color: tone, opacity: 0.85, fontSize: 9, fontWeight: '800', letterSpacing: 0.3 }}>{label}</Text>
     </View>
   );
 }
@@ -2715,7 +2700,9 @@ function GroupZone({
     >
       <Text
         numberOfLines={1}
-        style={{ color: tone, fontSize: 7.5, fontWeight: '800', letterSpacing: 1, textAlign: 'center' }}
+        adjustsFontSizeToFit
+        minimumFontScale={0.8}
+        style={{ color: tone, fontSize: 9.5, fontWeight: '800', letterSpacing: 0.6, textAlign: 'center' }}
       >{title}</Text>
 
       {/* Cards overlap into a fan the way a held hand does — five groups of

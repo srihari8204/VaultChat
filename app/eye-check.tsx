@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useRouter } from 'expo-router';
-import { useRef, useState } from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, Text as NativeText, View, useWindowDimensions } from 'react-native';
+import { Stack, useNavigation, useRouter } from 'expo-router';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text as NativeText, View, useWindowDimensions } from 'react-native';
 import Svg, { Circle, G, Line, Path } from 'react-native-svg';
 import { AppText as Text, AuroraBackground } from '../components/ui';
 import { useTheme } from '../lib/theme';
+import { PALETTES } from '../constants/theme';
 import {
   answerCheck, CLEAR_SCREEN_MATCHES, expectedOrientation, INITIAL_CHECK_STEP,
   SCREEN_LEVELS, screenClarityIndex, startLeftEye, symbolScale, TRIALS_PER_EYE,
@@ -13,6 +14,14 @@ import {
 const NOTICE = 'ఇది కేవలం ప్రాథమిక స్క్రీనింగ్ మాత్రమే. ఇది డాక్టర్ కంటి పరీక్షకు ప్రత్యామ్నాయం కాదు';
 const WHOEYES_URL = 'https://www.who.int/teams/noncommunicable-diseases/sensory-functions-disability-and-rehabilitation/whoeyes';
 const DIGITS = ['5', '8', '3', '6', '2', '9'] as const;
+// Label colour on solid primary fills. The palette has no on-primary token;
+// white is the brand's button text in both themes.
+const ON_PRIMARY = '#FFFFFF';
+// The test charts sit on a fixed white field in both themes, so marks drawn on
+// that field take the LIGHT palette's colours, which are made for white.
+const ON_WHITE_FIELD = PALETTES.light;
+// Phases where Back would throw away answers already given.
+const MID_TEST = new Set(['setup', 'acuity', 'color', 'colorResult', 'astig', 'astigResult', 'amsler', 'amslerResult']);
 const indexLabel = (correct: number) => {
   const value = screenClarityIndex(correct);
   return `${value > 0 ? '+' : ''}${value} points`;
@@ -43,6 +52,24 @@ export default function EyeCheckScreen() {
   const [amslerQuestion, setAmslerQuestion] = useState(0);
   const [amslerConcern, setAmslerConcern] = useState({ right: false, left: false });
   const pending = useRef(false);
+  // The 650 ms answer feedback must not fire after the screen is gone.
+  const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (feedbackTimer.current) clearTimeout(feedbackTimer.current); }, []);
+  // Leaving mid-test loses every answer, so it asks first (Back button,
+  // hardware back and the swipe gesture all go through beforeRemove).
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
+  const navigation = useNavigation();
+  useEffect(() => navigation.addListener('beforeRemove', (ev) => {
+    // beforeRemove is preventable at runtime; the generic navigation type says otherwise.
+    const e = ev as typeof ev & { preventDefault(): void };
+    if (!MID_TEST.has(phaseRef.current)) return;
+    e.preventDefault();
+    Alert.alert('Leave Eye Check?', 'Your answers so far will be lost.', [
+      { text: 'Continue the check', style: 'cancel' },
+      { text: 'Leave', style: 'destructive', onPress: () => navigation.dispatch(e.data.action) },
+    ]);
+  }), [navigation]);
   const card = [s.card, { backgroundColor: colors.surfaceSolid, borderColor: colors.glassStroke }];
   const primary = [s.primaryButton, { backgroundColor: colors.primary }];
   const chartSize = Math.max(1, Math.min(228, width - 64));
@@ -62,7 +89,7 @@ export default function EyeCheckScreen() {
     if (pending.current || step.phase !== 'right' && step.phase !== 'left') return;
     pending.current = true;
     setFeedback(angle === expectedOrientation(step));
-    setTimeout(() => {
+    feedbackTimer.current = setTimeout(() => {
       setStep(current => answerCheck(current, angle));
       setFeedback(null);
       pending.current = false;
@@ -73,7 +100,7 @@ export default function EyeCheckScreen() {
     pending.current = true;
     const correct = value === currentDigit;
     setFeedback(correct);
-    setTimeout(() => {
+    feedbackTimer.current = setTimeout(() => {
       if (correct) setColorCorrect(count => count + 1);
       if (colorIndex + 1 === DIGITS.length) setPhase('colorResult');
       else setColorIndex(index => index + 1);
@@ -114,7 +141,7 @@ export default function EyeCheckScreen() {
         <View style={s.header}>
           <Pressable accessibilityRole="button" accessibilityLabel="Back to Vision Comfort" onPress={() => router.back()} style={s.back}><Ionicons name="arrow-back" size={24} color={colors.text} /></Pressable>
           <Ionicons name="eye-outline" size={28} color={colors.primary} />
-          <Text style={s.title}>Eye Check</Text>
+          <Text style={s.title} accessibilityRole="header">Eye Check</Text>
         </View>
         <Text style={[s.subtitle, { color: colors.textDim }]}>Visual acuity · Colour vision · Astigmatism · Amsler grid</Text>
 
@@ -126,7 +153,7 @@ export default function EyeCheckScreen() {
         </>}
 
         {phase === 'setup' && <>
-          <Text style={s.sectionTitle}>Screen setup · {setupStep + 1}/4</Text>
+          <Text style={s.sectionTitle} accessibilityRole="header">Screen setup · {setupStep + 1}/4</Text>
           <View style={card}>
             {setupStep === 0 && <>
               <Text style={s.cardTitle}>Calibrate with a standard card</Text>
@@ -146,7 +173,7 @@ export default function EyeCheckScreen() {
             {setupStep === 1 && <>
               <Text style={s.cardTitle}>Glasses or contacts</Text>
               <Text style={s.body}>Use your usual glasses or contacts if needed. You can repeat the check without them later. Keep the same choice for both eyes.</Text>
-              <View style={s.choiceRow}>{(['with', 'without'] as const).map(value => <Pressable key={value} accessibilityRole="button" accessibilityState={{ selected: glasses === value }} onPress={() => setGlasses(value)} style={[s.choice, { backgroundColor: glasses === value ? colors.primary : colors.bg, borderColor: colors.glassStroke }]}><Text style={[s.choiceText, { color: glasses === value ? '#FFFFFF' : colors.text }]}>{value === 'with' ? 'With glasses' : 'Without glasses'}</Text></Pressable>)}</View>
+              <View style={s.choiceRow}>{(['with', 'without'] as const).map(value => <Pressable key={value} accessibilityRole="button" accessibilityState={{ selected: glasses === value }} onPress={() => setGlasses(value)} style={[s.choice, { backgroundColor: glasses === value ? colors.primary : colors.bg, borderColor: colors.glassStroke }]}><Text style={[s.choiceText, { color: glasses === value ? ON_PRIMARY : colors.text }]}>{value === 'with' ? 'With glasses' : 'Without glasses'}</Text></Pressable>)}</View>
             </>}
             {setupStep === 2 && <><Text style={s.cardTitle}>Check one eye at a time</Text><Text style={s.body}>Cover your left eye gently without pressing on it. We will check the right eye first, then switch sides.</Text><Ionicons name="eye-outline" size={100} color={colors.primary} style={s.setupIcon} /></>}
             {setupStep === 3 && <><Text style={s.cardTitle}>Keep your distance</Text><Text style={s.body}>Hold your device at arm&apos;s length, face it directly, and keep the distance steady. Set brightness to 100% if comfortable; lower it if glare hurts.</Text><Text style={[s.smallNote, { color: colors.textDim }]}>Ask someone to tap the gap directions if you need to stay farther from the phone.</Text></>}
@@ -163,7 +190,7 @@ export default function EyeCheckScreen() {
           <Pressable accessibilityRole="button" onPress={() => setPhase('color')} style={primary}><Text style={s.primaryLabel}>Next: colour vision</Text></Pressable>
         </>}
         {phase === 'acuity' && (step.phase === 'right' || step.phase === 'left') && <>
-          <Text style={s.sectionTitle}>Visual acuity · {step.eye === 'right' ? 'Right eye' : 'Left eye'}</Text>
+          <Text style={s.sectionTitle} accessibilityRole="header">Visual acuity · {step.eye === 'right' ? 'Right eye' : 'Left eye'}</Text>
           <Text style={s.body}>Cover your {step.eye === 'right' ? 'left' : 'right'} eye. At arm&apos;s length, match the gap in the top C using the direction buttons below.</Text>
           <Text style={[s.smallNote, { color: colors.textDim }]}>Gap {step.trial + 1}/{TRIALS_PER_EYE} · {glasses === 'with' ? 'with glasses' : 'without glasses'}</Text>
           <View style={[s.chartCard, { backgroundColor: '#FFFFFF', borderColor: colors.glassStroke }]}>{/* theme-exempt: the C chart uses a stable white test field */}
@@ -173,26 +200,28 @@ export default function EyeCheckScreen() {
                 const rad = direction.angle * Math.PI / 180;
                 return <Pressable key={direction.angle} accessibilityRole="button" accessibilityLabel={`Gap ${direction.label}`} onPress={() => answerAcuity(direction.angle)} style={[s.directionButton, ringSize < 190 ? s.narrowDirectionButton : { width: ringButtonSize, height: ringButtonSize, borderRadius: ringButtonSize / 2, left: (ringSize - ringButtonSize) / 2 + Math.cos(rad) * ringRadius, top: (ringSize - ringButtonSize) / 2 + Math.sin(rad) * ringRadius }, { backgroundColor: colors.primary }]}><NativeText maxFontSizeMultiplier={1} style={s.directionArrow}>{direction.symbol}</NativeText></Pressable>;
               })}
-              {ringSize >= 190 && <View style={[s.ringCenter, { left: (ringSize - 36) / 2, top: (ringSize - 36) / 2 }]}><Ionicons name={feedback === null ? 'eye-outline' : feedback ? 'checkmark-circle' : 'close-circle'} size={36} color={feedback === null ? colors.primary : feedback ? '#15803D' : '#B91C1C'} /></View>}
+              {ringSize >= 190 && <View style={[s.ringCenter, { left: (ringSize - 36) / 2, top: (ringSize - 36) / 2 }]}><Ionicons name={feedback === null ? 'eye-outline' : feedback ? 'checkmark-circle' : 'close-circle'} size={36} color={feedback === null ? colors.primary : feedback ? ON_WHITE_FIELD.success : ON_WHITE_FIELD.danger} /></View>}
             </View>
           </View>
+          {/* The ring's centre icon is visual only (and hidden on narrow screens); this says it. */}
+          <Text accessibilityLiveRegion="polite" style={[s.feedback, { color: feedback ? colors.success : colors.danger }]}>{feedback === null ? '' : feedback ? 'Matched' : 'Different answer'}</Text>
           <Pressable accessibilityRole="button" onPress={() => answerAcuity(null)} style={[s.secondaryButton, { borderColor: colors.glassStroke }]}><Text style={[s.secondaryLabel, { color: colors.text }]}>I can&apos;t see the gap</Text></Pressable>
           <Text style={[s.smallNote, { color: colors.textDim }]}>The gap changes direction and the C changes size after each answer. Keep looking at the top C, then tap its direction below.</Text>
         </>}
 
         {phase === 'color' && <>
-          <Text style={s.sectionTitle}>Colour vision · plate {colorIndex + 1}/{DIGITS.length}</Text>
+          <Text style={s.sectionTitle} accessibilityRole="header">Colour vision · plate {colorIndex + 1}/{DIGITS.length}</Text>
           <Text style={s.body}>Keep both eyes open. Hold the phone at arm&apos;s length. Which number do you see in the circle?</Text>
           <View style={[s.chartCard, { backgroundColor: '#FFFFFF', borderColor: colors.glassStroke }]}>{/* theme-exempt: dot plate colours need a stable white test field */}<ColorPlate digit={currentDigit} variant={(seed + colorIndex) % 3} size={chartSize} /></View>
           <View style={s.answerGrid}>{[currentDigit, DIGITS[(seed + colorIndex + 1) % DIGITS.length], DIGITS[(seed + colorIndex + 2) % DIGITS.length]].sort().map(value => <Pressable key={value} accessibilityRole="button" onPress={() => answerColor(value)} style={[s.answerButton, { backgroundColor: colors.surfaceSolid, borderColor: colors.glassStroke }]}><Text style={s.answerLabel}>{value}</Text></Pressable>)}</View>
           <Pressable accessibilityRole="button" onPress={() => answerColor('Nothing')} style={[s.secondaryButton, { borderColor: colors.glassStroke }]}><Text style={[s.secondaryLabel, { color: colors.text }]}>Nothing</Text></Pressable>
-          {feedback !== null && <Text style={[s.feedback, { color: feedback ? '#15803D' : colors.danger }]}>{feedback ? 'Matched' : 'Different answer'}</Text>}
+          <Text accessibilityLiveRegion="polite" style={[s.feedback, { color: feedback ? colors.success : colors.danger }]}>{feedback === null ? '' : feedback ? 'Matched' : 'Different answer'}</Text>
           <Text style={[s.smallNote, { color: colors.textDim }]}>These original dot patterns are inspired by the portal flow. Phone colours are not calibrated Ishihara plates.</Text>
         </>}
         {phase === 'colorResult' && <><View style={card}><Text style={s.cardTitle}>Colour vision screen result</Text><Text style={s.body}>{colorCorrect}/{DIGITS.length} numbers matched with both eyes open.</Text><Text style={[s.smallNote, { color: colors.textDim }]}>A different answer here cannot diagnose a colour-vision deficiency.</Text></View><Pressable accessibilityRole="button" onPress={() => setPhase('astig')} style={primary}><Text style={s.primaryLabel}>Next: astigmatism</Text></Pressable></>}
 
         {phase === 'astig' && <>
-          <Text style={s.sectionTitle}>Astigmatism · {astigEye === 'right' ? 'Right eye' : 'Left eye'}</Text>
+          <Text style={s.sectionTitle} accessibilityRole="header">Astigmatism · {astigEye === 'right' ? 'Right eye' : 'Left eye'}</Text>
           <Text style={s.body}>Cover your {astigEye === 'right' ? 'left' : 'right'} eye. At arm&apos;s length, focus on the centre. Do all lines look equally dark?</Text>
           <View style={[s.chartCard, { backgroundColor: '#FFFFFF', borderColor: colors.glassStroke }]}>{/* theme-exempt: black line chart needs a stable white test field */}<AstigChart size={chartSize} /></View>
           <View style={s.choiceRow}><Pressable accessibilityRole="button" onPress={() => answerAstig(true)} style={[s.choice, { backgroundColor: colors.surfaceSolid, borderColor: colors.glassStroke }]}><Text style={s.answerLabel}>Yes</Text></Pressable><Pressable accessibilityRole="button" onPress={() => answerAstig(false)} style={[s.choice, { backgroundColor: colors.surfaceSolid, borderColor: colors.glassStroke }]}><Text style={s.answerLabel}>No / not sure</Text></Pressable></View>
@@ -200,7 +229,7 @@ export default function EyeCheckScreen() {
         {phase === 'astigResult' && <><View style={card}><Text style={s.cardTitle}>Astigmatism line screen</Text><Text style={s.body}>Right eye: {astigSame.right ? 'lines looked equal' : 'difference or uncertainty reported'}</Text><Text style={s.body}>Left eye: {astigSame.left ? 'lines looked equal' : 'difference or uncertainty reported'}</Text><Text style={[s.smallNote, { color: colors.textDim }]}>Only an eye examination can diagnose astigmatism.</Text></View><Pressable accessibilityRole="button" onPress={() => setPhase('amsler')} style={primary}><Text style={s.primaryLabel}>Next: Amsler grid</Text></Pressable></>}
 
         {phase === 'amsler' && <>
-          <Text style={s.sectionTitle}>Amsler grid · {amslerEye === 'right' ? 'Right eye' : 'Left eye'}</Text>
+          <Text style={s.sectionTitle} accessibilityRole="header">Amsler grid · {amslerEye === 'right' ? 'Right eye' : 'Left eye'}</Text>
           <Text style={s.body}>Cover your {amslerEye === 'right' ? 'left' : 'right'} eye. Hold the phone about 30 cm away. Keep looking at the centre dot.</Text>
           <View style={[s.chartCard, { backgroundColor: '#FFFFFF', borderColor: colors.glassStroke }]}>{/* theme-exempt: black grid needs a stable white test field */}<AmslerGrid size={chartSize} /></View>
           <Text style={s.cardTitle}>{amslerQuestion === 0 ? 'Do all lines and squares look regular?' : 'Are any parts missing, distorted or darker?'}</Text>
@@ -274,10 +303,10 @@ const s = StyleSheet.create({
   screen: { flex: 1 }, scroll: { paddingHorizontal: 16, paddingBottom: 40 }, container: { width: '100%', maxWidth: 680, alignSelf: 'center' },
   header: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, minWidth: 0 }, back: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }, title: { fontSize: 24, fontWeight: '800', flexShrink: 1 }, subtitle: { fontSize: 14, lineHeight: 20, marginBottom: 20 },
   card: { borderWidth: 1, borderRadius: 16, padding: 16, marginBottom: 16, gap: 12 }, cardTitle: { fontSize: 18, fontWeight: '800' }, sectionTitle: { fontSize: 20, fontWeight: '800', marginBottom: 12 }, body: { fontSize: 15, lineHeight: 22 }, smallNote: { fontSize: 13, lineHeight: 19, marginTop: 8 }, resultHeading: { fontSize: 16, fontWeight: '800', marginTop: 4 }, scoreValue: { fontSize: 32, lineHeight: 40, fontWeight: '800' },
-  primaryButton: { minHeight: 54, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, alignItems: 'center', justifyContent: 'center', marginTop: 8 }, primaryLabel: { color: '#FFFFFF', fontSize: 16, fontWeight: '800', textAlign: 'center' },
+  primaryButton: { minHeight: 54, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, alignItems: 'center', justifyContent: 'center', marginTop: 8 }, primaryLabel: { color: ON_PRIMARY, fontSize: 16, fontWeight: '800', textAlign: 'center' },
   secondaryButton: { minHeight: 54, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, alignItems: 'center', justifyContent: 'center', marginTop: 10 }, secondaryLabel: { fontSize: 15, fontWeight: '700', textAlign: 'center' }, linkButton: { minHeight: 48, alignItems: 'center', justifyContent: 'center', paddingVertical: 10, marginTop: 8 }, linkLabel: { fontSize: 14, fontWeight: '700', textAlign: 'center' },
   chartCard: { minHeight: 170, borderWidth: 1, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginVertical: 16, padding: 16, gap: 24 },
-  directionRing: { position: 'relative' }, directionButton: { position: 'absolute', alignItems: 'center', justifyContent: 'center' }, directionArrow: { color: '#FFFFFF', fontSize: 27, fontWeight: '800' }, ringCenter: { position: 'absolute', width: 36, height: 36, alignItems: 'center', justifyContent: 'center' }, narrowDirectionGrid: { width: '100%', flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, narrowDirectionButton: { position: 'relative', width: '46%', flexGrow: 1, minHeight: 44, borderRadius: 12 },
+  directionRing: { position: 'relative' }, directionButton: { position: 'absolute', alignItems: 'center', justifyContent: 'center' }, directionArrow: { color: ON_PRIMARY, fontSize: 27, fontWeight: '800' }, ringCenter: { position: 'absolute', width: 36, height: 36, alignItems: 'center', justifyContent: 'center' }, narrowDirectionGrid: { width: '100%', flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, narrowDirectionButton: { position: 'relative', width: '46%', flexGrow: 1, minHeight: 44, borderRadius: 12 },
   choiceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 10 }, choice: { flexGrow: 1, minWidth: '44%', minHeight: 54, borderWidth: 1, borderRadius: 12, alignItems: 'center', justifyContent: 'center', padding: 10 }, choiceText: { fontSize: 15, fontWeight: '700', textAlign: 'center' },
   answerGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 }, answerButton: { width: '30%', flexGrow: 1, minHeight: 54, borderWidth: 1, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }, answerLabel: { fontSize: 16, fontWeight: '700', textAlign: 'center' }, feedback: { fontSize: 15, fontWeight: '800', textAlign: 'center', marginTop: 10 },
   cardLine: { width: 28, borderWidth: 2, borderStyle: 'dashed', borderRadius: 5, alignSelf: 'center', marginVertical: 12 }, calibrationTrack: { minHeight: 30, borderRadius: 15, alignSelf: 'center', justifyContent: 'center' }, calibrationThumb: { position: 'absolute', width: 24, height: 24, borderRadius: 12 }, setupIcon: { alignSelf: 'center', marginVertical: 16 },

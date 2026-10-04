@@ -11,11 +11,11 @@
 // (then on external storage) — so it under-reported usage and offered no way to
 // delete the files that actually took up the space (audit F-6).
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Platform, Alert, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect, useMemo, useRef, useCallback, type ComponentProps } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { type Palette } from '../constants/theme';
+import { TAB_ICON_INK, type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { Stack, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -34,7 +34,9 @@ type ChatStore = { id: string; name: string; size: number };
 // process. HEADER_TOP is the live binding and is applied at the element
 // below, so it follows a rotation like every other screen (2026-09-17).
 
-type Category = { label: string; size: number; color: string; icon: string };
+// Colours are resolved at render (catColor), so a theme switch recolours the bars.
+type CategoryKey = 'img' | 'vid' | 'aud' | 'file' | 'other';
+type Category = { key: CategoryKey; label: string; size: number; icon: ComponentProps<typeof Ionicons>['name'] };
 
 function formatBytes(bytes: number): string {
   if (!bytes || bytes < 1) return '0 B';
@@ -53,11 +55,19 @@ const EXT = {
 
 // Recursively walk a directory, accumulating bytes per bucket. Optionally delete
 // files older than `olderThan` (epoch seconds) instead of measuring.
+//
+// Not services/cache/cacheManager: that only measures fixed cache subfolders by
+// cache category and reads failures as 0 B. This screen needs every measured
+// root, bucketed by file type and attributed to chats.
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
+/** Per-walk tallies: subfolders that could not be read, files deleted. */
+type WalkStats = { skipped: number; removed: number };
 
 async function walk(
   dir: string,
   acc: Record<string, number>,
+  stats: WalkStats,
   olderThan?: number,
   perChat?: { map: Record<string, string>; sizes: Record<string, number> },
 ): Promise<void> {
@@ -71,13 +81,18 @@ async function walk(
   }
   for (const name of names) {
     const uri = dir + (dir.endsWith('/') ? '' : '/') + name;
-    let info: any;
+    let info: FileSystem.FileInfo;
     try { info = await FileSystem.getInfoAsync(uri); } catch { continue; }
     if (!info?.exists) continue;
-    if (info.isDirectory) { await walk(uri, acc, olderThan, perChat); continue; }
+    if (info.isDirectory) {
+      // One unreadable subfolder is skipped and counted, not fatal: the rest of
+      // the measurement is still true. Only an unreadable ROOT fails the load.
+      try { await walk(uri, acc, stats, olderThan, perChat); } catch { stats.skipped++; }
+      continue;
+    }
     if (olderThan != null) {
       if (info.modificationTime && info.modificationTime < olderThan) {
-        await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+        try { await FileSystem.deleteAsync(uri, { idempotent: true }); stats.removed++; } catch { /* left in place */ }
       }
       continue;
     }
@@ -102,7 +117,7 @@ function useS() {
 }
 
 export default function StorageManagerScreen() {
-  const { colors } = useTheme();
+  const { colors, scheme } = useTheme();
   const s = useS();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -113,21 +128,27 @@ export default function StorageManagerScreen() {
   const [chatStores, setChatStores] = useState<ChatStore[]>([]);
   // A failed measurement is not "0 B": it gets its own message and a retry.
   const [loadFailed, setLoadFailed] = useState(false);
+  // Subfolders the last measurement could not read (totals may be low).
+  const [skippedDirs, setSkippedDirs] = useState(0);
   // The walk can outlive the screen; no state updates after leaving it.
   const mounted = useRef(true);
   useEffect(() => () => { mounted.current = false; }, []);
 
-  useEffect(() => { loadStorageData(); }, []);
+  const catColor = (k: CategoryKey) =>
+    k === 'img' ? colors.primary : k === 'vid' ? colors.accent : k === 'aud' ? colors.purple
+      : k === 'file' ? TAB_ICON_INK.calls[scheme] : colors.textDim;
 
-  const loadStorageData = async () => {
+  const loadStorageData = useCallback(async () => {
     setLoading(true);
     setLoadFailed(false);
     try {
       const acc: Record<string, number> = { img: 0, vid: 0, aud: 0, file: 0, other: 0 };
+      const stats: WalkStats = { skipped: 0, removed: 0 };
       const attMap = await getAttachmentChatMap().catch(() => ({} as Record<string, string>));
       const perChat = { map: attMap, sizes: {} as Record<string, number> };
-      for (const root of measuredRoots()) await walk(toUri(root), acc, undefined, perChat);
+      for (const root of measuredRoots()) await walk(toUri(root), acc, stats, undefined, perChat);
       if (!mounted.current) return;
+      setSkippedDirs(stats.skipped);
 
       // Rank chats by how much media they hold (WhatsApp "Manage storage").
       try {
@@ -150,21 +171,24 @@ export default function StorageManagerScreen() {
 
       const total = acc.img + acc.vid + acc.aud + acc.file + acc.other;
       setCategories([
-        { label: 'Images', size: acc.img, color: colors.primary, icon: 'image-outline' },
-        { label: 'Videos', size: acc.vid, color: colors.accent, icon: 'videocam-outline' },
-        { label: 'Audio', size: acc.aud, color: colors.purple, icon: 'musical-notes-outline' },
-        { label: 'Files', size: acc.file, color: '#FF9F43', icon: 'document-outline' },
-        { label: 'Other', size: acc.other, color: colors.textDim, icon: 'ellipsis-horizontal-outline' },
+        { key: 'img', label: 'Images', size: acc.img, icon: 'image-outline' },
+        { key: 'vid', label: 'Videos', size: acc.vid, icon: 'videocam-outline' },
+        { key: 'aud', label: 'Audio', size: acc.aud, icon: 'musical-notes-outline' },
+        { key: 'file', label: 'Files', size: acc.file, icon: 'document-outline' },
+        { key: 'other', label: 'Other', size: acc.other, icon: 'ellipsis-horizontal-outline' },
       ]);
       setTotalUsed(total);
 
       try { setFreeSpace(await FileSystem.getFreeDiskStorageAsync()); } catch { setFreeSpace(0); }
     } catch {
-      if (mounted.current) setLoadFailed(true);
+      // Nothing from an earlier load may stay on screen as if it were current.
+      if (mounted.current) { setLoadFailed(true); setChatStores([]); }
     } finally {
       if (mounted.current) setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => { loadStorageData(); }, [loadStorageData]);
 
   const clearCache = () => {
     Alert.alert(
@@ -178,7 +202,7 @@ export default function StorageManagerScreen() {
             try {
               const dir = FileSystem.cacheDirectory;
               if (dir) {
-                const names = await FileSystem.readDirectoryAsync(dir).catch(() => [] as string[]);
+                const names = await FileSystem.readDirectoryAsync(dir);
                 for (const n of names) {
                   await FileSystem.deleteAsync(dir + n, { idempotent: true }).catch(() => {});
                 }
@@ -234,8 +258,13 @@ export default function StorageManagerScreen() {
             setClearing(true);
             try {
               const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
-              if (FileSystem.cacheDirectory) await walk(FileSystem.cacheDirectory, {}, cutoff);
-              Alert.alert('Done', `Removed cached files older than ${days} days.`);
+              const stats: WalkStats = { skipped: 0, removed: 0 };
+              if (FileSystem.cacheDirectory) await walk(FileSystem.cacheDirectory, {}, stats, cutoff);
+              const n = stats.removed;
+              Alert.alert('Done', (n > 0
+                ? `Removed ${n} cached file${n === 1 ? '' : 's'} older than ${days} days.`
+                : `No cached files were older than ${days} days.`)
+                + (stats.skipped > 0 ? ` ${stats.skipped} folder${stats.skipped === 1 ? '' : 's'} could not be read.` : ''));
               await loadStorageData();
             } catch {
               Alert.alert('Error', 'Failed to delete old media.');
@@ -250,12 +279,28 @@ export default function StorageManagerScreen() {
 
   const maxCatSize = Math.max(...categories.map(c => c.size), 1);
 
+  const header = (
+    <LinearGradient colors={[colors.glassSoft, colors.bg]} style={s.header}>
+      <View style={[s.headerRow, { marginTop: HEADER_TOP }]}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={16}>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
+        </TouchableOpacity>
+        <Text style={s.headerTitle} accessibilityRole="header">Storage Manager</Text>
+        <View style={{ width: 24 }} />
+      </View>
+    </LinearGradient>
+  );
+
   if (loading) {
     return (
-      <View style={s.loadingWrap}>
+      <View style={s.root}>
+        <AuroraBackground />
         <Stack.Screen options={{ headerShown: false }} />
-        <ActivityIndicator size="large" color={colors.accent} />
-        <Text style={{ color: colors.textDim, marginTop: 12 }}>Measuring storage…</Text>
+        {header}
+        <View style={s.loadingWrap} accessibilityLiveRegion="polite">
+          <ActivityIndicator size="large" color={colors.accent} />
+          <Text style={{ color: colors.textDim, marginTop: 12 }}>Measuring storage…</Text>
+        </View>
       </View>
     );
   }
@@ -265,15 +310,7 @@ export default function StorageManagerScreen() {
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
 
-      <LinearGradient colors={[colors.glassSoft, colors.bg]} style={s.header}>
-        <View style={[s.headerRow, { marginTop: HEADER_TOP }]}>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={16}>
-            <Ionicons name="arrow-back" size={24} color={colors.text} />
-          </TouchableOpacity>
-          <Text style={s.headerTitle}>Storage Manager</Text>
-          <View style={{ width: 24 }} />
-        </View>
-      </LinearGradient>
+      {header}
 
       <ScrollView style={s.scroll} contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
 
@@ -307,18 +344,23 @@ export default function StorageManagerScreen() {
             </View>
           ) : totalUsed === 0 ? (
             <Text style={{ color: colors.textDim, fontSize: 13 }}>No app files on disk yet.</Text>
-          ) : categories.map((cat, i) => (
-            <View key={i} style={s.catRow}>
+          ) : categories.map((cat) => (
+            <View key={cat.key} style={s.catRow} accessible accessibilityLabel={`${cat.label}, ${formatBytes(cat.size)}`}>
               <View style={s.catInfo}>
-                <Ionicons name={cat.icon as any} size={18} color={cat.color} />
+                <Ionicons name={cat.icon} size={18} color={catColor(cat.key)} />
                 <Text style={s.catLabel}>{cat.label}</Text>
                 <Text style={s.catSize}>{formatBytes(cat.size)}</Text>
               </View>
               <View style={s.barBg}>
-                <View style={[s.barFill, { width: `${(cat.size / maxCatSize) * 100}%`, backgroundColor: cat.color }]} />
+                <View style={[s.barFill, { width: `${(cat.size / maxCatSize) * 100}%`, backgroundColor: catColor(cat.key) }]} />
               </View>
             </View>
           ))}
+          {!loadFailed && skippedDirs > 0 && (
+            <Text style={s.cardNote}>
+              {skippedDirs} folder{skippedDirs === 1 ? '' : 's'} could not be read, so these totals may be a little low.
+            </Text>
+          )}
         </LinearGradient>
 
         {/* Per-chat (WhatsApp "Manage storage") */}
@@ -328,7 +370,7 @@ export default function StorageManagerScreen() {
             {chatStores.map(c => (
               <TouchableOpacity key={c.id} style={s.catRow} activeOpacity={0.7}
                 accessibilityRole="button" accessibilityLabel={`${c.name}, ${formatBytes(c.size)}. Open chat`}
-                onPress={() => router.push({ pathname: '/chat', params: { id: c.id } } as any)}>
+                onPress={() => router.push({ pathname: '/chat', params: { id: c.id } })}>
                 <View style={s.catInfo}>
                   <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.primary} />
                   <Text style={s.catLabel} numberOfLines={1}>{c.name}</Text>
@@ -362,7 +404,7 @@ export default function StorageManagerScreen() {
         <LinearGradient colors={[colors.glass, colors.glassSoft]} style={s.card}>
           <Text style={s.cardTitle}>Cache Management</Text>
 
-          <TouchableOpacity style={s.actionBtn} onPress={() => router.push('/cache-cleanup' as any)} disabled={clearing} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Cache cleanup by category" accessibilityState={{ disabled: clearing }}>
+          <TouchableOpacity style={s.actionBtn} onPress={() => router.push('/cache-cleanup')} disabled={clearing} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Cache cleanup by category" accessibilityState={{ disabled: clearing }}>
             <Ionicons name="sparkles-outline" size={20} color={colors.primary} />
             <Text style={[s.actionText, { color: colors.primary }]}>Cache cleanup — by category, Smart &amp; auto</Text>
           </TouchableOpacity>
@@ -385,7 +427,7 @@ export default function StorageManagerScreen() {
                 activeOpacity={0.7}
                 accessibilityRole="button"
                 accessibilityLabel={`Delete cached files older than ${d} days`}
-                accessibilityState={{ disabled: clearing }}
+                accessibilityState={{ disabled: clearing, busy: clearing }}
               >
                 <Text style={s.dayBtnText}>{d} days</Text>
               </TouchableOpacity>
@@ -401,7 +443,7 @@ export default function StorageManagerScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: 'transparent' },
-  loadingWrap: { flex: 1, backgroundColor: c.bg, justifyContent: 'center', alignItems: 'center' },
+  loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   header: { paddingBottom: 16, paddingHorizontal: 20 },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   headerTitle: { color: c.text, fontSize: 20, fontWeight: '700' },
@@ -429,6 +471,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   cardNote:     { color: c.textDim, fontSize: 12, lineHeight: 17, marginTop: 8 },
   sectionLabel: { color: c.textDim, fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1, marginTop: 14, marginBottom: 10 },
   daysRow: { flexDirection: 'row', gap: 10 },
-  dayBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: c.surfaceSolid, alignItems: 'center' },
+  dayBtn: { flex: 1, minHeight: 44, justifyContent: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: c.surfaceSolid, alignItems: 'center' },
   dayBtnText: { color: c.textDim, fontSize: 13, fontWeight: '600' },
 });

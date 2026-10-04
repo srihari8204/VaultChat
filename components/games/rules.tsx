@@ -13,10 +13,10 @@
 
 import { AppText as Text } from '../ui/Text';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ScrollView, } from 'react-native';
+import { View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Sheet } from './feedback';
-import { Btn, useType } from './ui';
+import { useType } from './ui';
 import { C, S } from '../../lib/games/theme';
 import type { GameKind } from '../../lib/gamesSocket';
 
@@ -102,7 +102,9 @@ export function RulesSheet({
   const r = RULES[game];
   return (
     <Sheet visible={visible} title="How this game plays" onClose={onClose}>
-      <ScrollView style={{ maxHeight: 380 }} contentContainerStyle={{ gap: S[2] }}>
+      {/* Sheet already scrolls and already has Close; a second scroller and a
+          second close button only fought it. */}
+      <View style={{ gap: S[2] }}>
         <Text numberOfLines={1} style={{ color: C.text, fontSize: t.md, fontWeight: '800' }}>{r.title}</Text>
         {r.sections.map(sec => (
           <React.Fragment key={sec.head}>
@@ -112,8 +114,7 @@ export function RulesSheet({
             ))}
           </React.Fragment>
         ))}
-      </ScrollView>
-      <Btn label="Got it" kind="gold" onPress={onClose} />
+      </View>
     </Sheet>
   );
 }

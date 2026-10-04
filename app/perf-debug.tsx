@@ -6,31 +6,37 @@
 // 1s tick while open. Purely a read-out of lib/perf's in-memory ring buffer —
 // no network, no persistence.
 
-import { HEADER_TOP } from '../constants/layout';
+import { HEADER_TOP, SCREEN_BOTTOM } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { type Palette } from '../constants/theme';
+import { TAB_ICON_INK, type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
-import perf, { type SendTiming } from '../lib/perf';
+import { recentMarks, recentSends, snapshot, type SendTiming } from '../lib/perf';
 import { ccwireDiagnostics } from '../lib/ccwire/transport';
 import { featureFlagDiagnostics, TRANSPORT_RUST } from '../lib/featureFlags';
 import { AuroraBackground } from '../components/ui';
 
-export default function PerfDebugScreen() {
-  const { colors } = useTheme();
-  const S = useMemo(() => makeStyles(colors), [colors]);
-  const router = useRouter();
+type Styles = ReturnType<typeof makeStyles>;
 
-  const [snap, setSnap] = useState(perf.snapshot());
-  const [sends, setSends] = useState<SendTiming[]>(perf.recentSends(20));
+export default function PerfDebugScreen() {
+  const { colors, scheme } = useTheme();
+  // Amber for "slow"/"warning". The palette has no warning token; the calls ink
+  // is the theme's amber, readable on both grounds (#F59E0B was 2:1 on light).
+  const warn = TAB_ICON_INK.calls[scheme];
+  const S = useMemo(() => makeStyles(colors, warn), [colors, warn]);
+  const router = useRouter();
+  const slow = (total?: number) => (total != null && total > 1500 ? S.slow : undefined);
+
+  const [snap, setSnap] = useState(snapshot());
+  const [sends, setSends] = useState<SendTiming[]>(recentSends(20));
   const [wire, setWire] = useState(ccwireDiagnostics());
 
   useEffect(() => {
     const id = setInterval(() => {
-      setSnap(perf.snapshot());
-      setSends(perf.recentSends(20));
+      setSnap(snapshot());
+      setSends(recentSends(20));
       setWire(ccwireDiagnostics());
     }, 1000);
     return () => clearInterval(id);
@@ -39,7 +45,7 @@ export default function PerfDebugScreen() {
   // Boot marks are written once at startup and never change, so unlike the rows
   // above they are read a single time rather than on the 1s tick.
   const boot = useMemo(() => {
-    const marks = perf.recentMarks(200).filter(m => m.event.startsWith('boot_') || m.event === 'db_ready');
+    const marks = recentMarks(200).filter(m => m.event.startsWith('boot_') || m.event === 'db_ready');
     if (!marks.length) return [];
     const t0 = marks[0].t;
     return marks.map(m => ({ event: m.event, offset: m.t - t0 }));
@@ -54,12 +60,12 @@ export default function PerfDebugScreen() {
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={S.title}>Diagnostics</Text>
+        <Text style={S.title} accessibilityRole="header">Diagnostics</Text>
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 48 }}>
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 24 + SCREEN_BOTTOM }}>
         {/* Connection */}
-        <Text style={S.section}>Connection</Text>
+        <Text style={S.section} accessibilityRole="header">Connection</Text>
         <View style={S.card}>
           <Row S={S} k="Transport" v={snap.transport} bad={transportBad} />
           <Row S={S} k="State" v={snap.connState} bad={snap.connState !== 'connected'} />
@@ -95,12 +101,12 @@ export default function PerfDebugScreen() {
             is where boot_unblocked lands: that is when the first render stopped
             being gated. Anything at or after boot_deferred_start is work that
             was deliberately moved OFF the startup path and is not felt. */}
-        <Text style={S.section}>Boot timeline</Text>
+        <Text style={S.section} accessibilityRole="header">Boot timeline</Text>
         <View style={S.card}>
           {boot.length === 0 ? (
             <Text style={S.empty}>No boot marks — this build predates them.</Text>
           ) : boot.map((b, i) => (
-            <View key={`${b.event}-${i}`} style={S.trow}>
+            <View key={`${b.event}-${i}`} style={S.trow} accessible accessibilityLabel={`${b.event}, ${b.offset} milliseconds after the first mark`}>
               <Text style={[S.td, { flex: 3 }]} numberOfLines={1}>{b.event}</Text>
               {/* Deferred work is SUPPOSED to land late — flagging it as slow
                   would invert the meaning of the change that moved it there. */}
@@ -112,9 +118,10 @@ export default function PerfDebugScreen() {
         </View>
 
         {/* Send timings */}
-        <Text style={S.section}>Last {sends.length} sends</Text>
+        <Text style={S.section} accessibilityRole="header">Last {sends.length} sends</Text>
         <View style={S.card}>
-          <View style={[S.trow, S.thead]}>
+          {/* Each row below reads as one sentence, so the column header is visual only. */}
+          <View style={[S.trow, S.thead]} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
             <Text style={[S.th, { flex: 2 }]}>id</Text>
             <Text style={S.th}>tap→enc</Text>
             <Text style={S.th}>enc→ack</Text>
@@ -123,7 +130,8 @@ export default function PerfDebugScreen() {
           {sends.length === 0 ? (
             <Text style={S.empty}>No sends yet — send a message, then come back.</Text>
           ) : sends.map((s, i) => (
-            <View key={`${s.id}-${i}`} style={S.trow}>
+            <View key={`${s.id}-${i}`} style={S.trow} accessible
+              accessibilityLabel={`Send ${s.id} via ${s.transport ?? 'unknown'}: tap to encrypt ${ms(s.tapToEncrypt)}, encrypt to acknowledgement ${ms(s.encryptToAck)}, ${s.failed ? 'failed' : `total ${ms(s.totalMs)}`}`}>
               <Text style={[S.td, { flex: 2 }]} numberOfLines={2}>{s.id}{'\n'}{s.transport ?? 'unknown'}</Text>
               <Text style={S.td}>{ms(s.tapToEncrypt)}</Text>
               <Text style={S.td}>{ms(s.encryptToAck)}</Text>
@@ -143,9 +151,9 @@ export default function PerfDebugScreen() {
   );
 }
 
-function Row({ S, k, v, bad }: { S: any; k: string; v: string; bad?: boolean }) {
+function Row({ S, k, v, bad }: { S: Styles; k: string; v: string; bad?: boolean }) {
   return (
-    <View style={S.kv}>
+    <View style={S.kv} accessible accessibilityLabel={`${k}: ${v}`}>
       <Text style={S.k}>{k}</Text>
       <Text style={[S.v, bad && S.vBad]}>{v}</Text>
     </View>
@@ -153,12 +161,11 @@ function Row({ S, k, v, bad }: { S: any; k: string; v: string; bad?: boolean }) 
 }
 
 function ms(n?: number): string { return n == null ? '—' : `${n}ms`; }
-function slow(total?: number) { return total != null && total > 1500 ? { color: '#F59E0B' } : undefined; }
 
-const makeStyles = (c: Palette) => StyleSheet.create({
+const makeStyles = (c: Palette, warn: string) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   header:  { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
-  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  backBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   title:   { color: c.text, fontSize: 22, fontWeight: '800' },
 
   section: { color: c.textDim, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', marginTop: 20, marginBottom: 8, letterSpacing: 0.5 },
@@ -175,7 +182,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   td:    { flex: 1, color: c.text, fontSize: 12, fontVariant: ['tabular-nums'] },
   tdFail:{ color: c.danger, fontWeight: '700' },
 
-  warn:  { color: '#F59E0B', fontSize: 12, marginTop: 8, paddingHorizontal: 4 },
+  slow:  { color: warn },
+  warn:  { color: warn, fontSize: 12, marginTop: 8, paddingHorizontal: 4 },
   empty: { color: c.textDim, fontSize: 13, padding: 14 },
   note:  { color: c.textDim, fontSize: 11, lineHeight: 16, marginTop: 16, paddingHorizontal: 4 },
 });

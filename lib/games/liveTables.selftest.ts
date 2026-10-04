@@ -87,9 +87,14 @@ A(/games_live_tables/.test(JOBS) && /INTERVAL '14 days'/.test(JOBS),
 
 // ── 5. the app shows it, opens it, and clears it ──────────────────────
 A(/'\/games\/tables'/.test(HOOK), '5. the hook reads the endpoint');
-A(/catch\(\(\) => \{ if \(alive\.current\) setTables\(\[\]\); \}\)/.test(HOOK),
+A(/status === 404\) \{ setTables\(\[\]\); setFailed\(false\); \}/.test(HOOK),
   '5a. a backend without the endpoint means an empty list, never an error — the '
   + 'two halves must be able to land in either order');
+A(/else setFailed\(true\)/.test(HOOK) && /live\.failed/.test(HUB),
+  '5a2. any other failure keeps the list and the hub offers a retry, instead of '
+  + 'reading as "no games"');
+A(/useFocusEffect\(refresh\)/.test(HOOK),
+  '5a3. the list refreshes on focus, so coming back from a board is current');
 A(/useLiveTables\(\)/.test(HUB) && /Your games/.test(HUB),
   '5b. the hub renders the list');
 A(/onOpen\(tb\.game, \{ room: tb\.room \}\)/.test(HUB), '5c. and a row opens that table');

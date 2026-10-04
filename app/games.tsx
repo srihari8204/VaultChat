@@ -18,7 +18,7 @@ import { useTheme } from '../lib/theme';
 
 import { AppText as Text } from '../components/ui/Text';
 import React, { useState } from 'react';
-import { Alert, BackHandler, Pressable, ScrollView, StatusBar, TextInput, View } from 'react-native';
+import { Alert, BackHandler, Modal, Pressable, ScrollView, StatusBar, TextInput, View } from 'react-native';
 import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -99,7 +99,7 @@ export default function GamesScreen() {
   // instead; from the hub, to wherever the tabs are.
   const exit = React.useCallback(() => {
     if (router.canGoBack()) router.back();
-    else router.replace((kind ? '/games' : '/(tabs)') as any);
+    else router.replace(kind ? '/games' : '/(tabs)');
   }, [router, kind]);
 
   /**
@@ -167,7 +167,7 @@ export default function GamesScreen() {
         : (
           <Hub
             onBack={leave}
-            onOpen={(g, opts) => router.push({ pathname: '/games', params: { game: g, ...opts } } as any)}
+            onOpen={(g, opts) => router.push({ pathname: '/games', params: { game: g, ...opts } })}
           />
         )}
       {/* Mounted once for all four boards — they open it through openInvite(). */}
@@ -272,9 +272,24 @@ function Hub({ onBack, onOpen }: { onBack: () => void; onOpen: (g: GameKind, opt
         {/* Games already in progress come FIRST. With ~19 players registered and
             usually none online, the game you are already in the middle of is
             the likeliest one to play — a menu of four new tables is not. */}
+        {live.failed && (
+          <Pressable
+            onPress={live.refresh}
+            disabled={live.loading}
+            accessibilityRole="button"
+            accessibilityLabel="Your games could not be refreshed. Try again"
+            accessibilityState={{ disabled: live.loading, busy: live.loading }}
+            style={{ minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: S[2] }}
+          >
+            <Ionicons name="refresh" size={16} color={C.muted} />
+            <Text style={{ color: C.muted, fontSize: t.sm, flex: 1 }}>
+              {live.loading ? 'Refreshing your games…' : 'Your games could not be refreshed. Tap to try again.'}
+            </Text>
+          </Pressable>
+        )}
         {live.tables.length > 0 && (
           <Panel style={{ gap: S[2] }}>
-            <Text style={{ color: C.text, fontSize: t.md, fontWeight: '800' }}>Your games</Text>
+            <Text accessibilityRole="header" style={{ color: C.text, fontSize: t.md, fontWeight: '800' }}>Your games</Text>
             {live.tables.map(tb => (
               <SettingRow
                 key={`${tb.game}:${tb.room}`}
@@ -345,6 +360,7 @@ function Hub({ onBack, onOpen }: { onBack: () => void; onOpen: (g: GameKind, opt
           entry={seeking}
           status={qm.status}
           error={qm.error}
+          onRetry={() => qm.start(seeking.kind)}
           onCancel={() => { qm.cancel(); setSeeking(null); }}
         />
       )}
@@ -535,8 +551,8 @@ function GameCard({ entry, onOpen, onQuick }: { entry: Entry; onOpen: () => void
 
 /** Full-screen searching state, with the bolt pulsing while the queue works. */
 function Searching({
-  entry, status, error, onCancel,
-}: { entry: Entry; status: string; error: string | null; onCancel: () => void }) {
+  entry, status, error, onRetry, onCancel,
+}: { entry: Entry; status: string; error: string | null; onRetry: () => void; onCancel: () => void }) {
   const C = useGamePalette();
   const t = useType();
   const pulse = useSharedValue(0);
@@ -555,17 +571,20 @@ function Searching({
     opacity: 0.75 + pulse.value * 0.25,
   }));
 
+  // A Modal, so hardware back cancels the search (onRequestClose) and a screen
+  // reader stays inside it instead of wandering into the hub underneath.
   return (
-    <ScrollView style={{ position: 'absolute', inset: 0, backgroundColor: C.light ? C.bg : 'rgba(20,4,4,0.92)' }} contentContainerStyle={{
+    <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={onCancel}>
+    <ScrollView style={{ flex: 1, backgroundColor: C.light ? C.bg : 'rgba(20,4,4,0.92)' }} contentContainerStyle={{
       flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: S[5], gap: S[4],
     }}>
-      <Animated.View style={aBolt}>
+      <Animated.View style={aBolt} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
         <Ionicons name="flash" size={64} color={C.gold} />
       </Animated.View>
       <Text style={{ color: C.text, fontSize: t.xl, fontWeight: '800', textAlign: 'center' }}>
         {error ? 'No luck' : `Finding a ${entry.name} opponent…`}
       </Text>
-      <Text style={{ color: error ? C.bad : C.muted, fontSize: t.md, textAlign: 'center' }}>
+      <Text accessibilityLiveRegion="polite" style={{ color: error ? C.bad : C.muted, fontSize: t.md, textAlign: 'center' }}>
         {error ?? status}
       </Text>
       {!error && (
@@ -574,8 +593,10 @@ function Searching({
           you will not be put in a bot game without being told.
         </Text>
       )}
+      {!!error && <Btn label="Try again" kind="gold" onPress={onRetry} />}
       <Btn label="Cancel" onPress={onCancel} />
     </ScrollView>
+    </Modal>
   );
 }
 
@@ -654,8 +675,10 @@ function BotOffer({
 }: { entry: Entry; onBot: () => void; onInvite: () => void; onCancel: () => void }) {
   const C = useGamePalette();
   const t = useType();
+  // A Modal for the same reasons as Searching: back means "Not now".
   return (
-    <ScrollView style={{ position: 'absolute', inset: 0, backgroundColor: C.light ? C.bg : 'rgba(20,4,4,0.92)' }} contentContainerStyle={{
+    <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={onCancel}>
+    <ScrollView style={{ flex: 1, backgroundColor: C.light ? C.bg : 'rgba(20,4,4,0.92)' }} contentContainerStyle={{
       flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: S[5], gap: S[3],
     }}>
       <GameGlyph game={entry.kind} size={56} color={C.light ? C.gold : undefined} />
@@ -670,5 +693,6 @@ function BotOffer({
       <Btn label="Invite someone" icon="link" onPress={onInvite} />
       <Btn label="Not now" onPress={onCancel} />
     </ScrollView>
+    </Modal>
   );
 }

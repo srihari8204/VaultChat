@@ -53,6 +53,7 @@ import { useTableVoice } from '../../lib/games/useTableVoice';
 import { openInvite, shareResult } from '../../lib/games/invite';
 import { useWallet, STAKES, stakeLabel } from '../../lib/games/useWallet';
 import { useAddBot, ADD_BOT_STALLED } from '../../lib/games/useAddBot';
+import { startBlockedReason } from '../../lib/games/startHint';
 import { initialOf } from '../../lib/format';
 
 /** 52-cell ring [row,col] on a 15x15 board, clockwise from red's start. */
@@ -412,6 +413,9 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
           )}
           <Btn label="Invite a friend" icon="link" onPress={() => { void openInvite('ludo', roomId); }} disabled={!roomId} />
           <Btn label="Start now" kind="gold" onPress={() => send({ t: 'start', mode: 'classic', stake })} disabled={!host || members.length < 2} />
+          {!!startBlockedReason(host, members.length) && (
+            <Text style={{ color: LR.muted, fontSize: t.sm, lineHeight: 18, textAlign: 'center' }}>{startBlockedReason(host, members.length)}</Text>
+          )}
         </ScrollView>
         <Toasts events={events} />
         <RulesSheet game="ludo" visible={rules.visible} onClose={rules.close} />

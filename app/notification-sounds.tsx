@@ -5,7 +5,7 @@
 
 import { HEADER_TOP } from '../constants/layout';
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Switch, ActivityIndicator } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, ScrollView, Switch, ActivityIndicator, Alert } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
@@ -14,7 +14,11 @@ import {
   getSoundPrefs, setSoundPrefs, previewRingtone, stopRingtonePreview, RINGTONES,
   SYSTEM_RINGTONE, systemRingtoneAvailable, type SoundPrefs,
 } from '../lib/sounds';
-import { AuroraBackground } from '../components/ui';
+import { AppText as Text, AuroraBackground } from '../components/ui';
+
+// The Switch thumb stays white in both themes (the platform look). colors.card
+// would turn it near-black on the dark theme's dark track and lose it.
+const THUMB = '#FFFFFF';
 
 export default function NotificationSoundsScreen() {
   const router = useRouter();
@@ -28,11 +32,14 @@ export default function NotificationSoundsScreen() {
     return () => { void stopRingtonePreview(); };
   }, []);
 
-  const patch = async (p: Partial<SoundPrefs>) => setPrefs(await setSoundPrefs(p));
+  // A failed save must not look saved: setSoundPrefs keeps the old value and throws.
+  const patch = async (p: Partial<SoundPrefs>): Promise<boolean> => {
+    try { setPrefs(await setSoundPrefs(p)); return true; }
+    catch { Alert.alert('Could not save', 'Your sound setting was not changed. Please try again.'); return false; }
+  };
 
   const pickRingtone = async (id: string) => {
-    await patch({ ringtone: id });
-    previewRingtone(id);   // play it once so they hear the choice
+    if (await patch({ ringtone: id })) previewRingtone(id);   // play it once so they hear the choice
   };
 
   if (!prefs) return <View style={[s.root, { justifyContent: 'center' }]}><ActivityIndicator color={colors.primary} /></View>;
@@ -56,7 +63,7 @@ export default function NotificationSoundsScreen() {
 
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
         {/* Message tones */}
-        <Text style={s.section}>MESSAGES</Text>
+        <Text style={s.section} accessibilityRole="header">MESSAGES</Text>
         <View style={s.row}>
           <Ionicons name="musical-notes-outline" size={22} color={colors.text} />
           <View style={s.rowBody}>
@@ -65,15 +72,15 @@ export default function NotificationSoundsScreen() {
           </View>
           <Switch
             value={prefs.messageSounds}
-            onValueChange={(v) => patch({ messageSounds: v })}
+            onValueChange={(v) => { void patch({ messageSounds: v }); }}
             accessibilityLabel="In-app message sounds"
             trackColor={{ true: colors.primary, false: colors.border }}
-            thumbColor="#fff"
+            thumbColor={THUMB}
           />
         </View>
 
         {/* Calls */}
-        <Text style={s.section}>CALLS</Text>
+        <Text style={s.section} accessibilityRole="header">CALLS</Text>
         <View style={s.row}>
           <Ionicons name="phone-portrait-outline" size={22} color={colors.text} />
           <View style={s.rowBody}>
@@ -81,14 +88,15 @@ export default function NotificationSoundsScreen() {
           </View>
           <Switch
             value={prefs.vibrate}
-            onValueChange={(v) => patch({ vibrate: v })}
+            onValueChange={(v) => { void patch({ vibrate: v }); }}
             accessibilityLabel="Vibrate on incoming call"
             trackColor={{ true: colors.primary, false: colors.border }}
-            thumbColor="#fff"
+            thumbColor={THUMB}
           />
         </View>
 
-        <Text style={[s.section, { marginTop: 18 }]}>RINGTONE</Text>
+        <Text style={[s.section, { marginTop: 18 }]} accessibilityRole="header">RINGTONE</Text>
+        <View accessibilityRole="radiogroup" accessibilityLabel="Ringtone">
         {options.map(rt => {
           // Without the native ringer a stored 'system' plays the first bundled tone.
           const on = prefs.ringtone === rt.id
@@ -111,6 +119,7 @@ export default function NotificationSoundsScreen() {
             </TouchableOpacity>
           );
         })}
+        </View>
 
         <Text style={s.note}>
           This ringtone plays while crazzychat is open. When the app is closed, incoming calls and
@@ -124,7 +133,7 @@ export default function NotificationSoundsScreen() {
 const makeStyles = (c: Palette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', paddingTop: HEADER_TOP, paddingHorizontal: 12, paddingBottom: 12, backgroundColor: c.bg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke, gap: 8 },
-  iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  iconBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
 
   section: { color: c.textDim, fontSize: 11, fontWeight: '800', letterSpacing: 1, paddingHorizontal: 18, paddingTop: 18, paddingBottom: 8 },

@@ -22,6 +22,8 @@ import Animated, {
 import * as Haptics from 'expo-haptics';
 import { useGameSocket, isMyTurn, type AutoStart } from '../../lib/games/useGameSocket';
 import { TableBackground, Panel, Btn, Banner, PlayerRow, Reconnecting, RematchBtn, TurnClock, useType, useBoardBox, useReduceMotion } from './ui';
+import { useAddBot, ADD_BOT_STALLED } from '../../lib/games/useAddBot';
+import { startBlockedReason } from '../../lib/games/startHint';
 import { useRematch } from '../../lib/games/useRematch';
 import { RulesSheet, useFirstTimeRules } from './rules';
 import { useCountdown } from '../../lib/games/useCountdown';
@@ -55,6 +57,9 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
   const mine = isMyTurn(state) && phase === 'connected';
   const reconnecting = phase !== 'connected' && !!state.game;
   const rematch = useRematch('tictactoe', roomId, state, send);
+  // "Add a bot" watched for an outcome, like Chess and Ludo: the server can
+  // accept addbot and never seat one, and a silent button reads as broken.
+  const bot = useAddBot(send, state.lobby?.members?.length ?? 0);
   // Offered once, in the lobby — before a move is ever required.
   const rules = useFirstTimeRules('tictactoe');
   // The server's own clock, when it sends one. No deadline shows no clock — a
@@ -145,9 +150,6 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
                 subtitle={typeof m.wins === 'number' ? `${m.wins} wins` : undefined}
               />
             ))}
-            {members.length < 2 && (
-              <Text style={{ color: C.muted, fontSize: t.sm }}>Two players minimum — add a bot to start now.</Text>
-            )}
           </Panel>
           {/* A private room is worth nothing if its code is not on screen: the
               deep link covers people who have the app open, and this covers
@@ -171,9 +173,15 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
             onToggleMute={voice.toggleMute}
           />
           <Btn label="How to play" icon="rules" onPress={rules.open} />
-          <Btn label="Add a bot" icon="bot" onPress={() => send({ t: 'addbot' })} />
+          <Btn label="Add a bot" icon="bot" onPress={() => bot.addBot({ t: 'addbot' })} />
+          {bot.stalled && (
+            <Text style={{ color: C.bad, fontSize: t.sm, lineHeight: 18 }}>{ADD_BOT_STALLED}</Text>
+          )}
           <Btn label="Invite a friend" icon="link" onPress={() => { void openInvite('tictactoe', roomId); }} disabled={!roomId} />
           <Btn label="Start game" kind="gold" onPress={() => send({ t: 'start' })} disabled={!host || members.length < 2} />
+          {!!startBlockedReason(host, members.length) && (
+            <Text style={{ color: C.muted, fontSize: t.sm, lineHeight: 18, textAlign: 'center' }}>{startBlockedReason(host, members.length)}</Text>
+          )}
         </ScrollView>
         <Toasts events={events} />
         <RulesSheet game="tictactoe" visible={rules.visible} onClose={rules.close} />

@@ -130,6 +130,7 @@ const unmount = (s: S): S => ({ ...s, timerLive: false });
   const hook = readFileSync(join(ROOT, 'lib/games/useAddBot.ts'), 'utf8');
   const ludo = readFileSync(join(ROOT, 'components/games/Ludo.tsx'), 'utf8');
   const chess = readFileSync(join(ROOT, 'components/games/Chess.tsx'), 'utf8');
+  const ttt = readFileSync(join(ROOT, 'components/games/TicTacToe.tsx'), 'utf8');
 
   A(/useEffect\(\(\) => stop, \[\]\)/.test(hook),
     '7a. the hook clears its timeout on unmount');
@@ -146,7 +147,7 @@ const unmount = (s: S): S => ({ ...s, timerLive: false });
   A(!/roomId|defaultRoom/.test(hook),
     '7c. ...and it does not quietly change rooms, which would lose invited players');
 
-  for (const [name, src] of [['Ludo', ludo], ['Chess', chess]] as const) {
+  for (const [name, src] of [['Ludo', ludo], ['Chess', chess], ['TicTacToe', ttt]] as const) {
     A(/useAddBot\(/.test(src), `7d. ${name} uses the hook`);
     // The call may carry its own payload (Ludo writes one explicitly) or take
     // the hook's default (Chess, whose shim discards it) — either way the tap
@@ -170,6 +171,8 @@ const unmount = (s: S): S => ({ ...s, timerLive: false });
     '7l. Chess still sends {t:"addbot", level} — byte-identical');
   A(/onPress=\{\(\) => bot\.addBot\(\{ t: 'addbot' \}\)\}/.test(ludo),
     '7m. Ludo still sends {t:"addbot"} — written at the call site, not defaulted');
+  A(/onPress=\{\(\) => bot\.addBot\(\{ t: 'addbot' \}\)\}/.test(ttt),
+    '7m2. TicTacToe still sends {t:"addbot"} — written at the call site');
   // Chess routes through a shim that DISCARDS the hook's default message, so
   // its level cannot be dropped on the floor by a future default change.
   A(/useAddBot\(\(\) => onAddBot\(\), members\.length\)/.test(chess),

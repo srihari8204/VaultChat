@@ -14,11 +14,15 @@
 // SAID; the board re-reads the authoritative snapshot the moment it opens.
 // Nothing here decides whose turn it is.
 //
-// TOLERANT OF A BACKEND THAT HAS NOT SHIPPED YET. A missing endpoint, a 500 or
-// no network all mean "no list", never an error on the games hub: the four
-// boards worked before this existed and must keep working if it goes away.
+// TOLERANT OF A BACKEND THAT HAS NOT SHIPPED YET. A missing endpoint (404) means
+// "no list". Any other failure keeps whatever was shown and sets `failed`, so
+// the hub can offer a quiet retry — never a blocking error: the four boards
+// worked before this existed and must keep working if it goes away.
+//
+// Refreshed on focus, so coming back from a board shows the turn you just took.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
 import { api } from '../api';
 import type { GameKind } from '../gamesSocket';
 import { liveTableOf, type LiveTable } from './liveTable';
@@ -28,6 +32,8 @@ export { agoLabel, type LiveTable } from './liveTable';
 export interface LiveTablesState {
   tables: LiveTable[];
   loading: boolean;
+  /** The last refresh failed for a reason other than a missing endpoint. */
+  failed: boolean;
   refresh: () => void;
   /** Drop a table from the list — the app calls this when a game is over. */
   forget: (game: GameKind, room: string) => void;
@@ -36,6 +42,7 @@ export interface LiveTablesState {
 export function useLiveTables(): LiveTablesState {
   const [tables, setTables] = useState<LiveTable[]>([]);
   const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
   const alive = useRef(true);
 
   const refresh = useCallback(() => {
@@ -44,23 +51,28 @@ export function useLiveTables(): LiveTablesState {
       .then(res => {
         if (!alive.current) return;
         setTables((Array.isArray(res?.tables) ? res.tables : []).map(liveTableOf).filter(Boolean) as LiveTable[]);
+        setFailed(false);
       })
-      .catch(() => { if (alive.current) setTables([]); })
+      .catch((e: { status?: number } | undefined) => {
+        if (!alive.current) return;
+        if (e?.status === 404) { setTables([]); setFailed(false); }
+        else setFailed(true);
+      })
       .finally(() => { if (alive.current) setLoading(false); });
   }, []);
 
   useEffect(() => {
     alive.current = true;
-    refresh();
     return () => { alive.current = false; };
-  }, [refresh]);
+  }, []);
+  useFocusEffect(refresh);
 
   const forget = useCallback((game: GameKind, room: string) => {
     setTables(prev => prev.filter(t => !(t.game === game && t.room === room)));
     void forgetTable(game, room);
   }, []);
 
-  return { tables, loading, refresh, forget };
+  return { tables, loading, failed, refresh, forget };
 }
 
 /**

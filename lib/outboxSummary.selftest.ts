@@ -1,6 +1,6 @@
 // lib/outboxSummary.selftest.ts — run: npx tsx lib/outboxSummary.selftest.ts
 import assert from 'node:assert/strict';
-import { summarizeOutbox, type OutboxRow } from './outboxSummary';
+import { describeRetry, summarizeOutbox, unreadableRows, type OutboxRow } from './outboxSummary';
 
 let n = 0;
 const ok = (label: string, fn: () => void) => { fn(); n++; console.log('  ok  ' + label); };
@@ -8,7 +8,7 @@ const ok = (label: string, fn: () => void) => { fn(); n++; console.log('  ok  ' 
 const row = (p: Partial<OutboxRow>): OutboxRow => ({ tempId: 't' + n + Math.random(), chatId: 'c1', createdAt: 100, ...p });
 
 ok('an empty outbox has nothing waiting and no oldest time', () => {
-  assert.deepEqual(summarizeOutbox([]), { waiting: 0, failed: 0, failedIds: [], chats: 0, oldestAt: null });
+  assert.deepEqual(summarizeOutbox([]), { waiting: 0, failed: 0, failedIds: [], failedChatIds: [], chats: 0, oldestAt: null });
 });
 
 ok('queued, waiting-for-keys and mid-send rows all count as waiting', () => {
@@ -41,6 +41,30 @@ ok('chats are counted once each, and the oldest unsent row is found', () => {
   ]);
   assert.equal(s.chats, 2);
   assert.equal(s.oldestAt, 10);
+});
+
+ok('failed rows name their chats once each, in queue order', () => {
+  const s = summarizeOutbox([
+    row({ chatId: 'b', state: 'FAILED' }), row({ chatId: 'a', state: 'QUEUED' }),
+    row({ chatId: 'b', state: 'FAILED' }), row({ chatId: 'c', state: 'FAILED' }),
+  ]);
+  assert.deepEqual(s.failedChatIds, ['b', 'c']);
+});
+
+ok('rows sealed while locked are counted as unreadable, within the read limit', () => {
+  assert.equal(unreadableRows(5, 5, 1000), 0);
+  assert.equal(unreadableRows(7, 4, 1000), 3);
+  assert.equal(unreadableRows(1500, 990, 1000), 10, 'only the rows that were read can be compared');
+  assert.equal(unreadableRows(3, 4, 1000), 0, 'a row added between the two reads is not negative');
+});
+
+ok('a retry reports what was sent and what is left', () => {
+  const sum = (waiting: number, failed: number) => ({ ...summarizeOutbox([]), waiting, failed });
+  assert.equal(describeRetry(sum(2, 2), sum(0, 0)), '4 messages sent.');
+  assert.equal(describeRetry(sum(0, 1), sum(0, 0)), '1 message sent.');
+  assert.equal(describeRetry(sum(1, 3), sum(0, 1)), '3 sent, 1 still failing.');
+  assert.equal(describeRetry(sum(0, 2), sum(1, 1)), 'Nothing sent yet: 1 still failing, 1 still waiting.');
+  assert.equal(describeRetry(sum(0, 0), sum(0, 0)), 'Nothing was waiting to send.');
 });
 
 console.log(`\noutboxSummary.selftest: ${n} passed`);

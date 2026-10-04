@@ -26,6 +26,12 @@ import {
 import { AuroraBackground } from '../components/ui';
 
 const AUTO_OPTIONS = [0, 7, 15, 30];
+// Label/icon colour on the solid primary fill. The palette has no on-primary
+// token; white is the brand's button text in both themes.
+const ON_PRIMARY = '#FFFFFF';
+// The database cache is reclaimed by VACUUM and is never scanned, so its size is
+// unknown, not zero (services/cache/cacheManager.ts measureCacheSizes).
+const UNMEASURED: ReadonlySet<CacheCategoryId> = new Set(['dbCache']);
 
 function useS() {
   const { colors } = useTheme();
@@ -70,7 +76,7 @@ export default function CacheCleanupScreen() {
   const toggle = (id: CacheCategoryId) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
   };
@@ -101,8 +107,18 @@ export default function CacheCleanupScreen() {
   const onSmart = () => runCleanup(planCleanup(sizes, { smart: true }), 'safe cache (Smart)');
   const onSelected = () => runCleanup(selectedPlan, 'selected cache');
 
-  const chooseAutoDays = async (d: number) => { setAutoDays(d); await setAutoCleanDays(d); };
-  const toggleLogout = async (v: boolean) => { setClearLogout(v); await setClearOnLogout(v); };
+  // A setting that did not save goes back to what is stored, and says so.
+  const chooseAutoDays = async (d: number) => {
+    const prev = autoDays;
+    setAutoDays(d);
+    try { await setAutoCleanDays(d); }
+    catch { setAutoDays(prev); Alert.alert('Could not save', 'Automatic cleanup was not changed.'); }
+  };
+  const toggleLogout = async (v: boolean) => {
+    setClearLogout(v);
+    try { await setClearOnLogout(v); }
+    catch { setClearLogout(!v); Alert.alert('Could not save', 'Clear cache on logout was not changed.'); }
+  };
 
   return (
     <View style={S.container}>
@@ -112,7 +128,7 @@ export default function CacheCleanupScreen() {
           <Ionicons name="chevron-back" size={26} color={colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
-          <Text style={S.headerTitle}>Cache cleanup</Text>
+          <Text style={S.headerTitle} accessibilityRole="header">Cache cleanup</Text>
           <Text style={S.headerSub}>Free storage — never your data</Text>
         </View>
       </View>
@@ -125,18 +141,18 @@ export default function CacheCleanupScreen() {
 
         <View style={S.btnRow}>
           <TouchableOpacity style={[S.actBtn, S.actPrimary]} onPress={onSmart} disabled={busy || loading} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel="One-tap smart cleanup" accessibilityState={{ disabled: busy || loading, busy }}>
-            {busy ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="flash" size={16} color="#fff" />}
+            {busy ? <ActivityIndicator size="small" color={ON_PRIMARY} /> : <Ionicons name="flash" size={16} color={ON_PRIMARY} />}
             <Text style={S.actPrimaryText}>One-Tap Smart Cleanup</Text>
           </TouchableOpacity>
         </View>
 
-        <Text style={S.sectionTitle}>CATEGORIES</Text>
+        <Text style={S.sectionTitle} accessibilityRole="header">CATEGORIES</Text>
         {loading ? (
           <View style={S.center}><ActivityIndicator color={colors.primary} /></View>
         ) : loadFailed ? (
           <View style={[S.card, S.center, { gap: 10 }]}>
             <Text style={S.rowDesc}>Cache sizes could not be measured.</Text>
-            <TouchableOpacity onPress={load} accessibilityRole="button" accessibilityLabel="Measure cache again" hitSlop={8}>
+            <TouchableOpacity onPress={load} accessibilityRole="button" accessibilityLabel="Measure cache again" style={S.retryBtn}>
               <Text style={[S.rowLabel, { color: colors.primary }]}>Try again</Text>
             </TouchableOpacity>
           </View>
@@ -144,16 +160,17 @@ export default function CacheCleanupScreen() {
           <View style={S.card}>
             {CACHE_CATEGORIES.map((c, i) => {
               const bytes = sizes[c.id] ?? 0;
+              const sizeText = UNMEASURED.has(c.id) ? 'Not measured' : formatBytes(bytes);
               const on = selected.has(c.id);
               return (
                 <View key={c.id}>
-                  <TouchableOpacity style={S.row} onPress={() => toggle(c.id)} activeOpacity={0.7} accessibilityRole="checkbox" accessibilityState={{ checked: on }} accessibilityLabel={`${c.label}, ${formatBytes(bytes)}`}>
+                  <TouchableOpacity style={S.row} onPress={() => toggle(c.id)} activeOpacity={0.7} accessibilityRole="checkbox" accessibilityState={{ checked: on }} accessibilityLabel={`${c.label}, ${UNMEASURED.has(c.id) ? 'size not measured' : formatBytes(bytes)}`}>
                     <Ionicons name={on ? 'checkbox' : 'square-outline'} size={22} color={on ? colors.primary : colors.textFaint} />
                     <View style={{ flex: 1 }}>
                       <Text style={S.rowLabel}>{c.label}</Text>
                       <Text style={S.rowDesc}>{c.description}</Text>
                     </View>
-                    <Text style={S.rowSize}>{formatBytes(bytes)}</Text>
+                    <Text style={S.rowSize}>{sizeText}</Text>
                   </TouchableOpacity>
                   {i < CACHE_CATEGORIES.length - 1 && <View style={S.divider} />}
                 </View>
@@ -167,14 +184,14 @@ export default function CacheCleanupScreen() {
           <Text style={[S.actClearText, { color: colors.danger }]}>Clear selected · {formatBytes(selectedPlan.totalBytes)}</Text>
         </TouchableOpacity>
 
-        <Text style={S.sectionTitle}>AUTOMATIC CLEANUP</Text>
+        <Text style={S.sectionTitle} accessibilityRole="header">AUTOMATIC CLEANUP</Text>
         <View style={S.card}>
           <View style={S.settingRow}>
             <Text style={S.rowLabel}>Auto-clear safe cache</Text>
-            <View style={S.chips}>
+            <View style={S.chips} accessibilityRole="radiogroup" accessibilityLabel="Auto-clear safe cache">
               {AUTO_OPTIONS.map((d) => (
                 <TouchableOpacity key={d} onPress={() => chooseAutoDays(d)} accessibilityRole="radio" accessibilityState={{ checked: autoDays === d }} accessibilityLabel={d === 0 ? 'Auto-clear off' : `Auto-clear every ${d} days`} style={[S.chip, autoDays === d && { backgroundColor: colors.primary, borderColor: colors.primary }]}>
-                  <Text style={[S.chipText, autoDays === d && { color: '#fff' }]}>{d === 0 ? 'Off' : `${d}d`}</Text>
+                  <Text style={[S.chipText, autoDays === d && { color: ON_PRIMARY }]}>{d === 0 ? 'Off' : `${d}d`}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -204,7 +221,7 @@ export default function CacheCleanupScreen() {
 const makeStyles = (c: Palette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: HEADER_TOP, paddingBottom: 14, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: c.glassStroke },
-  backBtn: { padding: 4 },
+  backBtn: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { color: c.text, fontSize: 18, fontWeight: '800' },
   headerSub: { color: c.textDim, fontSize: 12, marginTop: 1 },
 
@@ -215,7 +232,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   btnRow: { paddingHorizontal: 16 },
   actBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginHorizontal: 16, paddingVertical: 14, borderRadius: 14, marginTop: 8 },
   actPrimary: { backgroundColor: c.primary, marginHorizontal: 0 },
-  actPrimaryText: { color: '#fff', fontWeight: '800', fontSize: 15 },
+  actPrimaryText: { color: ON_PRIMARY, fontWeight: '800', fontSize: 15 },
   actClear: { borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glassSoft },
   actClearText: { fontWeight: '800', fontSize: 14 },
 
@@ -229,9 +246,10 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   rowDesc: { color: c.textDim, fontSize: 12, marginTop: 2, lineHeight: 16 },
   rowSize: { color: c.textDim, fontSize: 13, fontWeight: '700', fontVariant: ['tabular-nums'] },
 
-  settingRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 },
+  settingRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 12, padding: 14 },
   chips: { flexDirection: 'row', gap: 6 },
-  chip: { borderWidth: 1, borderColor: c.glassStroke, borderRadius: 9, paddingHorizontal: 10, paddingVertical: 5 },
+  chip: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.glassStroke, borderRadius: 9, paddingHorizontal: 10, paddingVertical: 5 },
+  retryBtn: { minHeight: 44, paddingHorizontal: 16, justifyContent: 'center' },
   chipText: { color: c.textDim, fontSize: 12.5, fontWeight: '700' },
 
   note: { marginHorizontal: 16, marginTop: 20, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glassSoft },

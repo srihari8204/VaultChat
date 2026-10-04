@@ -8,8 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { establishGamesSession } from '../gamesSocket';
 import { parseLeaderboard, type LeaderRow, type LeaderScope } from './leaderboard';
-
-const GAMES_HTTP = 'https://games.corefinite.com';
+import { GAMES_HTTP } from './origin';
 
 export interface LeaderboardState {
   rows: LeaderRow[];

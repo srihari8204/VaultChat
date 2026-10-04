@@ -1,9 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Switch,
-  Text as NativeText, TextInput, View,
+  Text as NativeText, View,
 } from 'react-native';
 import { AppText as Text, AuroraBackground } from '../components/ui';
 import { useTheme } from '../lib/theme';
@@ -14,6 +14,24 @@ import {
 } from '../lib/visionComfort';
 
 const TRACK_HEIGHT = 192;
+// Label colour on solid primary fills. The palette has no on-primary token;
+// white is the brand's button text in both themes.
+const ON_PRIMARY = '#FFFFFF';
+
+// Sight descriptions, keyed by id so the hint logic does not depend on copy.
+// `larger`: the description is about near text, so start from a larger level.
+const SIGHT_KINDS = [
+  { id: 'short', label: 'Short sight / nearsighted (far away blurry)', larger: false },
+  { id: 'long', label: 'Long sight / farsighted (near text blurry)', larger: true },
+  { id: 'astigmatism', label: 'Astigmatism', larger: true },
+  { id: 'reading', label: 'Reading glasses / presbyopia', larger: true },
+  { id: 'power', label: 'I know my spectacle power', larger: false },
+  { id: 'unknown', label: 'I don’t know', larger: false },
+] as const;
+type SightKindId = (typeof SIGHT_KINDS)[number]['id'];
+
+const sameProfile = (a: VisionProfile, b: VisionProfile) =>
+  a.level === b.level && a.highContrast === b.highContrast && a.reduceTransparency === b.reduceTransparency;
 
 export default function VisionComfortScreen() {
   const router = useRouter();
@@ -25,9 +43,25 @@ export default function VisionComfortScreen() {
   const [draft, setDraft] = useState<VisionProfile>({ level: 0, highContrast: false, reduceTransparency: false });
   const [busy, setBusy] = useState(false);
   const [sightStep, setSightStep] = useState(true);
-  const [sightKind, setSightKind] = useState<string | null>(null);
-  const [spectaclePower, setSpectaclePower] = useState('');
+  const [sightKind, setSightKind] = useState<SightKindId | null>(null);
   const initialized = useRef(false);
+
+  // Leaving with unsaved edits asks first, the same way switching profile does.
+  // beforeRemove covers the Back button, hardware back and the swipe gesture.
+  const dirty = ready && !sameProfile(draft, profiles[selected]);
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const navigation = useNavigation();
+  useEffect(() => navigation.addListener('beforeRemove', (ev) => {
+    // beforeRemove is preventable at runtime; the generic navigation type says otherwise.
+    const e = ev as typeof ev & { preventDefault(): void };
+    if (!dirtyRef.current) return;
+    e.preventDefault();
+    Alert.alert('Discard unsaved changes?', 'Save this profile first if you want to keep your adjustments.', [
+      { text: 'Keep editing', style: 'cancel' },
+      { text: 'Discard', style: 'destructive', onPress: () => navigation.dispatch(e.data.action) },
+    ]);
+  }), [navigation]);
 
   useEffect(() => {
     if (!ready || initialized.current) return;
@@ -41,7 +75,7 @@ export default function VisionComfortScreen() {
 
   const chooseProfile = (key: VisionProfileKey) => {
     if (key === selected) return;
-    if (JSON.stringify(draft) !== JSON.stringify(profiles[selected])) {
+    if (!sameProfile(draft, profiles[selected])) {
       Alert.alert('Discard unsaved changes?', 'Save this profile first if you want to keep your adjustments.', [
         { text: 'Keep editing', style: 'cancel' },
         { text: 'Discard', style: 'destructive', onPress: () => { setSelected(key); setDraft(profiles[key]); } },
@@ -70,7 +104,7 @@ export default function VisionComfortScreen() {
       setBusy(false);
     }
   };
-  const reset = async () => {
+  const doReset = async () => {
     if (busy) return;
     setBusy(true);
     try {
@@ -82,6 +116,14 @@ export default function VisionComfortScreen() {
       setBusy(false);
     }
   };
+  const reset = () => {
+    if (busy) return;
+    const name = selected === 'with-glasses' ? 'With glasses' : 'Without glasses';
+    Alert.alert(`Reset “${name}”?`, 'This profile goes back to the standard display: normal text size, contrast and transparency.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Reset', style: 'destructive', onPress: () => { void doReset(); } },
+    ]);
+  };
 
   const textColor = previewColors.bubbleInText;
   const bubbleColor = draft.highContrast ? previewColors.surfaceSolid : previewColors.bubbleIn;
@@ -90,9 +132,9 @@ export default function VisionComfortScreen() {
   const spacing = Math.round(12 * metrics.spacingScale);
 
   const finishSightStep = (useHint: boolean) => {
-    if (useHint && sightKind && sightKind !== 'I don’t know' && sightKind !== 'I know my spectacle power' && sightKind !== 'Short sight / nearsighted (far away blurry)' && draft.level === 0) changeLevel(2);
+    const kind = SIGHT_KINDS.find(k => k.id === sightKind);
+    if (useHint && kind?.larger && draft.level === 0) changeLevel(2);
     setSightKind(null);
-    setSpectaclePower('');
     setSightStep(false);
   };
 
@@ -106,7 +148,7 @@ export default function VisionComfortScreen() {
             <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.iconButton}>
               <Ionicons name="arrow-back" size={24} color={colors.text} />
             </Pressable>
-            <Text style={s.title}>Vision Comfort</Text>
+            <Text style={s.title} accessibilityRole="header">Vision Comfort</Text>
           </View>
           {!ready ? <ActivityIndicator color={colors.primary} style={s.loading} /> : (
             <>
@@ -122,8 +164,8 @@ export default function VisionComfortScreen() {
                   <Pressable key={key} accessibilityRole="button" accessibilityState={{ selected: selected === key }}
                     onPress={() => chooseProfile(key)}
                     style={[s.profileButton, { backgroundColor: selected === key ? colors.primary : colors.surfaceSolid, borderColor: selected === key ? colors.primary : colors.glassStroke }]}>
-                    <Ionicons name={icon} size={20} color={selected === key ? '#FFFFFF' : colors.text} />
-                    <Text style={[s.profileLabel, { color: selected === key ? '#FFFFFF' : colors.text }]}>{label}</Text>
+                    <Ionicons name={icon} size={20} color={selected === key ? ON_PRIMARY : colors.text} />
+                    <Text style={[s.profileLabel, { color: selected === key ? ON_PRIMARY : colors.text }]}>{label}</Text>
                   </Pressable>
                 ))}
               </View>
@@ -138,7 +180,7 @@ export default function VisionComfortScreen() {
                     <NativeText style={{ color: draft.highContrast ? textColor : previewColors.bubbleMetaIn, fontSize: Math.max(13, fontSize - 3), marginTop: 6 }}>Today · 6:12 PM</NativeText>
                   </View>
                   <View style={[s.sampleControl, { backgroundColor: previewColors.primary, minHeight: Math.max(44, Math.round(44 * metrics.controlScale)) }]}>
-                    <NativeText style={{ color: '#FFFFFF', fontSize: Math.max(15, fontSize - 1), fontWeight: '700' }}>Reply</NativeText>
+                    <NativeText style={{ color: ON_PRIMARY, fontSize: Math.max(15, fontSize - 1), fontWeight: '700' }}>Reply</NativeText>
                   </View>
                 </View>
                 <View style={s.sliderColumn}>
@@ -169,7 +211,7 @@ export default function VisionComfortScreen() {
                 <Text style={[s.checkStep, { color: colors.textDim }]}>2. Read both the English and Telugu messages. Try each eye separately, then both together.</Text>
                 <Text style={[s.checkStep, { color: colors.textDim }]}>3. Drag or use +/− until the words and Reply button feel most comfortable. Adjust contrast if needed, then save.</Text>
                 <Text style={[s.checkNote, { color: colors.textDim }]}>This is a screen comfort check. The enlargement percentage is a display setting, not an eyesight percentage or prescription.</Text>
-                <Pressable accessibilityRole="button" accessibilityLabel="Open Eye Check" onPress={() => router.push('/eye-check' as any)} style={[s.checkAction, { borderColor: colors.glassStroke }]}>
+                <Pressable accessibilityRole="button" accessibilityLabel="Open Eye Check" onPress={() => router.push('/eye-check')} style={[s.checkAction, { borderColor: colors.glassStroke }]}>
                   <Ionicons name="eye-outline" size={22} color={colors.accentOn} />
                   <Text style={[s.checkActionLabel, { color: colors.text }]}>Try the separate-eye symbol check</Text>
                   <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
@@ -178,24 +220,21 @@ export default function VisionComfortScreen() {
 
               {sightStep && <View style={[s.sightCard, { backgroundColor: colors.surfaceSolid, borderColor: colors.glassStroke }]}>
                 <Text style={s.sightTitle}>Which sight description feels familiar?</Text>
-                <Text style={[s.optionHint, { color: colors.textDim }]}>Optional. This suggests a general starting level only. Your spectacle number is never interpreted or saved. It does not correct eyesight or replace glasses or an eye examination.</Text>
-                <View style={s.sightChoices}>
-                  {['Short sight / nearsighted (far away blurry)', 'Long sight / farsighted (near text blurry)', 'Astigmatism', 'Reading glasses / presbyopia', 'I know my spectacle power', 'I don’t know'].map(kind => (
-                    <Pressable key={kind} accessibilityRole="button" accessibilityState={{ selected: sightKind === kind }} onPress={() => setSightKind(kind)}
-                      style={[s.sightChoice, { borderColor: sightKind === kind ? colors.primary : colors.glassStroke, backgroundColor: sightKind === kind ? colors.glassSoft : colors.bg }]}>
-                      <Text style={s.sightChoiceText}>{kind}</Text>
+                <Text style={[s.optionHint, { color: colors.textDim }]}>Optional. This suggests a general starting level only. It does not correct eyesight or replace glasses or an eye examination.</Text>
+                <View style={s.sightChoices} accessibilityRole="radiogroup" accessibilityLabel="Sight description">
+                  {SIGHT_KINDS.map(kind => (
+                    <Pressable key={kind.id} accessibilityRole="radio" accessibilityState={{ checked: sightKind === kind.id }} onPress={() => setSightKind(kind.id)}
+                      style={[s.sightChoice, { borderColor: sightKind === kind.id ? colors.primary : colors.glassStroke, backgroundColor: sightKind === kind.id ? colors.glassSoft : colors.bg }]}>
+                      <Text style={s.sightChoiceText}>{kind.label}</Text>
                     </Pressable>
                   ))}
                 </View>
-                {sightKind === 'I know my spectacle power' && <>
-                  <TextInput accessibilityLabel="Known spectacle power, optional" placeholder="For example, -2.00 D or +4.00 D" placeholderTextColor={colors.textDim} value={spectaclePower} onChangeText={setSpectaclePower} maxLength={24}
-                    style={[s.sightInput, { borderColor: colors.glassStroke, color: colors.text }]} />
-                  <Text style={[s.optionHint, { color: colors.textDim }]}>You can enter a known power from -4.00 D to +4.00 D. This is not measured by the app, and the number is discarded when you leave this step. Adjust the preview until it looks clear.</Text>
-                </>}
-                {sightKind === 'Short sight / nearsighted (far away blurry)' && <Text style={[s.optionHint, { color: colors.textDim }]}>This phone preview checks near-screen comfort only. Distance sight needs a measured-distance chart or an eye examination.</Text>}
+                {/* The app never reads a spectacle power, so it no longer asks for one. */}
+                {sightKind === 'power' && <Text style={[s.optionHint, { color: colors.textDim }]}>The app does not use your spectacle power. Use the profile for the glasses you wear and adjust the preview until it looks clear.</Text>}
+                {sightKind === 'short' && <Text style={[s.optionHint, { color: colors.textDim }]}>This phone preview checks near-screen comfort only. Distance sight needs a measured-distance chart or an eye examination.</Text>}
                 <View style={s.sightActions}>
                   <Pressable accessibilityRole="button" onPress={() => finishSightStep(false)} style={s.sightAction}><Text style={{ color: colors.textDim }}>Skip</Text></Pressable>
-                  <Pressable accessibilityRole="button" onPress={() => finishSightStep(true)} style={[s.sightAction, { backgroundColor: colors.primary }]}><Text style={{ color: '#FFFFFF', fontWeight: '700' }}>Use starting hint</Text></Pressable>
+                  <Pressable accessibilityRole="button" onPress={() => finishSightStep(true)} style={[s.sightAction, { backgroundColor: colors.primary }]}><Text style={{ color: ON_PRIMARY, fontWeight: '700' }}>Use starting hint</Text></Pressable>
                 </View>
               </View>}
 
@@ -217,11 +256,11 @@ export default function VisionComfortScreen() {
               </View>
 
               <Text style={[s.note, { color: colors.textDim }]}>This adjusts the app display for comfort. It does not correct eyesight or replace glasses or an eye examination.</Text>
-              <Pressable accessibilityRole="button" accessibilityLabel="Save my Vision Comfort settings" disabled={busy} onPress={save}
+              <Pressable accessibilityRole="button" accessibilityLabel="Save my Vision Comfort settings" accessibilityState={{ disabled: busy, busy }} disabled={busy} onPress={save}
                 style={[s.saveButton, { backgroundColor: colors.primary, opacity: busy ? 0.6 : 1 }]}>
-                {busy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={s.saveLabel}>✓ This looks clear · Save</Text>}
+                {busy ? <ActivityIndicator color={ON_PRIMARY} /> : <Text style={s.saveLabel}>✓ This looks clear · Save</Text>}
               </Pressable>
-              <Pressable accessibilityRole="button" accessibilityLabel="Reset selected Vision Comfort profile" disabled={busy} onPress={reset} style={s.resetButton}>
+              <Pressable accessibilityRole="button" accessibilityLabel="Reset selected Vision Comfort profile" accessibilityState={{ disabled: busy }} disabled={busy} onPress={reset} style={s.resetButton}>
                 <Text style={[s.resetLabel, { color: colors.textDim }]}>Reset this profile</Text>
               </Pressable>
             </>
@@ -246,7 +285,6 @@ const s = StyleSheet.create({
   sightChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 16 },
   sightChoice: { maxWidth: '100%', borderWidth: 1, borderRadius: 12, minHeight: 44, paddingHorizontal: 12, paddingVertical: 9, justifyContent: 'center' },
   sightChoiceText: { fontSize: 13, fontWeight: '600', flexShrink: 1 },
-  sightInput: { borderWidth: 1, borderRadius: 12, minHeight: 48, marginTop: 12, paddingHorizontal: 12, fontSize: 16 },
   sightActions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8, marginTop: 16 },
   sightAction: { minHeight: 48, paddingHorizontal: 14, justifyContent: 'center', borderRadius: 12 },
   sectionTitle: { fontSize: 12, fontWeight: '700', letterSpacing: 1, marginBottom: 8, marginTop: 16 },
@@ -277,7 +315,7 @@ const s = StyleSheet.create({
   optionHint: { fontSize: 12, lineHeight: 18, marginTop: 3 },
   note: { marginTop: 18, fontSize: 12, lineHeight: 18 },
   saveButton: { marginTop: 18, minHeight: 52, borderRadius: 12, alignItems: 'center', justifyContent: 'center', padding: 10 },
-  saveLabel: { color: '#FFFFFF', fontSize: 16, fontWeight: '800', textAlign: 'center' },
+  saveLabel: { color: ON_PRIMARY, fontSize: 16, fontWeight: '800', textAlign: 'center' },
   resetButton: { minHeight: 48, alignItems: 'center', justifyContent: 'center', marginTop: 4 },
   resetLabel: { fontSize: 14, fontWeight: '600' },
 });

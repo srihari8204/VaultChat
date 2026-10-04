@@ -13,7 +13,7 @@
 // local-first caches with it. Cache clean-up now goes to /cache-cleanup, which
 // plans what it deletes.
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -23,15 +23,26 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { AppText as Text, AuroraBackground } from '../components/ui';
 import { HEADER_TOP } from '../constants/layout';
-import { queueList } from '../lib/localDb';
+import { getCachedChat, queueCount, queueList } from '../lib/localDb';
 import { flush, on, retry } from '../lib/messageQueue';
-import { summarizeOutbox, type OutboxRow, type OutboxSummary } from '../lib/outboxSummary';
+import { describeRetry, summarizeOutbox, unreadableRows, type OutboxRow, type OutboxSummary } from '../lib/outboxSummary';
 
 // Keys written only by the old mock version of this screen (a seeded demo
 // queue and a fake "last sync"). Removed by exact name, nothing else.
 const LEGACY_MOCK_KEYS = ['vc_offline_queue', 'vc_last_sync'];
 // One page is plenty for a count; the queue itself drains in pages of 200.
 const OUTBOX_READ_LIMIT = 1000;
+// Label colour on the solid primary button. The palette has no on-primary
+// token; white is the brand's button text in both themes.
+const ON_PRIMARY = '#FFFFFF';
+
+type Outbox = OutboxSummary & { unreadable: number; chatNames: Record<string, string> };
+
+/** Name of a chat from the local cache, for the failed-message links. */
+async function chatName(id: string): Promise<string> {
+  const c = await getCachedChat(id).catch(() => null);
+  return (c?.type === 'direct' ? c?.peerName : c?.name) || c?.name || c?.peerName || 'Chat';
+}
 
 function timeAgo(ts: number): string {
   const mins = Math.floor((Date.now() - ts) / 60000);
@@ -55,17 +66,33 @@ export default function OfflineModeScreen() {
   const router = useRouter();
   const [isOnline, setIsOnline] = useState<boolean | null>(null);
   const [connectionType, setConnectionType] = useState('unknown');
-  const [outbox, setOutbox] = useState<OutboxSummary | null>(null);
+  const [outbox, setOutbox] = useState<Outbox | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
+  const [retryResult, setRetryResult] = useState<string | null>(null);
+  // Queue events can land after the screen is gone; no state updates then.
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
 
-  const loadOutbox = useCallback(async () => {
+  const loadOutbox = useCallback(async (): Promise<Outbox | null> => {
     try {
-      const rows = await queueList<OutboxRow>('msg', OUTBOX_READ_LIMIT);
-      setOutbox(summarizeOutbox(rows));
+      const [rows, stored] = await Promise.all([
+        queueList<OutboxRow>('msg', OUTBOX_READ_LIMIT), queueCount('msg').catch(() => 0),
+      ]);
+      const sum = summarizeOutbox(rows);
+      const names = await Promise.all(sum.failedChatIds.map(chatName));
+      const next: Outbox = {
+        ...sum,
+        unreadable: unreadableRows(stored, rows.length, OUTBOX_READ_LIMIT),
+        chatNames: Object.fromEntries(sum.failedChatIds.map((id, i) => [id, names[i]])),
+      };
+      if (!mounted.current) return null;
+      setOutbox(next);
       setLoadError(null);
+      return next;
     } catch (e: any) {
-      setLoadError(e?.message ?? 'Could not read the outbox');
+      if (mounted.current) setLoadError(e?.message ?? 'Could not read the outbox');
+      return null;
     }
   }, []);
 
@@ -93,6 +120,8 @@ export default function OfflineModeScreen() {
       return;
     }
     setRetrying(true);
+    setRetryResult(null);
+    const before = outbox;
     try {
       // retry() moves a rejected row back to the queue and starts a flush;
       // flush() sends whatever was already waiting.
@@ -101,8 +130,12 @@ export default function OfflineModeScreen() {
     } catch (e: any) {
       Alert.alert('Could not retry', e?.message ?? 'Try again');
     } finally {
-      setRetrying(false);
-      loadOutbox();
+      // Say what happened, from the recount — never assume success.
+      const after = await loadOutbox();
+      if (mounted.current) {
+        setRetrying(false);
+        if (after) setRetryResult(describeRetry(before, after));
+      }
     }
   }, [retrying, outbox, isOnline, loadOutbox]);
 
@@ -144,13 +177,13 @@ export default function OfflineModeScreen() {
         <View style={s.card}>
           <View style={s.sectionHeader}>
             <Ionicons name="paper-plane-outline" size={20} color={colors.textDim} />
-            <Text style={s.cardTitle}>Outbox</Text>
+            <Text style={s.cardTitle} accessibilityRole="header">Outbox</Text>
           </View>
 
           {loadError ? (
             <View accessibilityRole="alert">
               <Text style={s.dim}>Could not read the outbox. {loadError}</Text>
-              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Try reading the outbox again" onPress={loadOutbox} style={s.outlineBtn} activeOpacity={0.7}>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Try reading the outbox again" onPress={() => { void loadOutbox(); }} style={s.outlineBtn} activeOpacity={0.7}>
                 <Text style={s.outlineBtnTxt}>Try again</Text>
               </TouchableOpacity>
             </View>
@@ -159,7 +192,7 @@ export default function OfflineModeScreen() {
           ) : unsent === 0 ? (
             <View style={s.emptyRow}>
               <Ionicons name="checkmark-circle-outline" size={22} color={colors.primary} />
-              <Text style={s.body}>Nothing waiting to send.</Text>
+              <Text style={s.body}>{outbox.unreadable > 0 ? 'Nothing else waiting that could be read.' : 'Nothing waiting to send.'}</Text>
             </View>
           ) : (
             <>
@@ -173,6 +206,20 @@ export default function OfflineModeScreen() {
                   {outbox.failed} not sent — the server refused {outbox.failed === 1 ? 'it' : 'them'}. Each one is marked in its chat.
                 </Text>
               )}
+              {outbox.failedChatIds.map(id => (
+                <TouchableOpacity
+                  key={id}
+                  style={s.chatLink}
+                  onPress={() => router.push({ pathname: '/chat', params: { id } })}
+                  activeOpacity={0.7}
+                  accessibilityRole="link"
+                  accessibilityLabel={`Open ${outbox.chatNames[id] ?? 'chat'}, has a message that was not sent`}
+                >
+                  <Ionicons name="alert-circle-outline" size={18} color={colors.danger} />
+                  <Text style={[s.body, { flex: 1 }]} numberOfLines={1}>{outbox.chatNames[id] ?? 'Chat'}</Text>
+                  <Ionicons name="chevron-forward" size={16} color={colors.textDim} />
+                </TouchableOpacity>
+              ))}
               {outbox.oldestAt != null && <Text style={[s.dim, { marginTop: 6 }]}>Oldest from {timeAgo(outbox.oldestAt)}</Text>}
 
               <TouchableOpacity
@@ -184,12 +231,20 @@ export default function OfflineModeScreen() {
                 accessibilityLabel={outbox.failed > 0 ? `Retry ${unsent} unsent messages` : `Send ${unsent} waiting messages now`}
                 accessibilityState={{ disabled: retrying || !isOnline, busy: retrying }}
               >
-                {retrying ? <ActivityIndicator color="#FFFFFF" /> : (
+                {retrying ? <ActivityIndicator color={ON_PRIMARY} /> : (
                   <Text style={s.primaryBtnTxt}>{outbox.failed > 0 ? 'Retry now' : 'Send now'}</Text>
                 )}
               </TouchableOpacity>
               {!isOnline && <Text style={[s.dim, { marginTop: 8 }]}>Connect to the internet to send.</Text>}
             </>
+          )}
+          {!loadError && retryResult && (
+            <Text style={[s.dim, { marginTop: 8 }]} accessibilityLiveRegion="polite">{retryResult}</Text>
+          )}
+          {!loadError && outbox && outbox.unreadable > 0 && (
+            <Text style={[s.dim, { marginTop: 8 }]}>
+              {outbox.unreadable} more queued {outbox.unreadable === 1 ? 'item' : 'items'} could not be read (the local store may be locked), so {outbox.unreadable === 1 ? 'it is' : 'they are'} not counted here.
+            </Text>
           )}
         </View>
 
@@ -197,7 +252,7 @@ export default function OfflineModeScreen() {
         <View style={s.card}>
           <View style={s.sectionHeader}>
             <Ionicons name="apps-outline" size={20} color={colors.textDim} />
-            <Text style={s.cardTitle}>Without a connection</Text>
+            <Text style={s.cardTitle} accessibilityRole="header">Without a connection</Text>
           </View>
           {OFFLINE_FACTS.map(f => (
             <View key={f.label} style={s.featureRow} accessible accessibilityLabel={`${f.label}: ${f.works ? 'works offline' : 'needs a connection'}`}>
@@ -211,7 +266,7 @@ export default function OfflineModeScreen() {
         {/* ── Storage ──────────────────────────────── */}
         <TouchableOpacity
           style={[s.card, s.linkRow]}
-          onPress={() => router.push('/cache-cleanup' as any)}
+          onPress={() => router.push('/cache-cleanup')}
           activeOpacity={0.7}
           accessibilityRole="button"
           accessibilityLabel="Cache cleanup. See what is cached on this phone and free up space"
@@ -248,7 +303,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   emptyRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   primaryBtn: { marginTop: 14, minHeight: 48, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: c.primary },
-  primaryBtnTxt: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+  primaryBtnTxt: { color: ON_PRIMARY, fontSize: 16, fontWeight: '700' },
+  chatLink: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 44, marginTop: 6 },
   outlineBtn: { marginTop: 10, alignSelf: 'flex-start', minHeight: 44, paddingHorizontal: 16, justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glassSoft },
   outlineBtnTxt: { color: c.primary, fontWeight: '700' },
 

@@ -18,7 +18,7 @@ import { chessTttLayout } from '../../lib/games/chessTttLayout';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Svg, { Path, Ellipse, Defs, LinearGradient as SvgLinear, Stop } from 'react-native-svg';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -38,6 +38,8 @@ import LeaderboardSheet from './LeaderboardSheet';
 import { C, S, R, white, alpha, ACCENT } from '../../lib/games/theme';
 import { CR, CR_AMBIENT, CR_BOKEH, CR_VIGNETTE, CR_LIT, g } from '../../lib/games/chessRoom';
 import { useAddBot, ADD_BOT_STALLED } from '../../lib/games/useAddBot';
+import { startBlockedReason } from '../../lib/games/startHint';
+import { PIECE_NAME } from '../../lib/games/pieceNames';
 import { playSfx, preloadSfx, soundEnabled, setSoundEnabled } from '../../lib/games/sfx';
 import { Toasts, Confetti, Sheet, SettingRow, VoiceBar, VoiceSheet } from './feedback';
 import { useTableVoice, type TableVoice } from '../../lib/games/useTableVoice';
@@ -55,6 +57,7 @@ type Move = { from: number; to: number; promo?: string };
  * reads correctly at phone sizes.
  */
 const GLYPH: Record<string, string> = { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
+const GLYPH_NAME: Record<string, string> = Object.fromEntries(Object.entries(GLYPH).map(([k, g]) => [g, PIECE_NAME[k]]));
 
 /** Fill + fake-stroke per side. See OutlinedGlyph. */
 type Ink = { w: { fill: string; line: string }; b: { fill: string; line: string } };
@@ -1018,11 +1021,12 @@ function Seat({
 }) {
   const t = useType();
   const material = `${taken.join('')}${edge > 0 ? `  +${edge}` : ''}`;
+  const spokenMaterial = `${taken.map(g => GLYPH_NAME[g] ?? g).join(', ')}${edge > 0 ? `, ahead by ${edge}` : ''}`;
   return (
     <View
       accessibilityLabel={
         `${name}${bot ? ', bot' : ''}. ${role}.` +
-        (material ? ` Captured ${material}.` : '') +
+        (material ? ` Captured ${spokenMaterial}.` : '') +
         (clock ? ` ${clock} on the clock.` : '')
       }
       style={{
@@ -1331,6 +1335,9 @@ function PromoPicker({
     // "Promote to Q/R/B/N" buttons below would announce as nothing. Tapping
     // the backdrop to cancel is a sighted-only convenience either way, so an
     // explicit Cancel button carries that action for accessibility instead.
+    // In a Modal so hardware back cancels the promotion (onRequestClose) rather
+    // than reaching the hub's "Leave this table?" handler.
+    <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={onCancel}>
     <Pressable
       onPress={onCancel}
       accessible={false}
@@ -1342,7 +1349,7 @@ function PromoPicker({
         boxShadow: `0 20px 50px rgba(0,0,0,0.5), inset 0 1px 0 ${white(0.18)}`,
       }}>
         {choices.map(m => (
-          <Pressable key={m.promo} onPress={() => onPick(m)} accessibilityRole="button" accessibilityLabel={`Promote to ${m.promo}`}>
+          <Pressable key={m.promo} onPress={() => onPick(m)} accessibilityRole="button" accessibilityLabel={`Promote to ${PIECE_NAME[String(m.promo).toLowerCase()] ?? m.promo}`}>
             <OutlinedGlyph t={m.promo as string} c={color} size={46} stroke={PIECE_STROKE} ink={ink} />
           </Pressable>
         ))}
@@ -1359,6 +1366,7 @@ function PromoPicker({
         </Pressable>
       </View>
     </Pressable>
+    </Modal>
   );
 }
 
@@ -1441,6 +1449,9 @@ function Lobby({
           <Text style={{ color: CR.bad, fontSize: t.sm, lineHeight: 18 }}>{ADD_BOT_STALLED}</Text>
         )}
         <Btn label="Start game" kind="gold" onPress={onStart} disabled={!host || members.length < 2} />
+        {!!startBlockedReason(host, members.length) && (
+          <Text style={{ color: CR.muted, fontSize: t.sm, lineHeight: 18, textAlign: 'center' }}>{startBlockedReason(host, members.length)}</Text>
+        )}
       </ScrollView>
       <Toasts events={events} />
       <RulesSheet game="chess" visible={rules.visible} onClose={rules.close} />
@@ -1547,7 +1558,7 @@ function pairUp(history: string[]): string {
  */
 function squareLabel(sq: number, piece: Piece, target: boolean, capture: boolean): string {
   const name = `${FILES[sq & 7]}${8 - (sq >> 3)}`;
-  const what = piece ? `${piece.c === 'w' ? 'white' : 'black'} ${piece.t}` : 'empty';
+  const what = piece ? `${piece.c === 'w' ? 'white' : 'black'} ${PIECE_NAME[piece.t] ?? piece.t}` : 'empty';
   const hint = capture ? ', can capture' : target ? ', can move here' : '';
   return `${name}, ${what}${hint}`;
 }

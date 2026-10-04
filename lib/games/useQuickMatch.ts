@@ -39,6 +39,12 @@ export function useQuickMatch(): QuickMatchResult {
 
   const wsRef = useRef<WebSocket | null>(null);
   const aliveRef = useRef(true);
+  // ONE SEARCH AT A TIME. Every start() and cancel() bumps this, and every
+  // callback checks it is still the current attempt. Without it a Cancel tapped
+  // while the session was still being established was undone a moment later:
+  // the pending .then() opened the socket and queued the player anyway, so a
+  // match could arrive (and open a board) after they had walked away.
+  const attemptRef = useRef(0);
 
   const close = useCallback(() => {
     const ws = wsRef.current;
@@ -54,6 +60,7 @@ export function useQuickMatch(): QuickMatchResult {
   }, [close]);
 
   const cancel = useCallback(() => {
+    attemptRef.current++;
     close();
     if (!aliveRef.current) return;
     setPhase('idle');
@@ -62,6 +69,8 @@ export function useQuickMatch(): QuickMatchResult {
   }, [close]);
 
   const start = useCallback((game: GameKind) => {
+    const attempt = ++attemptRef.current;
+    const current = () => aliveRef.current && attemptRef.current === attempt;
     close();
     setPhase('connecting');
     setStatus('Connecting…');
@@ -70,19 +79,19 @@ export function useQuickMatch(): QuickMatchResult {
 
     establishGamesSession()
       .then(() => {
-        if (!aliveRef.current) return;
+        if (!current()) return;
         const ws = new WebSocket(`${GAMES_WS_BASE}/live/ws`);
         wsRef.current = ws;
 
         ws.onopen = () => {
-          if (!aliveRef.current) return;
+          if (!current()) return;
           setPhase('searching');
           setStatus('Searching for an opponent…');
           ws.send(JSON.stringify({ t: 'queue', game }));
         };
 
         ws.onmessage = (ev) => {
-          if (!aliveRef.current) return;
+          if (!current()) return;
           let m: any;
           try { m = JSON.parse(String(ev.data)); } catch { return; }
 
@@ -96,7 +105,7 @@ export function useQuickMatch(): QuickMatchResult {
         };
 
         ws.onerror = () => {
-          if (!aliveRef.current) return;
+          if (!current()) return;
           setPhase('error');
           setError('Could not reach the matchmaker.');
         };
@@ -104,14 +113,14 @@ export function useQuickMatch(): QuickMatchResult {
         ws.onclose = () => {
           // A close while still searching is a dropped queue, not a match —
           // say so rather than leaving a spinner running forever.
-          if (!aliveRef.current || wsRef.current !== ws) return;
+          if (!current() || wsRef.current !== ws) return;
           wsRef.current = null;
           setPhase(p => (p === 'searching' || p === 'connecting' ? 'error' : p));
           setError(e => e ?? 'Lost contact with the matchmaker.');
         };
       })
       .catch((err: unknown) => {
-        if (!aliveRef.current) return;
+        if (!current()) return;
         setPhase('error');
         setError(err instanceof Error ? err.message : String(err));
       });

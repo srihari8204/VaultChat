@@ -1,42 +1,41 @@
-import { HEADER_TOP, SCREEN_BOTTOM } from '../constants/layout';
+import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, type Href } from 'expo-router';
 import { useCallback, useEffect, useRef, useState , useMemo} from 'react';
 import { ActivityIndicator, Animated, Easing, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { AppText as Text } from '../components/ui/Text';
 import { AuroraBackground } from '../components/ui/AuroraBackground';
-import { type Palette } from '../constants/theme';
+import { brandAlpha, type Palette } from '../constants/theme';
+import { SafetyNavBar } from '../components/SafetyNavBar';
 import { useTheme } from '../lib/theme';
 import { readCache, writeCache } from '../lib/localCache';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { getSecurityOverview, type SecurityOverview } from '../lib/security';
 import { E2EE_ENABLED } from '../constants/flags';
 
-
-const NAV = [
-  {id:'chats',icon:'chatbubbles-outline',label:'Chats',route:'/(tabs)/chats'},
-  {id:'shield',icon:'shield-checkmark-outline',label:'Shield',route:'/dashboard'},
-  {id:'community',icon:'people-outline',label:'Community',route:'/communities'},
-  {id:'vault',icon:'file-tray-full-outline',label:'Vault',route:'/filevault'},
-  {id:'alerts',icon:'notifications-outline',label:'Alerts',route:'/notifications'},
-] as const;
-
-type Check = { name: string; icon: React.ComponentProps<typeof Ionicons>['name']; ok: boolean; desc: string };
+/** `href` is the screen where the check is changed; null when nothing there can change it. */
+type Check = { name: string; icon: React.ComponentProps<typeof Ionicons>['name']; ok: boolean; desc: string; href: Href | null };
 
 function buildChecks(ov: SecurityOverview): Check[] {
   return [
     { name: 'End-to-End Encryption', icon: 'lock-closed-outline', ok: E2EE_ENABLED && ov.e2eeKeyPublished,
-      desc: E2EE_ENABLED ? (ov.e2eeKeyPublished ? 'Keys published — direct chats are encrypted' : 'Open a chat to publish your keys') : 'Encrypted in transit (TLS)' },
+      desc: E2EE_ENABLED ? (ov.e2eeKeyPublished ? 'Keys published — direct chats are encrypted' : 'Open a chat to publish your keys') : 'Encrypted in transit (TLS)',
+      href: E2EE_ENABLED && !ov.e2eeKeyPublished ? '/(tabs)/chats' : null },
     { name: 'Last Seen Hidden', icon: 'eye-off-outline', ok: ov.settings.lastSeenVisible === false,
-      desc: ov.settings.lastSeenVisible === false ? 'Your last-seen is private' : 'Your last-seen is visible to contacts' },
+      desc: ov.settings.lastSeenVisible === false ? 'Your last-seen is private' : 'Your last-seen is visible to contacts',
+      href: '/last-seen-privacy' },
     { name: 'Read Receipts Off', icon: 'checkmark-done-outline', ok: ov.settings.readReceipts === false,
-      desc: ov.settings.readReceipts === false ? 'Read receipts are off' : 'Read receipts are on' },
+      desc: ov.settings.readReceipts === false ? 'Read receipts are off' : 'Read receipts are on',
+      href: '/last-seen-privacy' },
     { name: 'Undiscoverable', icon: 'person-remove-outline', ok: ov.settings.discoverable === false,
-      desc: ov.settings.discoverable === false ? "You're not discoverable by search" : "You're discoverable by phone/handle" },
+      desc: ov.settings.discoverable === false ? "You're not discoverable by search" : "You're discoverable by phone/handle",
+      href: '/last-seen-privacy' },
     { name: 'Blocked Contacts', icon: 'ban-outline', ok: true,
-      desc: `${ov.blockedContacts} contact${ov.blockedContacts === 1 ? '' : 's'} blocked` },
+      desc: `${ov.blockedContacts} contact${ov.blockedContacts === 1 ? '' : 's'} blocked`,
+      href: '/blocked' },
     { name: 'Active Sessions', icon: 'phone-portrait-outline', ok: ov.activeSessions <= 3,
-      desc: `${ov.activeSessions} signed-in session${ov.activeSessions === 1 ? '' : 's'} · ${ov.linkedDevices} device${ov.linkedDevices === 1 ? '' : 's'}` },
+      desc: `${ov.activeSessions} signed-in session${ov.activeSessions === 1 ? '' : 's'} · ${ov.linkedDevices} device${ov.linkedDevices === 1 ? '' : 's'}`,
+      href: '/login-history' },
   ];
 }
 
@@ -53,7 +52,6 @@ function DashboardContent() {
   const S = useS();
   const { colors } = useTheme();
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState('shield');
   const [overview, setOverview] = useState<SecurityOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -94,14 +92,10 @@ function DashboardContent() {
     return () => { radar.stop(); pulse.stop(); };
   }, [load, fadeAnim, pulseAnim, radarAnim]);
 
-  const handleNav = (item: (typeof NAV)[number]) => {
-    setActiveTab(item.id);
-    if (item.id !== 'shield') router.push(item.route as any);
-  };
-
   const checks = overview ? buildChecks(overview) : [];
   const score = checks.length ? Math.round((checks.filter(c => c.ok).length / checks.length) * 100) : 0;
   const scoreColor = score >= 80 ? colors.success : score >= 50 ? colors.accent : colors.danger;
+  const scoreWord = score >= 80 ? 'STRONG' : score >= 50 ? 'FAIR' : 'REVIEW';
   const radarDeg = radarAnim.interpolate({inputRange:[0,1],outputRange:['0deg','360deg']});
 
   return (
@@ -115,14 +109,19 @@ function DashboardContent() {
             <Text variant="h2" style={S.title}>Security Hub</Text>
             <Text style={{color:colors.textDim,fontSize:12}}>Your account security</Text>
           </View>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Refresh security overview" onPress={load} style={[S.scanBtn,loading&&{opacity:0.65}]}>
-            <Ionicons name="refresh-outline" size={22} color={colors.primary} />
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Refresh security overview" accessibilityState={{ disabled: loading, busy: loading }} disabled={loading} onPress={load} style={S.scanBtn}>
+            {loading ? <ActivityIndicator size="small" color={colors.primary} /> : <Ionicons name="refresh-outline" size={22} color={colors.primary} />}
           </TouchableOpacity>
         </View>
 
         <ScrollView contentContainerStyle={S.content} showsVerticalScrollIndicator={false}>
         <View style={S.scoreArea}>
-          <Animated.View style={[S.scoreRing,{transform:[{scale:pulseAnim}]}]}>
+          <Animated.View
+            style={[S.scoreRing,{transform:[{scale:pulseAnim}]}]}
+            accessible
+            accessibilityRole="summary"
+            accessibilityLabel={overview ? `Security score ${score} out of 100, ${scoreWord.toLowerCase()}` : 'Security score not loaded'}
+          >
             <View style={S.radarBg}/>
             <Animated.View style={[S.radarSweep,{transform:[{rotate:radarDeg}]}]}/>
             <View style={[S.radarRing,{width:100,height:100,borderRadius:50}]}/>
@@ -132,7 +131,7 @@ function DashboardContent() {
               <Text style={S.scoreLabel}>Security score</Text>
               <View style={{flexDirection:'row',alignItems:'center',gap:4,marginTop:3}}>
                 <View style={{width:6,height:6,borderRadius:3,backgroundColor:scoreColor}}/>
-                <Text style={{color:scoreColor,fontSize:12,fontWeight:'700'}}>{score>=80?'STRONG':score>=50?'FAIR':'REVIEW'}</Text>
+                <Text style={{color:scoreColor,fontSize:12,fontWeight:'700'}}>{scoreWord}</Text>
               </View>
             </View>
           </Animated.View>
@@ -144,8 +143,8 @@ function DashboardContent() {
             {label:'Devices',value:overview?String(overview.linkedDevices):'—',icon:'laptop-outline' as const,color:colors.primary},
             {label:'Blocked',value:overview?String(overview.blockedContacts):'—',icon:'ban-outline' as const,color:colors.primary},
             {label:'Account age',value:overview?accountAge(overview.accountCreatedAt):'—',icon:'calendar-outline' as const,color:colors.primary},
-          ].map((s,i)=>(
-            <View key={i} style={S.statCard}>
+          ].map((s)=>(
+            <View key={s.label} style={S.statCard} accessible accessibilityLabel={`${s.label}: ${s.value}`}>
               <Ionicons name={s.icon} size={22} color={s.color} />
               <Text style={{color:colors.text,fontSize:20,fontWeight:'800'}}>{s.value}</Text>
               <Text style={{color:colors.textDim,fontSize:12,textAlign:'center',marginTop:1}}>{s.label}</Text>
@@ -162,10 +161,19 @@ function DashboardContent() {
               </TouchableOpacity>
             </View>
           )}
-          {!loading && !error && checks.map((c,i)=>{
+          {!loading && !error && checks.map((c)=>{
             const col = c.ok ? colors.success : colors.danger;
+            const href = c.href;
             return (
-              <View key={i} style={S.moduleRow}>
+              <TouchableOpacity
+                key={c.name}
+                style={S.moduleRow}
+                disabled={!href}
+                onPress={href ? () => router.push(href) : undefined}
+                accessibilityRole={href ? 'link' : 'text'}
+                accessibilityLabel={`${c.name}, ${c.ok ? 'OK' : 'needs review'}. ${c.desc}`}
+                accessibilityHint={href ? 'Opens the screen where you can change this' : undefined}
+              >
                 <View style={[S.modIcon,{backgroundColor:col+'18',borderColor:col+'44'}]}>
                   <Ionicons name={c.icon} size={22} color={col} />
                 </View>
@@ -178,20 +186,14 @@ function DashboardContent() {
                   </View>
                   <Text style={{color:colors.textDim,fontSize:13,lineHeight:19}}>{c.desc}</Text>
                 </View>
-              </View>
+                {href && <Ionicons name="chevron-forward" size={18} color={colors.textDim} />}
+              </TouchableOpacity>
             );
           })}
         </ScrollView>
       </Animated.View>
 
-      <View style={S.navBar}>
-        {NAV.map(item=>(
-          <TouchableOpacity key={item.id} accessibilityRole="button" accessibilityLabel={item.label} accessibilityState={{selected:activeTab===item.id}} onPress={()=>handleNav(item)} style={[S.navItem,activeTab===item.id&&S.navItemActive]}>
-            <Ionicons name={item.icon} size={22} color={activeTab===item.id?colors.primary:colors.textDim} />
-            <Text style={[S.navLabel,{color:activeTab===item.id?colors.primary:colors.textDim}]}>{item.label}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+      <SafetyNavBar current="shield" />
     </View>
   );
 }
@@ -219,18 +221,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   scanBtn:{width:44,height:44,alignItems:'center',justifyContent:'center',backgroundColor:c.glassSoft,borderRadius:16,borderWidth:1,borderColor:c.glassStroke},
   scoreArea:{alignItems:'center',paddingVertical:14},
   scoreRing:{minWidth:180,minHeight:180,padding:20,borderRadius:90,borderWidth:2,borderColor:c.glassStroke,backgroundColor:c.glassSoft,justifyContent:'center',alignItems:'center',overflow:'hidden',position:'relative'},
-  radarBg:{position:'absolute',top:0,left:0,right:0,bottom:0,backgroundColor:'rgba(74,159,255,0.04)'},
-  radarSweep:{position:'absolute',top:0,left:'50%',width:2,height:'50%',backgroundColor:'rgba(74,159,255,0.5)',transformOrigin:'bottom center'},
-  radarRing:{position:'absolute',borderWidth:1,borderColor:'rgba(74,159,255,0.15)'},
+  radarBg:{position:'absolute',top:0,left:0,right:0,bottom:0,backgroundColor:brandAlpha(0.04)},
+  radarSweep:{position:'absolute',top:0,left:'50%',width:2,height:'50%',backgroundColor:brandAlpha(0.5),transformOrigin:'bottom center'},
+  radarRing:{position:'absolute',borderWidth:1,borderColor:brandAlpha(0.15)},
   scoreCenter:{alignItems:'center',zIndex:2},
-  scoreNum:{color:'#4A9FFF',fontSize:40,fontWeight:'900',lineHeight:42},
+  scoreNum:{fontSize:40,fontWeight:'900',lineHeight:42},
   scoreLabel:{color:c.textDim,fontSize:12,marginTop:2},
   statsRow:{flexDirection:'row',flexWrap:'wrap',gap:10,marginBottom:18},
   statCard:{flexGrow:1,flexBasis:'45%',backgroundColor:c.glassSoft,borderRadius:20,padding:16,alignItems:'center',borderWidth:1,borderColor:c.glassStroke,gap:6},
   moduleRow:{flexDirection:'row',alignItems:'center',backgroundColor:c.glassSoft,borderRadius:20,padding:16,marginBottom:10,borderWidth:1,borderColor:c.glassStroke,gap:12},
   modIcon:{width:44,height:44,borderRadius:22,justifyContent:'center',alignItems:'center',borderWidth:1},
-  navBar:{marginHorizontal:14,marginBottom:SCREEN_BOTTOM,backgroundColor:c.glass,borderRadius:24,borderWidth:1,borderColor:c.glassStroke,paddingVertical:8,paddingHorizontal:4,flexDirection:'row',alignItems:'stretch'},
-  navItem:{flex:1,minWidth:0,alignItems:'center',justifyContent:'center',gap:4,paddingVertical:6,paddingHorizontal:2,borderRadius:18,borderWidth:1,borderColor:'transparent'},
-  navItemActive:{backgroundColor:c.glassSoft,borderColor:c.glassStroke},
-  navLabel:{fontSize:11,fontWeight:'600',textAlign:'center'},
 });
