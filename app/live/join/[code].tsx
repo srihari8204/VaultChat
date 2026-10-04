@@ -28,9 +28,9 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, StatusBar,
-  TextInput, Platform,
+  View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, TextInput,
 } from 'react-native';
+import NetInfo from '@react-native-community/netinfo';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../../../constants/theme';
@@ -59,7 +59,11 @@ type Phase =
   | { kind: 'joining' }
   // The code is good, the passcode is not (or was not supplied).
   | { kind: 'passcode'; wrong: boolean }
-  | { kind: 'error' };
+  // `offline`: the redeem failed while the device had no connection, so the
+  // code may be perfectly good. lib/broadcast.ts redeemInviteLink folds every
+  // non-403 into 'invalid', so the device's own connectivity is what tells the
+  // two apart here (see the Handoffs in the fix log for the server-side split).
+  | { kind: 'error'; offline: boolean };
 
 export default function LiveJoinScreen() {
   const { colors } = useTheme();
@@ -75,6 +79,9 @@ export default function LiveJoinScreen() {
   const [name, setName] = useState('');
   const [passcode, setPasscode] = useState('');
   const [busy, setBusy] = useState(false);
+  // Every "Cancel"/"Done" lands on the chats tab, as Cancel always did.
+  // replace, not back: an invite-link arrival has no history to go back to.
+  const leave = useCallback(() => router.replace('/(tabs)/chats' as any), [router]);
 
   // Prefill the name from the profile. Failure is not worth surfacing — the
   // field is editable and the server falls back to the profile name anyway.
@@ -94,7 +101,7 @@ export default function LiveJoinScreen() {
   }, []);
 
   const attempt = useCallback(async (pc: string, showWrong: boolean) => {
-    if (!code) { setPhase({ kind: 'error' }); return; }
+    if (!code) { setPhase({ kind: 'error', offline: false }); return; }
     setBusy(true);
     try {
       const res = await redeemInviteLink(code, { passcode: pc, displayName: name });
@@ -103,9 +110,10 @@ export default function LiveJoinScreen() {
         router.replace({ pathname: '/live-view', params: { id: res.broadcastId } } as any);
         return;
       }
-      setPhase(res.reason === 'passcode'
-        ? { kind: 'passcode', wrong: showWrong }
-        : { kind: 'error' });
+      if (res.reason === 'passcode') { setPhase({ kind: 'passcode', wrong: showWrong }); return; }
+      let offline = false;
+      try { const net = await NetInfo.fetch(); offline = net.isConnected === false || net.isInternetReachable === false; } catch {}
+      setPhase({ kind: 'error', offline });
     } finally {
       setBusy(false);
     }
@@ -142,9 +150,9 @@ export default function LiveJoinScreen() {
 
 >
       <AuroraBackground />
+        {/* No StatusBar override: this screen follows the theme, so the root
+            bar (which already follows it) decides. */}
         <Stack.Screen options={{ headerShown: false }} />
-        {/* statusbar-exempt: live video fills the screen on a dark ground at every theme. */}
-        <StatusBar barStyle="light-content" />
         <View style={s.body}>
           <Ionicons name="person-circle-outline" size={48} color={colors.primary} />
           <Text style={s.title}>Join the live</Text>
@@ -165,6 +173,7 @@ export default function LiveJoinScreen() {
             value={name}
             onChangeText={setName}
             placeholder="Your crazzychat name"
+            accessibilityLabel="Your name, optional"
             placeholderTextColor={colors.textDim}
             maxLength={64}
             autoCapitalize="words"
@@ -176,11 +185,17 @@ export default function LiveJoinScreen() {
             style={[s.cta, !ready && s.ctaOff]}
             onPress={() => { if (ready) { setPhase({ kind: 'joining' }); void attempt('', false); } }}
             activeOpacity={0.85}
+            accessibilityRole="button"
             accessibilityLabel="Join the live"
+            accessibilityState={{ disabled: !ready, busy }}
           >
             {busy
               ? <ActivityIndicator color="#fff" />
               : <Text style={s.ctaText}>Join</Text>}
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={leave} activeOpacity={0.7} accessibilityRole="button" hitSlop={10}>
+            <Text style={s.cancel}>Cancel</Text>
           </TouchableOpacity>
         </View>
       </KeyboardSafe>
@@ -190,9 +205,9 @@ export default function LiveJoinScreen() {
   if (phase.kind === 'joining') {
     return (
       <View style={s.container}>
+        <AuroraBackground />
         <Stack.Screen options={{ headerShown: false }} />
-        <StatusBar barStyle="light-content" />
-        <View style={s.body}>
+        <View style={s.body} accessibilityLiveRegion="polite">
           <ActivityIndicator size="large" color={colors.primary} />
           <Text style={s.title}>Joining live…</Text>
           <Text style={s.sub}>Checking your invitation</Text>
@@ -204,17 +219,30 @@ export default function LiveJoinScreen() {
   if (phase.kind === 'error') {
     return (
       <View style={s.container}>
+        <AuroraBackground />
         <Stack.Screen options={{ headerShown: false }} />
-        <StatusBar barStyle="light-content" />
         <View style={s.body}>
-          <Ionicons name="close-circle-outline" size={56} color={colors.danger} />
-          <Text style={s.title}>This invitation isn’t valid</Text>
-          <Text style={s.sub}>
-            The link may have been revoked or expired, or the broadcast has ended.
-            Ask the host for a new link.
+          <Ionicons name={phase.offline ? 'cloud-offline-outline' : 'close-circle-outline'} size={56} color={colors.danger} />
+          <Text style={s.title} accessibilityRole="header">
+            {phase.offline ? 'You’re offline' : 'This invitation isn’t valid'}
           </Text>
-          <TouchableOpacity style={s.cta} onPress={() => router.replace('/(tabs)/chats' as any)} activeOpacity={0.85}>
-            <Text style={s.ctaText}>Done</Text>
+          <Text style={s.sub}>
+            {phase.offline
+              ? 'The invitation could not be checked. Connect to the internet and try again.'
+              : 'The link may have been revoked or expired, or the broadcast has ended. Ask the host for a new link.'}
+          </Text>
+          {/* Retry for either case: a redeem is idempotent, and "invalid" can
+              also be a server or network fault the client cannot tell apart. */}
+          <TouchableOpacity
+            style={s.cta}
+            onPress={() => { setPhase({ kind: 'joining' }); void attempt(passcode, false); }}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+          >
+            <Text style={s.ctaText}>Try again</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={leave} activeOpacity={0.7} accessibilityRole="button" hitSlop={10}>
+            <Text style={s.cancel}>Done</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -228,8 +256,8 @@ export default function LiveJoinScreen() {
       style={s.container}
 
 >
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="light-content" />
       <View style={s.body}>
         <Ionicons name="lock-closed-outline" size={48} color={colors.primary} />
         <Text style={s.title}>This live is protected</Text>
@@ -241,6 +269,7 @@ export default function LiveJoinScreen() {
           value={name}
           onChangeText={setName}
           placeholder="Name viewers will see"
+          accessibilityLabel="Your name, optional"
           placeholderTextColor={colors.textDim}
           maxLength={64}
           autoCapitalize="words"
@@ -253,6 +282,7 @@ export default function LiveJoinScreen() {
           value={passcode}
           onChangeText={setPasscode}
           placeholder="Passcode"
+          accessibilityLabel="Passcode"
           placeholderTextColor={colors.textDim}
           maxLength={64}
           autoCapitalize="none"
@@ -261,20 +291,23 @@ export default function LiveJoinScreen() {
           returnKeyType="go"
           onSubmitEditing={() => { if (canSubmit) void attempt(passcode, true); }}
         />
-        {phase.wrong && <Text style={s.bad}>That passcode is not correct.</Text>}
+        {phase.wrong && <Text style={s.bad} accessibilityRole="alert">That passcode is not correct.</Text>}
 
         <TouchableOpacity
           style={[s.cta, !canSubmit && s.ctaOff]}
           onPress={() => { if (canSubmit) void attempt(passcode, true); }}
           activeOpacity={0.85}
           disabled={!canSubmit}
+          accessibilityRole="button"
+          accessibilityLabel="Join live"
+          accessibilityState={{ disabled: !canSubmit, busy }}
         >
           {busy
             ? <ActivityIndicator color="#fff" />
             : <Text style={s.ctaText}>Join live</Text>}
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={() => router.replace('/(tabs)/chats' as any)} activeOpacity={0.7}>
+        <TouchableOpacity onPress={leave} activeOpacity={0.7} accessibilityRole="button" hitSlop={10}>
           <Text style={s.cancel}>Cancel</Text>
         </TouchableOpacity>
       </View>
@@ -301,7 +334,7 @@ function useS(colors: Palette) {
       paddingHorizontal: 32, marginTop: 24, minWidth: 200, alignItems: 'center',
     },
     ctaOff: { opacity: 0.5 },
-    ctaText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+    ctaText: { color: '#fff', fontSize: 16, fontWeight: '700' }, // on the primary fill in both themes
     cancel: { color: colors.textDim, fontSize: 14, marginTop: 18 },
   }), [colors]);
 }

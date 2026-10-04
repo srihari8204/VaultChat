@@ -14,7 +14,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { KeyboardSafe } from '../components/ui';
 import {
   View, StyleSheet, TouchableOpacity, ActivityIndicator, Alert,
-  ScrollView, TextInput, Platform,
+  ScrollView, TextInput,
   useWindowDimensions, Share, Animated, PanResponder, BackHandler,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -39,6 +39,7 @@ import {
   type Broadcast, type BroadcastMessage, type BroadcastPoll,
 } from '../lib/broadcast';
 import { getBroadcastToken } from '../lib/call/sfuToken';
+import { forgetHostPasscode, hostPasscodeFor } from '../lib/golive/hostPasscodeMemo';
 // lib/golive/room.ts — Go Live's OWN copy of the SFU join path.
 //
 // It began as lib/call/sfuRoom.ts and now lives under lib/golive/ so that
@@ -53,12 +54,14 @@ import { getBroadcastToken } from '../lib/call/sfuToken';
 type SfuSession = Awaited<ReturnType<typeof import('../lib/golive/room').joinSfuRoom>>;
 
 export default function LiveViewScreen() {
-  // `pc` is the host's own copy of the passcode, carried from app/live.tsx. The
-  // server keeps only a bcrypt hash, so this param is the only readable copy
-  // and it exists purely so the invite sheet can show the host what to share.
-  const { id, host, cam, mic, invite, pc } = useLocalSearchParams<{
-    id: string; host?: string; cam?: string; mic?: string; invite?: string; pc?: string;
+  const { id, host, cam, mic, invite } = useLocalSearchParams<{
+    id: string; host?: string; cam?: string; mic?: string; invite?: string;
   }>();
+  // The host's own copy of the passcode, handed over in memory by app/live.tsx
+  // (lib/golive/hostPasscodeMemo.ts), never as a route param. The server keeps
+  // only a bcrypt hash, so this is the only readable copy, and it exists purely
+  // so the invite sheet can show the host what to share.
+  const [pc] = useState(() => hostPasscodeFor(String(id ?? '')));
   const isHost = host === '1';
   /** Chosen on the setup screen, applied at join rather than after going on air. */
   const startCam = cam !== '0';
@@ -636,14 +639,21 @@ export default function LiveViewScreen() {
     return () => { alive = false; clearInterval(timer); void unwatchBroadcast(String(id)); };
   }, [id, waiting, failed]);
 
+  const [sendFailed, setSendFailed] = useState(false);
   const send = useCallback(async () => {
     const text = draft.trim();
     if (!text) return;
     setDraft('');
+    setSendFailed(false);
     const sent = await sendBroadcastChat(String(id), text);
     if (sent) {
       lastId.current = Math.max(lastId.current, sent.id);
       setMessages(prev => [...prev, sent].slice(-200));
+    } else {
+      // Put the message back rather than lose it — unless something new has
+      // already been typed, which must not be overwritten.
+      setDraft(cur => (cur === '' ? text : cur));
+      setSendFailed(true);
     }
   }, [draft, id]);
 
@@ -682,9 +692,9 @@ export default function LiveViewScreen() {
       return;
     }
     const created = await createPoll(String(id), d.q, opts);
-    setPollDraft(null);
-    if (created) setPolls(prev => [created, ...prev]);
-    else Alert.alert('Poll', 'Could not start the poll.');
+    // The draft stays open on failure so the host can retry without retyping.
+    if (created) { setPollDraft(null); setPolls(prev => [created, ...prev]); }
+    else Alert.alert('Poll', 'Could not start the poll. Your draft is still here.');
   }, [id, pollDraft]);
 
   // Set once the screen is on its way out, so a second tap on "Go back" / "End"
@@ -705,21 +715,12 @@ export default function LiveViewScreen() {
     //
     // Awaited before navigating, so the room is genuinely gone before the next
     // broadcast can start. The unmount cleanup still runs and is idempotent.
-    const s = hostSession.current;
-    hostSession.current = null;
-    const ls = localStream.current;
-    localStream.current = null;
-    try { ls?.getTracks?.().forEach((t: any) => t.stop()); } catch {}
-    if (s) {
-      try {
-        const { stopAllHostMedia } = await import('../lib/golive/hostMedia');
-        await stopAllHostMedia(s.room);
-      } catch { /* leaving regardless */ }
-      try { await s.leave(); } catch {}
-    }
+    // One teardown for every exit: releaseOwnedMedia (above).
+    await releaseOwnedMedia();
     await endBroadcast(String(id), b?.viewerCount ?? 0, b?.peakViewers ?? 0);
+    forgetHostPasscode(String(id));
     if (router.canGoBack()) router.back(); else router.replace('/live' as any);
-  }, [id, b, router]);
+  }, [id, b, router, releaseOwnedMedia]);
 
   /**
    * A viewer leaving. Never ends the broadcast — that is the host's alone.
@@ -736,18 +737,9 @@ export default function LiveViewScreen() {
   const leaveAsViewer = useCallback(async () => {
     if (leaving.current) return;
     leaving.current = true;
-    const s = hostSession.current;
-    hostSession.current = null;
-    mediaLib.current = null;
-    if (s) {
-      try {
-        const { stopAllHostMedia } = await import('../lib/golive/hostMedia');
-        await stopAllHostMedia(s.room);
-      } catch { /* leaving regardless */ }
-      try { await s.leave(); } catch {}
-    }
+    await releaseOwnedMedia();
     router.replace('/live' as any);
-  }, [router]);
+  }, [router, releaseOwnedMedia]);
 
   const confirmStop = () => Alert.alert(
     'End broadcast?',
@@ -839,13 +831,21 @@ export default function LiveViewScreen() {
   const [chrome, setChrome] = useState(true);
   const chromeShown = chrome || !stageReady;
   const [chatOpen, setChatOpen] = useState(false);
-  const [unread, setUnread] = useState(0);
-  const seenChat = useRef(0);
-
+  /**
+   * Unread is counted by MESSAGE ID, not list length. The list is capped at 200,
+   * so once it is full its length stops growing and a length-based count read
+   * zero for every new message after that.
+   */
+  const [seenChatId, setSeenChatId] = useState(0);
+  const newestChatId = messages.length ? messages[messages.length - 1].id : 0;
   useEffect(() => {
-    if (chatOpen) { seenChat.current = messages.length; setUnread(0); }
-    else setUnread(Math.max(0, messages.length - seenChat.current));
-  }, [messages, chatOpen]);
+    if (chatOpen) setSeenChatId(prev => Math.max(prev, newestChatId));
+  }, [chatOpen, newestChatId]);
+  const unread = useMemo(
+    () => (chatOpen ? 0 : messages.filter(m => m.id > seenChatId).length),
+    [chatOpen, messages, seenChatId],
+  );
+  const chatScroll = useRef<ScrollView>(null);
 
   // Anything the user has deliberately opened pins the chrome open: retiring
   // the bar out from under a half-typed message is the kind of "helpful" that
@@ -1008,7 +1008,9 @@ export default function LiveViewScreen() {
   const zoomPan = useRef(new Animated.ValueXY()).current;
   /** What the gesture has settled on. The Animated values follow the fingers. */
   const zoomAt = useRef({ scale: 1, x: 0, y: 0 });
-  const touch = useRef({ pinch: false, d0: 0, base: 1, x0: 0, y0: 0, moved: false });
+  // `scale`, `px`, `py` mirror what the gesture last set on the Animated values,
+  // so release reads them here instead of through the private __getValue.
+  const touch = useRef({ pinch: false, d0: 0, base: 1, x0: 0, y0: 0, moved: false, scale: 1, px: 0, py: 0 });
 
   // A new stream is a new picture: keeping a 3x zoom across it leaves the viewer
   // staring at a magnified corner of something they have not seen whole yet.
@@ -1021,6 +1023,9 @@ export default function LiveViewScreen() {
   const stageTouchStart = useCallback((e: any) => {
     const t = e.nativeEvent.touches;
     touch.current.moved = false;
+    touch.current.scale = zoomAt.current.scale;
+    touch.current.px = zoomAt.current.x;
+    touch.current.py = zoomAt.current.y;
     if (t.length === 2) {
       touch.current.pinch = true;
       touch.current.d0 = Math.hypot(t[1].pageX - t[0].pageX, t[1].pageY - t[0].pageY);
@@ -1039,7 +1044,8 @@ export default function LiveViewScreen() {
         touch.current.moved = true;
         // Tracked UNCLAMPED so the pinch feels continuous under the fingers;
         // clampZoom is what it settles to on release.
-        zoom.setValue(Math.min((d / touch.current.d0) * touch.current.base, ZOOM_MAX));
+        touch.current.scale = Math.min((d / touch.current.d0) * touch.current.base, ZOOM_MAX);
+        zoom.setValue(touch.current.scale);
       }
       return;
     }
@@ -1053,6 +1059,8 @@ export default function LiveViewScreen() {
         zoomAt.current.x + dx, zoomAt.current.y + dy,
         zoomAt.current.scale, win.width, win.height,
       );
+      touch.current.px = p.x;
+      touch.current.py = p.y;
       zoomPan.setValue(p);
     }
   }, [zoom, zoomPan, win.width, win.height]);
@@ -1060,8 +1068,7 @@ export default function LiveViewScreen() {
   const stageTouchEnd = useCallback(() => {
     if (touch.current.pinch) {
       touch.current.pinch = false;
-      const raw = (zoom as any).__getValue?.() ?? 1;
-      const scale = clampZoom(raw);
+      const scale = clampZoom(touch.current.scale);
       // The pan has to come back inside the SMALLER slack of the new scale, or
       // zooming out strands the picture off-centre against its own black edge.
       const p = clampZoomPan(zoomAt.current.x, zoomAt.current.y, scale, win.width, win.height);
@@ -1073,11 +1080,7 @@ export default function LiveViewScreen() {
     if (zoomAt.current.scale > 1) {
       zoomAt.current = {
         ...zoomAt.current,
-        ...clampZoomPan(
-          (zoomPan.x as any).__getValue?.() ?? 0,
-          (zoomPan.y as any).__getValue?.() ?? 0,
-          zoomAt.current.scale, win.width, win.height,
-        ),
+        ...clampZoomPan(touch.current.px, touch.current.py, zoomAt.current.scale, win.width, win.height),
       };
     }
     // A touch that never travelled is a tap, and the tap on this layer is what
@@ -1404,6 +1407,13 @@ export default function LiveViewScreen() {
       {stageReady && (
         <View
           style={StyleSheet.absoluteFill}
+          // A screen reader cannot double-tap a raw touch layer, so the layer
+          // is also a button whose activation toggles the controls.
+          accessible
+          accessibilityRole="button"
+          accessibilityLabel={chromeShown ? 'Hide controls' : 'Show controls'}
+          accessibilityActions={[{ name: 'activate' }]}
+          onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'activate') setChrome(v => !v); }}
           onStartShouldSetResponder={() => true}
           onMoveShouldSetResponder={() => true}
           onTouchStart={stageTouchStart}
@@ -1439,6 +1449,21 @@ export default function LiveViewScreen() {
             zOrder={1}
           />
         </Animated.View>
+      )}
+
+      {/* NOT ONLY A GESTURE. With the chrome retired, a small button in the
+          corner brings it back for anyone who cannot (or does not know to)
+          double-tap — including the exit, which must always be reachable. */}
+      {!ended && !chromeShown && (
+        <TouchableOpacity
+          onPress={() => setChrome(true)}
+          style={[S.icon, S.showChrome, { top: insets.top + SPACING.sm, right: insets.right + SPACING.lg }]}
+          accessibilityRole="button"
+          accessibilityLabel="Show controls"
+          hitSlop={8}
+        >
+          <Ionicons name="ellipsis-horizontal" size={18} color="#fff" />
+        </TouchableOpacity>
       )}
 
       {/* ── CHROME ──────────────────────────────────────────────────
@@ -1498,6 +1523,7 @@ export default function LiveViewScreen() {
               <TouchableOpacity
                 onPress={() => setFillPref(!fill)}
                 style={[S.icon, fill && S.iconOn]}
+                accessibilityRole="button"
                 accessibilityLabel={fill ? 'Fit the whole picture on screen' : 'Fill the screen'}
                 hitSlop={8}
               >
@@ -1511,6 +1537,7 @@ export default function LiveViewScreen() {
               <TouchableOpacity
                 onPress={() => setPipOn(v => !v)}
                 style={[S.icon, !pipOn && S.iconOn]}
+                accessibilityRole="button"
                 accessibilityLabel={pipOn ? 'Hide the camera corner' : 'Show the camera corner'}
                 hitSlop={8}
               >
@@ -1522,7 +1549,9 @@ export default function LiveViewScreen() {
               <TouchableOpacity
                 onPress={openChat}
                 style={[S.icon, chatOpen && S.iconOn]}
-                accessibilityLabel="Chat"
+                accessibilityRole="button"
+                accessibilityLabel={!chatOpen && unread > 0 ? `Chat, ${unread} unread` : 'Chat'}
+                accessibilityState={{ expanded: chatOpen }}
                 hitSlop={8}
               >
                 <Ionicons name="chatbubble-ellipses-outline" size={18} color="#fff" />
@@ -1541,6 +1570,7 @@ export default function LiveViewScreen() {
               <TouchableOpacity
                 onPress={() => setPollDraft({ q: '', opts: ['', ''] })}
                 style={S.icon}
+                accessibilityRole="button"
                 accessibilityLabel="Create a poll"
                 hitSlop={8}
               >
@@ -1552,6 +1582,7 @@ export default function LiveViewScreen() {
               <TouchableOpacity
                 onPress={() => (inviteUrl ? setInviteOpen(true) : makeInvite())}
                 style={S.icon}
+                accessibilityRole="button"
                 accessibilityLabel="Invite people"
                 hitSlop={8}
               >
@@ -1581,6 +1612,7 @@ export default function LiveViewScreen() {
               <TouchableOpacity
                 onPress={leaveAsViewer}
                 style={[S.icon, S.iconDanger]}
+                accessibilityRole="button"
                 accessibilityLabel="Leave"
                 hitSlop={8}
               >
@@ -1634,7 +1666,17 @@ export default function LiveViewScreen() {
                       <Ionicons name="stats-chart" size={13} color="#FCD34D" />
                       <AppText style={S.pollQ} numberOfLines={2}>{pl.question}</AppText>
                       {isOwner && (
-                        <TouchableOpacity onPress={() => { void closePoll(String(id), pl.id); setPolls(prev => prev.map(x => x.id === pl.id ? { ...x, closed: true } : x)); }}>
+                        <TouchableOpacity
+                          accessibilityRole="button" accessibilityLabel="End this poll" hitSlop={10}
+                          // Ending is final for every viewer: confirm it.
+                          onPress={() => Alert.alert('End this poll?', 'Viewers can no longer vote.', [
+                            { text: 'Keep it open', style: 'cancel' },
+                            { text: 'End poll', style: 'destructive', onPress: () => {
+                              void closePoll(String(id), pl.id);
+                              setPolls(prev => prev.map(x => x.id === pl.id ? { ...x, closed: true } : x));
+                            } },
+                          ])}
+                        >
                           <AppText style={S.pollClose}>End</AppText>
                         </TouchableOpacity>
                       )}
@@ -1653,6 +1695,9 @@ export default function LiveViewScreen() {
                           onPress={() => vote(pl.id, i)}
                           style={S.pollOpt}
                           activeOpacity={0.85}
+                          accessibilityRole="radio"
+                          accessibilityLabel={answered ? `${opt}, ${pct} percent` : `Vote for ${opt}`}
+                          accessibilityState={{ checked: mine, disabled: answered || voting !== null, busy: voting === pl.id }}
                         >
                           {answered && <View style={[S.pollBar, { width: `${pct}%` }, mine && S.pollBarMine]} />}
                           <AppText style={[S.pollOptText, mine && S.pollOptMine]} numberOfLines={1}>
@@ -1676,6 +1721,7 @@ export default function LiveViewScreen() {
                     value={pollDraft.q}
                     onChangeText={t => setPollDraft(d => d && { ...d, q: t })}
                     placeholder="Ask your viewers something…"
+                    accessibilityLabel="Poll question"
                     placeholderTextColor="#94A3B8"
                     style={S.pollInput}
                     maxLength={200}
@@ -1687,6 +1733,7 @@ export default function LiveViewScreen() {
                       value={o}
                       onChangeText={t => setPollDraft(d => d && { ...d, opts: d.opts.map((x, j) => j === i ? t : x) })}
                       placeholder={`Option ${i + 1}`}
+                      accessibilityLabel={`Poll option ${i + 1}`}
                       placeholderTextColor="#64748B"
                       style={S.pollInput}
                       maxLength={100}
@@ -1694,14 +1741,14 @@ export default function LiveViewScreen() {
                   ))}
                   <View style={S.pollBtnRow}>
                     {pollDraft.opts.length < 10 && (
-                      <TouchableOpacity onPress={() => setPollDraft(d => d && { ...d, opts: [...d.opts, ''] })}>
+                      <TouchableOpacity onPress={() => setPollDraft(d => d && { ...d, opts: [...d.opts, ''] })} accessibilityRole="button" accessibilityLabel="Add an option" hitSlop={10}>
                         <AppText style={S.pollAdd}>+ Option</AppText>
                       </TouchableOpacity>
                     )}
-                    <TouchableOpacity onPress={() => setPollDraft(null)}>
+                    <TouchableOpacity onPress={() => setPollDraft(null)} accessibilityRole="button" accessibilityLabel="Cancel the poll" hitSlop={10} style={S.pollCancelBtn}>
                       <AppText style={S.pollCancel}>Cancel</AppText>
                     </TouchableOpacity>
-                    <TouchableOpacity onPress={submitPoll}>
+                    <TouchableOpacity onPress={submitPoll} accessibilityRole="button" hitSlop={10}>
                       <AppText style={S.pollGo}>Start poll</AppText>
                     </TouchableOpacity>
                   </View>
@@ -1718,7 +1765,7 @@ export default function LiveViewScreen() {
                   <View style={S.inviteHead}>
                     <Ionicons name="lock-closed" size={14} color="#FCD34D" />
                     <AppText style={S.inviteTitle}>Private live — invite people</AppText>
-                    <TouchableOpacity onPress={() => setInviteOpen(false)} accessibilityLabel="Close the invite panel" hitSlop={8}>
+                    <TouchableOpacity onPress={() => setInviteOpen(false)} accessibilityRole="button" accessibilityLabel="Close the invite panel" hitSlop={8}>
                       <Ionicons name="close" size={18} color="#94A3B8" />
                     </TouchableOpacity>
                   </View>
@@ -1742,7 +1789,7 @@ export default function LiveViewScreen() {
                         <AppText style={S.pcLabel}>Passcode</AppText>
                         <AppText style={S.pcValue} selectable>{pc}</AppText>
                       </View>
-                      <TouchableOpacity accessibilityLabel="Copy the passcode"
+                      <TouchableOpacity accessibilityRole="button" accessibilityLabel="Copy the passcode"
                         style={S.inviteBtn}
                         onPress={async () => {
                           await Clipboard.setStringAsync(pc);
@@ -1755,7 +1802,7 @@ export default function LiveViewScreen() {
                     </View>
                   )}
                   <View style={S.inviteRow}>
-                    <TouchableOpacity accessibilityLabel="Copy the invite link"
+                    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Copy the invite link"
                       style={S.inviteBtn}
                       onPress={async () => {
                         await Clipboard.setStringAsync(inviteUrl);
@@ -1765,14 +1812,14 @@ export default function LiveViewScreen() {
                       <Ionicons name="copy-outline" size={15} color="#fff" />
                       <AppText style={S.inviteBtnText}>Copy</AppText>
                     </TouchableOpacity>
-                    <TouchableOpacity accessibilityLabel="Share the invite link"
+                    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Share the invite link"
                       style={S.inviteBtn}
                       onPress={() => Share.share({ message: 'Join my private live on crazzychat\n' + inviteUrl })}
                     >
                       <Ionicons name="share-social-outline" size={15} color="#fff" />
                       <AppText style={S.inviteBtnText}>Share</AppText>
                     </TouchableOpacity>
-                    <TouchableOpacity accessibilityLabel="Make a new invite link" style={S.inviteBtn} onPress={makeInvite} disabled={inviteBusy}>
+                    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Make a new invite link" accessibilityState={{ disabled: inviteBusy, busy: inviteBusy }} style={S.inviteBtn} onPress={makeInvite} disabled={inviteBusy}>
                       <Ionicons name="refresh-outline" size={15} color="#fff" />
                       <AppText style={S.inviteBtnText}>New link</AppText>
                     </TouchableOpacity>
@@ -1810,11 +1857,14 @@ export default function LiveViewScreen() {
                 >
                   <View style={S.chatHead}>
                     <AppText style={S.chatHeadText}>Live chat</AppText>
-                    <TouchableOpacity onPress={() => setChatOpen(false)} accessibilityLabel="Close the live chat" hitSlop={10}>
+                    <TouchableOpacity onPress={() => setChatOpen(false)} accessibilityRole="button" accessibilityLabel="Close the live chat" hitSlop={10}>
                       <Ionicons name="chevron-down" size={18} color="#94A3B8" />
                     </TouchableOpacity>
                   </View>
                   <ScrollView
+                    ref={chatScroll}
+                    // New messages land at the bottom; follow them.
+                    onContentSizeChange={() => chatScroll.current?.scrollToEnd({ animated: true })}
                     // Taller in landscape, because a right-hand column has the
                     // height to spare and 28% of a short edge is three messages.
                     style={[S.chatList, { maxHeight: Math.round(win.height * (landscape ? 0.5 : 0.28)) }]}
@@ -1828,11 +1878,15 @@ export default function LiveViewScreen() {
                       </AppText>
                     ))}
                   </ScrollView>
+                  {sendFailed && (
+                    <AppText style={S.chatFailed} accessibilityRole="alert">Not sent. Your message is back in the box.</AppText>
+                  )}
                   <View style={S.chatInputRow}>
                     <TextInput
                       value={draft}
                       onChangeText={setDraft}
                       placeholder="Say something…"
+                      accessibilityLabel="Live chat message"
                       placeholderTextColor="#94A3B8"
                       style={S.chatInput}
                       maxLength={500}
@@ -1840,7 +1894,7 @@ export default function LiveViewScreen() {
                       returnKeyType="send"
                       autoFocus
                     />
-                    <TouchableOpacity onPress={send} accessibilityLabel="Send" style={S.chatSend}>
+                    <TouchableOpacity onPress={send} accessibilityRole="button" accessibilityLabel="Send" style={S.chatSend}>
                       <Ionicons name="send" size={18} color="#fff" />
                     </TouchableOpacity>
                   </View>
@@ -1893,6 +1947,8 @@ export default function LiveViewScreen() {
   );
 }
 
+// The stage is video on black in every theme, so these chrome colours are
+// fixed on purpose (the same rule as the call screens).
 const S = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#000' },
   video: { flex: 1 },
@@ -1927,6 +1983,8 @@ const S = StyleSheet.create({
     backgroundColor: 'rgba(15,23,42,0.85)',
   },
   iconOn: { backgroundColor: 'rgba(59,130,246,0.9)' },
+  /** "Show controls", parked where the top row's last icon sits. */
+  showChrome: { position: 'absolute', opacity: 0.7 },
   iconDanger: { backgroundColor: 'rgba(185,28,28,0.92)' },
   badge: {
     position: 'absolute', top: -2, right: -2, minWidth: 17, height: 17,
@@ -2015,7 +2073,8 @@ const S = StyleSheet.create({
   },
   pollBtnRow:  { flexDirection: 'row', alignItems: 'center', gap: SPACING.lg, marginTop: 4 },
   pollAdd:     { color: '#93C5FD', fontSize: 12, fontWeight: '600' },
-  pollCancel:  { color: '#94A3B8', fontSize: 12, marginLeft: 'auto' },
+  pollCancelBtn: { marginLeft: 'auto' },
+  pollCancel:  { color: '#94A3B8', fontSize: 12 },
   pollGo:      { color: '#FCD34D', fontSize: 12, fontWeight: '800' },
   // Directly under the top row, in flow: the stage is context, the stream is
   // the subject.
@@ -2039,6 +2098,7 @@ const S = StyleSheet.create({
   chatListInner: { paddingHorizontal: SPACING.md, gap: 4 },
   chatLine:      { color: '#E2E8F0', fontSize: 13, textShadowColor: 'rgba(0,0,0,0.9)', textShadowRadius: 3 },
   chatName:      { color: '#FCD34D', fontWeight: '700' },
+  chatFailed:    { color: '#FCA5A5', fontSize: 12, paddingHorizontal: SPACING.md, marginTop: 4 },
   chatInputRow:  { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm,
                    paddingHorizontal: SPACING.md, marginTop: SPACING.sm },
   chatInput:     { flex: 1, color: '#fff', backgroundColor: 'rgba(0,0,0,0.55)',

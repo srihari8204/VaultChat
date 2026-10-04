@@ -39,6 +39,8 @@ import { Sheet, type SheetAction } from '../components/ui/Sheet';
 import { CallTimer } from '../components/call/CallTimer';
 import { CallExtras } from '../components/call/CallExtras';
 import { CallEncryptionBadge, protectionFor } from '../components/call/CallEncryptionBadge';
+import { inviteAndDescribe } from '../components/call/inviteResult';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   useCallConnectedAt, useCallError, useCallFlag, useCallLocalUrl,
   useCallStatus, useCanModerate, useMyHandRaised, useParticipant,
@@ -84,6 +86,13 @@ const ParticipantTile = memo(function ParticipantTile(
       activeOpacity={onModerate ? 0.7 : 1}
       disabled={!onModerate}
       onPress={() => onModerate?.(uid, name)}
+      // A host taps a tile to moderate; for everyone else it is a picture.
+      accessibilityRole={onModerate ? 'button' : undefined}
+      accessibilityLabel={[
+        onModerate ? `Moderate ${name}` : name,
+        p?.handRaisedAt ? 'hand raised' : '',
+        p?.role === 'audience' ? 'in the audience' : '',
+      ].filter(Boolean).join(', ')}
     >
       {isVideo && url
         ? <RTCView streamURL={url} style={S.video} objectFit="cover" />
@@ -94,7 +103,7 @@ const ParticipantTile = memo(function ParticipantTile(
       {/* A raised hand has to be visible on the tile, not only in a list a host
           might not have open — the whole point is that it interrupts. */}
       {!!p?.handRaisedAt && (
-        <View style={S.handBadge}><Text style={S.handBadgeTxt}>✋</Text></View>
+        <View style={S.handBadge} accessibilityLabel="Hand raised"><Text style={S.handBadgeTxt}>✋</Text></View>
       )}
       {p?.role === 'audience' && (
         <View style={S.roleBadge}><Ionicons name="eye-outline" size={11} color="#fff" /></View>
@@ -114,6 +123,7 @@ function GroupCallEngine() {
   const { colors } = useTheme();
   const S = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { chatId, video, name, members } = useLocalSearchParams<{
     chatId: string; video?: string; name?: string; members?: string;
   }>();
@@ -151,18 +161,33 @@ function GroupCallEngine() {
   // where a mis-tap is easy.
   // Five actions: Android's Alert renders three, so 'Move to audience' and
   // 'Lower hand' were unreachable there. Sheet takes as many as we give it.
+  //
+  // setRole resolves false when the server refused (not a host any more, the
+  // session is gone, offline). That used to be dropped, so a refused demotion
+  // looked done; the sheet now says so.
+  const changeRole = useCallback(async (uid: string, name: string, role: 'cohost' | 'speaker' | 'audience') => {
+    let ok = false;
+    try { ok = await engine.setRole(uid, role); } catch { ok = false; }
+    if (!ok) setSheet({ title: name, message: 'Could not change their role. Check your connection, or whether you are still a host.', actions: [] });
+  }, []);
   const moderate = useCallback((uid: string, name: string) => {
     setSheet({
       title: name,
       message: 'Change what this person can do',
       actions: [
-        { label: 'Make co-host', icon: 'shield-outline', onPress: () => engine.setRole(uid, 'cohost') },
-        { label: 'Make speaker', icon: 'mic-outline', onPress: () => engine.setRole(uid, 'speaker') },
-        { label: 'Move to audience', icon: 'people-outline', onPress: () => engine.setRole(uid, 'audience') },
-        { label: 'Lower hand', icon: 'hand-left-outline', onPress: () => engine.lowerPeerHand(uid) },
+        { label: 'Make co-host', icon: 'shield-outline', onPress: () => { void changeRole(uid, name, 'cohost'); } },
+        { label: 'Make speaker', icon: 'mic-outline', onPress: () => { void changeRole(uid, name, 'speaker'); } },
+        // Demoting someone mid-sentence cuts their mic for everyone: confirm it.
+        { label: 'Move to audience', icon: 'people-outline', onPress: () => Alert.alert(
+          `Move ${name} to the audience?`,
+          'Their microphone and camera stop for everyone until someone makes them a speaker again.',
+          [{ text: 'Cancel', style: 'cancel' },
+           { text: 'Move', style: 'destructive', onPress: () => { void changeRole(uid, name, 'audience'); } }],
+        ) },
+        { label: 'Lower hand', icon: 'hand-left-outline', onPress: () => { void engine.lowerPeerHand(uid); } },
       ],
     });
-  }, []);
+  }, [changeRole]);
   const toggleHand = useCallback(() => engine.raiseHand(!handUp), [handUp]);
 
   // ── invite: how a call actually fills up ────────────────────────────
@@ -177,6 +202,10 @@ function GroupCallEngine() {
   // who is on the call right now, and members can be added to the group during
   // a call. Anyone already here is filtered out by the engine — ringing someone
   // whose phone is showing this call is the one obviously wrong outcome.
+  // Say what an invite tap did: zero rung (already here, call over) is not success.
+  const reportInvite = useCallback((outcome: Promise<string>) => {
+    void outcome.then(message => setSheet({ title: 'Add people', message, actions: [] }));
+  }, []);
   const invite = useCallback(async () => {
     const id = String(chatId ?? '');
     if (!id) return;
@@ -229,19 +258,22 @@ function GroupCallEngine() {
       // Group members first — they are the expected candidates — then everyone
       // else you already talk to. Both go through the same invite.
       actions: [
-        ...away.map(m => ({
-          label: m.name || m.email || m.userId.slice(0, 8),
-          icon: 'person-add-outline' as const,
-          onPress: () => { void engine.inviteToCall([m.userId]); },
-        })),
+        ...away.map(m => {
+          const label = m.name || m.email || m.userId.slice(0, 8);
+          return {
+            label,
+            icon: 'person-add-outline' as const,
+            onPress: () => { reportInvite(inviteAndDescribe(() => engine.inviteToCall([m.userId]), label)); },
+          };
+        }),
         ...guests.map(g => ({
           label: g.name,
           icon: 'person-add-outline' as const,
-          onPress: () => { void engine.inviteToCall([g.id]); },
+          onPress: () => { reportInvite(inviteAndDescribe(() => engine.inviteToCall([g.id]), g.name)); },
         })),
       ].slice(0, ADD_LIST_MAX),
     });
-  }, [chatId, peerIds, seatsLeft]);
+  }, [chatId, peerIds, seatsLeft, reportInvite]);
 
   useEffect(() => {
     engine.startGroup({
@@ -372,7 +404,10 @@ function GroupCallEngine() {
             place to also answer "and how do I add someone". Same handler, same
             capacity rule — this is a second door, not a second feature. */}
         {status === 'connected' && seatsLeft > 0 && (
-          <TouchableOpacity onPress={invite} activeOpacity={0.7} style={S.addPeoplePill}>
+          <TouchableOpacity
+            onPress={invite} activeOpacity={0.7} style={S.addPeoplePill}
+            accessibilityRole="button" accessibilityLabel={`Add people, ${tiles} of ${CALL_MAX} seats used`}
+          >
             <Ionicons name="person-add" size={13} color="#fff" />
             <Text style={S.addPeopleTxt}>Add · {tiles}/{CALL_MAX}</Text>
           </TouchableOpacity>
@@ -421,6 +456,7 @@ function GroupCallEngine() {
       {paged && (
         <View style={S.pager}>
           <TouchableOpacity accessibilityRole="button" accessibilityLabel="Previous participants"
+            accessibilityState={{ disabled: page === 0 }}
             style={S.pagerBtn} disabled={page === 0}
             onPress={() => setPage(p => Math.max(0, p - 1))}
           >
@@ -430,6 +466,7 @@ function GroupCallEngine() {
             {page === 0 ? 'Speaking' : `Page ${page + 1} of ${pages}`}
           </Text>
           <TouchableOpacity accessibilityRole="button" accessibilityLabel="Next participants"
+            accessibilityState={{ disabled: page >= pages - 1 }}
             style={S.pagerBtn} disabled={page >= pages - 1}
             onPress={() => setPage(p => Math.min(pages - 1, p + 1))}
           >
@@ -457,7 +494,9 @@ function GroupCallEngine() {
       {status === 'connected' && <CallExtras bottom={controlsH + 12} />}
 
       <View
-        style={S.controls}
+        // Clears the gesture bar / home indicator; 36 stays the floor on
+        // devices without one.
+        style={[S.controls, { paddingBottom: Math.max(36, insets.bottom + 16) }]}
         onLayout={(e) => {
           const h = Math.round(e.nativeEvent.layout.height);
           if (h && h !== controlsH) setControlsH(h);
@@ -755,9 +794,9 @@ function GroupCallLegacy() {
       </ScrollView>
 
       <View style={S.controls}>
-        <CtrlBtn icon={muted ? 'mic-off' : 'mic'} active={muted} onPress={toggleMute} colors={colors} />
-        {isVideo && <CtrlBtn icon={camOff ? 'videocam-off' : 'videocam'} active={camOff} onPress={toggleCam} colors={colors} />}
-        <CtrlBtn icon="call" danger onPress={hangUp} colors={colors} />
+        <CtrlBtn icon={muted ? 'mic-off' : 'mic'} active={muted} onPress={toggleMute} colors={colors} label={muted ? 'Unmute' : 'Mute'} />
+        {isVideo && <CtrlBtn icon={camOff ? 'videocam-off' : 'videocam'} active={camOff} onPress={toggleCam} colors={colors} label={camOff ? 'Turn camera on' : 'Turn camera off'} />}
+        <CtrlBtn icon="call" danger onPress={hangUp} colors={colors} label="End call" />
       </View>
     </View>
   );
@@ -771,19 +810,29 @@ function GroupCallLegacy() {
 // mic shows mic-off and the useful thing to say is "Unmute". accessibilityState
 // carries the toggle position alongside it, so the current state is available
 // without being guessed from the verb (2026-09-17).
-function CtrlBtn({ icon, onPress, active, danger, colors, label }: any) {
+function CtrlBtn({ icon, onPress, active, danger, colors, label }: {
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+  onPress: () => void;
+  active?: boolean;
+  danger?: boolean;
+  colors: Palette;
+  label?: string;
+}) {
   return (
     <TouchableOpacity
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityState={{ selected: !!active }}
+      // Only toggles carry a state; End and Switch camera are plain actions.
+      accessibilityState={active === undefined ? undefined : { selected: active }}
       style={{ width: 60, height: 60, borderRadius: 30, alignItems: 'center', justifyContent: 'center', backgroundColor: danger ? colors.danger : active ? colors.primary : 'rgba(255,255,255,0.12)' }}>
       <Ionicons name={icon} size={26} color="#fff" />
     </TouchableOpacity>
   );
 }
 
+// Call chrome is always dark whatever the app theme (video surfaces sit on it),
+// so the greys and whites here are deliberate; only the accent follows the theme.
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen:    { flex: 1, backgroundColor: '#0B0B10' },
   topBar:    { paddingTop: HEADER_TOP, paddingHorizontal: 20, paddingBottom: 8, alignItems: 'center' },

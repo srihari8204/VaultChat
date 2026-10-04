@@ -30,7 +30,8 @@ import { addCallLog } from '../lib/callLog';
 import { CallTimer, elapsedSeconds } from '../components/call/CallTimer';
 import { CallControlButton } from '../components/call/CallControlButton';
 import { CallExtras } from '../components/call/CallExtras';
-import { CallEncryptionBadge } from '../components/call/CallEncryptionBadge';
+import { CallEncryptionBadge, protectionFor } from '../components/call/CallEncryptionBadge';
+import { inviteAndDescribe } from '../components/call/inviteResult';
 import { CALL_ENGINE_V2 } from '../constants/flags';
 import * as engine from '../lib/call/engine';
 import { setRingingPeer, setRingScreenPeer } from '../lib/ringTracker';
@@ -104,13 +105,6 @@ interface FilterDef {
   matrix: number[] | null;   // 20 floats (4×5); null = identity (no-op)
   swatch: string;            // chip preview color, derived from matrix
 }
-
-const IDENTITY: number[] = [
-  1, 0, 0, 0, 0,
-  0, 1, 0, 0, 0,
-  0, 0, 1, 0, 0,
-  0, 0, 0, 1, 0,
-];
 
 const FILTERS: FilterDef[] = [
   { id: 'none', label: 'Off',  matrix: null, swatch: 'transparent' },
@@ -415,7 +409,11 @@ function VideoCallEngine() {
         actions: people.slice(0, ADD_LIST_MAX).map(pp => ({
           label: pp.name,
           icon: 'person-add-outline' as const,
-          onPress: () => { void engine.inviteToCall([pp.id]); },
+          // Say what the tap did — see voicecall.tsx.
+          onPress: () => {
+            void inviteAndDescribe(() => engine.inviteToCall([pp.id]), pp.name)
+              .then(message => setAddSheet({ title: 'Add to call', message, actions: [] }));
+          },
         })),
       });
     } catch {
@@ -450,8 +448,21 @@ function VideoCallEngine() {
           ? <CallTimer style={S.status} startedAt={connectedAt} />
           : <Text style={S.status}>{statusText}</Text>}
         {error && <Text style={S.errorTxt}>{error}</Text>}
-        {/* D-1: 1:1 video is peer-to-peer. */}
-        <CallEncryptionBadge protection="transport" />
+        {/* 1:1 rides the same SFU room as a group call, frames sealed before
+            publish and publishing fail-closed (lib/call/room.ts). null = no
+            signalling cipher of ours on this path; see protectionFor. */}
+        <CallEncryptionBadge protection={protectionFor(1, null)} />
+        {/* In the top column, so it flows below the name, status, error and
+            badge on any inset — a fixed top:110 sat under them on a tall notch. */}
+        {(sharing || peerSharing) && (
+          <View style={S.shareBannerInline}>
+            <Ionicons name="phone-portrait" size={14} color="#fff" />
+            <Text style={S.shareBannerTxt}>
+              {sharing ? "You're sharing your screen"
+                : `${peerName || 'They'} ${peerName ? 'is' : 'are'} sharing their screen`}
+            </Text>
+          </View>
+        )}
       </View>
 
       {/* ADD PEOPLE, TOP-LEFT. It sits outside topBar deliberately: topBar is
@@ -462,20 +473,11 @@ function VideoCallEngine() {
         onPress={addPerson}
         style={[S.addTopBtn, { top: insets.top + 8 }]}
         hitSlop={10}
+        accessibilityRole="button"
         accessibilityLabel="Add people to this call"
       >
         <Ionicons name="person-add" size={20} color="#fff" />
       </TouchableOpacity>
-
-      {(sharing || peerSharing) && (
-        <View style={S.shareBanner} pointerEvents="none">
-          <Ionicons name="phone-portrait" size={14} color="#fff" />
-          <Text style={S.shareBannerTxt}>
-            {sharing ? "You're sharing your screen"
-              : `${peerName || 'They'} ${peerName ? 'is' : 'are'} sharing their screen`}
-          </Text>
-        </View>
-      )}
 
       {localUrl && (!cameraOff || sharing) && (
         <View style={[S.localWrap, { top: insets.top + 8 }]}>
@@ -488,9 +490,18 @@ function VideoCallEngine() {
 
       {showFilters && (
         <View style={[S.filterStrip, { bottom: barTop + 8 }]}>
+          {/* Honest about what this is: a tint over YOUR preview. The far side
+              receives the untouched camera (see the matrices note above). */}
+          <Text style={S.filterNote}>Tints your preview only. The other person sees your normal camera.</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={S.filterRow}>
             {FILTERS.map(opt => (
-              <TouchableOpacity key={opt.id} style={[S.filterChip, filter === opt.id && S.filterChipActive]} onPress={() => setFilter(opt.id)} activeOpacity={0.8}>
+              <TouchableOpacity
+                key={opt.id} style={[S.filterChip, filter === opt.id && S.filterChipActive]}
+                onPress={() => setFilter(opt.id)} activeOpacity={0.8}
+                accessibilityRole="radio"
+                accessibilityLabel={opt.id === 'none' ? 'No tint' : `${opt.label} tint`}
+                accessibilityState={{ checked: filter === opt.id }}
+              >
                 <View style={[S.filterSwatch,
                   opt.matrix ? { backgroundColor: opt.swatch } : { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.4)' },
                   filter === opt.id && { borderColor: '#FFFFFF' }]} />
@@ -520,7 +531,7 @@ function VideoCallEngine() {
         <CallControlButton variant="video" icon={muted ? 'mic-off' : 'mic'} label={muted ? 'Unmute' : 'Mute'} active={muted} onPress={engine.toggleMute} />
         <CallControlButton variant="video" icon={cameraOff ? 'videocam-off' : 'videocam'} label={cameraOff ? 'Camera' : 'Off'} a11yLabel={cameraOff ? 'Turn camera on' : 'Turn camera off'} active={cameraOff} onPress={engine.toggleCamera} />
         {sharing
-          ? <CallControlButton variant="video" icon="stop-circle" label="Stop" active onPress={toggleScreenShare} />
+          ? <CallControlButton variant="video" icon="stop-circle" label="Stop" a11yLabel="Stop sharing your screen" onPress={toggleScreenShare} />
           : <CallControlButton variant="video" icon="camera-reverse" label="Flip" onPress={engine.flipCamera} />}
         {Platform.OS === 'android' && !sharing && (
           <CallControlButton variant="video" icon="phone-portrait" label="Share" onPress={toggleScreenShare} />
@@ -535,7 +546,8 @@ function VideoCallEngine() {
         <CallControlButton
           variant="video"
           icon="sparkles"
-          label={filter === 'none' ? 'Beauty' : f.label}
+          label={filter === 'none' ? 'Tint' : f.label}
+          a11yLabel={showFilters ? 'Hide preview tints' : 'Preview tints, only you see them'}
           active={showFilters || filter !== 'none'}
           onPress={toggleFilters}
         />
@@ -1098,6 +1110,7 @@ function makeStyles() { return StyleSheet.create({
   addTopBtn:  { position: 'absolute', left: 16, width: 40, height: 40, borderRadius: 20,
                 alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.16)' },
   shareBanner:{ position: 'absolute', top: 110, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(157,111,208,0.92)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
+  shareBannerInline: { marginTop: 6, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(157,111,208,0.92)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
   shareBannerTxt: { color: '#fff', fontSize: 12, fontWeight: '700' },
   name:       { color: CALL.text, fontSize: 22, fontWeight: '700', ...CALL_TEXT_SHADOW },
   status:     { color: CALL.textDim, fontSize: 14, ...CALL_TEXT_SHADOW },
@@ -1113,6 +1126,7 @@ function makeStyles() { return StyleSheet.create({
   filterSwatch:    { width: 38, height: 38, borderRadius: 19, borderWidth: 2, borderColor: 'transparent' },
   filterLabel:     { color: 'rgba(255,255,255,0.65)', fontSize: 11, fontWeight: '600' },
   filterLabelActive:{ color: '#FFFFFF' },
+  filterNote:      { color: 'rgba(255,255,255,0.7)', fontSize: 12, paddingHorizontal: 16, paddingBottom: 8 },
 
   // flexWrap → the 7 controls fold onto a second centered row on narrow phones
   // instead of overflowing off-screen.

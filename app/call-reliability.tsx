@@ -10,13 +10,17 @@ import { useRouter, Stack, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  requestIgnoreBatteryOptimizations, openAutoStartSettings, oemInstructions, type OemStep,
+  requestIgnoreBatteryOptimizations, openAutoStartSettings, oemInstructions, isIgnoringBatteryOptimizations,
+  type OemStep,
 } from '../lib/batteryOptimization';
 import { getLowDataMode, setLowDataMode } from '../lib/callPrefs';
 import { canUseFullScreenIntent, openFullScreenIntentSettings } from '../lib/CallService';
 import { AuroraBackground } from '../components/ui';
 
+// The OEM auto-start page cannot be read back, so "I've done this" is the
+// user's word for it — kept across visits so they are not asked every time.
 const DONE_KEY = 'vc_call_reliability_done';
 
 export default function CallReliabilityScreen() {
@@ -27,9 +31,18 @@ export default function CallReliabilityScreen() {
   const [battOk, setBattOk] = useState(false);
   const [autoOk, setAutoOk] = useState(false);
   const [lowData, setLowData] = useState(false);
+  const [lowDataFailed, setLowDataFailed] = useState(false);
+  const [oemFailed, setOemFailed] = useState(false);
   useEffect(() => { getLowDataMode().then(setLowData).catch(() => {}); }, []);
 
-  useEffect(() => { oemInstructions().then(setOem); }, []);
+  useEffect(() => {
+    oemInstructions().then(setOem).catch(() => setOemFailed(true));
+    AsyncStorage.getItem(DONE_KEY).then(v => setAutoOk(v === '1')).catch(() => {});
+  }, []);
+  const markAutoStart = (done: boolean) => {
+    setAutoOk(done);
+    AsyncStorage.setItem(DONE_KEY, done ? '1' : '0').catch(() => {});
+  };
 
   // Android 14 turned USE_FULL_SCREEN_INTENT into a user-granted permission for
   // anything that is not the default dialer. Declaring it in the manifest is no
@@ -40,24 +53,32 @@ export default function CallReliabilityScreen() {
   // Re-checked on focus, not just on mount: granting it happens in Settings, so
   // the user comes BACK to this screen having changed it, and a mount-only check
   // would keep telling them to do something they had already done.
+  //
+  // The battery exemption is READ BACK the same way. This used to flip to "done"
+  // the moment the system dialog returned, whether or not the user allowed it.
+  // isIgnoringBatteryOptimizations reports true when it cannot tell (iOS, no
+  // native module), which here only means no warning is shown.
   const [fsiOk, setFsiOk] = useState(true);
-  const refreshFsi = () => { canUseFullScreenIntent().then(setFsiOk).catch(() => {}); };
-  useEffect(refreshFsi, []);
-  useFocusEffect(useCallback(() => { refreshFsi(); }, []));
+  const refresh = () => {
+    canUseFullScreenIntent().then(setFsiOk).catch(() => {});
+    isIgnoringBatteryOptimizations().then(setBattOk).catch(() => {});
+  };
+  useFocusEffect(useCallback(() => { refresh(); }, []));
 
   return (
     <View style={S.screen}>
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <View style={S.header}>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={8} style={S.hBtn}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
-        <Text style={S.title}>Call reliability</Text>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => (router.canGoBack() ? router.back() : router.replace('/settings' as any))} hitSlop={8} style={S.hBtn}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
+        <Text style={S.title} accessibilityRole="header">Call reliability</Text>
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
         <Text style={S.intro}>
-          To make sure calls ring even when crazzychat is closed, allow it to run in the background. This is required on most
-          Android phones.
+          {Platform.OS === 'android'
+            ? 'To make sure calls ring even when crazzychat is closed, allow it to run in the background. This is required on most Android phones.'
+            : 'iPhone rings for calls through the system, so there is nothing to set up here. Low data mode below still applies.'}
         </Text>
 
         {/* Step 0 — full-screen intent (Android 14+). Shown ONLY when it is
@@ -73,26 +94,40 @@ export default function CallReliabilityScreen() {
               Without this, an incoming call shows a small banner instead of taking over the
               screen — easy to miss when the phone is locked.
             </Text>
-            <TouchableOpacity style={S.btn} onPress={() => { openFullScreenIntentSettings(); }}>
+            <TouchableOpacity style={S.btn} onPress={() => { openFullScreenIntentSettings(); }} accessibilityRole="button" accessibilityLabel="Open full-screen call setting">
               <Text style={S.btnTxt}>Open setting</Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* Step 1 — battery optimization */}
+        {/* Step 1 — battery optimization. Android only: the request is a no-op
+            on iOS (lib/batteryOptimization.ts). */}
+        {Platform.OS === 'android' && (
         <View style={S.card}>
           <View style={S.cardHead}>
             <Ionicons name={battOk ? 'checkmark-circle' : 'battery-charging-outline'} size={22} color={battOk ? colors.online : colors.text} />
             <Text style={S.cardTitle}>1. Ignore battery optimization</Text>
           </View>
-          <Text style={S.cardBody}>Lets crazzychat receive a call while the app is closed or the screen is off.</Text>
-          <TouchableOpacity style={S.btn} onPress={async () => { await requestIgnoreBatteryOptimizations(); setBattOk(true); }}>
-            <Text style={S.btnTxt}>Allow</Text>
+          <Text style={S.cardBody}>
+            {battOk ? 'Done — crazzychat can receive a call while closed or with the screen off.'
+              : 'Lets crazzychat receive a call while the app is closed or the screen is off.'}
+          </Text>
+          <TouchableOpacity
+            style={S.btn}
+            onPress={async () => { await requestIgnoreBatteryOptimizations(); refresh(); }}
+            accessibilityRole="button" accessibilityLabel="Allow crazzychat to ignore battery optimization"
+          >
+            <Text style={S.btnTxt}>{battOk ? 'Open again' : 'Allow'}</Text>
           </TouchableOpacity>
         </View>
+        )}
+
+        {Platform.OS === 'android' && oemFailed && (
+          <Text style={S.cardBody}>Could not work out this phone&apos;s maker, so the auto-start steps are not shown. Look for &quot;Auto-start&quot; or &quot;Background activity&quot; in your phone&apos;s app settings.</Text>
+        )}
 
         {/* Step 2 — OEM auto-start */}
-        {oem && (
+        {Platform.OS === 'android' && oem && (
           <View style={S.card}>
             <View style={S.cardHead}>
               <Ionicons name={autoOk ? 'checkmark-circle' : 'rocket-outline'} size={22} color={autoOk ? colors.online : colors.text} />
@@ -104,11 +139,15 @@ export default function CallReliabilityScreen() {
                 <Text style={S.stepTxt}>{s}</Text>
               </View>
             ))}
-            <TouchableOpacity style={S.btn} onPress={async () => { await openAutoStartSettings(); }}>
+            <TouchableOpacity style={S.btn} onPress={async () => { await openAutoStartSettings(); }} accessibilityRole="button" accessibilityLabel="Open auto-start settings">
               <Text style={S.btnTxt}>Open settings</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[S.btn, S.btnGhost]} onPress={() => setAutoOk(true)}>
-              <Text style={[S.btnTxt, { color: colors.primary }]}>I’ve done this</Text>
+            <TouchableOpacity
+              style={[S.btn, S.btnGhost]} onPress={() => markAutoStart(!autoOk)}
+              accessibilityRole="checkbox" accessibilityState={{ checked: autoOk }}
+              accessibilityLabel="I've turned on auto-start"
+            >
+              <Text style={[S.btnTxt, { color: colors.primary }]}>{autoOk ? 'Done ✓ (tap to undo)' : 'I’ve done this'}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -130,10 +169,16 @@ export default function CallReliabilityScreen() {
             <Text style={S.cardTitle}>Low data mode</Text>
             <Switch
               value={lowData}
-              onValueChange={async (v) => { setLowData(v); await setLowDataMode(v); }}
+              accessibilityLabel="Low data mode"
+              onValueChange={async (v) => {
+                setLowData(v);
+                try { await setLowDataMode(v); setLowDataFailed(false); }
+                catch { setLowData(!v); setLowDataFailed(true); }
+              }}
               trackColor={{ true: colors.primary }}
             />
           </View>
+          {lowDataFailed && <Text style={[S.cardBody, { color: colors.danger }]}>Could not save this setting. Try again.</Text>}
           <Text style={S.cardBody}>
             Uses far less mobile data on calls, and less battery. Video stays on but at a lower
             quality ceiling; if the connection gets bad enough, video pauses so the audio keeps
@@ -160,7 +205,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   stepTxt: { color: c.text, fontSize: 13, lineHeight: 18, flex: 1 },
   btn: { marginTop: 6, backgroundColor: c.primary, borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
   btnGhost: { backgroundColor: 'transparent' },
-  btnTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
-  okBar: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, borderRadius: 12, backgroundColor: 'rgba(46,160,67,0.12)' },
+  btnTxt: { color: '#fff', fontSize: 15, fontWeight: '800' }, // on the primary fill in both themes
+  okBar: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, borderRadius: 12, backgroundColor: c.glassSoft, borderWidth: StyleSheet.hairlineWidth, borderColor: c.online },
   okTxt: { color: c.text, fontSize: 13, flex: 1 },
 });

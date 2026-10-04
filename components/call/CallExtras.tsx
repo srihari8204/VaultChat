@@ -55,7 +55,10 @@ function CallExtrasImpl({ bottom }: CallExtrasProps) {
       <View style={[S.wrap, { bottom }]} pointerEvents="box-none">
         {pickerOpen && <ReactionPicker onPick={react} />}
         <View style={S.row}>
-          <TouchableOpacity onPress={openChat} style={S.btn} hitSlop={8} accessibilityLabel="In-call chat">
+          <TouchableOpacity
+            onPress={openChat} style={S.btn} hitSlop={8} accessibilityRole="button"
+            accessibilityLabel={unread > 0 ? `In-call chat, ${unread} unread` : 'In-call chat'}
+          >
             <Ionicons name="chatbubble-ellipses" size={20} color="#fff" />
             {unread > 0 && (
               <View style={S.badge}>
@@ -67,7 +70,9 @@ function CallExtrasImpl({ bottom }: CallExtrasProps) {
             onPress={togglePicker}
             style={[S.btn, pickerOpen && S.btnActive]}
             hitSlop={8}
+            accessibilityRole="button"
             accessibilityLabel="Send a reaction"
+            accessibilityState={{ expanded: pickerOpen }}
           >
             <Ionicons name="happy" size={20} color="#fff" />
           </TouchableOpacity>

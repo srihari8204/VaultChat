@@ -17,6 +17,11 @@ import type { CallReaction } from '../../lib/call/types';
 /** The set a user can send. Short, and identical on both platforms. */
 export const CALL_EMOJI = ['❤️', '😂', '👍', '👏', '🎉', '😮'] as const;
 
+/** Spoken names: a screen reader reads a bare emoji inconsistently, or not at all. */
+const EMOJI_NAME: Record<(typeof CALL_EMOJI)[number], string> = {
+  '❤️': 'heart', '😂': 'laughing', '👍': 'thumbs up', '👏': 'clapping', '🎉': 'party', '😮': 'surprised',
+};
+
 const Floater = memo(function Floater({ emoji, lane }: { emoji: string; lane: number }) {
   const t = useRef(new Animated.Value(0)).current;
 
@@ -74,7 +79,10 @@ export const ReactionPicker = memo(function ReactionPicker(
   return (
     <View style={S.picker}>
       {CALL_EMOJI.map(e => (
-        <TouchableOpacity key={e} onPress={() => onPick(e)} hitSlop={6} style={S.pick}>
+        <TouchableOpacity
+          key={e} onPress={() => onPick(e)} hitSlop={6} style={S.pick}
+          accessibilityRole="button" accessibilityLabel={`React with ${EMOJI_NAME[e]}`}
+        >
           <Text style={S.pickText}>{e}</Text>
         </TouchableOpacity>
       ))}

@@ -25,12 +25,16 @@ import { SPACING, RADIUS } from '../constants/theme';
 import {
   listLive, startBroadcast, inviteCodeFrom, type Broadcast, type BroadcastVisibility,
 } from '../lib/broadcast';
+import { rememberHostPasscode } from '../lib/golive/hostPasscodeMemo';
 
 export default function LiveScreen() {
   const colors = useColors();
   const router = useRouter();
   const [live, setLive] = useState<Broadcast[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  // An offline list is not "Nobody is live right now".
+  const [loadError, setLoadError] = useState(false);
   const [starting, setStarting] = useState(false);
   const [title, setTitle] = useState('');
   const [composing, setComposing] = useState(false);
@@ -77,9 +81,14 @@ export default function LiveScreen() {
   }, [joinCode, router]);
 
   const load = useCallback(async () => {
-    try { setLive(await listLive()); } catch { /* offline — keep what we have */ }
+    try { setLive(await listLive()); setLoadError(false); }
+    catch { setLoadError(true); /* offline — keep what we have, and say so */ }
     setLoading(false);
   }, []);
+  const refresh = useCallback(async () => {
+    setRefreshing(true);
+    try { await load(); } finally { setRefreshing(false); }
+  }, [load]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
@@ -96,6 +105,9 @@ export default function LiveScreen() {
       setTitle('');
       setDesc('');
       setPasscode('');
+      // The host's readable passcode goes to live-view through memory, not the
+      // route params: params land in the navigation state and the URL.
+      if (pc) rememberHostPasscode(b.id, pc);
       router.push({ // `as any`: expo-router's generated route union is written at build time and
 // does not yet know a route added in the same change. Matches how the call
 // screens reference /group-call-active.
@@ -107,10 +119,9 @@ pathname: '/live-view' as any, params: {
         // it is the whole point of choosing private, and burying it behind a
         // menu would make the host hunt for it while already on air.
         invite: visibility === 'private' ? '1' : '0',
-        // Carried so the invite sheet can display it. Only readable copy there
-        // is — the server keeps a bcrypt hash. Lost if the app is restarted
-        // mid-broadcast, which is why the field warns the host to keep their own.
-        pc,
+        // The passcode is NOT here — see rememberHostPasscode above. Still lost
+        // if the app restarts mid-broadcast, which is why the field warns the
+        // host to keep their own copy.
       } });
     } catch (e: any) {
       // Three outcomes worth telling apart, because the user's next action
@@ -142,15 +153,21 @@ pathname: '/live-view' as any, params: {
 
       <ScrollView
         contentContainerStyle={S.scroll}
-        refreshControl={<RefreshControl refreshing={false} onRefresh={load} tintColor={colors.textDim} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.textDim} />}
       >
         {/* Said plainly, and BEFORE the go-live button. */}
         <View style={[S.notice, { backgroundColor: colors.glassSoft }]}>
           <Ionicons name="eye-outline" size={18} color={colors.textDim} />
+          {/* Matches the visibility being composed: "public" under the Private
+              option contradicted the hint right below it. */}
           <AppText style={[S.noticeText, { color: colors.textDim }]}>
-            Broadcasts are public and <AppText style={{ color: colors.text, fontWeight: '700' }}>not
-            end-to-end encrypted</AppText>. Anyone with the link can watch. Your
-            calls and messages are unaffected.
+            {composing && visibility === 'private'
+              ? 'Private broadcasts reach only the people you invite, but are '
+              : 'Broadcasts are public and '}
+            <AppText style={{ color: colors.text, fontWeight: '700' }}>not
+            end-to-end encrypted</AppText>.{composing && visibility === 'private'
+              ? ' Anyone holding your invitation can watch.'
+              : ' Anyone with the link can watch.'} Your calls and messages are unaffected.
           </AppText>
         </View>
 
@@ -160,6 +177,7 @@ pathname: '/live-view' as any, params: {
               value={title}
               onChangeText={setTitle}
               placeholder="What are you streaming?"
+              accessibilityLabel="Broadcast title"
               placeholderTextColor={colors.textFaint}
               style={[S.input, { color: colors.text }]}
               maxLength={200}
@@ -181,6 +199,9 @@ pathname: '/live-view' as any, params: {
                       { backgroundColor: on ? colors.surfaceSolid : 'transparent' },
                     ]}
                     activeOpacity={0.85}
+                    accessibilityRole="radio"
+                    accessibilityState={{ checked: on }}
+                    accessibilityLabel={v === 'public' ? 'Public broadcast' : 'Private broadcast'}
                   >
                     <Ionicons
                       name={v === 'public' ? 'globe-outline' : 'lock-closed-outline'}
@@ -216,6 +237,7 @@ pathname: '/live-view' as any, params: {
                   value={passcode}
                   onChangeText={setPasscode}
                   placeholder="Passcode (optional)"
+                  accessibilityLabel="Passcode, optional"
                   placeholderTextColor={colors.textFaint}
                   style={[S.input, { color: colors.text }]}
                   maxLength={64}
@@ -234,6 +256,7 @@ pathname: '/live-view' as any, params: {
               value={desc}
               onChangeText={setDesc}
               placeholder="Description (optional)"
+              accessibilityLabel="Description, optional"
               placeholderTextColor={colors.textFaint}
               style={[S.input, S.inputDesc, { color: colors.text }]}
               maxLength={1000}
@@ -268,12 +291,19 @@ pathname: '/live-view' as any, params: {
 
             <View style={S.row}>
               <TouchableOpacity
-                onPress={() => { setComposing(false); setTitle(''); setDesc(''); }}
+                // The passcode is cleared too: it is the one secret on this form.
+                onPress={() => { setComposing(false); setTitle(''); setDesc(''); setPasscode(''); }}
                 style={[S.btn, { backgroundColor: colors.surfaceSolid }]}
+                accessibilityRole="button"
               >
                 <AppText style={{ color: colors.textDim }}>Cancel</AppText>
               </TouchableOpacity>
-              <TouchableOpacity onPress={goLive} disabled={starting} style={S.btnPrimary}>
+              <TouchableOpacity
+                onPress={goLive} disabled={starting} style={S.btnPrimary}
+                accessibilityRole="button" accessibilityLabel="Go live now"
+                accessibilityState={{ disabled: starting, busy: starting }}
+              >
+                {/* The "on air" red gradient is a fixed brand mark for Go Live in both themes. */}
                 <LinearGradient colors={['#EF4444', '#B91C1C']} style={S.btnGrad}>
                   {starting
                     ? <ActivityIndicator color="#fff" size="small" />
@@ -284,7 +314,7 @@ pathname: '/live-view' as any, params: {
           </View>
         ) : (
           <>
-            <TouchableOpacity onPress={() => setComposing(true)} activeOpacity={0.85}>
+            <TouchableOpacity onPress={() => setComposing(true)} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel="Go live">
               <LinearGradient colors={['#EF4444', '#B91C1C']} style={S.goLive}>
                 <Ionicons name="radio-outline" size={22} color="#fff" />
                 <AppText style={S.goLiveText}>Go live</AppText>
@@ -313,6 +343,7 @@ pathname: '/live-view' as any, params: {
                   value={joinCode}
                   onChangeText={setJoinCode}
                   placeholder="Paste invitation link or code"
+                  accessibilityLabel="Invitation link or code"
                   placeholderTextColor={colors.textFaint}
                   style={[S.input, { color: colors.text }]}
                   autoCapitalize="none"
@@ -325,6 +356,7 @@ pathname: '/live-view' as any, params: {
                     style={[S.btn, { backgroundColor: colors.glassSoft }]}
                     onPress={() => { setJoinOpen(false); setJoinCode(''); }}
                     activeOpacity={0.85}
+                    accessibilityRole="button"
                   >
                     <AppText style={{ color: colors.textDim, fontWeight: '600' }}>Cancel</AppText>
                   </TouchableOpacity>
@@ -333,6 +365,8 @@ pathname: '/live-view' as any, params: {
                     onPress={goJoin}
                     disabled={!joinCode.trim()}
                     activeOpacity={0.85}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: !joinCode.trim() }}
                   >
                     <AppText style={{ color: '#fff', fontWeight: '700' }}>Continue</AppText>
                   </TouchableOpacity>
@@ -343,6 +377,7 @@ pathname: '/live-view' as any, params: {
                 onPress={() => setJoinOpen(true)}
                 activeOpacity={0.85}
                 style={[S.joinBtn, { borderColor: colors.glassStroke }]}
+                accessibilityRole="button"
               >
                 <Ionicons name="lock-closed-outline" size={18} color={colors.textDim} />
                 <AppText style={{ color: colors.text, fontWeight: '600' }}>Join a private live</AppText>
@@ -355,6 +390,16 @@ pathname: '/live-view' as any, params: {
 
         {loading ? (
           <ActivityIndicator style={{ marginTop: SPACING.xl }} color={colors.textDim} />
+        ) : loadError && live.length === 0 ? (
+          <View style={S.empty}>
+            <Ionicons name="cloud-offline-outline" size={34} color={colors.textFaint} />
+            <AppText style={[S.emptyText, { color: colors.textDim }]}>
+              Could not load live broadcasts. Check your connection.
+            </AppText>
+            <TouchableOpacity onPress={refresh} accessibilityRole="button" style={[S.joinBtn, { borderColor: colors.glassStroke, paddingHorizontal: SPACING.xl }]}>
+              <AppText style={{ color: colors.text, fontWeight: '600' }}>Try again</AppText>
+            </TouchableOpacity>
+          </View>
         ) : live.length === 0 ? (
           <View style={S.empty}>
             <Ionicons name="videocam-off-outline" size={34} color={colors.textFaint} />
@@ -372,6 +417,8 @@ pathname: '/live-view' as any, params: {
 pathname: '/live-view' as any, params: { id: b.id } })}
               style={[S.card, { backgroundColor: colors.glassSoft }]}
               activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel={`Watch ${b.title || 'Untitled broadcast'}, live${b.visibility === 'private' ? ', private' : ''}, ${b.viewerCount} watching`}
             >
               <View style={S.cardTop}>
                 <View style={S.liveDot} />
@@ -424,6 +471,7 @@ const S = StyleSheet.create({
   },
   card: { padding: SPACING.lg, borderRadius: RADIUS.lg, marginBottom: SPACING.md },
   cardTop: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, marginBottom: SPACING.sm },
+  // The LIVE dot/label are the same fixed "on air" red as the Go Live gradient.
   liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#EF4444' },
   liveLabel: { color: '#EF4444', fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
   viewers: { fontSize: 12, marginLeft: 'auto' },

@@ -65,16 +65,20 @@ export default function NetworkTestScreen() {
   const [progress, setProgress] = useState(0);
   const [download, setDownload] = useState(0);
   const [upload, setUpload] = useState(0);
-  const [, setConnectionType] = useState('Unknown');
   const [connectionDetails, setConnectionDetails] = useState('');
   const [history, setHistory] = useState<TestResult[]>([]);
+  // A history that could not be read is not "No previous tests".
+  const [historyError, setHistoryError] = useState(false);
   const [serverOnline, setServerOnline] = useState<boolean | null>(null);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   // Async test steps keep resolving after the user leaves; nothing may set
-  // state then.
+  // state then. Leaving also ABORTS the in-flight request, so a 5 MB download
+  // does not keep running (and costing data) behind a screen nobody is on.
   const mounted = useRef(true);
-  useEffect(() => () => { mounted.current = false; }, []);
+  const abort = useRef(new AbortController());
+  useEffect(() => () => { mounted.current = false; abort.current.abort(); }, []);
+  const signal = () => abort.current.signal;
 
   useEffect(() => {
     loadHistory();
@@ -94,14 +98,14 @@ export default function NetworkTestScreen() {
       const gen = (state as any).details?.cellularGeneration || '';
       details = gen ? gen.toUpperCase() : 'Cellular';
     } else details = state.type || 'Unknown';
-    if (mounted.current) { setConnectionType(state.type || 'Unknown'); setConnectionDetails(details); }
+    if (mounted.current) setConnectionDetails(details);
     return details;
   };
 
   const checkServerStatus = async () => {
     try {
       const start = Date.now();
-      const resp = await fetch(DOWN_URL(1), { method: 'HEAD' });
+      const resp = await fetch(DOWN_URL(1), { method: 'HEAD', signal: signal() });
       const elapsed = Date.now() - start;
       if (mounted.current) setServerOnline(resp.ok && elapsed < 5000);
     } catch {
@@ -112,18 +116,27 @@ export default function NetworkTestScreen() {
   const loadHistory = async () => {
     try {
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
-      if (raw) setHistory(JSON.parse(raw));
-    } catch {}
+      const parsed = raw ? JSON.parse(raw) : [];
+      if (!mounted.current) return;
+      setHistory(Array.isArray(parsed) ? parsed : []);
+      setHistoryError(false);
+    } catch {
+      if (mounted.current) setHistoryError(true);
+    }
   };
 
-  const saveHistory = async (result: TestResult) => {
-    try {
-      const updated = [result, ...history].slice(0, 20);
-      setHistory(updated);
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-    } catch {}
+  // Functional update: `history` captured by runTest's closure is the list as
+  // it was when the run STARTED, so building on it could drop a result that
+  // landed in between. Persisted from the same list the state holds.
+  const saveHistory = (result: TestResult) => {
+    setHistory(prev => {
+      const updated = [result, ...prev].slice(0, 20);
+      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
+      return updated;
+    });
   };
 
+  const running = phase !== 'idle' && phase !== 'done' && phase !== 'failed';
   const progressTo = (p: number) => { if (mounted.current) setProgress(p); };
 
   // ── Ping Test ── (a failed request is not a round trip)
@@ -132,7 +145,7 @@ export default function NetworkTestScreen() {
     for (let i = 0; i < 5; i++) {
       const start = Date.now();
       try {
-        const resp = await fetch(DOWN_URL(1), { cache: 'no-store' });
+        const resp = await fetch(DOWN_URL(1), { cache: 'no-store', signal: signal() });
         trips.push(resp.ok ? Date.now() - start : null);
       } catch { trips.push(null); }
       progressTo((i + 1) / 5 * 100);
@@ -147,7 +160,7 @@ export default function NetworkTestScreen() {
     for (let i = 0; i < sizes.length; i++) {
       const start = Date.now();
       try {
-        const resp = await fetch(DOWN_URL(sizes[i]), { cache: 'no-store' });
+        const resp = await fetch(DOWN_URL(sizes[i]), { cache: 'no-store', signal: signal() });
         const blob = await resp.blob();
         samples.push({ ok: resp.ok, bytes: blob.size, ms: Date.now() - start });
       } catch {
@@ -172,6 +185,7 @@ export default function NetworkTestScreen() {
           method: 'POST',
           body: data,
           headers: { 'Content-Type': 'application/octet-stream' },
+          signal: signal(),
         });
         samples.push({ ok: resp.ok, bytes: sizes[i], ms: Date.now() - start });
       } catch {
@@ -240,7 +254,6 @@ export default function NetworkTestScreen() {
   // ── Gauge rendering ──
   const renderGauge = () => {
     const speed = phase === 'download' ? download : phase === 'upload' ? upload : (phase === 'done' ? download : 0);
-    const running = phase !== 'idle' && phase !== 'done' && phase !== 'failed';
     const maxSpeed = 200;
     const ratio = Math.min(speed / maxSpeed, 1);
     // Semicircle from -135deg to 135deg (270 deg arc)
@@ -250,14 +263,15 @@ export default function NetworkTestScreen() {
 
     return (
       <View style={styles.gaugeContainer} accessible accessibilityRole="progressbar"
-        accessibilityLabel={phase === 'failed' ? 'Speed test failed' : `${phase === 'upload' ? 'Upload' : 'Download'} ${speed.toFixed(1)} megabits per second`}>
+        accessibilityLabel={phase === 'failed' ? 'Speed test failed' : `${phase === 'upload' ? 'Upload' : 'Download'} ${speed.toFixed(1)} megabits per second`}
+        accessibilityValue={running ? { min: 0, max: 100, now: Math.round(progress) } : { text: `${speed.toFixed(1)} Mbps` }}>
         {/* Gauge background arc */}
         <View style={[styles.gauge, { width: GAUGE_SIZE, height: GAUGE_SIZE / 2 + 20 }]}>
           {/* Background semicircle */}
           <View style={styles.gaugeArcBg} />
           {/* Colored arc overlay */}
           <View style={[styles.gaugeArcFill, {
-            borderColor: speed > 100 ? colors.primary : speed > 50 ? colors.accent : speed > 20 ? colors.accent : '#FBBF24',
+            borderColor: speed > 100 ? colors.primary : speed > 20 ? colors.accent : colors.textDim,
           }]} />
           {/* Tick marks */}
           {ticks.map(t => {
@@ -332,7 +346,7 @@ export default function NetworkTestScreen() {
             <Text style={styles.connectionIcon}>{getConnectionIcon()}</Text>
             <Text style={styles.connectionLabel}>{connectionDetails}</Text>
           </View>
-          <View style={[styles.serverDot, { backgroundColor: serverOnline === null ? '#FBBF24' : serverOnline ? colors.primary : colors.danger }]} />
+          <View style={[styles.serverDot, { backgroundColor: serverOnline === null ? colors.textFaint : serverOnline ? colors.primary : colors.danger }]} />
           <Text style={styles.serverLabel}>
             {serverOnline === null ? 'Checking...' : serverOnline ? 'Test server reachable' : 'Test server unreachable'}
           </Text>
@@ -345,17 +359,14 @@ export default function NetworkTestScreen() {
         {renderGauge()}
 
         {/* Progress bar */}
-        {phase !== 'idle' && phase !== 'done' && phase !== 'failed' && (
+        {running && (
           <View style={styles.progressBar}>
             <View style={[styles.progressFill, { width: `${progress}%` }]} />
           </View>
         )}
 
         {/* Test Button */}
-        {(() => {
-          const running = phase !== 'idle' && phase !== 'done' && phase !== 'failed';
-          return (
-            <TouchableOpacity
+        <TouchableOpacity
               onPress={runTest}
               disabled={running}
               style={[styles.testButton, running && styles.testButtonDisabled]}
@@ -364,18 +375,16 @@ export default function NetworkTestScreen() {
               accessibilityState={{ disabled: running, busy: running }}
             >
               <LinearGradient
-                colors={running ? [colors.border, colors.border] : [colors.accent, '#2D7AE0']}
+                colors={running ? [colors.border, colors.border] : [colors.accent, colors.accentDeep]}
                 style={styles.testButtonGradient}
               >
                 {running ? (
-                  <ActivityIndicator color="#FFF" />
+                  <ActivityIndicator color={colors.text} />
                 ) : (
                   <Text style={styles.testButtonText}>{phase === 'idle' ? 'Start Test' : 'Test Again'}</Text>
                 )}
               </LinearGradient>
             </TouchableOpacity>
-          );
-        })()}
 
         {/* Failed */}
         {phase === 'failed' && (
@@ -394,7 +403,7 @@ export default function NetworkTestScreen() {
               ['Download', outcome.download, 'Mbps', colors.accent],
               ['Upload', outcome.upload, 'Mbps', colors.accent],
               ['Ping', outcome.ping, 'ms', colors.primary],
-              ['Jitter', outcome.jitter, 'ms', '#FBBF24'],
+              ['Jitter', outcome.jitter, 'ms', colors.purple],
             ] as const).map(([label, value, unit, edge]) => (
               <View key={label} style={[styles.resultCard, { borderLeftColor: edge }]} accessible
                 accessibilityLabel={value == null ? `${label} failed` : `${label} ${unit === 'Mbps' ? value.toFixed(1) : value} ${unit}`}>
@@ -411,11 +420,20 @@ export default function NetworkTestScreen() {
         {/* History */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>History</Text>
-          {history.length === 0 ? (
+          {historyError ? (
+            <TouchableOpacity onPress={loadHistory} accessibilityRole="button" accessibilityLabel="Past results could not be read. Try again">
+              <Text style={styles.noHistory}>Past results could not be read. Tap to try again.</Text>
+            </TouchableOpacity>
+          ) : history.length === 0 ? (
             <Text style={styles.noHistory}>No previous tests</Text>
           ) : (
             history.map(item => (
-              <View key={item.id} style={styles.historyRow}>
+              <View
+                key={item.id} style={styles.historyRow} accessible
+                // The arrows and stopwatch are read raw by a screen reader, so the
+                // row speaks one sentence instead.
+                accessibilityLabel={`${formatDate(item.timestamp)}, ${item.connectionType}: download ${item.download.toFixed(1)}, upload ${item.upload.toFixed(1)} megabits per second, ping ${item.ping} milliseconds`}
+              >
                 <View style={styles.historyLeft}>
                   <Text style={styles.historyDate}>{formatDate(item.timestamp)}</Text>
                   <Text style={styles.historyConn}>{item.connectionType}</Text>
@@ -450,14 +468,14 @@ const makeStyles = (c: Palette, SW: number) => StyleSheet.create({
   // The status-bar inset comes from INSET_SCREENS (app/_layout.tsx), which pads
   // this screen already; a second 40/56 here doubled it.
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 4, paddingHorizontal: 16, paddingBottom: 14 },
-  backBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(74,159,255,0.08)', justifyContent: 'center', alignItems: 'center' },
+  backBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: c.glassSoft, justifyContent: 'center', alignItems: 'center' },
   headerTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
   scroll: { flex: 1 },
   scrollContent: { paddingHorizontal: 16 },
 
   // Connection
   connectionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 10, marginBottom: 16 },
-  connectionBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, marginRight: 16, borderWidth: 1, borderColor: 'rgba(74,159,255,0.1)' },
+  connectionBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, marginRight: 16, borderWidth: 1, borderColor: c.glassStroke },
   connectionIcon: { fontSize: 16, marginRight: 6 },
   connectionLabel: { color: c.text, fontSize: 14, fontWeight: '600' },
   serverDot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
@@ -470,7 +488,7 @@ const makeStyles = (c: Palette, SW: number) => StyleSheet.create({
   // Gauge
   gaugeContainer: { alignItems: 'center', marginVertical: 16 },
   gauge: { alignItems: 'center', justifyContent: 'flex-end', overflow: 'hidden' },
-  gaugeArcBg: { position: 'absolute', top: 0, width: GAUGE_SIZE, height: GAUGE_SIZE, borderRadius: GAUGE_SIZE / 2, borderWidth: GAUGE_STROKE, borderColor: 'rgba(74,159,255,0.08)' },
+  gaugeArcBg: { position: 'absolute', top: 0, width: GAUGE_SIZE, height: GAUGE_SIZE, borderRadius: GAUGE_SIZE / 2, borderWidth: GAUGE_STROKE, borderColor: c.glassStroke },
   gaugeArcFill: { position: 'absolute', top: 0, width: GAUGE_SIZE, height: GAUGE_SIZE, borderRadius: GAUGE_SIZE / 2, borderWidth: GAUGE_STROKE, borderTopColor: 'transparent' },
   gaugeTick: { position: 'absolute', bottom: 0, alignItems: 'center' },
   gaugeTickLabel: { color: c.textDim, fontSize: 9 },
@@ -482,18 +500,19 @@ const makeStyles = (c: Palette, SW: number) => StyleSheet.create({
   gaugePhase: { color: c.accent, fontSize: 13, fontWeight: '600', marginTop: 8 },
 
   // Progress
-  progressBar: { height: 4, backgroundColor: 'rgba(74,159,255,0.1)', borderRadius: 2, marginVertical: 12, overflow: 'hidden' },
+  progressBar: { height: 4, backgroundColor: c.glassSoft, borderRadius: 2, marginVertical: 12, overflow: 'hidden' },
   progressFill: { height: 4, backgroundColor: c.accent, borderRadius: 2 },
 
   // Test Button
   testButton: { borderRadius: 14, overflow: 'hidden', marginVertical: 16, elevation: 4, shadowColor: c.accent, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 10 },
   testButtonDisabled: { opacity: 0.7 },
   testButtonGradient: { paddingVertical: 16, alignItems: 'center', borderRadius: 14 },
+  // White on the brand-blue gradient (accent → accentDeep) in both themes.
   testButtonText: { color: '#FFF', fontSize: 18, fontWeight: '800', letterSpacing: 1 },
 
   // Results
   resultsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 16 },
-  resultCard: { width: (SW - 42) / 2, backgroundColor: c.glassSoft, borderRadius: 14, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(74,159,255,0.08)', borderLeftWidth: 3 },
+  resultCard: { width: (SW - 42) / 2, backgroundColor: c.glassSoft, borderRadius: 14, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: c.glassStroke, borderLeftWidth: 3 },
   resultLabel: { color: c.textDim, fontSize: 12, marginBottom: 4 },
   resultValue: { color: c.text, fontSize: 28, fontWeight: '800' },
   resultUnit: { color: c.textDim, fontSize: 12, marginTop: 2 },
@@ -502,7 +521,7 @@ const makeStyles = (c: Palette, SW: number) => StyleSheet.create({
   section: { marginTop: 20 },
   sectionTitle: { color: c.text, fontSize: 16, fontWeight: '700', marginBottom: 12 },
   noHistory: { color: c.textDim, fontSize: 13, textAlign: 'center', marginTop: 8 },
-  historyRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(74,159,255,0.06)' },
+  historyRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: c.hairline },
   historyLeft: { flex: 1 },
   historyDate: { color: c.text, fontSize: 13, fontWeight: '600' },
   historyConn: { color: c.textDim, fontSize: 11, marginTop: 2 },

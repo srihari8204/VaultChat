@@ -7,7 +7,7 @@
 
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { BackHandler, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, BackHandler, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { CALL } from '../constants/callTheme';
@@ -136,6 +136,12 @@ export default function IncomingCallScreen() {
     return () => { dead = true; if (off) off(); };
   }, [peerUid]);
 
+  // Leave the ring screen even when it was the app's first screen (a
+  // notification launch has no history, and router.back() is then a no-op).
+  // Used by the caller-hangup listener below as well as by decline.
+  const leaveRef = useRef(() => {});
+  leaveRef.current = () => { if (router.canGoBack()) router.back(); else router.replace('/' as any); };
+
   // Listen for caller-side hangup before answer
   const decidedRef = useRef(false);
   useEffect(() => {
@@ -149,7 +155,7 @@ export default function IncomingCallScreen() {
           decidedRef.current = true;
           stopRingtone();
           addCallLog({ chatId, peerUid, peerName: displayName, kind: type === 'video' ? 'video' : 'audio', direction: 'missed', at: Date.now(), durationSec: 0 }).catch(() => {});
-          if (router.canGoBack()) router.back(); else router.replace('/' as any);
+          leaveRef.current();
         }
       };
       // Same `dead` guard as the offer effect. This one is the reason it
@@ -162,9 +168,7 @@ export default function IncomingCallScreen() {
     return () => { dead = true; if (off) off(); };
   }, [peerUid, router]);
 
-  // Leave the ring screen even when it was the app's first screen (a
-  // notification launch has no history, and router.back() is then a no-op).
-  const leave = () => { if (router.canGoBack()) router.back(); else router.replace('/' as any); };
+  const leave = () => leaveRef.current();
 
   // One decision per ring: a double tap must not replace twice, or decline
   // after accepting.
@@ -206,11 +210,25 @@ export default function IncomingCallScreen() {
     decidedRef.current = true;
     stopRingtone();
     addCallLog({ chatId, peerUid, peerName: displayName, kind: type === 'video' ? 'video' : 'audio', direction: 'declined', at: Date.now(), durationSec: 0 }).catch(() => {});
-    try {
-      const s = await getSocket();
-      s.emit('webrtc_end', { to: peerUid, chatId });
-    } catch {}
+    // TELL THE CALLER FIRST, and say so if we could not.
+    //
+    // Sent before leaving, as it always was: leaving releases the ring claim,
+    // and the caller re-sends its ring every few seconds until it hears this.
+    // A swallowed failure used to leave the caller's phone ringing until its
+    // own timeout with nothing on either screen, so a failed first try is
+    // retried in the background (the ring screen is gone by then) and the user
+    // is told if it never got through.
+    //
+    // A GROUP ring is different: the group engine only accepts webrtc_end from
+    // live participants (lib/call/engine.ts `accept`), so a decliner's end is
+    // ignored there by design and the call carries on for everyone else.
+    // Sent anyway for older builds; a failure is not worth an alert.
+    if (await sendDecline(peerUid, chatId, 1)) { leave(); return; }
     leave();
+    const told = await sendDecline(peerUid, chatId, 2, 1500);
+    if (!told && !isGroup) {
+      Alert.alert('Could not reach the caller', `${displayName} may keep hearing it ring until their call times out.`);
+    }
   };
 
   // Hardware back on a ringing call is a decline. Without this, back popped
@@ -234,7 +252,10 @@ export default function IncomingCallScreen() {
 
       <View style={[S.body, { paddingTop: insets.top }]}>
         <Text style={S.label}>{isWaiting ? 'On another call' : type === 'video' ? 'Incoming video call' : 'Incoming voice call'}</Text>
-        <View style={S.avatar}><Text style={S.avatarTxt}>{initial}</Text></View>
+        {/* Decorative: the name below says who is calling. */}
+        <View style={S.avatar} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+          <Text style={S.avatarTxt}>{initial}</Text>
+        </View>
         <Text numberOfLines={1} style={S.name}>{displayName}</Text>
         {isWaiting && <Text style={S.label}>{type === 'video' ? 'Video call' : 'Voice call'} waiting…</Text>}
       </View>
@@ -257,6 +278,19 @@ export default function IncomingCallScreen() {
       </View>
     </View>
   );
+}
+
+/** Send the decline, waiting `delayMs` before each attempt. True once sent. */
+async function sendDecline(peerUid: string, chatId: string, attempts: number, delayMs = 0): Promise<boolean> {
+  for (let i = 0; i < attempts; i++) {
+    if (delayMs) await new Promise(r => setTimeout(r, delayMs * (i + 1)));
+    try {
+      const s = await getSocket();
+      s.emit('webrtc_end', { to: peerUid, chatId });
+      return true;
+    } catch { /* realtime link down — try again */ }
+  }
+  return false;
 }
 
 function makeStyles() { return StyleSheet.create({

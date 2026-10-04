@@ -82,12 +82,12 @@ function CallChatSheetImpl({ visible, onClose, messages, onSend }: CallChatSheet
           lib/keyboardAvoidance.selftest.ts cannot see it. The sheet is pinned
           bottom:0 and lifts by the measured keyboard height — see the note on
           that effect for why a Modal needs its own measurement. */}
-      <Pressable style={S.backdrop} onPress={onClose} />
+      <Pressable style={S.backdrop} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close in-call chat" />
       <View style={[S.sheet, { bottom: kb }]}>
         <View style={S.grabber} />
         <View style={S.head}>
-          <Text style={S.title}>In-call chat</Text>
-          <TouchableOpacity accessibilityLabel="Close in-call chat" onPress={onClose} hitSlop={10}>
+          <Text style={S.title} accessibilityRole="header">In-call chat</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close in-call chat" onPress={onClose} hitSlop={10}>
             <Ionicons name="close" size={22} color="rgba(255,255,255,0.7)" />
           </TouchableOpacity>
         </View>
@@ -112,13 +112,18 @@ function CallChatSheetImpl({ visible, onClose, messages, onSend }: CallChatSheet
             value={draft}
             onChangeText={setDraft}
             placeholder="Message"
+            accessibilityLabel="In-call message"
             placeholderTextColor="rgba(255,255,255,0.4)"
             maxLength={500}
             multiline
             onSubmitEditing={send}
             returnKeyType="send"
           />
-          <TouchableOpacity accessibilityLabel="Send message" onPress={send} disabled={!draft.trim()} style={S.send} hitSlop={8}>
+          <TouchableOpacity
+            accessibilityRole="button" accessibilityLabel="Send message"
+            accessibilityState={{ disabled: !draft.trim() }}
+            onPress={send} disabled={!draft.trim()} style={S.send} hitSlop={8}
+          >
             <Ionicons name="send" size={20} color={draft.trim() ? '#fff' : 'rgba(255,255,255,0.3)'} />
           </TouchableOpacity>
         </View>

@@ -41,7 +41,8 @@ import { newCallCipher, openCallOffer, plainCipher, type CallCipher } from '../l
 import { CallTimer, elapsedSeconds } from '../components/call/CallTimer';
 import { CallControlButton } from '../components/call/CallControlButton';
 import { CallExtras } from '../components/call/CallExtras';
-import { CallEncryptionBadge } from '../components/call/CallEncryptionBadge';
+import { CallEncryptionBadge, protectionFor } from '../components/call/CallEncryptionBadge';
+import { inviteAndDescribe } from '../components/call/inviteResult';
 import { CALL_ENGINE_V2 } from '../constants/flags';
 import * as engine from '../lib/call/engine';
 import { setRingingPeer, setRingScreenPeer } from '../lib/ringTracker';
@@ -287,7 +288,12 @@ function VoiceCallEngine() {
         actions: people.slice(0, ADD_LIST_MAX).map(pp => ({
           label: pp.name,
           icon: 'person-add-outline' as const,
-          onPress: () => { void engine.inviteToCall([pp.id]); },
+          // Say what the tap did: inviteToCall rings nobody when the person is
+          // already here or the call has ended, and that must not look like success.
+          onPress: () => {
+            void inviteAndDescribe(() => engine.inviteToCall([pp.id]), pp.name)
+              .then(message => setAddSheet({ title: 'Add to call', message, actions: [] }));
+          },
         })),
       });
     } catch {
@@ -306,12 +312,14 @@ function VoiceCallEngine() {
         onPress={addPerson}
         style={[S.addTopBtn, { top: insets.top + 8 }]}
         hitSlop={10}
+        accessibilityRole="button"
         accessibilityLabel="Add people to this call"
       >
         <Ionicons name="person-add" size={20} color="#fff" />
       </TouchableOpacity>
       <View style={S.body}>
-        <View style={S.avatarWrap}>
+        {/* Decorative: the name below says who it is. */}
+        <View style={S.avatarWrap} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
           <View style={S.avatar}><Text style={S.avatarTxt}>{initial}</Text></View>
         </View>
         <Text numberOfLines={1} style={S.name}>{displayName}</Text>
@@ -319,8 +327,11 @@ function VoiceCallEngine() {
           ? <CallTimer style={S.status} startedAt={connectedAt} />
           : <Text style={S.status}>{statusText}</Text>}
         {error && <Text style={S.errorTxt}>{error}</Text>}
-        {/* D-1: a 1:1 call is peer-to-peer, so this claim is the strong one. */}
-        <CallEncryptionBadge protection="transport" />
+        {/* The engine carries 1:1 through the same SFU room as a group call,
+            with frames sealed before publish and publishing fail-closed until
+            the media key arrives (lib/call/room.ts). null = no signalling
+            cipher of ours on this path. See protectionFor's contract. */}
+        <CallEncryptionBadge protection={protectionFor(1, null)} />
       </View>
 
       {status === 'connected' && <CallExtras bottom={insets.bottom + 116} />}
