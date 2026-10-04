@@ -350,10 +350,11 @@ func sbAdminSubscriptions(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(e.plan,'free'), COALESCE(e.state,'—'), COALESCE(e.source,''),
 		       COALESCE(e.reference,''), e.expires_at,
 		       (SELECT COUNT(DISTINCT customer_user_id) FROM shopbook_order o WHERE o.shop_id=s.id),
-		       (SELECT COUNT(*) FROM shopbook_product p WHERE p.shop_id=s.id)
+		       (SELECT COUNT(*) FROM shopbook_product p WHERE p.shop_id=s.id),
+		       s.pro_requested_at
 		  FROM shopbook_shop s
 		  LEFT JOIN shopbook_entitlement e ON e.shop_id = s.id
-		 ORDER BY s.created_at DESC LIMIT 500`)
+		 ORDER BY s.pro_requested_at DESC NULLS LAST, s.created_at DESC LIMIT 500`)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "db error")
 		return
@@ -362,10 +363,10 @@ func sbAdminSubscriptions(w http.ResponseWriter, r *http.Request) {
 	out := []map[string]any{}
 	for rows.Next() {
 		var id, name, displayPlan, plan, state, source, ref string
-		var expires *time.Time
+		var expires, proRequested *time.Time
 		var customers, products int
 		if rows.Scan(&id, &name, &displayPlan, &plan, &state, &source, &ref,
-			&expires, &customers, &products) != nil {
+			&expires, &customers, &products, &proRequested) != nil {
 			continue
 		}
 		out = append(out, map[string]any{
@@ -375,6 +376,8 @@ func sbAdminSubscriptions(w http.ResponseWriter, r *http.Request) {
 			"displayPlan": displayPlan, "entitledPlan": plan, "state": state,
 			"source": source, "reference": ref, "expiresAt": httpx.JST(expires),
 			"customers": customers, "products": products,
+			// Set by the owner's "request Pro"; cleared by any entitlement decision.
+			"proRequestedAt": httpx.JST(proRequested),
 		})
 	}
 	httpx.JSON(w, 200, map[string]any{"subscriptions": out})
@@ -418,7 +421,7 @@ func sbAdminSetEntitlement(w http.ResponseWriter, r *http.Request) {
 	// Keep the display column in step so the owner's app does not claim a
 	// plan the entitlement no longer backs.
 	if _, err := db.Pool.Exec(ctx,
-		`UPDATE shopbook_shop SET plan=$2, updated_at=NOW() WHERE id=$1`,
+		`UPDATE shopbook_shop SET plan=$2, pro_requested_at=NULL, updated_at=NOW() WHERE id=$1`,
 		shopID, sbPlanFromEntitlement(b.Plan, b.State, false)); err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "db error")
 		return
@@ -465,9 +468,11 @@ func sbAdminOrders(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, 200, map[string]any{"orders": out})
 }
 
-// GET /api/admin/shopbook/returns
+// GET /api/admin/shopbook/returns?status=&shopId=
 func sbAdminReturns(w http.ResponseWriter, r *http.Request) {
-	out, err := sbReturnRows(r.Context(), `($1='' OR rt.status=$1)`, r.URL.Query().Get("status"))
+	q := r.URL.Query()
+	out, err := sbReturnRows(r.Context(), `($1='' OR rt.status=$1) AND ($2='' OR rt.shop_id::text=$2)`,
+		q.Get("status"), q.Get("shopId"))
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "db error")
 		return

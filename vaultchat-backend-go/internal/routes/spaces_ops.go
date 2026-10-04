@@ -58,6 +58,7 @@ func RegisterSpaceOpsOnID(id *http.ServeMux) {
 	id.HandleFunc("GET /chats/{id}/visitor-passes", httpx.RequireAuth(visitorPassList))
 	id.HandleFunc("POST /chats/{id}/visitor-passes", httpx.RequireAuth(visitorPassCreate))
 	id.HandleFunc("POST /chats/{id}/visitor-passes/redeem", httpx.RequireAuth(visitorPassRedeem))
+	id.HandleFunc("GET /chats/{id}/shift", httpx.RequireAuth(shiftGet))
 	id.HandleFunc("PATCH /chats/{id}/shift", httpx.RequireAuth(shiftSet))
 }
 
@@ -513,6 +514,39 @@ func visitorPassRedeem(w http.ResponseWriter, r *http.Request) {
 }
 
 // ─── shift window ──────────────────────────────────────────────────────
+
+// shiftGet reads the window back, in the same shape PATCH takes ("" = unset).
+// Readable by whoever may set it (edit_settings) or judge attendance against
+// it (view_space_ops — the attendance screen); not by every member.
+func shiftGet(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := httpx.UserFrom(r)
+	chatID := r.PathValue("id")
+
+	mem := chatsRequireMem(w, r, 403, "You cannot see this space's shift", "Failed to load shift")
+	if mem == nil {
+		return
+	}
+	if !mem.can(groups.PermEditSettings) && !mem.can(groups.PermViewSpaceOps) {
+		httpx.Err(w, 403, "You cannot see this space's shift")
+		return
+	}
+	var start, end string
+	var grace, delay int
+	if err := chatsQRow(ctx, user.ID,
+		`SELECT COALESCE(to_char(shift_start, 'HH24:MI'), ''), COALESCE(to_char(shift_end, 'HH24:MI'), ''),
+		        shift_grace_minutes, run_delay_threshold_minutes
+		   FROM chats WHERE id = $1`,
+		[]any{chatID}, &start, &end, &grace, &delay); err != nil {
+		log.Printf("[shift GET] %v", err)
+		httpx.Err(w, 500, "Failed to load shift")
+		return
+	}
+	httpx.JSON(w, 200, map[string]any{
+		"shiftStart": start, "shiftEnd": end,
+		"shiftGraceMinutes": grace, "runDelayThresholdMinutes": delay,
+	})
+}
 
 // shiftSet configures the window attendance is judged against.
 //

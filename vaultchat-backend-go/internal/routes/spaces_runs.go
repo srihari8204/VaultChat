@@ -50,6 +50,10 @@ const (
 // transaction, where the only way out is an error.
 var errRiderNotOnRoster = errors.New("rider not on roster")
 
+// errStopNotOnRun rolls a stop-list save back when it names a stop id that is
+// not one of this run's stops (or names one twice).
+var errStopNotOnRun = errors.New("stop not on run")
+
 // runEventDetail builds the jsonb payload for a run event.
 //
 // TEXT, not a Go map. pgx cannot encode map[string]any for a jsonb parameter —
@@ -318,6 +322,44 @@ func runGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The ASSIGNED DRIVER — and only the driver, not ops viewers or guardians —
+	// also gets each rider's guardians, so a child who is not at the stop can be
+	// followed up with the right parent. Direct guardian_of links only, to
+	// roster entries with an account that are still members of this space.
+	if run.DriverID != nil && *run.DriverID == user.ID {
+		byRider := map[string][]map[string]any{}
+		if err := chatsQueryU(ctx, user.ID,
+			`SELECT l.object_id, g.user_id, g.display_name
+			   FROM run_riders rr
+			   JOIN space_links l ON l.chat_id = $1 AND l.object_id = rr.rider_id
+			                     AND l.relation = 'guardian_of'
+			   JOIN space_roster g ON g.id = l.subject_id AND g.chat_id = $1
+			                      AND g.user_id IS NOT NULL AND g.archived_at IS NULL
+			   JOIN chat_members cm ON cm.chat_id = $1 AND cm.user_id = g.user_id
+			                       AND cm.left_at IS NULL
+			  WHERE rr.run_id = $2
+			  ORDER BY g.display_name`,
+			[]any{chatID, runID}, func(rows pgx.Rows) error {
+				var riderID, uid, name string
+				if e := rows.Scan(&riderID, &uid, &name); e != nil {
+					return e
+				}
+				byRider[riderID] = append(byRider[riderID], map[string]any{"userId": uid, "displayName": name})
+				return nil
+			}); err != nil {
+			log.Printf("[run GET guardians] %v", err)
+			httpx.Err(w, 500, "Failed to load run")
+			return
+		}
+		for _, rd := range riders {
+			g := byRider[rd["riderId"].(string)]
+			if g == nil {
+				g = []map[string]any{}
+			}
+			rd["guardians"] = g
+		}
+	}
+
 	// The threshold this run's "running late" badge should agree with. Without
 	// this the client's isDelayed() only ever had the compile-time default
 	// (10), so an admin who set the space's threshold to 30 via shiftSet saw
@@ -569,6 +611,12 @@ func runPatch(w http.ResponseWriter, r *http.Request) {
 // Replace rather than patch: stops are an ORDERED sequence, and incremental
 // edits to a sequence are where off-by-one reordering bugs live. The client
 // sends the list it wants; the server makes that true.
+//
+// A stop sent WITH its `id` is updated in place (new seq, label, lat, lng,
+// plannedAt) and keeps its id — so its arrival mark and every rider's stopId
+// survive an edit. A stop without an id is new; an existing stop left out of
+// the list is deleted (riders on it fall back to no stop, via the FK).
+// The answer lists the stop ids in order.
 func runStopsSet(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := httpx.UserFrom(r)
@@ -582,6 +630,7 @@ func runStopsSet(w http.ResponseWriter, r *http.Request) {
 
 	var b struct {
 		Stops []struct {
+			ID        string   `json:"id"`
 			Label     string   `json:"label"`
 			Lat       *float64 `json:"lat"`
 			Lng       *float64 `json:"lng"`
@@ -594,6 +643,7 @@ func runStopsSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	stopIDs := make([]string, 0, len(b.Stops))
 	if err := db.WithUser(ctx, user.ID, func(tx pgx.Tx) error {
 		var owned int
 		if err := tx.QueryRow(ctx,
@@ -602,7 +652,25 @@ func runStopsSet(w http.ResponseWriter, r *http.Request) {
 		}
 		// One transaction: a half-replaced stop list is a route that goes
 		// somewhere nobody planned.
-		if _, err := tx.Exec(ctx, `DELETE FROM run_stops WHERE run_id = $1`, runID); err != nil {
+		keep := make([]string, 0, len(b.Stops))
+		seen := map[string]bool{}
+		for _, s := range b.Stops {
+			if s.ID == "" {
+				continue
+			}
+			if seen[s.ID] || !isUUID(s.ID) {
+				return errStopNotOnRun
+			}
+			seen[s.ID] = true
+			keep = append(keep, s.ID)
+		}
+		if _, err := tx.Exec(ctx,
+			`DELETE FROM run_stops WHERE run_id = $1 AND NOT (id = ANY($2::uuid[]))`, runID, keep); err != nil {
+			return err
+		}
+		// UNIQUE (run_id, seq) is checked per statement: park the kept stops on
+		// negative seqs first so a reorder cannot collide with itself.
+		if _, err := tx.Exec(ctx, `UPDATE run_stops SET seq = -1 - seq WHERE run_id = $1`, runID); err != nil {
 			return err
 		}
 		for i, s := range b.Stops {
@@ -618,17 +686,37 @@ func runStopsSet(w http.ResponseWriter, r *http.Request) {
 				}
 				planned = &t
 			}
-			if _, err := tx.Exec(ctx,
+			if s.ID != "" {
+				tag, err := tx.Exec(ctx,
+					`UPDATE run_stops SET seq = $3, label = $4, lat = $5, lng = $6, planned_at = $7
+					  WHERE id = $1 AND run_id = $2`,
+					s.ID, runID, i, label, s.Lat, s.Lng, planned)
+				if err != nil {
+					return err
+				}
+				if tag.RowsAffected() == 0 {
+					return errStopNotOnRun
+				}
+				stopIDs = append(stopIDs, s.ID)
+				continue
+			}
+			var id string
+			if err := tx.QueryRow(ctx,
 				`INSERT INTO run_stops (run_id, seq, label, lat, lng, planned_at)
-				 VALUES ($1, $2, $3, $4, $5, $6)`,
-				runID, i, label, s.Lat, s.Lng, planned); err != nil {
+				 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+				runID, i, label, s.Lat, s.Lng, planned).Scan(&id); err != nil {
 				return err
 			}
+			stopIDs = append(stopIDs, id)
 		}
 		return nil
 	}); err != nil {
 		if db.NoRows(err) {
 			httpx.Err(w, 404, "Run not found")
+			return
+		}
+		if errors.Is(err, errStopNotOnRun) {
+			httpx.Err(w, 400, "A stop id is not one of this run's stops", map[string]any{"code": "unknown_stop"})
 			return
 		}
 		log.Printf("[run stops PUT] %v", err)
@@ -637,7 +725,7 @@ func runStopsSet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	emitx.ChatEvent(chatID, "runs_changed", map[string]any{"runId": runID, "by": user.ID})
-	httpx.JSON(w, 200, map[string]any{"ok": true, "stops": len(b.Stops)})
+	httpx.JSON(w, 200, map[string]any{"ok": true, "stops": len(b.Stops), "stopIds": stopIDs})
 }
 
 // runStopArrive marks the vehicle as having reached a stop — the ARRIVED step

@@ -1952,6 +1952,50 @@ func authMpinSet(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, 200, map[string]any{"ok": true})
 }
 
+// ── MPIN proof (shared) ────────────────────────────────────────────────
+
+type mpinResult int
+
+const (
+	mpinOK mpinResult = iota
+	mpinLocked
+	mpinWrong
+	mpinFailed // database error: neither a pass nor a strike
+)
+
+// authMpinCheck is THE MPIN check: /auth/mpin/verify and DELETE /user/account
+// both go through it, so they share one five-per-15-minutes budget on the same
+// "mpin:<id>" key and cannot drift apart. On mpinLocked, retryAfter is the wait.
+func authMpinCheck(r *http.Request, userID, mpin string) (user *authUserRow, res mpinResult, retryAfter int64) {
+	ctx := r.Context()
+	// ConsumeSecure, not Consume: a Redis outage must not remove the
+	// five-attempt limit on a six-digit PIN (audit F11).
+	gate := redisx.ConsumeSecure(ctx, "mpin:"+userID, 5, 900)
+	if !gate.Allowed {
+		reset := gate.ResetInSec
+		if reset == 0 {
+			reset = 900
+		}
+		return nil, mpinLocked, reset
+	}
+
+	user = &authUserRow{}
+	err := db.Pool.QueryRow(ctx,
+		`SELECT `+authUserCols+` FROM users WHERE id = $1 AND is_deleted = FALSE`,
+		userID).Scan(user.fields()...)
+	if err != nil && !db.NoRows(err) {
+		return nil, mpinFailed, 0
+	}
+	ok := err == nil && user.MpinHash != nil && *user.MpinHash != "" &&
+		vault.VerifySecret(mpin, *user.MpinHash)
+	authAudit(ctx, &userID, authClientIP(r), "mpin", ok)
+	if !ok {
+		return nil, mpinWrong, 0
+	}
+	redisx.Reset(ctx, "mpin:"+userID)
+	return user, mpinOK, 0
+}
+
 // ── POST /auth/mpin/verify ─────────────────────────────────────────────
 
 func authMpinVerify(w http.ResponseWriter, r *http.Request) {
@@ -1968,35 +2012,19 @@ func authMpinVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ConsumeSecure, not Consume: a Redis outage must not remove the
-	// five-attempt limit on a six-digit PIN (audit F11).
-	gate := redisx.ConsumeSecure(ctx, "mpin:"+userID, 5, 900)
-	if !gate.Allowed {
-		reset := gate.ResetInSec
-		if reset == 0 {
-			reset = 900
-		}
+	user, res, reset := authMpinCheck(r, userID, mpin)
+	switch res {
+	case mpinLocked:
 		authEnvErrRetry(w, http.StatusLocked, "locked", fmt.Sprintf("Too many attempts. Try again in %ds", reset), reset)
 		return
-	}
-
-	user := &authUserRow{}
-	err := db.Pool.QueryRow(ctx,
-		`SELECT `+authUserCols+` FROM users WHERE id = $1 AND is_deleted = FALSE`,
-		userID).Scan(user.fields()...)
-	if err != nil && !db.NoRows(err) {
+	case mpinFailed:
 		authEnvErr(w, 500, "server_error", "Verification failed")
 		return
-	}
-	ok := err == nil && user.MpinHash != nil && *user.MpinHash != "" &&
-		vault.VerifySecret(mpin, *user.MpinHash)
-	authAudit(ctx, &userID, authClientIP(r), "mpin", ok)
-	if !ok {
+	case mpinWrong:
 		authEnvErr(w, 401, "invalid_mpin", "Incorrect MPIN")
 		return
 	}
 
-	redisx.Reset(ctx, "mpin:"+userID)
 	access, refresh, err := authIssueTokens(ctx, r, user.ID, user.Email)
 	if err != nil {
 		authEnvErr(w, 500, "server_error", "Verification failed")

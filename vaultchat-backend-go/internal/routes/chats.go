@@ -33,6 +33,7 @@ import (
 	"vaultchat/backend-go/internal/httpx"
 	"vaultchat/backend-go/internal/metrics"
 	"vaultchat/backend-go/internal/realtime"
+	"vaultchat/backend-go/internal/redisx"
 	"vaultchat/backend-go/internal/services"
 	"vaultchat/backend-go/internal/vault"
 )
@@ -77,6 +78,7 @@ func RegisterChats(mux *http.ServeMux) {
 	mux.HandleFunc("GET /chats", httpx.RequireAuth(chatsList))
 	mux.HandleFunc("POST /chats", httpx.RequireAuth(chatsCreate))
 	mux.HandleFunc("POST /chats/join/{code}", httpx.RequireAuth(chatsJoinByCode))
+	mux.HandleFunc("GET /chats/join/{code}/preview", httpx.RequireAuth(chatsJoinPreview))
 	mux.HandleFunc("GET /chats/search", httpx.RequireAuth(chatsSearch))
 	mux.HandleFunc("GET /chats/common/{userId}", httpx.RequireAuth(chatsCommon))
 	mux.HandleFunc("GET /chats/{id}", httpx.RequireAuth(chatsGet))
@@ -1801,6 +1803,53 @@ func (l chatsInviteRow) public() chatsPublicInvite {
 		CreatedAt: httpx.JSTime(l.CreatedAt), ExpiresAt: httpx.JST(l.ExpiresAt),
 		MaxUses: l.MaxUses, Uses: l.Uses, Revoked: l.Revoked,
 	}
+}
+
+// GET /chats/join/{code}/preview — what "Join" would join, before joining.
+//
+// Answers ONLY the group's name, its current member count and whether joining
+// needs an admin's approval: no chat id, no member list, no photo, no creator.
+// A code is the only credential here, so this is a validity oracle for codes —
+// it is rate-limited per user and per IP with ConsumeSecure (a Redis outage
+// must not lift the limit), and every dead link answers the same 410.
+func chatsJoinPreview(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := httpx.UserFrom(r)
+	for _, lim := range []struct {
+		key    string
+		n, win int64
+	}{
+		{"chatjoin:preview:" + user.ID, 30, 600},
+		{"chatjoin:preview:ip:" + authClientIP(r), 120, 3600},
+	} {
+		if rl := redisx.ConsumeSecure(ctx, lim.key, lim.n, lim.win); !rl.Allowed {
+			httpx.Err(w, 429, "Too many link checks. Try again later.",
+				map[string]any{"retryAfter": max(rl.ResetInSec, 1)})
+			return
+		}
+	}
+	code := strings.TrimSpace(r.PathValue("code"))
+	var name string
+	var members int64
+	var approve bool
+	err := db.SysPool.QueryRow(ctx,
+		`SELECT COALESCE(c.name, ''), c.approve_members,
+		        (SELECT COUNT(*) FROM chat_members cm WHERE cm.chat_id = c.id AND cm.left_at IS NULL)
+		   FROM invite_links il JOIN chats c ON c.id = il.chat_id
+		  WHERE il.code = $1 AND c.type = 'group' AND NOT il.revoked
+		    AND (il.expires_at IS NULL OR il.expires_at > NOW())
+		    AND (il.max_uses = 0 OR il.uses < il.max_uses)
+		  LIMIT 1`, code).Scan(&name, &approve, &members)
+	if db.NoRows(err) || (err == nil && code == "") {
+		httpx.Err(w, http.StatusGone, "This invite link is invalid, expired or used up")
+		return
+	}
+	if err != nil {
+		log.Printf("[chats join preview] %v", err)
+		httpx.Err(w, 500, "Failed to load invite")
+		return
+	}
+	httpx.JSON(w, 200, map[string]any{"name": name, "memberCount": members, "requiresApproval": approve})
 }
 
 // POST /chats/join/{code} — redeem an invite link (plain pool, like Node).

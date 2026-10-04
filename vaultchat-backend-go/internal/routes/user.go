@@ -1691,8 +1691,32 @@ func userAccountDelete(w http.ResponseWriter, r *http.Request) {
 	// by the account we are erasing would defeat the point of erasing it.
 	var body struct {
 		Reason string `json:"reason"`
+		Mpin   any    `json:"mpin"`
 	}
 	_ = httpx.Body(r, &body)
+
+	// RE-AUTHENTICATION. A bearer token proves a session, not who is holding
+	// the unlocked phone, and this erases the account for good. The MPIN goes
+	// through the same check (and the same attempt budget) as /auth/mpin/verify.
+	// 403, not 401, for a wrong MPIN: the session is fine, and a 401 would send
+	// the client into refresh/sign-out instead of showing the error.
+	mpin := authStr(body.Mpin)
+	if mpin == "" {
+		authEnvErr(w, 400, "mpin_required", "Enter your MPIN to delete this account")
+		return
+	}
+	switch _, res, reset := authMpinCheck(r, user.ID, mpin); res {
+	case mpinLocked:
+		authEnvErrRetry(w, http.StatusLocked, "locked", fmt.Sprintf("Too many attempts. Try again in %ds", reset), reset)
+		return
+	case mpinFailed:
+		authEnvErr(w, 500, "server_error", "Verification failed")
+		return
+	case mpinWrong:
+		authEnvErr(w, 403, "invalid_mpin", "Incorrect MPIN. The account was not deleted.")
+		return
+	}
+
 	if body.Reason != "" {
 		if len(body.Reason) > 120 {
 			body.Reason = body.Reason[:120]

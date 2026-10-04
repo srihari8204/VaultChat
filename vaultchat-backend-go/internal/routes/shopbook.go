@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
@@ -106,6 +107,7 @@ func RegisterShopBook(mux *http.ServeMux) {
 	// Shop owner — Phase 2b
 	mux.HandleFunc("POST /shopbook/my-shop/ledger/remind", httpx.RequireAuth(sbSendReminder))
 	mux.HandleFunc("POST /shopbook/my-shop/plan", httpx.RequireAuth(sbSetPlan))
+	mux.HandleFunc("POST /shopbook/my-shop/plan/request-pro", httpx.RequireAuth(sbRequestPro))
 	mux.HandleFunc("GET /shopbook/my-shop/reports", httpx.RequireAuth(sbReports))
 
 	// Upgrade (openspec: shop-book-upgrade) — tax engine, full order
@@ -1096,7 +1098,7 @@ func sbMyOrders(w http.ResponseWriter, r *http.Request) {
 // or the shop owner can read it.
 func orderWithItems(ctx context.Context, w http.ResponseWriter, orderID, userID string) {
 	var shopID, custID, status, note, couponCode, address string
-	var cancelReason, cancelledBy, rejectReason, notCollectedReason, currency string
+	var cancelReason, cancelledBy, rejectReason, rejectNote, notCollectedReason, currency string
 	// Shop identity for the bill header (spec: invoicing / shop profile).
 	var shopName, shopAddress, shopPhone, shopCountry, ownerName string
 	var shopTaxCfg []byte
@@ -1111,7 +1113,7 @@ func orderWithItems(ctx context.Context, w http.ResponseWriter, orderID, userID 
 		`SELECT o.shop_id, o.customer_user_id, o.status, `+sbCents("o.total")+`, o.note, o.created_at,
 		        o.coupon_code, `+sbCents("o.discount")+`, o.delivery, `+sbCents("o.delivery_fee")+`, o.address,
 		        `+sbCents("o.subtotal")+`, `+sbCents("o.tax_total")+`, `+sbCents("o.round_off")+`,
-		        o.cancel_reason, o.cancelled_by, o.reject_reason, o.not_collected_reason,
+		        o.cancel_reason, o.cancelled_by, o.reject_reason, o.reject_note, o.not_collected_reason,
 		        s.currency, s.name, s.address, s.phone, s.country, s.tax_config,
 		        COALESCE(u.name,''), o.buyer_tax
 		   FROM shopbook_order o
@@ -1120,7 +1122,7 @@ func orderWithItems(ctx context.Context, w http.ResponseWriter, orderID, userID 
 		  WHERE o.id=$1`, orderID).Scan(&shopID, &custID, &status, &totalC, &note, &created,
 		&couponCode, &discountC, &delivery, &deliveryFeeC, &address,
 		&subtotalC, &taxTotalC, &roundOffC,
-		&cancelReason, &cancelledBy, &rejectReason, &notCollectedReason, &currency,
+		&cancelReason, &cancelledBy, &rejectReason, &rejectNote, &notCollectedReason, &currency,
 		&shopName, &shopAddress, &shopPhone, &shopCountry, &shopTaxCfg, &ownerName, &buyerTax)
 	if db.NoRows(err) {
 		httpx.Err(w, http.StatusNotFound, "Order not found")
@@ -1206,7 +1208,7 @@ func orderWithItems(ctx context.Context, w http.ResponseWriter, orderID, userID 
 		"couponCode": couponCode, "discount": money(discountC).Float(), "delivery": delivery,
 		"deliveryFee": money(deliveryFeeC).Float(), "address": address, "rated": rated,
 		"cancelReason": cancelReason, "cancelledBy": cancelledBy,
-		"rejectReason": rejectReason, "notCollectedReason": notCollectedReason,
+		"rejectReason": rejectReason, "rejectNote": rejectNote, "notCollectedReason": notCollectedReason,
 		"currency": currency,
 		// Additive minor-unit view of the SAME amounts (shopbook_currency.go).
 		// The decimal fields above are unchanged and stay authoritative for
@@ -1874,6 +1876,10 @@ func sbOwnerCollectDenied() bool {
 	return os.Getenv("SHOPBOOK_OWNER_COLLECT") == "deny"
 }
 
+// sbRejectNoteMax bounds the owner's free-text note on an "other" rejection
+// (migration 140 enforces the same limit on shopbook_order.reject_note).
+const sbRejectNoteMax = 200
+
 // The six rejection reason codes (spec: order-management / rejection).
 var sbRejectReasons = map[string]string{
 	"out_of_stock":  "Out of Stock",
@@ -1964,18 +1970,35 @@ func sbOwnerSetStatus(w http.ResponseWriter, r *http.Request) {
 	var b struct {
 		Status string `json:"status"`
 		Reason string `json:"reason"` // rejection code or cancellation text
+		Note   string `json:"note"`   // free text, only with reject reason "other"
 	}
 	_ = httpx.Body(r, &b)
 	if b.Status == "new" { // legacy client alias
 		b.Status = "pending"
 	}
 
+	b.Note = strings.TrimSpace(b.Note)
 	if b.Status == "rejected" {
 		if _, okR := sbRejectReasons[b.Reason]; !okR {
 			httpx.Err(w, http.StatusBadRequest,
 				"reason must be one of out_of_stock|shop_closed|quantity|outside_hours|technical|other")
 			return
 		}
+	}
+	if b.Note != "" && (b.Status != "rejected" || b.Reason != "other") {
+		httpx.Err(w, http.StatusBadRequest, "note is only accepted when rejecting with reason other",
+			map[string]any{"code": "note_not_allowed"})
+		return
+	}
+	if utf8.RuneCountInString(b.Note) > sbRejectNoteMax {
+		httpx.Err(w, http.StatusBadRequest, fmt.Sprintf("note must be at most %d characters", sbRejectNoteMax),
+			map[string]any{"code": "note_too_long", "max": sbRejectNoteMax})
+		return
+	}
+	// What the customer is told: the reason label, plus the owner's words for "other".
+	rejectText := sbRejectReasons[b.Reason]
+	if b.Note != "" {
+		rejectText += " — " + b.Note
 	}
 	if b.Status == "cancelled" && strings.TrimSpace(b.Reason) == "" {
 		httpx.Err(w, http.StatusBadRequest, "cancellation reason required")
@@ -2099,8 +2122,8 @@ func sbOwnerSetStatus(w http.ResponseWriter, r *http.Request) {
 		args := []any{finalStatus, orderID, shopID}
 		switch b.Status {
 		case "rejected":
-			set = `status=$1, reject_reason=$4, updated_at=NOW()`
-			args = append(args, b.Reason)
+			set = `status=$1, reject_reason=$4, reject_note=$5, updated_at=NOW()`
+			args = append(args, b.Reason, b.Note)
 		case "cancelled":
 			set = `status=$1, cancel_reason=$4, cancelled_by='owner', updated_at=NOW()`
 			args = append(args, b.Reason)
@@ -2115,7 +2138,7 @@ func sbOwnerSetStatus(w http.ResponseWriter, r *http.Request) {
 		for _, ev := range events {
 			note := ""
 			if ev == "rejected" {
-				note = sbRejectReasons[b.Reason]
+				note = rejectText
 			} else if ev == "cancelled" || ev == "not_collected" {
 				note = b.Reason
 			} else if ev == "collected" && ownerAsserted {
@@ -2166,7 +2189,7 @@ func sbOwnerSetStatus(w http.ResponseWriter, r *http.Request) {
 			"ready":         "Your order is ready to collect 🎉",
 			"collected":     "Order collected — thank you!",
 			"completed":     "Order completed — thank you!",
-			"rejected":      "Your order was rejected: " + sbRejectReasons[b.Reason],
+			"rejected":      "Your order was rejected: " + rejectText,
 			"cancelled":     "Your order was cancelled: " + b.Reason,
 			"not_collected": "The shop marked your order as not collected: " + b.Reason,
 		}[b.Status]
@@ -3213,6 +3236,26 @@ func sbSetPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, 200, map[string]any{"ok": true, "plan": "free"})
+}
+
+// sbRequestPro records that the owner asked for Pro (migration 141), for an
+// admin to act on in the subscriptions list. It grants NOTHING — entitlement
+// still comes only from sbAdminSetEntitlement — and it is idempotent: asking
+// again keeps the first request time. An admin decision clears it.
+func sbRequestPro(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	shopID, ok := ownerShopID(ctx, w, httpx.UserFrom(r).ID)
+	if !ok {
+		return
+	}
+	var at time.Time
+	if err := db.Pool.QueryRow(ctx,
+		`UPDATE shopbook_shop SET pro_requested_at = COALESCE(pro_requested_at, NOW())
+		  WHERE id=$1 RETURNING pro_requested_at`, shopID).Scan(&at); err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	httpx.JSON(w, 200, map[string]any{"ok": true, "requestedAt": httpx.JST(&at)})
 }
 
 // sbSalesBuckets groups completed-order sales by a to_char pattern over an

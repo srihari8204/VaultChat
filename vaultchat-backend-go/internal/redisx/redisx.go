@@ -283,11 +283,16 @@ func ConsumeBy(ctx context.Context, key string, n, limit, windowSec int64) RateR
 	return RateResult{Allowed: count <= limit, Remaining: rem, ResetInSec: reset}
 }
 
-// Reset mirrors rateLimit.reset.
+// Reset mirrors rateLimit.reset. It clears the in-process fallback bucket too:
+// ConsumeSecure counts there when Redis is absent or erroring, and without this
+// a successful MPIN check during an outage never cleared its strikes.
 func Reset(ctx context.Context, key string) {
 	if Client != nil {
 		Client.Del(ctx, "rl:"+key)
 	}
+	memMu.Lock()
+	delete(memBuckets, key)
+	memMu.Unlock()
 }
 
 // ── A small expiring key/value store ────────────────────────────────────

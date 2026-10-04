@@ -479,7 +479,7 @@ func sbCreditNote(w http.ResponseWriter, r *http.Request) {
 // sbReturnRows renders a return list for either side of the counter.
 func sbReturnRows(ctx context.Context, where string, args ...any) ([]map[string]any, error) {
 	rows, err := db.Pool.Query(ctx, `
-		SELECT rt.id, rt.order_id, rt.status, rt.reason, rt.decision_note, rt.settlement,
+		SELECT rt.id, rt.order_id, rt.shop_id, rt.status, rt.reason, rt.decision_note, rt.settlement,
 		       `+sbCents("rt.refund_total")+`, rt.requested_at,
 		       COALESCE(u.name,''), s.name, s.currency,
 		       COALESCE((SELECT cn.id::text FROM shopbook_credit_note cn WHERE cn.return_id=rt.id),'')
@@ -494,16 +494,16 @@ func sbReturnRows(ctx context.Context, where string, args ...any) ([]map[string]
 	defer rows.Close()
 	out := []map[string]any{}
 	for rows.Next() {
-		var id, orderID, status, reason, note, settlement string
+		var id, orderID, shopID, status, reason, note, settlement string
 		var custName, shopName, currency, noteID string
 		var refund int64
 		var at time.Time
-		if rows.Scan(&id, &orderID, &status, &reason, &note, &settlement,
+		if rows.Scan(&id, &orderID, &shopID, &status, &reason, &note, &settlement,
 			&refund, &at, &custName, &shopName, &currency, &noteID) != nil {
 			continue
 		}
 		out = append(out, map[string]any{
-			"id": id, "orderId": orderID, "status": status, "reason": reason,
+			"id": id, "orderId": orderID, "shopId": shopID, "status": status, "reason": reason,
 			"decisionNote": note, "settlement": settlement,
 			"refundTotal": money(refund).Float(), "requestedAt": httpx.JST(&at),
 			"customerName": custName, "shopName": shopName, "currency": currency,
