@@ -30,7 +30,8 @@ function triggerFor(freq: ReminderFreq, at: number): any {
     // expo weekday: 1 = Sunday … 7 = Saturday
     case 'weekly':  return { type: 'weekly', weekday: d.getDay() + 1, hour, minute };
     case 'monthly': return { type: 'monthly', day: d.getDate(), hour, minute };
-    case 'yearly':  return { type: 'yearly', month: d.getMonth() + 1, day: d.getDate(), hour, minute };
+    // expo yearly month uses Date ranges: 0 = January … 11 = December
+    case 'yearly':  return { type: 'yearly', month: d.getMonth(), day: d.getDate(), hour, minute };
     default:        return { date: d };   // 'once'
   }
 }

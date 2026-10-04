@@ -52,6 +52,9 @@ export const makeC = (P: Palette) => ({
   // navy as a FILL under white text. The dark-theme navy above is a light
   // accent for text, so white on it read at under 2:1; a fill needs its own.
   navyFill:   P === FIN ? '#1E3A5F' : '#24456E',
+  // green as a FILL under white text, for the same reason: white on the dark
+  // accent green read at 1.9:1; this fill reads at 5.3:1.
+  greenFill:  P === FIN ? '#0B7A3B' : '#1E7A4C',
 
   // The app header is a large FILL, not accent text. One token cannot be both:
   // reusing the accent in dark gives a glaring slab, so the roles are split.
@@ -141,7 +144,7 @@ export const makeStyles = (C: ReturnType<typeof makeC>) => StyleSheet.create({
     borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7, marginRight: 8,
     borderWidth: 1, borderColor: C.border,
   },
-  chipActive: { backgroundColor: C.green, borderColor: C.green },
+  chipActive: { backgroundColor: C.greenFill, borderColor: C.greenFill },
   chipText: { color: C.text, fontSize: 12.5, fontWeight: '600' },
 
   card: {
@@ -169,7 +172,7 @@ export const makeStyles = (C: ReturnType<typeof makeC>) => StyleSheet.create({
   badgeClosed: { backgroundColor: C.dangerSoft },
   badgeText: { fontSize: 11, fontWeight: '700', color: C.green },
 
-  addBtn: { backgroundColor: C.green, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 9 },
+  addBtn: { backgroundColor: C.greenFill, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 9 },
   addBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
 
   panel: { backgroundColor: C.card, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: C.border, marginVertical: 8, gap: 8 },
@@ -184,7 +187,7 @@ export const makeStyles = (C: ReturnType<typeof makeC>) => StyleSheet.create({
 
   primaryBtn: {
     flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8,
-    backgroundColor: C.green, borderRadius: 12, paddingVertical: 14, marginTop: 8,
+    backgroundColor: C.greenFill, borderRadius: 12, paddingVertical: 14, marginTop: 8,
   },
   primaryBtnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
   outlineBtn: {
@@ -195,7 +198,7 @@ export const makeStyles = (C: ReturnType<typeof makeC>) => StyleSheet.create({
   dangerBtn: { alignItems: 'center', paddingVertical: 13, marginTop: 8 },
   dangerBtnText: { color: C.danger, fontWeight: '700', fontSize: 14 },
 
-  smallGreen: { backgroundColor: C.green, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
+  smallGreen: { backgroundColor: C.greenFill, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
   smallGreenText: { color: '#fff', fontWeight: '700', fontSize: 12 },
   smallOutline: { borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7, borderWidth: 1, borderColor: C.border },
   smallOutlineText: { color: C.text, fontWeight: '600', fontSize: 12 },
@@ -246,12 +249,12 @@ export const makeStyles = (C: ReturnType<typeof makeC>) => StyleSheet.create({
   toggleLabel: { color: C.text, fontSize: 14, flex: 1 },
 
   statusBtn: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: C.border, backgroundColor: C.card },
-  statusBtnActive: { backgroundColor: C.green, borderColor: C.green },
+  statusBtnActive: { backgroundColor: C.greenFill, borderColor: C.greenFill },
   statusBtnText: { fontSize: 12.5, fontWeight: '700', color: C.text },
 
   filterBar: { backgroundColor: C.card, borderBottomWidth: 1, borderBottomColor: C.border, maxHeight: 50 },
   filterChip: { paddingHorizontal: 14, paddingVertical: 8, marginVertical: 7, marginRight: 8, borderRadius: 18, backgroundColor: C.chip },
-  filterChipActive: { backgroundColor: C.green },
+  filterChipActive: { backgroundColor: C.greenFill },
   filterChipText: { color: C.sub, fontWeight: '700', fontSize: 13 },
   filterChipTextActive: { color: '#fff' },
 
@@ -287,7 +290,7 @@ export const makeStyles = (C: ReturnType<typeof makeC>) => StyleSheet.create({
   },
   offerText: { color: C.green, fontSize: 13.5, fontWeight: '700' },
   couponCode: {
-    backgroundColor: C.green, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6,
+    backgroundColor: C.greenFill, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6,
     borderStyle: 'dashed', borderWidth: 1, borderColor: '#166534',
   },
   couponCodeText: { color: '#fff', fontSize: 12.5, fontWeight: '800', letterSpacing: 1 },
@@ -333,7 +336,7 @@ export const makeStyles = (C: ReturnType<typeof makeC>) => StyleSheet.create({
     width: 44, height: 44, borderRadius: 10, borderWidth: 1.5, borderColor: C.green,
     justifyContent: 'center', alignItems: 'center', backgroundColor: C.card,
   },
-  micBtnOn: { backgroundColor: C.green, borderColor: C.green },
+  micBtnOn: { backgroundColor: C.greenFill, borderColor: C.greenFill },
   findProductBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.greenSoft,
     borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, marginTop: 8,

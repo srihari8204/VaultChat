@@ -177,13 +177,16 @@ export function SubHeader({ title, onBack, right }: {
   );
 }
 
+const ON_FILL = '#fff';   // chip icon and text on the green fill
 export function Chip({ label, icon, active, onPress }: { label: string; icon: string; active: boolean; onPress: () => void }) {
   return (
     <TouchableOpacity style={[s.chip, active && s.chipActive]} onPress={onPress}
       // The icon is an emoji or a glyph name, never a label worth reading out.
       accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ selected: active }}>
-      <Text style={{ fontSize: 13 }}>{icon}</Text>
-      <Text style={[s.chipText, active && { color: '#fff' }]}>{label}</Text>
+      {/^[a-z]+(-[a-z]+)*$/.test(icon)
+        ? <Ionicons name={icon as any} size={14} color={active ? ON_FILL : C.sub} />
+        : <Text style={{ fontSize: 13 }}>{icon}</Text>}
+      <Text style={[s.chipText, active && { color: ON_FILL }]}>{label}</Text>
     </TouchableOpacity>
   );
 }

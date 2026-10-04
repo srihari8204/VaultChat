@@ -729,11 +729,10 @@ export default function VaultScreen() {
         animationType="slide"
         onRequestClose={() => setShowBackup(false)}
       >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setShowBackup(false)}
-        >
+        <View style={styles.modalOverlay}>
+          {/* Backdrop as a sibling of the panel so the sheet's buttons stay reachable by screen readers. */}
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowBackup(false)}
+            accessibilityRole="button" accessibilityLabel="Close" />
           <View style={styles.backupPanel}>
             <View style={styles.backupHandle} />
             <Text style={styles.backupTitle}>Export file list</Text>
@@ -778,7 +777,7 @@ export default function VaultScreen() {
               with chat backup. Deleting the app deletes them.
             </Text>
           </View>
-        </TouchableOpacity>
+        </View>
       </Modal>
 
       

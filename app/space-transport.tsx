@@ -288,9 +288,8 @@ export default function SpaceTransportScreen() {
             )}
 
             <View style={s.actions}>
-              {/* The run view reads the same sealed stream everyone else does.
-                  It shows status, arrival window and position freshness — not a
-                  map — so the label says "Track", not "Live … map". */}
+              {/* The run view reads the same sealed stream everyone else does:
+                  status, arrival window, position freshness and a map. */}
               <TouchableOpacity
                 onPress={() => router.push({ pathname: '/space-run', params: { spaceId, runId: run.id, name: spaceName, groupType: params.groupType ?? '' } })}
                 style={[s.btn, { backgroundColor: colors.brandOnLight, flex: 1 }]}

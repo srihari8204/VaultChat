@@ -509,10 +509,10 @@ export default function SpaceRunsAdminScreen() {
             <TouchableOpacity
               style={s.pickRow} onPress={() => setNewRequireCode((v) => !v)}
               accessibilityRole="checkbox" accessibilityState={{ checked: newRequireCode }}
-              accessibilityLabel="Ask for a handover code when a rider is dropped off"
+              accessibilityLabel="Ask for a handover code when a rider boards and is dropped off"
             >
               <Ionicons name={newRequireCode ? 'checkbox' : 'square-outline'} size={19} color={newRequireCode ? colors.primary : colors.textDim} />
-              <Text style={[s.pickText, newRequireCode && { color: colors.text }]}>Ask for a handover code at drop-off</Text>
+              <Text style={[s.pickText, newRequireCode && { color: colors.text }]}>Ask for a handover code at boarding and drop-off</Text>
             </TouchableOpacity>
             <View style={s.modalRow}>
               <TouchableOpacity style={s.modalBtn} onPress={() => setCreating(false)} accessibilityRole="button">

@@ -377,13 +377,16 @@ export default function VaultFeaturesScreen() {
         animationType="slide"
         onRequestClose={() => setShowLock(false)}
       >
-        <TouchableOpacity
-          style={modalStyles.overlay}
-          activeOpacity={1}
-          onPress={() => setShowLock(false)}
-          accessibilityRole="button"
-          accessibilityLabel="Close"
-        >
+        <View style={modalStyles.overlay}>
+          {/* The backdrop is a sibling of the panel, not its parent: a
+              labelled button wrapping the options hid them from VoiceOver. */}
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setShowLock(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+          />
           <View style={modalStyles.panel} accessibilityRole="radiogroup">
             <View style={modalStyles.handle} />
             <Text style={modalStyles.title} accessibilityRole="header">Auto Screen Lock</Text>
@@ -409,7 +412,7 @@ export default function VaultFeaturesScreen() {
               );
             })}
           </View>
-        </TouchableOpacity>
+        </View>
       </Modal>
 
     </View>

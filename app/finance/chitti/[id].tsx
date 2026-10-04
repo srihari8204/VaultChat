@@ -400,10 +400,9 @@ export default function ChittiDetail() {
                   <Text style={s.aSub}>Bid {formatINR(a.winning_bid)} · Commission {formatINR(a.commission)}</Text>
                   <Text style={s.aDiv}>Dividend/member {formatINR(a.dividend)}</Text>
                 </View>
-                {/* Confirmed like the group delete above (2026-09-17). This one
-                    also writes NO timeline entry — unlike deleteMember and
-                    recordAuction — so an accidental tap destroyed a settled
-                    auction (month, bid, winner) leaving no trace it happened. */}
+                {/* Confirmed like the group delete above (2026-09-17); the
+                    delete also writes a timeline entry, so a removed settled
+                    auction (month, bid, winner) leaves a trace. */}
                 <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Delete month ${a.month}'s auction`}
                   onPress={() => removeAuction(a)} hitSlop={14}><Ionicons name="close" size={16} color={FIN.faint} /></TouchableOpacity>
               </View>

@@ -40,7 +40,7 @@ const EXEMPT = new Set([
   'components/finance/ui.tsx',
   'components/games/Rummy.tsx', 'components/games/Chess.tsx', 'components/games/Ludo.tsx',
 ]);
-const EXEMPT_PREFIX = ['app/finance/', 'app/spaces/', 'lib/games/', 'lib/groups/'];
+const EXEMPT_PREFIX = ['app/spaces/', 'lib/games/', 'lib/groups/'];
 
 const rgb = (h: string): [number, number, number] => {
   let x = h.replace('#', '');

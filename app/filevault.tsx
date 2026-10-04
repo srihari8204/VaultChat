@@ -7,8 +7,8 @@
 // AES-256-GCM (a random file key wrapped under the Device PIN, lib/vaultCrypto)
 // and stores them as .enc files with a SecureStore manifest. Rather than ship
 // two vaults — one real, one fake — every "Vault" entry point now lands on the
-// real one. Kept only as an alias for old links; the in-app caller left is
-// components/SafetyNavBar.tsx (see that file to point it at /vault directly).
+// real one. Kept only as an alias for old links; nothing in the app links here
+// any more (SafetyNavBar points at /vault directly).
 
 import { Redirect } from 'expo-router';
 

@@ -300,7 +300,3 @@ export function ShopSettings({ shop, me, onSaved, onCancel }: {
     </>
   );
 }
-
-// ════════════════════════════════════════════════════════════════
-//  upgrade surfaces — notification inbox, reason modal, invoice
-// ════════════════════════════════════════════════════════════════

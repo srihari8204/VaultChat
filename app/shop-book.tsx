@@ -342,6 +342,3 @@ function OwnerApp({ me }: { me: { id: string; name: string } | null }) {
   );
 }
 
-// Every quick-link card opens a screen, so every one carries the same affordance.
-// Corner-pinned: the cards are centered columns, so a chevron in the flow stacks
-// under the label instead of reading as "forward".

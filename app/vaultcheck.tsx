@@ -11,7 +11,7 @@
 
 import { AppText as Text } from '../components/ui/Text';
 import { AuroraBackground } from '../components/ui';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity, Share, Alert,
 } from 'react-native';
@@ -46,6 +46,10 @@ export default function VaultCheckScreen() {
   const [error, setError] = useState<string>('');
   const [attempt, setAttempt] = useState(0);
   const [elapsed, setElapsed] = useState(0);
+  // verifyMedia cannot be cancelled, so a timeout only stops WAITING. The
+  // running analysis is kept here and Try again waits on it again instead of
+  // starting a second one alongside it.
+  const inflight = useRef<{ key: string; p: Promise<VaultCheckReport> } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -68,10 +72,18 @@ export default function VaultCheckScreen() {
           filename: filename ? String(filename) : undefined,
         });
         if (!local) throw new Error('Could not locate the media on this device');
+        const key = `${local}|${kind}`;
+        let run = inflight.current?.key === key ? inflight.current.p : null;
+        if (!run) {
+          const p = verifyMedia(local, kind);
+          inflight.current = { key, p };
+          p.catch(() => {}).finally(() => { if (inflight.current?.p === p) inflight.current = null; });
+          run = p;
+        }
         const timeout = new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error('The check took too long and was stopped. Try again, or try a shorter clip.')), CHECK_TIMEOUT_MS);
+          timer = setTimeout(() => reject(new Error('The check is taking too long. It is still running on this device — Try again to keep waiting for it, or try a shorter clip.')), CHECK_TIMEOUT_MS);
         });
-        const r = await Promise.race([verifyMedia(local, kind), timeout]);
+        const r = await Promise.race([run, timeout]);
         if (!cancelled) setReport(r);
       } catch (e: any) {
         if (!cancelled) setError(e?.message || 'Verification failed');
@@ -108,7 +120,7 @@ export default function VaultCheckScreen() {
               {kind === 'video' ? ' A video can take up to a minute or two.' : ''}
             </Text>
             {elapsed >= 3 && (
-              <Text style={S.loadingHint} accessibilityLiveRegion="polite">{elapsed}s elapsed</Text>
+              <Text style={S.loadingHint}>{elapsed}s elapsed</Text>
             )}
           </View>
         )}
