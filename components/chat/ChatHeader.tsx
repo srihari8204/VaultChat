@@ -156,14 +156,14 @@ export function ChatHeader({
             <>
               <TouchableOpacity
                 style={S.headerIconBtn} hitSlop={4}
-                onPress={() => router.push({ pathname: '/videocall' as any, params })} accessibilityRole="button" accessibilityLabel="Video call"
+                onPress={() => router.push({ pathname: '/videocall', params })} accessibilityRole="button" accessibilityLabel="Video call"
                 activeOpacity={0.7}
               >
                 <Ionicons name="videocam" size={23} color={colors.text} />
               </TouchableOpacity>
               <TouchableOpacity
                 style={S.headerIconBtn} hitSlop={4}
-                onPress={() => router.push({ pathname: '/voicecall' as any, params })} accessibilityRole="button" accessibilityLabel="Voice call"
+                onPress={() => router.push({ pathname: '/voicecall', params })} accessibilityRole="button" accessibilityLabel="Voice call"
                 activeOpacity={0.7}
               >
                 <Ionicons name="call" size={20} color={colors.text} />
@@ -180,14 +180,14 @@ export function ChatHeader({
             <>
               <TouchableOpacity
                 style={S.headerIconBtn} hitSlop={4}
-                onPress={() => router.push({ pathname: '/group-calls' as any, params: { ...params, mode: 'video' } })} accessibilityRole="button" accessibilityLabel="Group video call"
+                onPress={() => router.push({ pathname: '/group-calls', params: { ...params, mode: 'video' } })} accessibilityRole="button" accessibilityLabel="Group video call"
                 activeOpacity={0.7}
               >
                 <Ionicons name="videocam" size={23} color={colors.text} />
               </TouchableOpacity>
               <TouchableOpacity
                 style={S.headerIconBtn} hitSlop={4}
-                onPress={() => router.push({ pathname: '/group-calls' as any, params: { ...params, mode: 'voice' } })} accessibilityRole="button" accessibilityLabel="Group voice call"
+                onPress={() => router.push({ pathname: '/group-calls', params: { ...params, mode: 'voice' } })} accessibilityRole="button" accessibilityLabel="Group voice call"
                 activeOpacity={0.7}
               >
                 <Ionicons name="call" size={20} color={colors.text} />

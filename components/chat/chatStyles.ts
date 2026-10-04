@@ -199,6 +199,9 @@ export const makeStyles = (
 
   errorBar:      { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: tint(c.danger, 0.12), borderColor: tint(c.danger, 0.4), borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 10 },
   errorTxt:      { color: c.danger, fontSize: 12 },
+  // A transient status line ("Forwarding to …"), neutral so it never reads as an error.
+  noticeBar:     { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: c.surfaceSolid, borderColor: c.border, borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 10 },
+  noticeTxt:     { color: c.text, fontSize: 12 },
   screenshotBanner:    { backgroundColor: tint(c.warning, 0.14), borderColor: tint(c.warning, 0.5), borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 10 },
   // Memory Bubble — anniversary banner under the chat header. Distinct
   // from screenshot/error banners (purple) so the user reads it as a

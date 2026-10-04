@@ -80,7 +80,7 @@ export function useMessageActions({
       // message from the local cache and would show it in plain view there.
       ...(protectedMsg ? [] : [
         { key: 'remind',  label: 'Remind',  icon: 'alarm-outline', onPress: () => router.push({
-            pathname: '/message-reminder' as any,
+            pathname: '/message-reminder',
             params: { chatId, messageId: String(msg.id) },
           }) },
       ] as SheetAction[]),
@@ -109,7 +109,7 @@ export function useMessageActions({
         && (msg.type === 'image' || msg.type === 'video')) {
       acts.push({ key: 'verify', label: 'Verify', icon: 'shield-checkmark-outline', onPress: () => {
           router.push({
-            pathname: '/vaultcheck' as any,
+            pathname: '/vaultcheck',
             params: {
               attachmentId: String(msg.meta!.attachmentId),
               msgType: msg.type,

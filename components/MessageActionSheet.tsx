@@ -17,7 +17,7 @@ import { SCREEN_BOTTOM } from '../constants/layout';
 export interface SheetAction {
   key: string;
   label: string;
-  icon: string;
+  icon: keyof typeof Ionicons.glyphMap;
   onPress: () => void;
   danger?: boolean;
 }
@@ -89,7 +89,7 @@ export function MessageActionSheet({
             <View key={ri} style={s.gridRow}>
               {row.map(a => (
                 <TouchableOpacity key={a.key} style={s.tile} onPress={() => fire(a.onPress)} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={a.label}>
-                  <Ionicons name={a.icon as any} size={23} color={a.danger ? colors.danger : colors.text} />
+                  <Ionicons name={a.icon} size={23} color={a.danger ? colors.danger : colors.text} />
                   <Text style={[s.tileLabel, a.danger && { color: colors.danger }]} numberOfLines={1}>{a.label}</Text>
                 </TouchableOpacity>
               ))}

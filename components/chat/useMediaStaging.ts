@@ -148,7 +148,7 @@ export function useMediaStaging({ sending, enqueueMediaOptimistic, params, route
     // View-once marks image/video bytes on send — a document has none to mark.
     const viewOnce = !isFile && params.capturedViewOnce === '1';
     // Clear immediately so navigating back into the chat doesn't re-stage.
-    router.setParams({ capturedUri: '', capturedType: '', capturedViewOnce: '', capturedName: '' } as any);
+    router.setParams({ capturedUri: '', capturedType: '', capturedViewOnce: '', capturedName: '' });
     const filename = isFile
       ? (params.capturedName || `Scan-${Date.now()}.pdf`)
       : isVideo

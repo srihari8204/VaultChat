@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { brandAlpha } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
 import { KeyboardSafe } from '../ui/KeyboardSafe';
+import { ON_MEDIA_SCRIM } from './chatStyles';
 
 export type PendingItem = {
   uri: string; mediaType: 'image' | 'video' | 'file'; filename: string; mime: string;
@@ -62,11 +63,11 @@ export function MediaCaptionPreview({
                 hitSlop={12}
                 style={{ position: 'absolute', top: insets.top + 12, left: 16, zIndex: 2, width: 40, height: 40, borderRadius: 20, backgroundColor: '#00000088', alignItems: 'center', justifyContent: 'center' }}
               >
-                <Ionicons name="close" size={26} color="#fff" />
+                <Ionicons name="close" size={26} color={ON_MEDIA_SCRIM} />
               </TouchableOpacity>
               {multi && (
                 <View style={{ position: 'absolute', top: insets.top + 18, right: 16, zIndex: 2, backgroundColor: '#00000088', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 14 }}>
-                  <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>{currentIdx + 1} / {pendingItems.length}</Text>
+                  <Text style={{ color: ON_MEDIA_SCRIM, fontWeight: '700', fontSize: 13 }}>{currentIdx + 1} / {pendingItems.length}</Text>
                 </View>
               )}
 
@@ -115,7 +116,7 @@ export function MediaCaptionPreview({
                         : <Image source={{ uri: it.uri }} style={{ width: '100%', height: '100%' }} />}
                       <TouchableOpacity onPress={() => removePendingAt(i)} hitSlop={6} accessibilityRole="button" accessibilityLabel={`Remove attachment ${i + 1}`}
                         style={{ position: 'absolute', top: 1, right: 1, width: 18, height: 18, borderRadius: 9, backgroundColor: '#000000aa', alignItems: 'center', justifyContent: 'center' }}>
-                        <Ionicons name="close" size={12} color="#fff" />
+                        <Ionicons name="close" size={12} color={ON_MEDIA_SCRIM} />
                       </TouchableOpacity>
                     </TouchableOpacity>
                   ))}
@@ -137,7 +138,7 @@ export function MediaCaptionPreview({
                   hitSlop={6}
                 >
                   <View style={{ width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: colors.glassStroke, alignItems: 'center', justifyContent: 'center' }}>
-                    <Text style={{ color: cur.viewOnce ? '#fff' : colors.text, fontSize: 12, fontWeight: '800' }}>1</Text>
+                    <Text style={{ color: cur.viewOnce ? colors.onPrimary : colors.text, fontSize: 12, fontWeight: '800' }}>1</Text>
                   </View>
                 </TouchableOpacity>
                 <TextInput
@@ -157,10 +158,10 @@ export function MediaCaptionPreview({
                   accessibilityState={{ disabled: sending, busy: sending }}
                   style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', opacity: sending ? 0.6 : 1 }}
                 >
-                  {sending ? <ActivityIndicator color="#fff" /> : <Ionicons name="send" size={22} color="#fff" />}
+                  {sending ? <ActivityIndicator color={colors.onPrimary} /> : <Ionicons name="send" size={22} color={colors.onPrimary} />}
                   {multi && !sending && (
                     <View style={{ position: 'absolute', top: -4, right: -4, minWidth: 20, height: 20, borderRadius: 10, backgroundColor: colors.danger, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, borderWidth: 2, borderColor: colors.glassStroke }}>
-                      <Text style={{ color: '#fff', fontSize: 11, fontWeight: '800' }}>{pendingItems.length}</Text>
+                      <Text style={{ color: colors.onDanger, fontSize: 11, fontWeight: '800' }}>{pendingItems.length}</Text>
                     </View>
                   )}
                 </TouchableOpacity>

@@ -44,7 +44,7 @@ export interface Palette {
   bubbleOut: string;       // sent bubble
   bubbleInText: string; bubbleOutText: string;
   bubbleMetaIn: string; bubbleMetaOut: string;  // time/tick color inside the bubble
-  tickRead: string;        // blue double-tick
+  tickRead: string;        // read double-tick ON the bubbleOut fill (lib/chatBubbleTick.selftest.ts)
   headerBar: string;       // chat top bar
 
   // ─── Aurora Glass (U6) ───────────────────────────────────────────
@@ -79,8 +79,11 @@ export interface Palette {
   brandOnLight: string;
   /**
    * Text/icon colour ON a solid `primary` / `danger` fill (buttons, badges).
-   * Not always white: white on the dark scheme's #1777FE is 4.11:1 and on
-   * #EF4444 3.76:1 — under AA 4.5:1 — so dark uses the splash night ink.
+   * Both schemes are white (#FFFFFF) today. Light passes AA (6.33:1 / 6.57:1);
+   * dark does NOT: white on #1777FE is 4.11:1 and on #EF4444 3.76:1, under
+   * 4.5:1 for small text. The dark value is the owner's open design decision —
+   * see the note on AuroraDark.onPrimary — so screens put their on-fill ink
+   * here and inherit whatever is chosen.
    */
   onPrimary: string;
   onDanger: string;
@@ -209,7 +212,7 @@ export const AuroraDark: Palette = {
   bubbleOutText: '#FFFFFF',
   bubbleMetaIn:  'rgba(255,255,255,0.62)',
   bubbleMetaOut: 'rgba(255,255,255,0.70)',
-  tickRead:      '#FFFFFF',
+  tickRead:      '#7CFFB2',   // read ✓✓ on bubbleOut: 5.07:1 on the fill, a mint hue apart from the white meta line
   headerBar:     '#12101A',
 
   glass:       'rgba(255,255,255,0.10)',
@@ -221,10 +224,12 @@ export const AuroraDark: Palette = {
   accentDeep:  '#1552E0',
   accentOn:    '#7FB6FF',
   brandOnLight:'#1552E0',
-  // White, as every solid button already uses. Below AA for small text in dark
-  // (4.11:1 on #1777FE, 3.76:1 on #EF4444); BRAND_NIGHT '#010628' would pass
-  // (4.83 / 5.27:1) but restyles every dark-mode button — a design decision
-  // left open in 2026-10-04_fix_status.md §5.
+  // White, as every solid button already used, so moving screens onto these
+  // tokens changed nothing on screen. Below AA for small text in dark (4.11:1
+  // on #1777FE, 3.76:1 on #EF4444). BRAND_NIGHT '#010628' would pass (4.83 /
+  // 5.27:1) but restyles every dark-mode button, so the value is NOT changed
+  // here: it waits on the owner's design decision (not yet listed in
+  // 2026-10-04_fix_status.md).
   onPrimary:   '#FFFFFF',
   onDanger:    '#FFFFFF',
   warning:     '#F59E0B',   // ≥7.44:1 on bg/card/surfaceSolid/surface/glass
@@ -257,7 +262,7 @@ export const AuroraLight: Palette = {
   bubbleOutText: '#FFFFFF',
   bubbleMetaIn:  'rgba(27,21,38,0.66)',
   bubbleMetaOut: 'rgba(255,255,255,0.85)',
-  tickRead:      '#FFFFFF',
+  tickRead:      '#7CFFB2',   // read ✓✓ on bubbleOut: 5.07:1 on the fill, a mint hue apart from the white meta line
   headerBar:     '#FFFFFF',
 
   glass:       'rgba(255,255,255,0.88)',

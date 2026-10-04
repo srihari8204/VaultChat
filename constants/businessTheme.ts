@@ -53,7 +53,7 @@ export const BIZ: Palette = {
   bubbleOutText: '#FFFFFF',
   bubbleMetaIn:  'rgba(255,255,255,0.45)',
   bubbleMetaOut: 'rgba(255,255,255,0.75)',
-  tickRead:      '#FFFFFF',
+  tickRead:      '#7CFFB2',   // same read-tick mint as constants/theme.ts
   headerBar:     '#0B1B2A',
 
   // Aurora Glass roles, in Business blue-on-navy. Business screens are dark-only

@@ -62,7 +62,7 @@ import { MessageInfoModal, ProfilePhotoModal, AttachMenu, ForwardPicker } from '
 import { ChatHeader } from '../components/chat/ChatHeader';
 import { MessageRow } from '../components/chat/MessageRow';
 import { InChatSearchBar } from '../components/chat/InChatSearchBar';
-import { ErrorBar, KeyChangeBanner, ScreenshotBanner, MemoryBanner, LiveLocationBanner, PinnedBar } from '../components/chat/ChatBanners';
+import { ErrorBar, NoticeBar, KeyChangeBanner, ScreenshotBanner, MemoryBanner, LiveLocationBanner, PinnedBar } from '../components/chat/ChatBanners';
 import { getShareViewing } from '../lib/viewerPrefs';
 import type { ViewerActivity } from '../lib/socket';
 import { extractFirstUrl, fetchPreviewFromDevice, type LinkPreviewData } from '../lib/linkPreview';
@@ -382,7 +382,7 @@ export default function ChatScreen({ chatIdProp, embedded, onClosePane }: { chat
   // arrived elsewhere in the conversation.
   const prevReactionsRef = useRef<Record<number, ReactionSummary[]>>({});
   const mergedReactions = useMemo(() => {
-    const next = mergeReactions(messages as any, meId, prevReactionsRef.current);
+    const next = mergeReactions(messages, meId, prevReactionsRef.current);
     prevReactionsRef.current = next;
     return next;
   }, [messages, meId]);
@@ -392,6 +392,12 @@ export default function ChatScreen({ chatIdProp, embedded, onClosePane }: { chat
   const [forwardMsg, setForwardMsg]   = useState<DisplayMessage | null>(null);
   const [forwardChats, setForwardChats] = useState<ChatSummary[]>([]);
   const [forwardLoading, setForwardLoading] = useState(false);
+  // "Forwarding to X" after a forward is queued, and the forwards still in
+  // flight (outbox tempId → target name) so a later rejection can say which
+  // chat it was for — the red bubble itself is in the TARGET chat.
+  const [forwardNote, setForwardNote] = useState<string | null>(null);
+  const clearForwardNote = useCallback(() => setForwardNote(null), []);
+  const forwardsInFlight = useRef(new Map<string, string>());
 
   // Composer growth is capped against THIS pane, not the window. The cap was a
   // flat maxHeight: 120, which is fine full-screen but is a third of a stacked
@@ -738,7 +744,7 @@ export default function ChatScreen({ chatIdProp, embedded, onClosePane }: { chat
           }
         }
 
-        const pendingBubbles = (pendingQ as any[]).map(q => ({
+        const pendingBubbles = pendingQ.map(q => ({
           // meta too: a queued GIF card is nothing but meta, and a text keeps
           // its ink / mentions / link preview across the restart.
           id: 0, chatId: q.chatId, senderId: myId ?? '', type: q.type, content: q.plaintext,
@@ -750,8 +756,8 @@ export default function ChatScreen({ chatIdProp, embedded, onClosePane }: { chat
           // below already applies.
           _state: q.state === 'FAILED' ? 'failed' : 'pending', _error: q.lastError ?? undefined,
         })) as DisplayMessage[];
-        const mediaBubbles = (mediaQ as any[]).map(m => ({
-          id: 0, chatId: m.chatId, senderId: myId ?? '', type: m.type as any, content: m.caption || '',
+        const mediaBubbles = mediaQ.map(m => ({
+          id: 0, chatId: m.chatId, senderId: myId ?? '', type: m.type, content: m.caption || '',
           meta: { localUri: m.srcPath, mime: m.mime, filename: m.filename, ...(m.metaExtra || {}), ...(m.viewOnce ? { viewOnce: true } : {}) },
           replyToId: null, editedAt: null, deletedAt: null,
           createdAt: new Date(m.createdAt).toISOString(), _tempId: m.tempId, _state: m.state === 'failed' ? 'failed' : 'pending',
@@ -948,12 +954,12 @@ export default function ChatScreen({ chatIdProp, embedded, onClosePane }: { chat
           return prev
             .filter(x => x._tempId !== tempId)
             .map(x => x.id === real.id
-              ? ({ ...x, ...real, meta: { ...(real as any).meta, ...(uri ? { localUri: uri } : {}) } } as DisplayMessage)
+              ? ({ ...x, ...real, meta: { ...real.meta, ...(uri ? { localUri: uri } : {}) } } as DisplayMessage)
               : x);
         }
         const localUri = prev.find(x => x._tempId === tempId)?.meta?.localUri;
         return prev.map(x => x._tempId === tempId
-          ? ({ ...real, meta: { ...(real as any).meta, ...(localUri ? { localUri } : {}) }, _tempId: undefined, _state: undefined } as DisplayMessage)
+          ? ({ ...real, meta: { ...real.meta, ...(localUri ? { localUri } : {}) }, _tempId: undefined, _state: undefined } as DisplayMessage)
           : x);
       });
       cacheMessages(cid, [real]).catch(() => {});
@@ -1277,7 +1283,7 @@ export default function ChatScreen({ chatIdProp, embedded, onClosePane }: { chat
         off.push(() => s.off('poll_voted',        onPollVoted));
         off.push(() => s.off('poll_unvoted',      onPollUnvoted));
       } catch (e) {
-        if (!cancelled) console.warn('[chat] socket setup failed:', (e as any)?.message);
+        if (!cancelled) console.warn('[chat] socket setup failed:', e instanceof Error ? e.message : e);
       }
     })();
 
@@ -1748,11 +1754,32 @@ export default function ChatScreen({ chatIdProp, embedded, onClosePane }: { chat
         id: m.id, chatId: m.chatId, senderId: m.senderId, type: m.type,
         content: m.content, meta: m.meta,
       });
-      await enqueueMessage(target.id, { type: p.type as DisplayMessage['type'], plaintext: p.plaintext, meta: p.meta });
+      const q = await enqueueMessage(target.id, { type: p.type as DisplayMessage['type'], plaintext: p.plaintext, meta: p.meta });
+      const name = target.name || target.peerName || 'that chat';
+      forwardsInFlight.current.set(q.tempId, name);
+      setForwardNote(`Forwarding to ${name}`);
     } catch (e: any) {
       Alert.alert('Forward failed', e?.message ?? 'Try again');
     }
   }, [forwardMsg]);
+
+  // A forward the server REJECTS (blocked, not a member, too large) turns red
+  // in the target chat only; say so here, where the user forwarded it. Offline
+  // is not a rejection — the outbox keeps the clock and retries, so no alert.
+  // ponytail: only while this screen is mounted; a rejection after the user
+  // leaves shows just as the red bubble in the target chat. Move this to an
+  // app-level outbox listener if forwards need feedback from anywhere.
+  useEffect(() => {
+    const offFailed = onQueue('failed', ({ tempId, error }) => {
+      const name = forwardsInFlight.current.get(tempId);
+      if (name == null) return;
+      forwardsInFlight.current.delete(tempId);
+      Alert.alert(`Not forwarded to ${name}`,
+        `${error || 'The server refused it.'}\n\nIt is marked “not sent” in ${name}, where you can retry or cancel it.`);
+    });
+    const offSent = onQueue('sent', ({ tempId }) => { forwardsInFlight.current.delete(tempId); });
+    return () => { offFailed(); offSent(); };
+  }, []);
 
   const onCancelEdit = useCallback(() => {
     setEditingId(null);
@@ -1771,7 +1798,7 @@ export default function ChatScreen({ chatIdProp, embedded, onClosePane }: { chat
   ) => {
     const item = await enqueueMedia(chatId, type, file, opts);
     const optimistic: DisplayMessage = {
-      id: 0, chatId, senderId: meId ?? '', type: type as any,
+      id: 0, chatId, senderId: meId ?? '', type,
       content: opts.caption?.trim() || '',
       // localUri lets the bubble render instantly (no download).
       meta: { localUri: file.uri, mime: file.mime, filename: file.filename, ...(opts.metaExtra || {}), ...(opts.viewOnce ? { viewOnce: true } : {}) },
@@ -1998,7 +2025,7 @@ export default function ChatScreen({ chatIdProp, embedded, onClosePane }: { chat
       setMessages(prev => {
         const have = new Set(prev.map(x => x._tempId).filter(Boolean));
         const add = items.filter(m => !have.has(m.tempId)).map(m => ({
-          id: 0, chatId: m.chatId, senderId: meId ?? '', type: m.type as any,
+          id: 0, chatId: m.chatId, senderId: meId ?? '', type: m.type,
           content: m.caption || '',
           meta: { localUri: m.srcPath, mime: m.mime, filename: m.filename, ...(m.metaExtra || {}), ...(m.viewOnce ? { viewOnce: true } : {}) },
           replyToId: null, editedAt: null, deletedAt: null,
@@ -2296,6 +2323,8 @@ export default function ChatScreen({ chatIdProp, embedded, onClosePane }: { chat
 
       {error && <ErrorBar error={error} onRetry={() => { setError(null); setLoadNonce(n => n + 1); }} />}
 
+      {forwardNote && <NoticeBar text={forwardNote} onDismiss={clearForwardNote} />}
+
       <KeyChangeBanner otherMembers={otherMembers} chatName={chat?.name} />
 
       {screenshotBanner && <ScreenshotBanner by={screenshotBanner.by} membersById={membersById} />}
@@ -2543,6 +2572,7 @@ export default function ChatScreen({ chatIdProp, embedded, onClosePane }: { chat
         setLockErr={setLockErr}
         submitLockPin={submitLockPin}
         embedded={embedded}
+        onClosePane={onClosePane}
       />
     </View>
   );

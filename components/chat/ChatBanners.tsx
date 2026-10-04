@@ -1,11 +1,11 @@
 // components/chat/ChatBanners.tsx — the strips between the chat header and
-// the message list: load error, security-code change, inbound screenshot,
+// the message list: load error, a transient notice, security-code change, inbound screenshot,
 // Memory Bubble, live location and the pinned message. Moved out of
 // app/chat.tsx unchanged. State that only a banner reads (the key-change check,
 // dismissed memories) lives with its banner; everything else is a prop.
 
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Text, TouchableOpacity, View } from 'react-native';
+import { AccessibilityInfo, Alert, Platform, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../lib/theme';
@@ -28,6 +28,27 @@ export function ErrorBar({ error, onRetry }: { error: string; onRetry: () => voi
         accessibilityLabel="Retry loading this chat"
       >
         <Text style={[S.errorTxt, { fontWeight: '700' }]}>Retry</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+/** A short status line that clears itself (e.g. "Forwarding to Sam"). Polite
+ *  live region on Android, an explicit announcement on iOS (which has no live
+ *  regions). `onDismiss` must be stable, or the 4 s timer restarts on render. */
+export function NoticeBar({ text, onDismiss }: { text: string; onDismiss: () => void }) {
+  const S = useS();
+  const { colors } = useTheme();
+  useEffect(() => {
+    if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(text);
+    const t = setTimeout(onDismiss, 4000);
+    return () => clearTimeout(t);
+  }, [text, onDismiss]);
+  return (
+    <View style={S.noticeBar} accessibilityLiveRegion="polite">
+      <Text style={[S.noticeTxt, { flex: 1 }]}>{text}</Text>
+      <TouchableOpacity onPress={onDismiss} hitSlop={12} accessibilityRole="button" accessibilityLabel="Dismiss">
+        <Ionicons name="close" size={16} color={colors.textDim} />
       </TouchableOpacity>
     </View>
   );
@@ -71,7 +92,7 @@ export function KeyChangeBanner({ otherMembers, chatName }: { otherMembers: Chat
         <TouchableOpacity
           accessibilityRole="button"
           accessibilityLabel="Verify security code"
-          onPress={() => router.push({ pathname: '/verify-contact' as any,
+          onPress={() => router.push({ pathname: '/verify-contact',
             params: { peerId: keyChange.peerId,
               peerName: otherMembers[0]?.name ?? chatName ?? '' } })}
         >

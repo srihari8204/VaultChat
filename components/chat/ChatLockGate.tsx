@@ -18,7 +18,7 @@ import { useS } from './chatStyles';
 export type LockState = 'checking' | 'open' | 'locked';
 
 export function ChatLockGate({
-  lockState, setLockState, lockInfo, lockBio, setLockBio, lockPin, setLockPin, lockErr, setLockErr, submitLockPin, embedded,
+  lockState, setLockState, lockInfo, lockBio, setLockBio, lockPin, setLockPin, lockErr, setLockErr, submitLockPin, embedded, onClosePane,
 }: {
   lockState: LockState;
   setLockState: (s: LockState) => void;
@@ -32,6 +32,8 @@ export function ChatLockGate({
   submitLockPin: () => void;
   /** A split-view pane (app/split.tsx): navigating from here would replace the whole split. */
   embedded?: boolean;
+  /** Split view: close just this pane (app/split.tsx), the pane's own exit. */
+  onClosePane?: () => void;
 }) {
   const S = useS();
   const { colors } = useTheme();
@@ -98,10 +100,16 @@ export function ChatLockGate({
         </View>
       )}
 
-      {embedded ? (
+      {embedded && onClosePane ? (
         // A pane has no screen of its own to leave: router.replace here swapped
-        // the whole split view (and the other chat) for the chat list. The split
-        // bar's Swap / Close are this pane's exits, as for the hidden header Back.
+        // the whole split view (and the other chat) for the chat list. Closing
+        // just this pane leaves the other chat in place.
+        <TouchableOpacity style={{ marginTop: 20 }} hitSlop={10} onPress={onClosePane} accessibilityRole="button" accessibilityLabel="Close this chat pane">
+          <Text style={S.lockGateBack}>Close this chat</Text>
+        </TouchableOpacity>
+      ) : embedded ? (
+        // No close callback from the host: the split bar's Swap / Close are this
+        // pane's exits, as for the hidden header Back.
         <Text style={[S.lockGateSub, { marginTop: 20 }]}>Use Swap or Close in the split bar to leave this chat.</Text>
       ) : (
         <TouchableOpacity style={{ marginTop: 20 }} hitSlop={10} onPress={() => router.replace('/(tabs)/chats')} accessibilityRole="button" accessibilityLabel="Back to chats">

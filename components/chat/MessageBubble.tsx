@@ -73,7 +73,10 @@ export function GroupRefBubble({ gref, isMine }: { gref: GroupRef; isMine: boole
   const { colors } = useTheme();
   const gRouter = useRouter();
   const info = gref.groupType ? groupTypeInfo(gref.groupType) : null;
-  const icon = (gref.icon || info?.icon || 'people') as any;
+  // gref.icon is a server string: an unknown glyph name falls back rather than
+  // rendering Ionicons' '?' box.
+  const icon = [gref.icon, info?.icon].find((n): n is keyof typeof Ionicons.glyphMap =>
+    !!n && n in Ionicons.glyphMap) ?? 'people';
   const tint = gref.color || info?.color || colors.primary;
 
   return (

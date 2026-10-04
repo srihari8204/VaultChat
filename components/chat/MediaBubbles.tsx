@@ -105,14 +105,14 @@ export function FileBubble({
       // is now the single copy, asserted by docOpen.selftest.ts.
       const route = viewerRouteFor(filename, mime);
       if (route === '/archive-viewer') {
-        fileRouter.push({ pathname: '/archive-viewer', params: { uri: openUri, filename } } as any);
+        fileRouter.push({ pathname: '/archive-viewer', params: { uri: openUri, filename } });
         return;
       }
       if (route === '/file-viewer') {
         fileRouter.push({
           pathname: '/file-viewer',
           params: { uri: openUri, filename, mimeType: mime || '' },
-        } as any);
+        });
         return;
       }
 
