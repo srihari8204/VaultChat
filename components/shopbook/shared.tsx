@@ -2,9 +2,9 @@
 // Split out of app/shop-book.tsx on 2026-10-04 and edited since (fixes are
 // logged per round). Palette and styles come from ./theme.
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { KeyboardSafe } from '../ui';
-import { View, Text, TextInput, TouchableOpacity, ScrollView, Alert, Switch, Modal } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, Alert, Switch, Modal, BackHandler } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router as navRouter } from 'expo-router';
 import { navigateTo } from '../../lib/nav/openNavigation';
@@ -14,6 +14,7 @@ import { StatTile, EmptyState } from '../finance/ui';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { t } from '../../lib/shopbookI18n';
 import { C, s } from './theme';
+import { userErrorText } from '../../lib/userErrorText';
 
 /**
  * Show a generated Shop Book document INSIDE crazzychat.
@@ -36,7 +37,9 @@ export function previewDoc(uri: string, filename: string, mimeType = 'applicatio
 
 /** What to say when a load fails. Shown in ErrorState with a retry, so a
  *  failure never reads as "nothing here". */
-export const loadErrText = (e: any): string => e?.message || 'Check your connection and try again.';
+// Server copy (lib/api errors carry a status) passes through; a raw JS or
+// network message never reaches the user (lib/userErrorText).
+export const loadErrText = (e: unknown): string => userErrorText(e, 'Check your connection and try again.');
 
 export function Row({ label, value, tone, bold }: { label: string; value: string; tone?: string; bold?: boolean }) {
   return (
@@ -157,6 +160,7 @@ export function SubHeader({ title, onBack, right }: {
   title: string; onBack?: () => void;
   right?: { icon: keyof typeof Ionicons.glyphMap; label: string; badge?: number; onPress: () => void };
 }) {
+  useHardwareBack(onBack);
   return (
     <View style={s.subHeader}>
       {onBack ? (
@@ -174,6 +178,34 @@ export function SubHeader({ title, onBack, right }: {
       ) : <View style={{ width: 38 }} />}
     </View>
   );
+}
+
+/**
+ * Android hardware Back runs the same action as the on-screen back arrow.
+ *
+ * Shop Book is one route with its own in-screen views (inbox, order, bill,
+ * khata detail, settings, …), and nothing intercepted hardware Back, so it
+ * popped the whole route from any of them — and skipped guards such as the
+ * bill's "Packed quantities not saved yet" prompt. Every view's back arrow is
+ * a SubHeader, so registering here covers each view with its own guard.
+ *
+ * Registered once per mounted header (the latest handler is read from a ref),
+ * so BackHandler's last-registered-first order is mount order: the view on
+ * top — the inbox over the app, an order over hidden Settings, a bill over its
+ * order — answers first. A header with no back action declines, and Back
+ * falls through to the router, which leaves Shop Book.
+ */
+export function useHardwareBack(onBack: (() => void) | undefined) {
+  const latest = useRef(onBack);
+  latest.current = onBack;
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (!latest.current) return false;
+      latest.current();
+      return true;
+    });
+    return () => sub.remove();
+  }, []);
 }
 
 /** An Ionicons glyph name, as opposed to an emoji or a blank icon. */

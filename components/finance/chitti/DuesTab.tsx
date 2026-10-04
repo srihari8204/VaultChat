@@ -9,6 +9,7 @@ import { markCollection, type ChittiGroup, type ChittiMember, type ChittiCollect
 import { makeChittiStyles, getCollectionMeta, collectionStatus, CYCLE, ROW_PAGE } from './chittiStyles';
 import { Btn } from '../ui';
 import { MonthChips } from './MonthChips';
+import { userErrorText } from '../../../lib/userErrorText';
 
 export function DuesTab({ group, members, collections, month, onMonth, onChanged }: {
   group: ChittiGroup; members: ChittiMember[]; collections: ChittiCollection[];
@@ -34,8 +35,8 @@ export function DuesTab({ group, members, collections, month, onMonth, onChanged
     try {
       await markCollection(group.id, m.id, month, group.installment, next);
       await onChanged();
-    } catch (e: any) {
-      Alert.alert('Could not update the due', e?.message ?? 'Nothing was changed. Try again.');
+    } catch (e) {
+      Alert.alert('Could not update the due', userErrorText(e, 'Nothing was changed. Try again.'));
     } finally { cycling.current = false; }
   };
 

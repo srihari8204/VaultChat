@@ -16,6 +16,8 @@ import { listReminders, type Reminder } from '../../db/reminders';
 import { listGroups, type ChittiGroup } from '../../db/chitti';
 import { auctionDate } from '../../utils/financeRules';
 import { historyOccurrences, phoneSkips } from '../../lib/finance/reminderSchedule';
+import { isUnscheduled } from '../../components/finance/notifyIds';
+import { rebuildRecurringAlertsOnce } from '../../components/finance/retriggerOnce';
 
 /** `key` is stable across reloads; `ref` is what tapping the event opens. */
 interface Ev {
@@ -43,7 +45,14 @@ export default function FinanceCalendar() {
     if (!me) return;
     begin();
     Promise.all([listLedger(me.id), listReminders(me.id), listGroups(me.id)])
-      .then(([ledgers, reminders, groups]) => { setData({ ledgers, reminders, groups }); done(); })
+      .then(([ledgers, reminders, groups]) => {
+        setData({ ledgers, reminders, groups }); done();
+        // The one-time anchored alert rebuild also runs from here, so a user
+        // who only opens the Calendar is not left on the old triggers.
+        rebuildRecurringAlertsOnce(me.id, reminders)
+          .then(async (rebuilt) => { if (rebuilt) { const r = await listReminders(me.id); setData((d) => ({ ...d, reminders: r })); } })
+          .catch(() => {});
+      })
       .catch(fail);
   }, [me, begin, done, fail]);
   useFocusEffect(reload);
@@ -67,7 +76,9 @@ export default function FinanceCalendar() {
       for (const at of historyOccurrences(r, from, to)) {
         // The phone repeats on the anchor's own day number, so a clamped
         // day (30 Apr for a day-31 series) is due here but gets no alert.
-        const note = done ? ' (done)' : phoneSkips(r, at) ? ` (no phone alert this ${r.freq === 'yearly' ? 'year' : 'month'})` : '';
+        // A reminder whose alert was never scheduled says so, as its card in
+        // Reminders does ("Not scheduled: no phone alert").
+        const note = done ? ' (done)' : isUnscheduled(r.freq, r.notif_id) ? ' (no phone alert)' : phoneSkips(r, at) ? ` (no phone alert this ${r.freq === 'yearly' ? 'year' : 'month'})` : '';
         evs.push({ key: `r-${r.id}-${at}`, at, label: `${r.title}${note}`, tone: 'warn', ref: { kind: 'reminder', id: r.id } });
       }
     }

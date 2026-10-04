@@ -13,6 +13,7 @@ import { fmtDate, num, formatINR } from '../../../utils/financeFormat';
 import { toPaise } from '../../../utils/money';
 import { insertGroup, type ChittiStatus } from '../../../db/chitti';
 import { checkChittiForm, type ChittiFormField } from '../../../components/finance/chittiFormRules';
+import { userErrorText } from '../../../lib/userErrorText';
 
 export default function NewChitti() {
   const FIN = useFinanceTheme();
@@ -69,7 +70,7 @@ export default function NewChitti() {
         foreman: foreman.trim() || null, status,
       });
       router.replace({ pathname: '/finance/chitti/[id]', params: { id: g.id } });
-    } catch (e: any) { Alert.alert('Could not save', e?.message ?? 'Try again'); }
+    } catch (e) { Alert.alert('Could not save', userErrorText(e, 'Try again')); }
   };
 
   // Leaving an amount field says the mismatch once (each distinct one), so a

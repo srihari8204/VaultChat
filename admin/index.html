@@ -9,7 +9,7 @@
      style-src likewise pins the ONE style element (no style="" attributes anywhere; script code may still set
      el.style.* through the CSSOM, which CSP allows). After editing the stylesheet, recompute with the same command,
      replacing script by style in both tags; an unmatched hash leaves the page unstyled. admin/adminPages.selftest.ts checks both. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-GKBfoUr+EmprbU+01Ml8Kee/CwkM9KQfqMCutLtX5Vg='; style-src 'sha256-NE5WAayE7jR6aDfoyfLQV/9HVxR47D+DI4A7WhHUK5Q='; font-src 'self'; connect-src https: http://localhost:* http://127.0.0.1:*; img-src data:; base-uri 'none'; form-action 'none'" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-4G/2wZU4UwWvBSLj/0gZdsaFIO0TMEJkZqvgSX7Sml4='; style-src 'sha256-xE20GEmUbz4ybpVxYmC5RAWVIgWgOlwJS9UuSEZrOEQ='; font-src 'self'; connect-src https: http://localhost:* http://127.0.0.1:*; img-src data:; base-uri 'none'; form-action 'none'" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="dark light" />
 <title>crazzychat · Admin Console</title>
@@ -35,6 +35,12 @@
     --gold-fill:#E8B64C; --panel-end:#0A0F1C; --topbar:rgba(7,11,20,.92); --well:#05080F; --well-txt:#cfe3ff;
     --err-txt:#ffb3bd; --chip:rgba(255,255,255,.06); --hover:rgba(255,255,255,.03); --shadow:0 24px 60px rgba(0,0,0,.5);
     --mono:'JetBrains Mono',ui-monospace,monospace; --head:'Sora',sans-serif; --body:'Nunito Sans',sans-serif;
+    /* Former literals in the rules below. The gold gradient ends and their ink
+       are fills in both themes (dark ink on bright gold: 9.85:1 / 6.81:1 /
+       4.63:1 at the dark end); the washes switch with the theme. */
+    --glow:rgba(232,182,76,.06); --gold-end:#A8761F; --gold-end2:#C9942F; --on-gold:#1a1305;
+    --ok-wash:rgba(62,207,142,.14); --err-wash:rgba(255,92,114,.14); --err-box:rgba(255,92,114,.1);
+    --err-edge:rgba(255,92,114,.35); --err-line:rgba(255,92,114,.4);
   }
   /* Light theme follows the OS setting. Text colours here are the darker
      variants (all >= 4.5:1 on their backgrounds); --gold-fill stays bright
@@ -47,11 +53,16 @@
       --ok:#0F7A4A; --warn:#B7791F; --err:#C8243B; --info:#1D63C9;
       --panel-end:#F7F8FB; --topbar:rgba(255,255,255,.92); --well:#F1F4F9; --well-txt:#123A6B;
       --err-txt:#8F1426; --chip:rgba(15,23,38,.06); --hover:rgba(15,23,38,.04); --shadow:0 12px 32px rgba(15,23,38,.12);
+      /* Washes in the light theme's own --ok / --err hues; their text stays
+         >= 4.5:1 (badge 4.6+, error box 8+). */
+      --glow:rgba(138,90,0,.05);
+      --ok-wash:rgba(15,122,74,.10); --err-wash:rgba(200,36,59,.10); --err-box:rgba(200,36,59,.07);
+      --err-edge:rgba(200,36,59,.30); --err-line:rgba(200,36,59,.40);
     }
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;height:100%}
-  body{background:radial-gradient(1200px 700px at 80% -10%,rgba(232,182,76,.06),transparent 60%),var(--bg);color:var(--txt);font-family:var(--body);font-size:14px;line-height:1.5}
+  body{background:radial-gradient(1200px 700px at 80% -10%,var(--glow),transparent 60%),var(--bg);color:var(--txt);font-family:var(--body);font-size:14px;line-height:1.5}
   h1,h2,h3,.h{font-family:var(--head);letter-spacing:.2px}
   .mono{font-family:var(--mono)}
   button{font-family:var(--body);cursor:pointer;border:none}
@@ -69,7 +80,7 @@
   #login{min-height:100%;display:flex;align-items:center;justify-content:center;padding:24px}
   .card{background:linear-gradient(180deg,var(--panel),var(--panel-end));border:1px solid var(--line);border-radius:18px;padding:24px;width:100%;max-width:380px;box-shadow:var(--shadow)}
   .logo{display:flex;align-items:center;gap:10px;margin-bottom:6px}
-  .logo .dot{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,var(--gold-fill),#A8761F);display:grid;place-items:center;color:#1a1305;font-weight:800;font-family:var(--head)}
+  .logo .dot{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,var(--gold-fill),var(--gold-end));display:grid;place-items:center;color:var(--on-gold);font-weight:800;font-family:var(--head)}
   .logo h1{font-size:18px;margin:0;font-weight:700}
   .muted{color:var(--sub);font-size:12.5px}
   /* Former style="" attributes: the CSP pins this stylesheet's hash instead of
@@ -77,12 +88,14 @@
   .mt-12{margin-top:12px} .mt-14{margin-top:14px} .card.wide{max-width:520px}
   .field{margin-top:14px}
   .field label{display:block;font-size:11px;color:var(--sub);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px}
-  .btn{background:linear-gradient(135deg,var(--gold-fill),#C9942F);color:#1a1305;font-weight:800;border-radius:11px;padding:12px 16px;width:100%;margin-top:18px;font-size:14px}
+  .btn{background:linear-gradient(135deg,var(--gold-fill),var(--gold-end2));color:var(--on-gold);font-weight:800;border-radius:11px;padding:12px 16px;width:100%;margin-top:18px;font-size:14px}
   .btn:active{transform:translateY(1px)}
   .btn.ghost{background:transparent;color:var(--gold);border:1px solid var(--line);width:auto;margin:0;padding:8px 14px;font-weight:700}
   .btn.sm{padding:7px 12px;width:auto;margin:0;font-size:12.5px;border-radius:9px}
-  .btn.danger{background:transparent;border:1px solid rgba(255,92,114,.4);color:var(--err)}
-  .err-box{margin-top:14px;background:rgba(255,92,114,.1);border:1px solid rgba(255,92,114,.35);color:var(--err-txt);border-radius:10px;padding:10px 12px;font-size:12.5px}
+  .btn.danger{background:transparent;border:1px solid var(--err-line);color:var(--err)}
+  .err-box{margin-top:14px;background:var(--err-box);border:1px solid var(--err-edge);color:var(--err-txt);border-radius:10px;padding:10px 12px;font-size:12.5px}
+  /* Empty, the alert stays rendered (so it is announced when filled) but invisible. */
+  .err-box:empty{margin:0;padding:0;border:0}
 
   /* ── App shell ── */
   #app{min-height:100%;display:flex;flex-direction:column}
@@ -113,9 +126,9 @@
   .hrow .k{color:var(--sub)}
   .hrow .v{font-family:var(--mono);font-size:12.5px}
   .badge{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:99px}
-  .badge.ok{background:rgba(62,207,142,.14);color:var(--ok)}
-  .badge.bad{background:rgba(255,92,114,.14);color:var(--err)}
-  .badge.on{background:rgba(62,207,142,.14);color:var(--ok)}
+  .badge.ok{background:var(--ok-wash);color:var(--ok)}
+  .badge.bad{background:var(--err-wash);color:var(--err)}
+  .badge.on{background:var(--ok-wash);color:var(--ok)}
   .badge.off{background:var(--chip);color:var(--faint)}
 
   /* ── Tables ── */
@@ -162,7 +175,7 @@
       <input id="adminKey" type="password" placeholder="x-admin-key" autocomplete="off" />
     </div>
     <button class="btn" id="loginBtn">Connect</button>
-    <div id="loginErr" class="err-box hide" role="alert"></div>
+    <div id="loginErr" class="err-box" role="alert"></div>
     <div class="muted mt-14">Key is kept in <b>sessionStorage</b> only — cleared when the tab closes.</div>
   </div>
 </div>
@@ -314,12 +327,14 @@
   $('#srvUrl').value = SERVER;
   $('#loginBtn').onclick = async ()=>{
     const srv = $('#srvUrl').value.trim(); const key = $('#adminKey').value.trim();
-    const errEl = $('#loginErr'); errEl.classList.add('hide');
-    if(!srv || !key){ errEl.textContent='Enter both server URL and admin key.'; errEl.classList.remove('hide'); return; }
+    // Always rendered (empty takes no room): a role=alert region that was
+    // display:none is not reliably announced when its text arrives.
+    const errEl = $('#loginErr'); errEl.textContent = '';
+    if(!srv || !key){ errEl.textContent='Enter both server URL and admin key.'; return; }
     // The key travels in a header to this URL: never over plain http, except to
     // this machine during development. The CSP's connect-src enforces the same.
     if(!/^https:\/\//i.test(srv) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(srv)){
-      errEl.textContent='The server URL must start with https://'; errEl.classList.remove('hide'); return;
+      errEl.textContent='The server URL must start with https://'; return;
     }
     SERVER = srv; KEY = key;
     $('#loginBtn').textContent = 'Verifying…'; $('#loginBtn').disabled = true;
@@ -328,7 +343,7 @@
       SS.setItem('vc_admin_srv', SERVER); SS.setItem('vc_admin_key', KEY);
       enterApp();
     }catch(e){
-      errEl.textContent = e.message; errEl.classList.remove('hide');
+      errEl.textContent = e.message;
     }finally{ $('#loginBtn').textContent='Connect'; $('#loginBtn').disabled = false; }
   };
   $('#adminKey').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#loginBtn').click(); });
@@ -341,7 +356,7 @@
     SS.removeItem('vc_admin_key');           // drop the key
     KEY=''; $('#app').classList.add('hide'); $('#login').classList.remove('hide'); $('#adminKey').value='';
     const errEl = $('#loginErr');
-    errEl.textContent = reason || ''; errEl.classList.toggle('hide', !reason);
+    errEl.textContent = reason || '';
     if(reason) $('#adminKey').focus();
   }
   $('#logoutBtn').onclick = ()=>signOut();

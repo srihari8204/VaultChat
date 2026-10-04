@@ -19,6 +19,7 @@ import { Catalog } from './catalog';
 import { CartView } from './checkout';
 import { permissionDenied } from '../../lib/permissionDenied';
 import { useShopLoad } from './useShopLoad';
+import { userErrorText } from '../../lib/userErrorText';
 
 /** Unwrap an expo-location result to a usable pair, or null.
  *  Rejects (0,0): that is what a failed fix serialises to, not a place anyone
@@ -502,7 +503,7 @@ export function CustomerProfile({ me }: { me: { id: string; name: string } | nul
   const loadLists = useCallback(async () => {
     if (!me) return;
     try { setLists(await listShopLists(me.id)); setListsErr(''); }
-    catch (e: any) { setListsErr(loadErrText(e)); }
+    catch (e) { setListsErr(loadErrText(e)); }
   }, [me]);
 
   const loadAccount = useCallback(async () => {
@@ -523,13 +524,13 @@ export function CustomerProfile({ me }: { me: { id: string; name: string } | nul
     try {
       await saveShopList({ user_id: me.id, name: newName.trim(), items: newItems.trim() });
       setNewName(''); setNewItems(''); setAdding(false); loadLists();
-    } catch (e: any) { Alert.alert('Couldn’t save the list', e?.message ?? 'Try again'); }
+    } catch (e) { Alert.alert('Couldn’t save the list', userErrorText(e, 'Try again')); }
     finally { setListBusy(false); }
   };
 
   const removeList = async (id: string) => {
     try { await deleteShopList(id); loadLists(); }
-    catch (e: any) { Alert.alert('Couldn’t delete the list', e?.message ?? 'Try again'); }
+    catch (e) { Alert.alert('Couldn’t delete the list', userErrorText(e, 'Try again')); }
   };
 
   const shareList = async (l: ShopList) => {

@@ -3,8 +3,9 @@
 // WHY THESE COLOURS ARE FIXED. A QR code is read by a camera, not a person:
 // scanners expect dark modules on a light ground, and many refuse an inverted
 // (light-on-dark) code. So every QR this app draws (qr-contact, verify-contact's
-// safety number, invite-link) is near-black on white in BOTH themes, never the
-// theme's text-on-background pair. constants/qrPalette.selftest.ts checks it.
+// safety number, invite-link, and Shop Book's shop QR in
+// components/shopbook/reports.tsx) is near-black on white in BOTH themes, never
+// the theme's text-on-background pair. constants/qrPalette.selftest.ts checks it.
 //
 // The scanner's hint line sits over the live camera image, whose colours are
 // unknown, so it is white with a black shadow in every theme (the same reason

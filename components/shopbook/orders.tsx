@@ -19,6 +19,7 @@ import { previewDoc, Row, onShopBookEvent, ReasonModal, SubHeader, Field, Status
 import { InvoiceView } from './invoices';
 import { useShopLoad } from './useShopLoad';
 import { OwnerOrderDetail } from './orderDetail';
+import { userErrorText } from '../../lib/userErrorText';
 
 export function MyOrders({ onOpen }: { onOpen: (id: string) => void }) {
   const [orders, setOrders] = useState<SB.OrderSummary[]>([]);
@@ -122,7 +123,7 @@ export function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () =>
           ? 'This order will be billed as a tax invoice you can claim against.'
           : 'This order will be billed as a plain retail bill.');
       load();
-    } catch (e: any) { Alert.alert('Could not save', e?.message ?? 'Try again'); }
+    } catch (e) { Alert.alert('Could not save', userErrorText(e, 'Try again')); }
     finally { setBusy(false); }
   };
 
@@ -132,14 +133,14 @@ export function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () =>
     if (busy) return;
     setBusy(true);
     try { await SB.decideAlternative(orderId, itemId, accept); load(); }
-    catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
+    catch (e) { Alert.alert('Error', userErrorText(e, 'Try again')); }
     finally { setBusy(false); }
   };
 
   const cancelOrder = async (reason: string) => {
     setBusy(true);
     try { await SB.cancelOrder(orderId, reason); load(); }
-    catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
+    catch (e) { Alert.alert('Error', userErrorText(e, 'Try again')); }
     finally { setBusy(false); }
   };
 
@@ -147,7 +148,7 @@ export function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () =>
   const confirmCollected = async () => {
     setBusy(true);
     try { await SB.collectOrder(orderId); load(); }
-    catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
+    catch (e) { Alert.alert('Error', userErrorText(e, 'Try again')); }
     finally { setBusy(false); }
   };
 
@@ -155,7 +156,7 @@ export function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () =>
     if (stars < 1) { Alert.alert('Tap a star to rate'); return; }
     setBusy(true);
     try { await SB.rateOrder(orderId, stars, review.trim()); load(); }
-    catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
+    catch (e) { Alert.alert('Error', userErrorText(e, 'Try again')); }
     finally { setBusy(false); }
   };
 
@@ -180,7 +181,7 @@ export function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () =>
         { idempotencyKey: repeatKey.current, confirmPricing });
       repeatKey.current = clientKey();
       Alert.alert('Order placed', 'Your repeat order was sent to the shop.');
-    } catch (e: any) {
+    } catch (e) {
       // Prices moved since the original order: show what changed and let the
       // customer decide, as the cart does — never re-price silently.
       const pc = SB.priceChangesFrom(e);
@@ -195,7 +196,7 @@ export function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () =>
         ]);
         return;
       }
-      Alert.alert('Error', e?.message ?? 'Try again');
+      Alert.alert('Error', userErrorText(e, 'Try again'));
     }
     finally { setBusy(false); }
   };
@@ -215,7 +216,7 @@ export function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () =>
     try {
       const { uri } = await Print.printToFileAsync({ html });
       previewDoc(uri, `receipt-${order.id}.pdf`);
-    } catch (e: any) { Alert.alert('Error', e?.message ?? 'Could not create the bill'); }
+    } catch (e) { Alert.alert('Error', userErrorText(e, 'Could not create the bill')); }
   };
 
   if (invoice) return <InvoiceView orderId={orderId} onBack={() => setInvoice(false)} />;
@@ -569,9 +570,9 @@ export function ReturnRequest({ order, onDone }: { order: SB.OrderDetail; onDone
       Alert.alert('Return requested',
         `The shop will review it. If approved, ${money(r.refundTotal)} will be credited to your account.`);
       onDone();
-    } catch (e: any) {
+    } catch (e) {
       Alert.alert(e?.body?.code === 'return_window_closed' ? 'Too late to return' : 'Could not request',
-        e?.message ?? 'Try again');
+        userErrorText(e, 'Try again'));
     } finally { setBusy(false); }
   };
 

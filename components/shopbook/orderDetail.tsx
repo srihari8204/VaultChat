@@ -15,6 +15,7 @@ import { C, s } from './theme';
 import { ReasonModal, SubHeader, StatusPill, AvailabilityTag } from './shared';
 import { BillScreen } from './invoices';
 import { useShopLoad } from './useShopLoad';
+import { userErrorText } from '../../lib/userErrorText';
 
 export function OwnerOrderDetail({ orderId, onBack }: { orderId: string; onBack: () => void }) {
   const [order, setOrder] = useState<SB.OrderDetail | null>(null);
@@ -37,7 +38,7 @@ export function OwnerOrderDetail({ orderId, onBack }: { orderId: string; onBack:
     if (busy) return false;
     setBusy(true);
     try { await SB.setItemAvailability(orderId, itemId, a, name, price); load(); return true; }
-    catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); return false; }
+    catch (e) { Alert.alert('Error', userErrorText(e, 'Try again')); return false; }
     finally { setBusy(false); }
   };
 
@@ -62,7 +63,7 @@ export function OwnerOrderDetail({ orderId, onBack }: { orderId: string; onBack:
   const setStatus = async (status: OrderStatus, reason = '', note = '') => {
     setBusy(true);
     try { await SB.setOrderStatus(orderId, status, reason, note); load(); }
-    catch (e: any) {
+    catch (e) {
       // Accepting reserves stock. If the shelf can't cover it the order is
       // untouched — name the items so the owner's next move (an alternative,
       // or rejecting as out of stock) is obvious.
@@ -75,7 +76,7 @@ export function OwnerOrderDetail({ orderId, onBack }: { orderId: string; onBack:
         );
         return;
       }
-      Alert.alert('Error', e?.message ?? 'Try again');
+      Alert.alert('Error', userErrorText(e, 'Try again'));
     }
     finally { setBusy(false); }
   };

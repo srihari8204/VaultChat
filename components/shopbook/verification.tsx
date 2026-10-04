@@ -12,6 +12,7 @@ import { ErrorState } from '../finance/ui';
 import { C, s } from './theme';
 import { previewDoc, SubHeader, Empty } from './shared';
 import { useShopLoad } from './useShopLoad';
+import { userErrorText } from '../../lib/userErrorText';
 
 // The shop's own audit trail (P1-F). Append-only server-side; read-only here.
 export function AuditScreen({ onBack }: { onBack: () => void }) {
@@ -106,7 +107,7 @@ export function VerificationScreen({ onBack }: { onBack: () => void }) {
       setUploading(kind);
       await SB.uploadDocument(kind, file);
       await load();
-    } catch (e: any) { Alert.alert('Could not upload', e?.message ?? 'Try again'); }
+    } catch (e) { Alert.alert('Could not upload', userErrorText(e, 'The upload did not complete. Try again.')); }
     finally { setUploading(null); }
   };
 
@@ -116,10 +117,10 @@ export function VerificationScreen({ onBack }: { onBack: () => void }) {
       const r = await SB.submitVerification();
       setState(r.verifyState);
       Alert.alert('Submitted', 'Your shop is now queued for review.');
-    } catch (e: any) {
+    } catch (e) {
       const missing = SB.missingForVerification(e);
       Alert.alert(missing ? 'Not ready yet' : 'Could not submit',
-        missing ? `Still needed:\n• ${missing.join('\n• ')}` : (e?.message ?? 'Try again'));
+        missing ? `Still needed:\n• ${missing.join('\n• ')}` : (userErrorText(e, 'Try again')));
     } finally { setBusy(false); }
   };
 
@@ -129,7 +130,7 @@ export function VerificationScreen({ onBack }: { onBack: () => void }) {
     try {
       const { url } = await SB.documentUrl(d.id);
       previewDoc(url, d.filename || d.kind, d.mime || undefined);
-    } catch (e: any) { Alert.alert('Could not open', e?.message ?? 'Try again'); }
+    } catch (e) { Alert.alert('Could not open', userErrorText(e, 'Try again')); }
   };
 
   const STATE_COPY: Record<SB.VerifyState, { label: string; tone: string; hint: string }> = {

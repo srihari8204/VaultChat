@@ -17,6 +17,7 @@ import { sumRupees } from '../../utils/money';
 import { listLedger, type LedgerEntry } from '../../db/ledger';
 import { listGroups } from '../../db/chitti';
 import { sharePdf, pdfDocument, kvTable, exportExcel } from '../../utils/financeIO';
+import { userErrorText } from '../../lib/userErrorText';
 
 type Period = 'month' | 'year' | 'all';
 
@@ -101,7 +102,7 @@ export default function Reports() {
 
   const onPdf = async () => {
     try { await sharePdf(pdfDocument(`Finance Report — ${label}`, kvTable(rows())), 'report'); }
-    catch (e: any) { Alert.alert('Export failed', e?.message ?? 'Try again'); }
+    catch (e) { Alert.alert('Export failed', userErrorText(e, 'Try again')); }
   };
   const onExcel = async () => {
     if (r.ledgers.length === 0) return Alert.alert('Nothing to export', `No ledgers were created ${label.toLowerCase()}.`);
@@ -113,7 +114,7 @@ export default function Reports() {
       // Names and amounts: once the share sheet has handed the file on, the
       // cache copy goes, as the PDF export and app/finance/io.tsx already do.
       if (uri) await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
-    } catch (e: any) { Alert.alert('Export failed', e?.message ?? 'Try again'); }
+    } catch (e) { Alert.alert('Export failed', userErrorText(e, 'Try again')); }
   };
 
   return (

@@ -9,6 +9,7 @@ import { formatMoney, cartTotal, clientKey, couponDiscount, couponLabel, type Ca
 import * as SB from '../../services/shopBookService';
 import { C, s } from './theme';
 import { Row, Empty } from './shared';
+import { userErrorText } from '../../lib/userErrorText';
 
 export function CartView({ shop, cart, setCart, onPlaced, coupons }: {
   shop: SB.Shop; cart: CartItem[]; setCart: (c: CartItem[]) => void;
@@ -61,7 +62,7 @@ export function CartView({ shop, cart, setCart, onPlaced, coupons }: {
         { couponCode: lapsed ? undefined : applied?.code, idempotencyKey: idemKey, confirmPricing },
       );
       onPlaced(res.id);
-    } catch (e: any) {
+    } catch (e) {
       // The shop's prices moved since this cart was built. Show the customer
       // exactly what changed and let them decide — never re-price silently.
       const pc = SB.priceChangesFrom(e);
@@ -79,7 +80,7 @@ export function CartView({ shop, cart, setCart, onPlaced, coupons }: {
         );
         return;
       }
-      Alert.alert('Could not place order', e?.message ?? 'Try again.');
+      Alert.alert('Could not place order', userErrorText(e, 'Try again.'));
     } finally { setPlacing(false); }
   };
 

@@ -12,6 +12,7 @@ import { t } from '../../lib/shopbookI18n';
 import { C, s } from './theme';
 import { SubHeader, Empty } from './shared';
 import { useShopLoad } from './useShopLoad';
+import { userErrorText } from '../../lib/userErrorText';
 
 export function NotificationCenter({ mode, onBack, onRead, onReadOne, onOpen }: {
   mode: 'customer' | 'owner';
@@ -23,7 +24,7 @@ export function NotificationCenter({ mode, onBack, onRead, onReadOne, onOpen }: 
 
   const markAll = async () => {
     try { await SB.markNotificationsRead(); onRead(); load(); }
-    catch (e: any) { Alert.alert('Could not mark as read', e?.message ?? 'Try again'); }
+    catch (e) { Alert.alert('Could not mark as read', userErrorText(e, 'Try again')); }
   };
 
   // Opening a row reads it. Marking is best-effort: the badge corrects itself

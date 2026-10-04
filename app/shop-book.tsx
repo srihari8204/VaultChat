@@ -37,6 +37,7 @@ import { OwnerProducts, PurchasesScreen, OwnerCoupons, OwnerSuppliers } from '..
 import { ShopSettings } from '../components/shopbook/settings';
 import { VerificationScreen, AuditScreen } from '../components/shopbook/verification';
 import { useShopLoad } from '../components/shopbook/useShopLoad';
+import { userErrorText } from '../lib/userErrorText';
 
 type Mode = 'customer' | 'owner';
 
@@ -203,7 +204,7 @@ function CustomerApp({ me, initialShopId, carts, setCarts, openOrder, onOpened }
   useEffect(() => { (async () => {
     if (!initialShopId) return;
     try { const sh = await SB.shopDetails(initialShopId); setTab('shops'); setSelShop(sh); }
-    catch (e: any) { Alert.alert('Couldn’t open that shop', e?.message ?? 'Check your connection and try again.'); }
+    catch (e) { Alert.alert('Couldn’t open that shop', userErrorText(e, 'Check your connection and try again.')); }
   })(); }, [initialShopId]);
 
   const toggleFav = useCallback(async (shopId: string) => {
@@ -214,7 +215,7 @@ function CustomerApp({ me, initialShopId, carts, setCarts, openOrder, onOpened }
       return n;
     });
     try { await SB.toggleFavorite(shopId); }
-    catch (e: any) { Alert.alert('Couldn’t update favourites', loadErrText(e)); loadFavs(); }
+    catch (e) { Alert.alert('Couldn’t update favourites', loadErrText(e)); loadFavs(); }
   }, [loadFavs]);
 
   const openTrack = (id: string) => { setTrackId(id); };
@@ -239,7 +240,7 @@ function CustomerApp({ me, initialShopId, carts, setCarts, openOrder, onOpened }
           <ProductSearch onBack={() => setProductSearch(false)}
             onOpenShop={async (shopId) => {
               try { const sh = await SB.shopDetails(shopId); setProductSearch(false); setSelShop(sh); }
-              catch (e: any) { Alert.alert('Error', e?.message ?? 'Could not open shop'); }
+              catch (e) { Alert.alert('Error', userErrorText(e, 'Could not open shop')); }
             }} />
         )}
         {tab === 'shops' && selShop && !ledgerShop && (

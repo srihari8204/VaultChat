@@ -13,6 +13,7 @@ import { ErrorState } from '../finance/ui';
 import { C, s } from './theme';
 import { previewDoc, SubHeader, Chip, StatCard, LedgerRow, Empty } from './shared';
 import { useShopLoad } from './useShopLoad';
+import { userErrorText } from '../../lib/userErrorText';
 
 /** One product row being typed into a counter sale or a khata entry. Held as
  *  strings: a half-typed "12." is not a number yet. */
@@ -111,7 +112,7 @@ export function KhataDetail({ customer, currency, onBack }: { customer: SB.Custo
       }
       entryKey.current = clientKey();
       setAmount(''); setRemark(''); setItems([]); load();
-    } catch (e: any) {
+    } catch (e) {
       // Over the credit limit is a question, not a failure. Keep the same
       // idempotency key on the retry so confirming cannot double-post.
       const breach = SB.creditBreachFrom(e);
@@ -126,7 +127,7 @@ export function KhataDetail({ customer, currency, onBack }: { customer: SB.Custo
         );
         return;
       }
-      Alert.alert('Error', e?.message ?? 'Try again');
+      Alert.alert('Error', userErrorText(e, 'Try again'));
     }
     finally { setBusy(false); }
   };
@@ -145,9 +146,9 @@ export function KhataDetail({ customer, currency, onBack }: { customer: SB.Custo
       const html = await SB.invoiceHtml(id);
       const { uri } = await Print.printToFileAsync({ html });
       previewDoc(uri, `${isPay ? 'receipt' : 'bill'}-${id}.pdf`);
-    } catch (e: any) {
+    } catch (e) {
       Alert.alert(isPay ? 'Could not create the receipt' : 'Could not create the bill',
-        e?.message ?? 'Try again');
+        userErrorText(e, 'Try again'));
     } finally { setBusy(false); }
   };
 
@@ -188,7 +189,7 @@ export function KhataDetail({ customer, currency, onBack }: { customer: SB.Custo
       Alert.alert('Credit limit saved',
         v > 0 ? `${customer.customerName || 'This customer'} can owe up to ${money(v)}.`
               : 'No ceiling — entries will never be questioned.');
-    } catch (e: any) { Alert.alert('Could not save', e?.message ?? 'Try again'); }
+    } catch (e) { Alert.alert('Could not save', userErrorText(e, 'Try again')); }
     finally { setBusy(false); }
   };
 
@@ -198,7 +199,7 @@ export function KhataDetail({ customer, currency, onBack }: { customer: SB.Custo
       const res = await SB.sendReminder(customer.customerId);
       Alert.alert(res.sent ? 'Reminder sent' : 'Nothing to remind',
         res.sent ? 'A payment reminder was pushed to the customer.' : 'This customer has no pending balance.');
-    } catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
+    } catch (e) { Alert.alert('Error', userErrorText(e, 'Try again')); }
     finally { setBusy(false); }
   };
 

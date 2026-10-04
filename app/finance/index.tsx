@@ -151,20 +151,22 @@ export default function FinanceDashboard() {
             </View>
             {/* Full-term figures, not accrued or received interest: each
                 ledger's interest to its end date (a 1-year projection when it
-                has none) — what ledgerInterest computes. The words say so. */}
+                has none) — what ledgerInterest computes. The words say so.
+                Lent side only (borrowed interest is not summed), so each line
+                says it is interest you earn. */}
             <View style={s.heroFoot}>
               <Text style={s.heroFootTxt} numberOfLines={2}
-                accessibilityLabel={`Full-term interest on settled loans: ${inrShort(t.earned)}`}>
-                Interest, settled loans (full term) {inrShort(t.earned)}
+                accessibilityLabel={`Interest you earn, full term, on settled loans you lent: ${inrShort(t.earned)}`}>
+                Interest you earn, settled loans (full term) {inrShort(t.earned)}
               </Text>
               <Text style={s.heroFootTxt} numberOfLines={2}
-                accessibilityLabel={`Full-term interest expected on open loans, to their end dates: ${inrShort(t.pending)}`}>
-                Interest, open loans (full term) {inrShort(t.pending)}
+                accessibilityLabel={`Interest you earn, full term, expected on open loans you lent, to their end dates: ${inrShort(t.pending)}`}>
+                Interest you earn, open loans (full term) {inrShort(t.pending)}
               </Text>
             </View>
             <Text style={[s.heroFootTxt, { marginTop: 8 }]} numberOfLines={2}
-              accessibilityLabel={`Interest accrued so far on open loans: ${inrShort(t.accrued)}`}>
-              Interest accrued so far, open loans {inrShort(t.accrued)}
+              accessibilityLabel={`Interest you have earned so far on open loans you lent: ${inrShort(t.accrued)}`}>
+              Interest earned so far, open loans {inrShort(t.accrued)}
             </Text>
             {t.compounding && <Text style={s.heroNote} numberOfLines={3} adjustsFontSizeToFit minimumFontScale={0.8}>{t.compounding}</Text>}
           </HeroCard>

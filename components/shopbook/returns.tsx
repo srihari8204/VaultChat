@@ -11,6 +11,7 @@ import { ErrorState } from '../finance/ui';
 import { C, s } from './theme';
 import { SubHeader, Empty } from './shared';
 import { useShopLoad } from './useShopLoad';
+import { userErrorText } from '../../lib/userErrorText';
 
 // Returns (P1-B). The owner decides; approval issues a credit note and puts
 // sellable goods back. Refusing requires saying why.
@@ -45,7 +46,7 @@ export function ReturnsScreen({ currency, onBack }: { currency?: string; onBack:
     try {
       await SB.decideReturn(rt.id, ok, { restock, note: why, settlement: 'credit' });
       setRefuse(null); setNote(''); load();
-    } catch (e: any) { Alert.alert('Could not record', e?.message ?? 'Try again'); }
+    } catch (e) { Alert.alert('Could not record', userErrorText(e, 'Try again')); }
     finally { setBusy(false); }
   };
 

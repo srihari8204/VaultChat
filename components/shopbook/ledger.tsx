@@ -14,6 +14,7 @@ import { C, s } from './theme';
 import { previewDoc, SubHeader, StatCard, TxnRow, LedgerRow, Empty, Banner } from './shared';
 import { useShopLoad } from './useShopLoad';
 import { KhataDetail, newDraftLine, type DraftLine } from './khataDetail';
+import { userErrorText } from '../../lib/userErrorText';
 
 export function CustomerLedgerView({ shop, onBack }: { shop: SB.Shop; onBack: () => void }) {
   const money = (n: number) => formatMoney(n, shop.currency || '₹');
@@ -88,8 +89,8 @@ export function OwnerKhata({ currency }: { currency?: string }) {
       setCustomers(list);
       const found = list.find((c) => c.customerId === r.id);
       if (found) setSel(found);
-    } catch (e: any) {
-      Alert.alert('Could not save', e?.message ?? 'Try again');
+    } catch (e) {
+      Alert.alert('Could not save', userErrorText(e, 'Try again'));
     } finally { setSaving(false); }
   };
 
@@ -263,8 +264,8 @@ export function CounterSale({ currency, onDone }: { currency?: string; onDone: (
       } catch {
         Alert.alert('Sale recorded', 'The bill could not be shown, but the sale is saved.');
       }
-    } catch (e: any) {
-      Alert.alert('Could not record the sale', e?.message ?? 'Try again');
+    } catch (e) {
+      Alert.alert('Could not record the sale', userErrorText(e, 'Try again'));
     } finally { setBusy(false); }
   };
 

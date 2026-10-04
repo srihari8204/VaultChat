@@ -70,10 +70,17 @@ export async function snoozeReminder(id: string, nextAt: number, notifId: string
   await d.runAsync(`UPDATE reminders SET next_at = ?, status = 'active', notif_id = ? WHERE id = ?`, [nextAt, notifId, id]);
 }
 
-/** Replace only the row's notification ids (a re-scheduled alert). */
-export async function setReminderNotifId(id: string, notifId: string | null): Promise<void> {
+/**
+ * Replace the row's notification ids only if the row is still active and
+ * still holds `expected` (null-safe). One statement, so a Done, Snooze or
+ * Delete that lands while a new alert was being scheduled cannot be
+ * overwritten: false means the row changed, and the caller cancels the alert
+ * it just scheduled instead of leaving it live on a done or deleted row.
+ */
+export async function replaceReminderNotifId(id: string, expected: string | null, notifId: string): Promise<boolean> {
   const d = await financeDb();
-  await d.runAsync(`UPDATE reminders SET notif_id = ? WHERE id = ?`, [notifId, id]);
+  const r = await d.runAsync(`UPDATE reminders SET notif_id = ? WHERE id = ? AND status = 'active' AND notif_id IS ?`, [notifId, id, expected]);
+  return r.changes > 0;
 }
 
 export async function deleteReminder(id: string): Promise<void> {
@@ -81,4 +88,4 @@ export async function deleteReminder(id: string): Promise<void> {
   await d.runAsync(`DELETE FROM reminders WHERE id = ?`, [id]);
 }
 
-export default { insertReminder, listReminders, setReminderStatus, snoozeReminder, deleteReminder, setReminderNotifId };
+export default { insertReminder, listReminders, setReminderStatus, snoozeReminder, deleteReminder, replaceReminderNotifId };

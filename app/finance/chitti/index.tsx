@@ -64,7 +64,7 @@ export default function ChittiList() {
       {/* Before the list in the tree, so a screen reader reaches the only add
           action without passing every card; drawn over the list by zIndex. */}
       <TouchableOpacity style={[s.fab, { bottom: insets.bottom + 20 }]} activeOpacity={0.9} onPress={() => router.push('/finance/chitti/new')}
-        accessibilityRole="button" accessibilityLabel="New Lucky Draw group">
+        accessibilityRole="button" accessibilityLabel="New Lucky Draw group" accessibilityHint="Opens the new group form">
         <Ionicons name="add" size={22} color={FIN.onBrand} />
         <Text style={s.fabTxt}>New Lucky Draw Group</Text>
       </TouchableOpacity>

@@ -15,6 +15,7 @@ import {
 } from '../../../db/chitti';
 import { makeChittiStyles } from './chittiStyles';
 import { MonthChips } from './MonthChips';
+import { userErrorText } from '../../../lib/userErrorText';
 
 export interface AuctionDraft { winnerId: string | null; bid: string; commission: string }
 export const EMPTY_AUCTION_DRAFT: AuctionDraft = { winnerId: null, bid: '', commission: '' };
@@ -64,7 +65,7 @@ export function AuctionsTab({ group: g, members, auctions, month, onMonth, onCha
     if (!winner) { setDraft(d => ({ ...d, winnerId: null })); return Alert.alert('Winner', 'That member was removed. Select the winning member again.'); }
     try {
       await recordAuction(g, month, winnerId, winner.name, b, c);
-    } catch (e: any) { return Alert.alert('Could not record the auction', e?.message ?? 'Nothing was saved. Try again.'); }
+    } catch (e) { return Alert.alert('Could not record the auction', userErrorText(e, 'Nothing was saved. Try again.')); }
     setDraft(EMPTY_AUCTION_DRAFT);
     await onChanged();
   };
@@ -84,7 +85,7 @@ export function AuctionsTab({ group: g, members, auctions, month, onMonth, onCha
     `Delete month ${a.month}'s auction? The bid and the winner are removed; the deletion is noted in History. This cannot be undone.`,
     [{ text: 'Cancel', style: 'cancel' },
      { text: 'Delete', style: 'destructive', onPress: () => {
-       deleteAuction(a.id).then(onChanged).catch((e: any) => Alert.alert('Could not delete the auction', e?.message ?? 'Try again.'));
+       deleteAuction(a.id).then(onChanged).catch((e) => Alert.alert('Could not delete the auction', userErrorText(e, 'Try again.')));
      } }],
   );
 

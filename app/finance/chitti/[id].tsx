@@ -22,6 +22,7 @@ import { MembersTab, EMPTY_MEMBER_DRAFT, type MemberDraft } from '../../../compo
 import { DuesTab } from '../../../components/finance/chitti/DuesTab';
 import { AuctionsTab, EMPTY_AUCTION_DRAFT, type AuctionDraft } from '../../../components/finance/chitti/AuctionsTab';
 import { HistoryTab } from '../../../components/finance/chitti/HistoryTab';
+import { userErrorText } from '../../../lib/userErrorText';
 
 type Tab = 'members' | 'collections' | 'auctions' | 'history';
 
@@ -90,7 +91,7 @@ export default function ChittiDetail() {
     { text: 'Cancel', style: 'cancel' },
     { text: 'Delete', style: 'destructive', onPress: () => {
       deleteGroup(g.id).then(() => router.back())
-        .catch((e: any) => Alert.alert('Could not delete the group', e?.message ?? 'Try again.'));
+        .catch((e) => Alert.alert('Could not delete the group', userErrorText(e, 'Try again.')));
     } },
   ]);
 
@@ -108,7 +109,7 @@ export default function ChittiDetail() {
     Alert.alert(`Mark as ${word}?`, `${g.name} moves to the ${word} tab of Lucky Draw. Members, dues and auctions are kept.`, [
       { text: 'Cancel', style: 'cancel' },
       { text: `Mark ${word}`, onPress: () => {
-        setGroupStatus(g.id, next).then(reload).catch((e: any) => Alert.alert('Could not change the status', e?.message ?? 'Try again.'));
+        setGroupStatus(g.id, next).then(reload).catch((e) => Alert.alert('Could not change the status', userErrorText(e, 'Try again.')));
       } },
     ]);
   };

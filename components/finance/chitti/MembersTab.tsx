@@ -13,6 +13,7 @@ import {
   insertMember, updateMember, deleteMember, normalizeMobile, type ChittiGroup, type ChittiMember,
 } from '../../../db/chitti';
 import { makeChittiStyles, ROW_PAGE } from './chittiStyles';
+import { userErrorText } from '../../../lib/userErrorText';
 
 export interface MemberDraft { show: boolean; editingId: string | null; name: string; phone: string; address: string }
 export const EMPTY_MEMBER_DRAFT: MemberDraft = { show: false, editingId: null, name: '', phone: '', address: '' };
@@ -57,7 +58,7 @@ export function MembersTab({ group: g, members, onChanged, draft, setDraft }: {
       } else {
         await insertMember({ group_id: g.id, name, phone, address, number: nextMemberNumber(members) });
       }
-    } catch (e: any) { return Alert.alert('Could not save the member', e?.message ?? 'Try again.'); }
+    } catch (e) { return Alert.alert('Could not save the member', userErrorText(e, 'Try again.')); }
     set({ show: false });
     await onChanged();
   };
@@ -67,7 +68,7 @@ export function MembersTab({ group: g, members, onChanged, draft, setDraft }: {
     `Remove ${m.name} from ${g.name}? Their collection history stays in the group totals but is no longer attributed. This cannot be undone.`,
     [{ text: 'Cancel', style: 'cancel' },
      { text: 'Remove', style: 'destructive', onPress: () => {
-       deleteMember(m.id).then(onChanged).catch((e: any) => Alert.alert('Could not remove the member', e?.message ?? 'Try again.'));
+       deleteMember(m.id).then(onChanged).catch((e) => Alert.alert('Could not remove the member', userErrorText(e, 'Try again.')));
      } }],
   );
 

@@ -15,6 +15,7 @@ import { t } from '../../lib/shopbookI18n';
 import { C, s } from './theme';
 import { Row, SubHeader, StatCard, Empty, Banner } from './shared';
 import { useShopLoad } from './useShopLoad';
+import { userErrorText } from '../../lib/userErrorText';
 
 export function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPlans, onReports,
                          onPurchases, onReturns, onAudit, onVerify }: {
@@ -188,14 +189,14 @@ export function OwnerPlans({ plan, requestedAt: knownRequestedAt, onBack, onChan
     if (busy) return;
     setBusy(true);
     try { setRequestedAt((await SB.requestPro()).requestedAt); }
-    catch (e: any) {
+    catch (e) {
       // Today's server has no such route yet: say that, rather than a failure
       // the owner would keep retrying.
       if (SB.notAvailableYet(e)) {
         Alert.alert('Not available yet',
           'Requesting Pro from the app needs a server update that is not live yet. Nothing was sent, and your plan has not changed.');
       } else {
-        Alert.alert('Could not send the request', e?.message ?? 'Try again');
+        Alert.alert('Could not send the request', userErrorText(e, 'Try again'));
       }
     }
     finally { setBusy(false); }
@@ -211,7 +212,7 @@ export function OwnerPlans({ plan, requestedAt: knownRequestedAt, onBack, onChan
       { text: 'Move to Free', style: 'destructive', onPress: async () => {
         setBusy(true);
         try { await SB.setPlan('free'); onChanged(); }
-        catch (e: any) { Alert.alert('Could not change the plan', e?.message ?? 'Try again'); }
+        catch (e) { Alert.alert('Could not change the plan', userErrorText(e, 'Try again')); }
         finally { setBusy(false); }
       } },
     ],

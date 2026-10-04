@@ -9,7 +9,7 @@ import { useDatePicker } from '../../components/finance/useDatePicker';
 import { FIN_HERO, TABULAR, type FinancePalette, HERO_INK } from '../../constants/financeTheme';
 import { FinHeader, Label, Field, Segment, Radio, Btn, DateField, HeroCard, Card, RowLine } from '../../components/finance/ui';
 import { useMe } from '../../components/finance/useMe';
-import { fmtDate, num } from '../../utils/financeFormat';
+import { fmtDate } from '../../utils/financeFormat';
 import { round2, formatINR, type InterestType } from '../../utils/interest';
 import type { LedgerPeriod } from '../../utils/finance';
 import { calculateInterest, compoundingFor, compoundingWord, COMPOUNDING } from '../../lib/finance/compounding';
@@ -17,6 +17,8 @@ import { insertInterest } from '../../db/interestHistory';
 import { sharePdf, pdfDocument, kvTable } from '../../utils/financeIO';
 import { useRouter } from 'expo-router';
 import { ledgerPrefillParams } from '../../components/finance/ledgerPrefill';
+import { checkInterestForm, YEAR_MS, type InterestFormField } from '../../components/finance/interestFormRules';
+import { userErrorText } from '../../lib/userErrorText';
 
 export default function InterestCalc() {
   const FIN = useFinanceTheme();
@@ -52,37 +54,18 @@ export default function InterestCalc() {
     picker.open(new Date(cur), (d) => { if (which === 'from') setFrom(d.getTime()); else setTo(d.getTime()); });
   };
 
+  // After a refused Calculate the checks run live, so a marked field clears
+  // as soon as it is fixed (the LedgerForm / chitti form pattern).
+  const [tried, setTried] = useState(false);
+  const checked = checkInterestForm({ principal, rate, timeMode, from, to, durY, durM, durD });
+  const problems = tried && 'problems' in checked ? checked.problems : [];
+  const errorAt = (f: InterestFormField) => problems.find((p) => p.field === f)?.message;
+
   const onCalc = async () => {
-    const P = num(principal), R = num(rate);
-    if (!(P > 0)) return Alert.alert('Principal', 'Enter a principal greater than 0.');
-    // 0% is a real (family) loan — same rule as the ledger forms and EMI.
-    if (!Number.isFinite(R) || R < 0) return Alert.alert('Rate', 'Enter an interest rate of 0 or more.');
-    let years: number;
-    let start = Date.now();
-    if (timeMode === 'dates') {
-      if (!from) return Alert.alert('From date', 'Pick a start date.');
-      if (to <= from) return Alert.alert('Dates', 'End date must be after start date.');
-      years = (to - from) / 31536000000;
-      start = from;
-    } else {
-      // `|| 0` SWALLOWED THE HARDENED PARSER (2026-09-17). num() returns NaN
-      // for a half-typed "1,2" so that `!(x > 0)` can reject it — but `|| 0`
-      // turns that NaN back into a believable zero BEFORE the check, and the
-      // check then passes on the strength of the other two boxes. Years "1,2"
-      // with Months "6" calculated 0.5 years instead of 1.7 and WROTE that
-      // duration to interest_history, with no alert and a plausible number on
-      // the hero card. Blank is still 0 — num('') is 0, not NaN — so an
-      // unfilled Months box costs nothing.
-      const dY = num(durY), dM = num(durM), dD = num(durD);
-      if (!Number.isFinite(dY) || !Number.isFinite(dM) || !Number.isFinite(dD)) {
-        return Alert.alert('Duration', 'Years, months and days must be plain numbers. Use digits only — 1200 or 1,200 both work — or leave a box empty.');
-      }
-      // "2 years, −6 months" used to pass as 1.5 years because only the total
-      // was checked; a negative part is a typo, not an instruction.
-      if (dY < 0 || dM < 0 || dD < 0) return Alert.alert('Duration', 'Years, months and days cannot be negative.');
-      years = dY + dM / 12 + dD / 365;
-      if (!(years > 0)) return Alert.alert('Duration', 'Enter a duration greater than 0.');
-    }
+    setTried(true);
+    // Every failing field is marked inline; the first also gets the Alert.
+    if ('problem' in checked) return Alert.alert(checked.problem.title, checked.problem.message);
+    const { principal: P, rate: R, years, start } = checked.ok;
     const r = calculateInterest({ type, principal: P, rate: R, rateMode, period, years, perYear });
     // Nothing bounds the rate or the duration, and compounding overflows fast:
     // a daily rate annualises to ×365 and P·(1+r)^(n·T) with T = 999999999 is
@@ -96,12 +79,12 @@ export default function InterestCalc() {
       return Alert.alert('Out of range', 'That rate and duration produce a number too large to calculate. Try a shorter duration or a lower rate.');
     }
     // The ledger counts years the same way (utils/financeRules ledgerInterest).
-    const out = { interest: round2(r.interest), total: round2(r.total), years, type, principal: P, rate: R, rateMode, period, perYear, timeMode, start, end: start + years * 31536000000 };
+    const out = { interest: round2(r.interest), total: round2(r.total), years, type, principal: P, rate: R, rateMode, period, perYear, timeMode, start, end: start + years * YEAR_MS };
     setRes(out);
     if (me) {
       try {
         await insertInterest({ user_id: me.id, user_name: me.name, type, principal: P, rate: R, time_years: round2(years), frequency: type === 'compound' ? perYear : null, interest: out.interest, total_amount: out.total, rate_mode: rateMode, period });
-      } catch (e: any) {
+      } catch (e) {
         // `catch {}` made this file's own header comment ("Saves to on-device
         // history") a lie (2026-09-22). The result above is real and on screen,
         // but it is ephemeral — onClear and navigating away destroy it, and
@@ -110,12 +93,12 @@ export default function InterestCalc() {
         // has been lost". Announced exactly as a failed write is in
         // ledger/new.tsx; the title differs from that screen's 'Could not save'
         // because here the calculation itself DID succeed.
-        Alert.alert('Not saved to history', `The result above is correct, but it could not be written to Saved & History. ${e?.message ?? 'Try again.'}`);
+        Alert.alert('Not saved to history', `The result above is correct, but it could not be written to Saved & History. ${userErrorText(e, 'Try again.')}`);
       }
     }
   };
 
-  const onClear = () => { setPrincipal(''); setRate(''); setFrom(null); setTo(Date.now()); setDurY(''); setDurM(''); setDurD(''); setPerYearPick(null); setRes(null); };
+  const onClear = () => { setTried(false); setPrincipal(''); setRate(''); setFrom(null); setTo(Date.now()); setDurY(''); setDurM(''); setDurD(''); setPerYearPick(null); setRes(null); };
 
   const onShare = async () => {
     if (!res) return;
@@ -130,7 +113,7 @@ export default function InterestCalc() {
       { k: 'Day count', v: conventionNote(res.timeMode) },
       ...(res.type === 'compound' ? [{ k: 'Ledgers', v: LEDGER_NOTE }] : []),
     ]));
-    try { await sharePdf(html, 'interest'); } catch (e: any) { Alert.alert('Share failed', e?.message ?? 'Try again'); }
+    try { await sharePdf(html, 'interest'); } catch (e) { Alert.alert('Share failed', userErrorText(e, 'Try again')); }
   };
 
   const monthly = res ? round2(res.interest / (res.years * 12 || 1)) : 0;
@@ -149,13 +132,13 @@ export default function InterestCalc() {
           </View>
 
           <Label>Principal Amount</Label>
-          <Field label="Principal amount" value={principal} onChangeText={setPrincipal} placeholder="₹ 0" keyboardType="numeric" />
+          <Field label="Principal amount" value={principal} onChangeText={setPrincipal} placeholder="₹ 0" keyboardType="numeric" error={errorAt('principal')} />
 
           <Label>Rate Type</Label>
           <Segment<'percent' | 'rupees'> options={[{ k: 'percent', label: '% (percentage)' }, { k: 'rupees', label: '₹ per ₹100' }]} value={rateMode} onChange={setRateMode} label="Rate type" />
 
           <Label>{rateMode === 'rupees' ? 'Interest Rate (₹ per ₹100)' : 'Interest Rate (%)'}</Label>
-          <Field label={rateMode === 'rupees' ? 'Interest rate, rupees per 100' : 'Interest rate, percent'} value={rate} onChangeText={setRate} placeholder="Enter rate" keyboardType="numeric" />
+          <Field label={rateMode === 'rupees' ? 'Interest rate, rupees per 100' : 'Interest rate, percent'} value={rate} onChangeText={setRate} placeholder="Enter rate" keyboardType="numeric" error={errorAt('rate')} />
 
           <Label>Interest Period</Label>
           <Segment<LedgerPeriod> options={[{ k: 'daily', label: 'Daily' }, { k: 'weekly', label: 'Weekly' }, { k: 'monthly', label: 'Monthly' }, { k: 'yearly', label: 'Yearly' }]} value={period} onChange={setPeriod} small label="Interest period" />
@@ -179,8 +162,10 @@ export default function InterestCalc() {
             <>
               <Label>From Date</Label>
               <DateField label="From date" value={from ? fmtDate(from) : ''} onPress={() => pick('from')} />
+              {errorAt('from') ? <Text style={s.err} accessibilityLiveRegion="polite">{errorAt('from')}</Text> : null}
               <Label>To Date</Label>
               <DateField label="To date" value={fmtDate(to)} onPress={() => pick('to')} />
+              {errorAt('to') ? <Text style={s.err} accessibilityLiveRegion="polite">{errorAt('to')}</Text> : null}
             </>
           ) : (
             <>
@@ -190,6 +175,7 @@ export default function InterestCalc() {
                 <View style={s.durationField}><Field label="Duration in months" value={durM} onChangeText={setDurM} placeholder="Months" keyboardType="numeric" /></View>
                 <View style={s.durationField}><Field label="Duration in days" value={durD} onChangeText={setDurD} placeholder="Days" keyboardType="numeric" /></View>
               </View>
+              {errorAt('duration') ? <Text style={s.err} accessibilityLiveRegion="polite">{errorAt('duration')}</Text> : null}
             </>
           )}
 
@@ -252,6 +238,7 @@ const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   durationField: { flexGrow: 1, flexBasis: 100, minWidth: 0 },
   btnRow: { flexDirection: 'row', gap: 12, marginTop: 20 },
   note: { color: FIN.faint, fontSize: 12, lineHeight: 17, marginTop: 8 },
+  err: { color: FIN.bad, fontSize: 12.5, fontWeight: '600', marginTop: 6 },
   // Hero ink: the FIN_HERO gradient is dark in both schemes (HERO_INK, constants/financeTheme).
   heroLabel: { color: HERO_INK.label, fontSize: 10.5, fontWeight: '700', letterSpacing: 0.8 },
   heroVal: { color: HERO_INK.strong, fontSize: 28, fontWeight: '800', marginTop: 6, ...TABULAR },

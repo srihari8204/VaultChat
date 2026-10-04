@@ -14,6 +14,7 @@ import { getLedger, addLedgerUpdate, type LedgerEntry } from '../../../db/ledger
 import { round2 } from '../../../utils/interest';
 import { ledgerInterest, ledgerInterestSoFar } from '../../../utils/financeRules';
 import { ledgerInterestTypeLabel } from '../../../lib/finance/compounding';
+import { userErrorText } from '../../../lib/userErrorText';
 
 export default function UpdateAmount() {
   const FIN = useFinanceTheme();
@@ -25,6 +26,7 @@ export default function UpdateAmount() {
   const [remaining, setRemaining] = useState('');
   const [note, setNote] = useState('');
   const [touchedRemaining, setTouchedRemaining] = useState(false);
+  const [tried, setTried] = useState(false);
 
   const { status, begin, done, fail } = useLoadStatus();
   const load = useCallback(() => {
@@ -53,11 +55,17 @@ export default function UpdateAmount() {
     );
   }
 
+  // Marked inline after a refused Save, and live from then on, so a fixed
+  // field clears at once (the LedgerForm pattern).
+  const rec = num(received), rem = num(remaining);
+  const receivedError = tried && !(rec > 0) ? 'Enter the amount received (greater than 0).' : undefined;
+  const remainingError = tried && !(rem >= 0) ? 'Enter a valid remaining amount.' : undefined;
+
   const soFar = ledgerInterestSoFar(e, Date.now());
   const full = ledgerInterest(e);
 
   const onSave = async () => {
-    const rec = num(received), rem = num(remaining);
+    setTried(true);
     if (!(rec > 0)) return Alert.alert('Received', 'Enter the amount received (greater than 0).');
     if (!(rem >= 0)) return Alert.alert('Remaining', 'Enter a valid remaining amount.');
     // Both are legitimate (an overpayment; interest added to the balance) but
@@ -90,7 +98,7 @@ export default function UpdateAmount() {
     try {
       await addLedgerUpdate(e.id, rec, rem, note.trim() || null);
       router.back();
-    } catch (err: any) { Alert.alert('Could not save', err?.message ?? 'Try again'); }
+    } catch (err) { Alert.alert('Could not save', userErrorText(err, 'Try again')); }
   };
 
   return (
@@ -111,10 +119,14 @@ export default function UpdateAmount() {
           </Card>
 
           <Label>Amount Received Now</Label>
-          <Field label="Amount received now" value={received} onChangeText={setReceived} placeholder="₹ 0" keyboardType="numeric" />
+          <Field label="Amount received now" value={received} onChangeText={setReceived} placeholder="₹ 0" keyboardType="numeric" error={receivedError} />
 
           <Label hint="(auto — edit if needed)">New Remaining Amount</Label>
-          <Field label="New remaining amount" value={remaining} onChangeText={(t) => { setTouchedRemaining(true); setRemaining(t); }} placeholder="₹ 0" keyboardType="numeric" />
+          {/* The spoken label says it fills itself, so a screen-reader user
+              knows it changed when Received was typed. */}
+          <Field label={touchedRemaining ? 'New remaining amount' : 'New remaining amount, filled in as current remaining minus amount received until you edit it'}
+            value={remaining} onChangeText={(t) => { setTouchedRemaining(true); setRemaining(t); }} placeholder="₹ 0" keyboardType="numeric" error={remainingError} />
+          {!touchedRemaining && <Text style={s.hint}>Fills in as current remaining − amount received. Edit it if interest or a charge was added.</Text>}
 
           <Label hint="(optional)">Notes</Label>
           <Field label="Notes, optional" value={note} onChangeText={setNote} placeholder="e.g. paid via UPI" multiline />

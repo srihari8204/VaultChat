@@ -15,6 +15,7 @@ import { formatINR, fmtDate, PERIOD_LABEL } from '../../utils/financeFormat';
 import { listLedger } from '../../db/ledger';
 import { listInterest, deleteInterest, type InterestRow } from '../../db/interestHistory';
 import { listGroups } from '../../db/chitti';
+import { userErrorText } from '../../lib/userErrorText';
 
 type Kind = 'ledger' | 'interest' | 'chitti';
 interface SavedItem {
@@ -54,7 +55,7 @@ export default function Saved() {
   const deleteCalc = useCallback((r: InterestRow) => {
     deleteInterest(r.id)
       .then(() => { AccessibilityInfo.announceForAccessibility('Calculation deleted'); reloadRef.current(); })
-      .catch((e: any) => Alert.alert('Could not delete', e?.message ?? 'Try again.'));
+      .catch((e) => Alert.alert('Could not delete', userErrorText(e, 'Try again.')));
   }, []);
   const viewCalc = useCallback((r: InterestRow) => setViewing(r), []);
 

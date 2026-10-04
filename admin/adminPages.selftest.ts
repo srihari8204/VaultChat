@@ -12,7 +12,7 @@
 //    <style> element, and no style="" attribute anywhere.
 // 5. shopbook.html asks for notes in inline forms: no prompt() is left; both
 //    forms save through one helper; an early Confirm says why it was ignored.
-// 6. logs.html and shopbook.html keep every stylesheet colour in :root tokens.
+// 6. every page keeps every stylesheet colour in :root tokens.
 // 7. index.html's @font-face files exist where LOGS_DEPLOY.md copies them from.
 //
 // Run: npx tsx admin/adminPages.selftest.ts
@@ -111,6 +111,13 @@ for (const page of ['index.html', 'logs.html', 'shopbook.html']) scripts[page] =
     assert.ok(/await saveForm\(btn, errEl,/.test(fnSource(s, fn)), `shopbook.html: ${fn} saves through saveForm`);
     assert.ok(!/btn\.disabled = true/.test(fnSource(s, fn)), `shopbook.html: ${fn} hand-rolls the busy state again`);
   }
+  // N6: Escape / Cancel / reopening never removes a form whose save is still
+  // running (its failure would land in a detached form, unseen).
+  for (const fn of ['closeNote', 'closeEntitlement', 'openNote', 'openEntitlement']) {
+    assert.ok(/stillSaving\(/.test(fnSource(s, fn)), `shopbook.html: ${fn} can drop a form mid-save`);
+  }
+  assert.ok(/aria-busy="true"/.test(fnSource(s, 'stillSaving')), 'shopbook.html: stillSaving reads the submit button\'s busy state');
+  assert.ok(/if \(!errEl\.isConnected\) toast\(/.test(fnSource(s, 'saveForm')), 'shopbook.html: a failure in a detached form is toasted');
 }
 
 // ── logs.html: the status live region is written only when it changes ──
@@ -120,13 +127,23 @@ for (const page of ['index.html', 'logs.html', 'shopbook.html']) scripts[page] =
   assert.ok(!/(?<!window\[area\]\.)\b(localStorage|sessionStorage)\.(get|set|remove)Item/.test(s), 'logs.html: storage outside the guarded helpers');
 }
 
-// ── stylesheet colours live in :root tokens (logs.html, shopbook.html) ──
-for (const page of ['logs.html', 'shopbook.html']) {
+// ── stylesheet colours live in :root tokens (all three pages; index.html's
+//    light theme redefines them in its own :root, so nothing is left behind) ──
+for (const page of ['index.html', 'logs.html', 'shopbook.html']) {
   const css = /<style>([\s\S]*?)<\/style>/.exec(read(page))![1]
     .replace(/\/\*[\s\S]*?\*\//g, '')           // comments may quote old values
     .replace(/:root\s*\{[^}]*\}/g, '');            // the token blocks themselves
   const stray = css.match(/#[0-9a-fA-F]{3,8}\b|rgba?\(/g);
   assert.equal(stray, null, `${page}: colour literal outside :root (${stray}) — add a token`);
+}
+
+// ── index.html: the login alert is always rendered (a role=alert region
+//    toggled out of display:none is not reliably announced) ──
+{
+  const html = read('index.html');
+  assert.ok(/<div id="loginErr" class="err-box" role="alert"><\/div>/.test(html), 'index.html: #loginErr is not an always-rendered alert');
+  assert.ok(!/errEl\.classList\.(add|remove|toggle)\('hide'/.test(scripts['index.html']), 'index.html: the login alert is hidden with display:none again');
+  assert.ok(/\.err-box:empty\{margin:0;padding:0;border:0\}/.test(html), 'index.html: an empty login alert takes room');
 }
 
 // ── index.html's fonts: every @font-face file is one the deploy can copy ──

@@ -1,12 +1,13 @@
 // app/finance/ledger/index.tsx — Ledger Book list (All / Lent / Borrowed) with
 // status filtering and a 30-second undo-delete snackbar. The detail screen's
-// Delete hands its ledger here (`deleteId`), so both deletes undo the same way.
+// confirmed Delete hands its ledger here in memory (ledgerDeleteHandoff), so
+// both deletes undo the same way. No route param can delete a ledger.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFinanceTheme } from '../../../components/finance/useFinanceTheme';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, Animated, Alert, AccessibilityInfo, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { financeStatusColors, TABULAR, FIN_SHADOW, type FinancePalette } from '../../../constants/financeTheme';
 import { FinHeader, Segment, Pill, EmptyState, LoadingState, ErrorState } from '../../../components/finance/ui';
@@ -14,6 +15,8 @@ import { useLoadStatus } from '../../../components/finance/useLoad';
 import { useMe } from '../../../components/finance/useMe';
 import { formatINR, PERIOD_LABEL } from '../../../utils/financeFormat';
 import { listLedger, deleteLedger, restoreLedger, type LedgerEntry } from '../../../db/ledger';
+import { hasLedgerDelete, takeLedgerDelete } from '../../../components/finance/ledgerDeleteHandoff';
+import { userErrorText } from '../../../lib/userErrorText';
 
 type Filter = 'all' | 'lend' | 'borrow';
 
@@ -34,7 +37,6 @@ export default function LedgerList() {
   const [pending, setPending] = useState<LedgerEntry[]>([]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const snack = useRef(new Animated.Value(0)).current;
-  const { deleteId } = useLocalSearchParams<{ deleteId?: string }>();
 
   // Kept current synchronously (not only on render), so a reload that lands
   // between a delete and its re-render still hides the row.
@@ -80,18 +82,19 @@ export default function LedgerList() {
     }
   };
 
-  // The detail screen's Delete arrives as `deleteId` (it pops back here with
-  // dismissTo), once the row is on screen; the param is then cleared so a
-  // later focus does not delete it again.
+  // The detail screen's confirmed Delete arrives through the in-memory handoff
+  // (it pops back here with dismissTo), once the reloaded rows are on screen.
+  // It used to be a `deleteId` route param, which any vaultchat:// link could
+  // set to delete a ledger unconfirmed; route params are no longer read here.
   useEffect(() => {
-    if (!deleteId || status !== 'ready') return;
-    const row = rows.find(r => r.id === deleteId);
-    router.setParams({ deleteId: undefined });
+    if (status !== 'ready' || !hasLedgerDelete()) return;
+    const id = takeLedgerDelete();
+    const row = id ? rows.find(r => r.id === id) : undefined;
     if (row) askDelete(row);
     // askDelete reads only refs and setters; re-running on its identity would
     // be per render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deleteId, status, rows, router]);
+  }, [status, rows]);
 
   // FLUSH ON THE WAY OUT. The 30s timer dies with the screen, so leaving inside
   // the window abandoned a delete the snackbar had already reported as done —
@@ -110,8 +113,8 @@ export default function LedgerList() {
     // A failed delete used to vanish silently while the snackbar said
     // "deleted"; the ledger came back on the next visit with no explanation.
     for (const p of due) {
-      deleteLedger(p.id).catch((err: any) => {
-        Alert.alert('Could not delete the ledger', `${p.name}: ${err?.message ?? 'It is still in your ledger book.'}`);
+      deleteLedger(p.id).catch((err) => {
+        Alert.alert('Could not delete the ledger', `${p.name}: ${userErrorText(err, 'It is still in your ledger book.')}`);
         reload();
       });
     }
@@ -125,7 +128,7 @@ export default function LedgerList() {
     // Cleared first, so the reload below shows the restored rows.
     setPendingNow([]);
     Promise.all(back.map(p => restoreLedger(p)))
-      .catch((err: any) => Alert.alert('Could not undo', err?.message ?? 'The ledger could not be restored.'))
+      .catch((err) => Alert.alert('Could not undo', userErrorText(err, 'The ledger could not be restored.')))
       .finally(reload);
     Animated.timing(snack, { toValue: 0, duration: 180, useNativeDriver: true }).start();
   };

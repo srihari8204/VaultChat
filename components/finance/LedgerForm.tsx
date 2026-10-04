@@ -18,6 +18,7 @@ import { ledgerInterest, ledgerCompounding } from '../../utils/financeRules';
 import { COMPOUNDING, ledgerInterestTypeLabel } from '../../lib/finance/compounding';
 import { checkLedgerForm } from './ledgerFormRules';
 import type { LedgerPrefill } from './ledgerPrefill';
+import { userErrorText } from '../../lib/userErrorText';
 
 export interface LedgerFormValues {
   direction: 'lend' | 'borrow'; name: string; mobile: string | null;
@@ -101,8 +102,8 @@ export function LedgerForm({ initial, prefill, directionEditable, saveLabel, onS
         rate: c.rate, rate_mode: rateMode, period, start_date: start, end_date: end, notes: notes.trim() || null,
         compounding,
       });
-    } catch (e: any) {
-      Alert.alert('Could not save', e?.message ?? 'Try again');
+    } catch (e) {
+      Alert.alert('Could not save', userErrorText(e, 'Try again'));
     }
   };
 
@@ -112,6 +113,11 @@ export function LedgerForm({ initial, prefill, directionEditable, saveLabel, onS
       {picker.element}
       <KeyboardSafe style={{ flex: 1 }} >
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          {/* The calculator's "Save as ledger" fills the terms; say so, so the
+              user knows where they came from and checks them before saving. */}
+          {!initial && prefill && Object.keys(prefill).length > 0 && (
+            <Text style={s.prefillNote}>Terms from your interest calculation. Add who it is with, check the terms, then save.</Text>
+          )}
           {directionEditable && (
             <View style={s.radioRow} accessibilityRole="radiogroup" accessibilityLabel="Lend or borrow">
               <Radio label="Lend" active={direction === 'lend'} onPress={() => setDirection('lend')} />
@@ -176,6 +182,7 @@ const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   radioRow: { flexDirection: 'row', gap: 28, marginTop: 8, marginBottom: 4 },
   err: { color: FIN.bad, fontSize: 12.5, fontWeight: '600', marginTop: 6 },
   preview: { color: FIN.sub, fontSize: 13, lineHeight: 19, marginTop: 18 },
+  prefillNote: { color: FIN.brandDeep, backgroundColor: FIN.brandSoft, fontSize: 13, lineHeight: 19, fontWeight: '600', borderRadius: 10, padding: 10, marginBottom: 6 },
 });
 
 export default LedgerForm;

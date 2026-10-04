@@ -161,7 +161,8 @@ export default function FinanceSearch() {
                 <View style={[s.dot, { backgroundColor: e.direction === 'lend' ? FIN.good : FIN.bad }]} />
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={s.title} numberOfLines={1}>{e.name}</Text>
-                  <Text style={s.sub} numberOfLines={1}>{e.direction === 'lend' ? 'Lent' : 'Borrowed'} · {formatINR(e.remaining)} remaining{e.mobile ? ` · ${e.mobile}` : ''}</Text>
+                  {/* Two lines: at 320dp one line cut off the mobile number. */}
+                  <Text style={s.sub} numberOfLines={2}>{e.direction === 'lend' ? 'Lent' : 'Borrowed'} · {formatINR(e.remaining)} remaining{e.mobile ? ` · ${e.mobile}` : ''}</Text>
                 </View>
                 <View style={{ alignItems: 'flex-end', gap: 5 }}>
                   <Text style={s.amt}>{formatINR(e.principal)}</Text>

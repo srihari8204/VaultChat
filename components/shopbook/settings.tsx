@@ -15,6 +15,7 @@ import { t } from '../../lib/shopbookI18n';
 import { permissionDenied } from '../../lib/permissionDenied';
 import { C, s } from './theme';
 import { loadErrText, ReasonModal, SubHeader, Chip, Field, ToggleRow } from './shared';
+import { userErrorText } from '../../lib/userErrorText';
 
 export function ShopSettings({ shop, me, onSaved, onCancel }: {
   shop: SB.Shop | null; me: { id: string; name: string } | null;
@@ -56,7 +57,7 @@ export function ShopSettings({ shop, me, onSaved, onCancel }: {
   const loadCountries = useCallback(async () => {
     setCountryErr('');
     try { setCountryList(await SB.countries()); }
-    catch (e: any) { setCountryErr(loadErrText(e)); }
+    catch (e) { setCountryErr(loadErrText(e)); }
   }, []);
   useEffect(() => { loadCountries(); }, [loadCountries]);
   const countryCfg = countryList.find((c2) => c2.code === country);
@@ -117,7 +118,7 @@ export function ShopSettings({ shop, me, onSaved, onCancel }: {
       setLocReq(await SB.myLocationRequest());
       Alert.alert('Sent for review',
         'Your new location was sent for review. Customers keep seeing the current one until it is approved.');
-    } catch (e: any) { Alert.alert('Could not send', e?.message ?? 'Try again'); }
+    } catch (e) { Alert.alert('Could not send', userErrorText(e, 'Try again')); }
     finally { setBusy(false); }
   };
 
@@ -176,11 +177,11 @@ export function ShopSettings({ shop, me, onSaved, onCancel }: {
       });
       const fresh = await SB.myShop();
       if (fresh) onSaved(fresh);
-    } catch (e: any) {
+    } catch (e) {
       // Not an error the owner can fix by retrying — it is a request they have
       // to make. Offer that instead of the refusal.
       if (SB.locationLocked(e)) { setMoveAsk(true); return; }
-      Alert.alert('Error', e?.message ?? 'Try again');
+      Alert.alert('Error', userErrorText(e, 'Try again'));
     }
     finally { setBusy(false); }
   };

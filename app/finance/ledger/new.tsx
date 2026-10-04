@@ -5,7 +5,7 @@
 
 import React from 'react';
 import { useFinanceTheme } from '../../../components/finance/useFinanceTheme';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, Alert } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { type FinancePalette } from '../../../constants/financeTheme';
 import { FinHeader } from '../../../components/finance/ui';
@@ -23,10 +23,18 @@ export default function NewLedger() {
   // Read once: the form owns its fields after the first render.
   const [prefill] = React.useState(() => parseLedgerPrefill(params));
 
+  const fromCalculator = Object.keys(prefill).length > 0;
+
   const onSave = async (v: LedgerFormValues) => {
     if (!me) return;
-    await insertLedger({ user_id: me.id, ...v });
-    router.back();
+    const saved = await insertLedger({ user_id: me.id, ...v });
+    if (!fromCalculator) { router.back(); return; }
+    // From the calculator, Back alone returned to the calculation with nothing
+    // saying a ledger was made or where it went.
+    Alert.alert('Saved to Ledger Book', `${saved.name} is in your Ledger Book.`, [
+      { text: 'Back to calculator', style: 'cancel', onPress: () => router.back() },
+      { text: 'Open ledger', onPress: () => router.replace({ pathname: '/finance/ledger/[id]', params: { id: saved.id } }) },
+    ], { cancelable: true, onDismiss: () => router.back() });
   };
 
   return (

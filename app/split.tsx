@@ -120,7 +120,9 @@ export default function SplitScreen() {
             element (a label on a non-accessible icon is never spoken). */}
         <Ionicons name={vertical ? 'tablet-landscape-outline' : 'phone-portrait-outline'} size={15} color={colors.textDim}
           accessible={!vertical} accessibilityRole="header" accessibilityLabel="Split view" />
-        {/* Stacked means a narrow window: the three buttons need the room. */}
+        {/* Side by side (a wide window) the words fit next to the icon. Stacked
+            (a narrow window) the three buttons need the room, so the icon
+            above names the bar instead. */}
         {vertical && <Text accessibilityRole="header" style={[st.barTxt, { color: colors.textDim }]}>Split view</Text>}
         <View style={{ flex: 1 }} />
         <TouchableOpacity onPress={swap} hitSlop={{ left: 6, right: 6 }} style={st.barBtn}

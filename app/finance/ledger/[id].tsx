@@ -10,10 +10,12 @@ import { FinHeader, Card, HeroCard, RowLine, Pill, Btn, LoadingState, ErrorState
 import { useLoadStatus } from '../../../components/finance/useLoad';
 import { formatINR, fmtDate, fmtDateTime, PERIOD_LABEL } from '../../../utils/financeFormat';
 import { getLedger, type LedgerEntry } from '../../../db/ledger';
+import { handOffLedgerDelete } from '../../../components/finance/ledgerDeleteHandoff';
 import { listTimeline, type TimelineRow } from '../../../db/financeTimeline';
 import { ledgerInterest, ledgerInterestSoFar } from '../../../utils/financeRules';
 import { ledgerInterestTypeLabel } from '../../../lib/finance/compounding';
 import { sharePdf, pdfDocument, kvTable } from '../../../utils/financeIO';
+import { userErrorText } from '../../../lib/userErrorText';
 
 export default function LedgerDetail() {
   const FIN = useFinanceTheme();
@@ -71,17 +73,18 @@ export default function LedgerDetail() {
       { k: 'Start date', v: fmtDate(e.start_date) },
       { k: 'End date', v: e.end_date ? fmtDate(e.end_date) : '—' },
     ]));
-    try { await sharePdf(html, `ledger-${e.name}`); } catch (err: any) { Alert.alert('Share failed', err?.message ?? 'Try again'); }
+    try { await sharePdf(html, `ledger-${e.name}`); } catch (err) { Alert.alert('Share failed', userErrorText(err, 'Try again')); }
   };
 
-  // The same undo as the list's long-press: the delete is handed to the Ledger
-  // Book (`deleteId`), which hides the row and shows its 30-second Undo
+  // The same undo as the list's long-press: after this confirmation the delete
+  // is handed to the Ledger Book in memory (ledgerDeleteHandoff — never a route
+  // param, which any link could set), which hides the row and shows its 30-second Undo
   // snackbar before anything is removed. dismissTo pops back to the list when
   // it is in the stack, and opens it when this screen came from elsewhere
   // (customer, search, a link).
   const onDelete = () => Alert.alert('Delete ledger?', `Delete ${e.name} with its repayments and timeline? You can undo this for 30 seconds in the Ledger Book.`, [
     { text: 'Cancel', style: 'cancel' },
-    { text: 'Delete', style: 'destructive', onPress: () => router.dismissTo({ pathname: '/finance/ledger', params: { deleteId: e.id } }) },
+    { text: 'Delete', style: 'destructive', onPress: () => { handOffLedgerDelete(e.id); router.dismissTo('/finance/ledger'); } },
   ]);
 
   return (
@@ -156,7 +159,10 @@ export default function LedgerDetail() {
         ) : (
           <View style={s.tl}>
             {tl.map((row, i) => (
-              <View key={row.id} style={s.tlRow}>
+              // One spoken row per event (kind, detail, time), not three
+              // separate stops; the dot and stem are decoration.
+              <View key={row.id} style={s.tlRow} accessible
+                accessibilityLabel={`${tlLabel(row.kind)}, ${row.detail}, ${fmtDateTime(row.at)}`}>
                 <View style={s.tlDotWrap}>
                   <View style={s.tlDot} />
                   {i < tl.length - 1 && <View style={s.tlStem} />}

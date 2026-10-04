@@ -10,7 +10,7 @@
      class; script code may still set el.style.* through the CSSOM, which CSP allows). After editing the stylesheet,
      recompute with the same command, replacing script by style in both tags; an unmatched hash leaves the page
      unstyled. admin/adminPages.selftest.ts checks both. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-5QqaChKxKM1GB4m7fam51rpWbNmugclTBiXtJtVDF3U='; style-src 'sha256-gahcIHLLt/EAU6Bko0IieCN7Z4eW1Sbt5v4BIg9wwG4='; connect-src https: http://localhost:* http://127.0.0.1:*; img-src data:; base-uri 'none'; form-action 'none'" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-jZyYGLMn0csXxFnFKwN/EgJqfbFk4Re/c6veumvAmjo='; style-src 'sha256-gahcIHLLt/EAU6Bko0IieCN7Z4eW1Sbt5v4BIg9wwG4='; connect-src https: http://localhost:* http://127.0.0.1:*; img-src data:; base-uri 'none'; form-action 'none'" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="dark light" />
 <title>Shop Book · Admin</title>
@@ -510,8 +510,20 @@ async function saveForm(btn, errEl, save){
   catch (e) {
     errEl.textContent = 'Not saved: ' + e.message;
     btn.disabled = false; btn.removeAttribute('aria-busy');
+    // Belt and braces: a form that is gone (a reload re-rendered its card)
+    // cannot show the failure, so it is toasted instead of lost.
+    if (!errEl.isConnected) toast('❌ Not saved: ' + e.message);
     return false;
   }
+}
+// A form whose save is still running is not closed or replaced (Escape,
+// Cancel, reopening): a failure must land in the form, with the typed input
+// kept, not in a detached one nobody sees. The form says why it stayed.
+function stillSaving(f){
+  if (!f || !f.querySelector('[aria-busy="true"]')) return false;
+  const errEl = f.querySelector('[role="alert"]');
+  if (errEl) errEl.textContent = 'Still saving. The form closes when it finishes.';
+  return true;
 }
 // A field the form refuses: the reason in the form's alert, the field marked
 // invalid and focused.
@@ -545,6 +557,7 @@ function openNote(b){
   const ask = noteAsk(b.dataset);
   if (!card || !ask) return;
   const old = card.querySelector(':scope > form[data-note-form]');
+  if (stillSaving(old)) return;
   if (old) old.remove();
   const uid = 'note' + (++noteSeq);
   const f = document.createElement('form');
@@ -565,6 +578,7 @@ function openNote(b){
   f.querySelector('input').focus();
 }
 function closeNote(f){
+  if (stillSaving(f)) return;
   const opener = noteOpeners.get(f);
   f.remove();
   if (opener && opener.isConnected) opener.focus();
@@ -656,7 +670,7 @@ function entitlementSummary(name, plan, state, expiresAt, reference){
 
 function openEntitlement(shopId, plan, state){
   const slot = document.querySelector(`[data-ent-for="${CSS.escape(shopId)}"]`);
-  if (!slot) return;
+  if (!slot || stillSaving(slot.querySelector('form'))) return;
   const name = shopNames.get(shopId) || shopId;
   const uid = 'ent' + (++entSeq);
   const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
@@ -681,6 +695,7 @@ function openEntitlement(shopId, plan, state){
 
 function closeEntitlement(shopId){
   const slot = document.querySelector(`[data-ent-for="${CSS.escape(shopId)}"]`);
+  if (slot && stillSaving(slot.querySelector('form'))) return;
   if (slot) slot.innerHTML = '';
   const opener = document.querySelector(`[data-act="entitlement"][data-id="${CSS.escape(shopId)}"]`);
   if (opener) opener.focus();
@@ -741,7 +756,8 @@ document.addEventListener('input', (ev) => {
 // (or send a note twice) without a second, deliberate press.
 document.addEventListener('keydown', (ev) => {
   if (ev.key === 'Enter' && ev.repeat && ev.target.closest('form[data-ent-form], form[data-note-form]')) ev.preventDefault();
-  // Escape closes the open note or entitlement form, as its Cancel does.
+  // Escape closes the open note or entitlement form, as its Cancel does
+  // (not while its save runs: closeNote / closeEntitlement check stillSaving).
   if (ev.key === 'Escape') {
     const f = ev.target.closest && ev.target.closest('form[data-ent-form], form[data-note-form]');
     if (!f) return;

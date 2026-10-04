@@ -95,10 +95,14 @@ ok('the user is told the inputs are out of range', interest.includes("'Out of ra
 // to a believable zero BEFORE the guard, and the guard then passes on the
 // strength of the other fields. Every remaining `|| 0` around num() in these
 // screens is that bug (2026-09-17).
+// The calculator's input checks moved to components/finance/interestFormRules
+// (round 8: inline errors), so the duration checks are read there.
+const interestRules = fs.readFileSync('components/finance/interestFormRules.ts', 'utf8');
 ok('the interest duration no longer launders NaN through `|| 0`',
-  !/num\(dur[YMD]\) \|\| 0/.test(interest));
+  !/num\(f?\.?dur[YMD]\) \|\| 0/.test(interestRules) && !/num\(dur[YMD]\) \|\| 0/.test(interest));
 ok('the interest duration rejects a box that did not parse',
-  /Number\.isFinite\(dY\)/.test(interest) && interest.indexOf('Number.isFinite(dY)') < interest.indexOf('years = dY'));
+  /Number\.isFinite\(dY\)/.test(interestRules) && interestRules.indexOf('Number.isFinite(dY)') < interestRules.indexOf('years = dY'));
+ok('the interest screen calculates only from the checked inputs', /checkInterestForm\(/.test(interest) && /checked\.ok/.test(interest));
 
 // The auctions tab moved out of app/finance/chitti/[id].tsx (round 4 split).
 const chitti = fs.readFileSync('components/finance/chitti/AuctionsTab.tsx', 'utf8');

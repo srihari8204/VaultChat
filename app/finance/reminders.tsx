@@ -14,45 +14,17 @@ import { FinHeader, Label, Field, Segment, Btn, Pill, EmptyState, Card, LoadingS
 import { useLoadStatus } from '../../components/finance/useLoad';
 import { useMe } from '../../components/finance/useMe';
 import { fmtDateTime } from '../../utils/financeFormat';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  insertReminder, listReminders, setReminderStatus, snoozeReminder, deleteReminder, setReminderNotifId,
+  insertReminder, listReminders, setReminderStatus, snoozeReminder, deleteReminder, replaceReminderNotifId,
   type Reminder, type ReminderFreq,
 } from '../../db/reminders';
 import { scheduleReminder, scheduleAt, cancel, snoozedNotifIds, notificationsAllowed } from '../../components/finance/notify';
 import { isUnscheduled, withRecurrence } from '../../components/finance/notifyIds';
+import { reminderBusy } from '../../components/finance/retrigger';
+import { rebuildRecurringAlertsOnce } from '../../components/finance/retriggerOnce';
+import { userErrorText } from '../../lib/userErrorText';
 import { nextOccurrence } from '../../utils/financeRules';
 import { osTriggerFor, skipsSomePeriods, anchorOf } from '../../lib/finance/reminderSchedule';
-
-/** Set once every recurring alert has been rebuilt from its anchor (below). */
-const RETRIGGER_KEY = 'vc_fin_retrigger_anchor_v1';
-
-/**
- * Recurring alerts scheduled before the trigger was built from the anchor
- * (it used max(now, picked time), so the phone alerted on a different day or
- * time than the app shows) are re-scheduled once from their anchor. The new
- * alert is stored before the old one is cancelled, so a failure keeps the old
- * alert rather than none. Never prompts: without permission it waits for a
- * later visit. Resolves true when every row was rebuilt; a row changed
- * meanwhile is left alone and retried on a later visit.
- */
-async function retriggerFromAnchors(userId: string, rows: Reminder[]): Promise<boolean> {
-  if (!(await notificationsAllowed())) return false;
-  let all = true;
-  for (const r of rows) {
-    const old = (r.notif_id ?? '').split(',')[0];
-    if (r.status !== 'active' || r.freq === 'once' || !old) continue;
-    const fresh = await scheduleReminder('Vault Finance', r.title, r.freq, anchorOf(r));
-    if (!fresh) { all = false; continue; }
-    // Done, snoozed or deleted meanwhile: that action owns the row's alerts.
-    const now = (await listReminders(userId).catch(() => [] as Reminder[])).find((x) => x.id === r.id);
-    if (!now || now.status !== 'active' || now.notif_id !== r.notif_id) { await cancel(fresh); all = false; continue; }
-    try { await setReminderNotifId(r.id, withRecurrence(r.notif_id, fresh)); }
-    catch { await cancel(fresh); all = false; continue; }
-    await cancel(old);
-  }
-  return all;
-}
 
 const FREQ_LABEL: Record<ReminderFreq, string> = { once: 'Once', daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', yearly: 'Yearly' };
 
@@ -77,10 +49,10 @@ export default function Reminders() {
       setRows(r); loadOk();
       if (retriggered.current) return;
       retriggered.current = true;
+      // Old recurring alerts are rebuilt once from their anchor
+      // (components/finance/retrigger), then re-read for the rebuilt ids.
       (async () => {
-        if ((await AsyncStorage.getItem(RETRIGGER_KEY)) === '1') return;
-        if (await retriggerFromAnchors(me.id, r)) await AsyncStorage.setItem(RETRIGGER_KEY, '1');
-        setRows(await listReminders(me.id));   // the rebuilt ids
+        if (await rebuildRecurringAlertsOnce(me.id, r)) setRows(await listReminders(me.id));
       })().catch(() => {});
     }).catch(loadFail);
   }, [me, beginLoad, loadOk, loadFail]);
@@ -98,12 +70,13 @@ export default function Reminders() {
   };
 
   // One action per reminder at a time: two taps on Snooze scheduled two
-  // alerts, and only the last id was kept to cancel.
-  const busy = useRef(new Set<string>());
+  // alerts, and only the last id was kept to cancel. The lock is shared with
+  // the one-time alert rebuild (components/finance/retrigger), so the two
+  // never work on the same row at once.
   const once = (r: Reminder, work: () => Promise<void>) => async () => {
-    if (busy.current.has(r.id)) return;
-    busy.current.add(r.id);
-    try { await work(); } finally { busy.current.delete(r.id); }
+    if (reminderBusy.has(r.id)) return;
+    reminderBusy.add(r.id);
+    try { await work(); } finally { reminderBusy.delete(r.id); }
   };
 
   const picker = useDatePicker();
@@ -112,16 +85,38 @@ export default function Reminders() {
   // A reminder whose notification could not be scheduled (permission denied,
   // or the OS refused) is still worth keeping as a note, but it must not look
   // like it will alert anyone.
-  // Permission is checked here, so a trigger the OS refused is not blamed on it.
-  const warnUnscheduled = async () => {
+  // Permission is checked here, so a trigger the OS refused is not blamed on
+  // it; that case offers "Try again" for the row instead of delete-and-re-add.
+  const warnUnscheduled = async (r: Reminder) => {
     if (await notificationsAllowed()) {
       Alert.alert('Alert not scheduled',
-        'The reminder is saved, but your phone did not accept its alert, so it will not alert you. Delete it and add it again.');
+        'The reminder is saved, but your phone did not accept its alert, so it will not alert you.',
+        [{ text: 'Not now', style: 'cancel' }, { text: 'Try again', onPress: () => retrySchedule(r) }]);
     } else {
       Alert.alert('Notifications are off',
-        'The reminder is saved, but it will not alert you. Allow notifications for this app in your phone settings, then add it again.');
+        'The reminder is saved, but it will not alert you. Allow notifications for this app in your phone settings, then tap "Try again" on the reminder.');
     }
   };
+
+  // Re-runs scheduleReminder for a row with no phone alert. The store is
+  // conditional (the row must still be active with the ids read here), so a
+  // row changed meanwhile keeps its own state and the new alert is cancelled.
+  const retrySchedule = (r: Reminder) => once(r, async () => {
+    if (r.freq === 'once' && r.next_at <= Date.now()) {
+      Alert.alert('This time has passed', 'A one-off reminder in the past cannot alert. Delete it and add a new one.');
+      return;
+    }
+    try {
+      const fresh = await scheduleReminder('Vault Finance', r.title, r.freq, r.freq === 'once' ? r.next_at : anchorOf(r));
+      if (!fresh) { void warnUnscheduled(r); return; }
+      const next = r.freq === 'once' ? fresh : withRecurrence(r.notif_id, fresh);
+      if (!(await replaceReminderNotifId(r.id, r.notif_id, next))) await cancel(fresh);
+      else AccessibilityInfo.announceForAccessibility(`Alert scheduled for ${r.title}`);
+    } catch (e) {
+      Alert.alert('Could not schedule the alert', userErrorText(e, 'Try again.'));
+    }
+    reload();
+  })();
 
   const confirm = (t: string, msg: string, ok: string) => new Promise<boolean>((resolve) => Alert.alert(t, msg, [
     { text: 'Go back', style: 'cancel', onPress: () => resolve(false) },
@@ -165,21 +160,21 @@ export default function Reminders() {
     const ref = params.refType === 'ledger' || params.refType === 'chitti' ? params.refType : null;
     try {
       const notifId = await scheduleReminder('Vault Finance', title.trim(), freq, start);
-      await insertReminder({
+      const saved = await insertReminder({
         user_id: me.id,
         ref_type: ref,
         ref_id: ref ? params.refId ?? null : null,
         // The picked time anchors the series; next_at is its next occurrence.
         title: title.trim(), freq, next_at: nextOccurrence(freq, start, Date.now()), anchor_at: start, notif_id: notifId,
       });
-      if (!notifId) void warnUnscheduled();
+      if (!notifId) void warnUnscheduled(saved);
       setShowAdd(false); setTitle(''); reload();
-    } catch (e: any) { Alert.alert('Could not add the reminder', e?.message ?? 'Try again.'); }
+    } catch (e) { Alert.alert('Could not add the reminder', userErrorText(e, 'Try again.')); }
   };
 
   const onDone = (r: Reminder) => once(r, async () => {
     try { await cancel(r.notif_id); await setReminderStatus(r.id, 'done'); reload(); }
-    catch (e: any) { Alert.alert('Could not update the reminder', e?.message ?? 'Try again.'); }
+    catch (e) { Alert.alert('Could not update the reminder', userErrorText(e, 'It is still active. Try again.')); }
   })();
   const onSnooze = (r: Reminder) => once(r, async () => {
     try {
@@ -191,20 +186,26 @@ export default function Reminders() {
       const ids = snoozedNotifIds(r.freq, r.notif_id, snoozeId);
       await cancel(ids.cancel);
       await snoozeReminder(r.id, next, ids.keep);
-      if (!snoozeId) void warnUnscheduled();
+      const snoozed = { ...r, next_at: next, status: 'active' as const, notif_id: ids.keep };
+      if (!snoozeId) void warnUnscheduled(snoozed);
       // The snooze itself may be fine while the repeating alert never was.
+      // Permission is checked, so a refused trigger is not blamed on it.
       else if (isUnscheduled(r.freq, ids.keep)) {
+        const allowed = await notificationsAllowed();
         Alert.alert('Snoozed, but not repeating',
-          'You will be reminded tomorrow, but the repeating reminder is not scheduled, so it will not alert you after that. Allow notifications for this app in your phone settings, then add it again.');
+          allowed
+            ? 'You will be reminded tomorrow, but your phone did not accept the repeating alert, so it will not alert you after that.'
+            : 'You will be reminded tomorrow, but the repeating reminder is not scheduled, so it will not alert you after that. Allow notifications for this app in your phone settings, then tap "Try again" on the reminder.',
+          allowed ? [{ text: 'Not now', style: 'cancel' }, { text: 'Try again', onPress: () => retrySchedule(snoozed) }] : undefined);
       }
       reload();
-    } catch (e: any) { Alert.alert('Could not snooze the reminder', e?.message ?? 'Try again.'); }
+    } catch (e) { Alert.alert('Could not snooze the reminder', userErrorText(e, 'It was not snoozed. Try again.')); }
   })();
   const onDelete = (r: Reminder) => Alert.alert('Delete reminder?', r.title, [
     { text: 'Cancel', style: 'cancel' },
     { text: 'Delete', style: 'destructive', onPress: once(r, async () => {
       try { await cancel(r.notif_id); await deleteReminder(r.id); reload(); }
-      catch (e: any) { Alert.alert('Could not delete the reminder', e?.message ?? 'Try again.'); }
+      catch (e) { Alert.alert('Could not delete the reminder', userErrorText(e, 'It is still in your list. Try again.')); }
     }) },
   ]);
 
@@ -258,7 +259,15 @@ export default function Reminders() {
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={s.title} numberOfLines={2}>{r.title}</Text>
                 <Text style={s.sub}>{fmtDateTime(r.next_at)}</Text>
-                {isUnscheduled(r.freq, r.notif_id) && <Text style={[s.sub, { color: FIN.bad }]}>Not scheduled: no phone alert</Text>}
+                {isUnscheduled(r.freq, r.notif_id) && (
+                  <View style={s.unscheduled}>
+                    <Text style={[s.sub, { color: FIN.bad, flexShrink: 1 }]}>Not scheduled: no phone alert</Text>
+                    <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Try again to schedule the phone alert for ${r.title}`}
+                      onPress={() => retrySchedule(r)} style={s.retry}>
+                      <Text style={s.retryTxt}>Try again</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
               </View>
             </View>
             <View style={s.actions}>
@@ -301,6 +310,9 @@ const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   activeCard: { flexDirection: 'column', alignItems: 'stretch' },
   focused: { borderColor: FIN.brand, borderWidth: 2 },
   reminderHeading: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  unscheduled: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 8 },
+  retry: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 4 },
+  retryTxt: { color: FIN.brandDeep, fontSize: 13, fontWeight: '700', textDecorationLine: 'underline' },
   actions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 4, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: FIN.border, paddingTop: 8 },
   iconBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', backgroundColor: FIN.cardStrong, borderRadius: 12 },
   whenBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: FIN.brandSoft, borderRadius: 10, paddingVertical: 12, paddingHorizontal: 14, borderWidth: 1, borderColor: FIN.brand },

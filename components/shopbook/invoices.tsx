@@ -17,6 +17,7 @@ import { t } from '../../lib/shopbookI18n';
 import { C, s } from './theme';
 import { previewDoc, Row, SubHeader, Field } from './shared';
 import { useShopLoad } from './useShopLoad';
+import { userErrorText } from '../../lib/userErrorText';
 
 // Live bill (P0-C). The owner weighs out what they packed and the total moves.
 //
@@ -50,7 +51,7 @@ export function BillScreen({ orderId, onBack }: { orderId: string; onBack: () =>
     if (busy) return;
     setBusy(true);
     try { setBill(await SB.updateBill(orderId, p)); }
-    catch (e: any) { Alert.alert('Could not update the bill', e?.message ?? 'Try again'); }
+    catch (e) { Alert.alert('Could not update the bill', userErrorText(e, 'Try again')); }
     finally { setBusy(false); }
   };
 
@@ -305,7 +306,7 @@ export function InvoiceView({ orderId, onBack }: { orderId: string; onBack: () =
     try {
       const { uri } = await Print.printToFileAsync({ html: invoiceHtml(fromInvoice(inv)) });
       previewDoc(uri, `${String(inv.invoiceNo).replace(/[/\\:*?"<>|]/g, '-')}.pdf`);
-    } catch (e: any) { Alert.alert('Error', e?.message ?? 'Could not create the invoice PDF'); }
+    } catch (e) { Alert.alert('Error', userErrorText(e, 'Could not create the invoice PDF')); }
   };
 
   const money = (n: number) => formatMoney(n, inv?.currency ?? '₹');

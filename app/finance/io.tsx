@@ -17,6 +17,7 @@ import { exportExcel, shareTextFile } from '../../utils/financeIO';
 import { buildBackup, restoreBackup, isRestorable } from '../../db/financeBackup';
 import { LEDGER_HEADERS, ledgerCsvRow, planLedgerImport, toCsv } from '../../components/finance/ledgerCsv';
 import { sealFinanceBackup, isSealedFinanceBackup, openFinanceBackup, passwordProblem } from '../../utils/financeBackupSeal';
+import { userErrorText } from '../../lib/userErrorText';
 
 type Dataset = 'ledger' | 'chitti' | 'backup';
 type Format = 'excel' | 'csv';
@@ -139,7 +140,7 @@ export default function FinanceIO() {
           ? await exportExcel('vault-lucky-draw', LD_HEADERS, data)
           : await shareTextFile('vault-lucky-draw.csv', toCsv(LD_HEADERS, data), 'text/csv'));
       }
-    } catch (e: any) { Alert.alert('Export failed', e?.message ?? 'Try again'); }
+    } catch (e) { Alert.alert('Export failed', userErrorText(e, 'Try again')); }
   };
 
   const onImport = async () => {
@@ -180,7 +181,7 @@ export default function FinanceIO() {
             return Alert.alert('Wrong password', 'That password does not open this backup. Nothing was changed.');
           }
         }
-        let parsed: any;
+        let parsed: unknown;
         try { parsed = JSON.parse(text); } catch { parsed = null; }
         if (!isRestorable(parsed)) {
           return Alert.alert('Not a backup file', 'This is not a Vault Finance backup, or it was made by a newer version of the app. Nothing was changed.');
@@ -221,8 +222,8 @@ export default function FinanceIO() {
       // "Import failed" never hides a half-imported file.
       const count = await insertLedgers(plan.rows.map(row => ({ ...row, user_id: me.id })));
       Alert.alert('Import complete', `${plural(count, 'ledger')} imported.${notes ? `\n\n${notes}` : ''}`);
-    } catch (e: any) {
-      Alert.alert('Import failed', e?.message ?? 'Could not read the file.');
+    } catch (e) {
+      Alert.alert('Import failed', userErrorText(e, 'Could not read the file.'));
     }
   };
 

@@ -16,6 +16,7 @@ import { C, s } from './theme';
 import { Row, SubHeader, Chip, Field, ToggleRow, Empty } from './shared';
 import { useShopLoad } from './useShopLoad';
 import { StockScreen } from './stock';
+import { userErrorText } from '../../lib/userErrorText';
 
 // Purchases needs the catalog too (the "add an item" chips), so both are read
 // in one load and fail or succeed together, as before.
@@ -56,14 +57,14 @@ export function OwnerCoupons({ currency, onBack }: { currency?: string; onBack: 
     try {
       await SB.saveCoupon({ code: code.trim(), kind, value: num(value), minOrder: num(minOrder), active: true });
       setCode(''); setValue(''); setMinOrder(''); load();
-    } catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
+    } catch (e) { Alert.alert('Error', userErrorText(e, 'Try again')); }
     finally { setBusy(false); }
   };
 
   const remove = async (id?: string) => {
     if (!id) return;
     try { await SB.deleteCoupon(id); load(); }
-    catch (e: any) { Alert.alert('Could not delete the coupon', e?.message ?? 'Try again'); }
+    catch (e) { Alert.alert('Could not delete the coupon', userErrorText(e, 'Try again')); }
   };
 
   return (
@@ -136,14 +137,14 @@ export function OwnerSuppliers({ onBack }: { onBack: () => void }) {
     try {
       await SB.saveSupplier({ name: name.trim(), phone: phone.trim(), items: items.trim(), note: note.trim() });
       setName(''); setPhone(''); setItems(''); setNote(''); load();
-    } catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
+    } catch (e) { Alert.alert('Error', userErrorText(e, 'Try again')); }
     finally { setBusy(false); }
   };
 
   const remove = async (id?: string) => {
     if (!id) return;
     try { await SB.deleteSupplier(id); load(); }
-    catch (e: any) { Alert.alert('Could not delete the supplier', e?.message ?? 'Try again'); }
+    catch (e) { Alert.alert('Could not delete the supplier', userErrorText(e, 'Try again')); }
   };
 
   return (
@@ -211,7 +212,7 @@ export function OwnerProducts({ shop }: { shop: SB.Shop }) {
       await SB.bulkAddProducts(fresh.map((it) => ({ name: it.name, unit: it.unit, price: 0 })));
       Alert.alert(t('owner.starterCatalog'), t('owner.starterLoaded'));
       load();
-    } catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
+    } catch (e) { Alert.alert('Error', userErrorText(e, 'Try again')); }
     finally { setSeeding(false); }
   };
 
@@ -331,7 +332,7 @@ export function ProductEditor({ product, currency, onDone }: {
         trackStock, costPrice: num(costPrice), reorderLevel: num(reorderLevel),
       });
       onDone();
-    } catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
+    } catch (e) { Alert.alert('Error', userErrorText(e, 'Try again')); }
     finally { setBusy(false); }
   };
 
@@ -342,7 +343,7 @@ export function ProductEditor({ product, currency, onDone }: {
       { text: 'Delete', style: 'destructive', onPress: async () => {
         setBusy(true);
         try { await SB.deleteProduct(product.id); onDone(); }
-        catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
+        catch (e) { Alert.alert('Error', userErrorText(e, 'Try again')); }
         finally { setBusy(false); }
       } },
     ]);
@@ -468,11 +469,11 @@ export function PurchasesScreen({ currency, onBack }: { currency?: string; onBac
       key.current = clientKey();
       setAdding(false); setSupplier(''); setInvNo(''); setItems([]);
       load();
-    } catch (e: any) {
+    } catch (e) {
       // The server refuses the same supplier invoice twice — that double-count
       // is the classic mistake when moving off paper.
       Alert.alert(e?.body?.code === 'duplicate_supplier_invoice'
-        ? 'Already recorded' : 'Could not save', e?.message ?? 'Try again');
+        ? 'Already recorded' : 'Could not save', userErrorText(e, 'Try again'));
     } finally { setBusy(false); }
   };
 
@@ -591,7 +592,7 @@ export function BulkAdd({ currency, onDone }: { currency?: string; onDone: () =>
       const res = await SB.bulkAddProducts(parsed.map((p) => ({ name: p.name, brand: p.brand, unit: p.unit, price: p.price })));
       Alert.alert('Added', `${res.added} product(s) added to your catalog.`);
       onDone();
-    } catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
+    } catch (e) { Alert.alert('Error', userErrorText(e, 'Try again')); }
     finally { setBusy(false); }
   };
 

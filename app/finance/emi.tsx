@@ -11,6 +11,7 @@ import { num } from '../../utils/financeFormat';
 import { formatINR } from '../../utils/interest';
 import { emi, amortization } from '../../utils/finance';
 import { sharePdf, pdfDocument, kvTable, htmlTable } from '../../utils/financeIO';
+import { userErrorText } from '../../lib/userErrorText';
 
 const LOAN_TYPES = ['Home', 'Car', 'Bike', 'Personal', 'Education', 'Business'];
 
@@ -77,7 +78,7 @@ export default function EmiCalc() {
     ]) + `<h3 style="margin-top:20px;font-size:14px;color:${FIN_PRINT.brandDeep}">Amortization schedule</h3>` +
     htmlTable(['Month', 'EMI', 'Principal', 'Interest', 'Balance'],
       schedule.map(r => [r.month, formatINR(r.emi), formatINR(r.principal), formatINR(r.interest), formatINR(r.balance)]));
-    try { await sharePdf(pdfDocument('EMI Report', body), 'emi'); } catch (e: any) { Alert.alert('Share failed', e?.message ?? 'Try again'); }
+    try { await sharePdf(pdfDocument('EMI Report', body), 'emi'); } catch (e) { Alert.alert('Share failed', userErrorText(e, 'Try again')); }
   };
 
   return (

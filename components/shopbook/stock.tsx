@@ -12,6 +12,7 @@ import { LoadingState, ErrorState } from '../finance/ui';
 import { C, s } from './theme';
 import { loadErrText, SubHeader, Chip, StatCard, Field, Empty } from './shared';
 import { useShopLoad } from './useShopLoad';
+import { userErrorText } from '../../lib/userErrorText';
 
 // Stock (P0-B). Deliberately one screen: the position, and the one action that
 // changes it. Every change needs a reason, because the movement ledger is only
@@ -40,7 +41,7 @@ export function StockScreen({ currency, onBack }: { currency?: string; onBack: (
     try {
       const list = await SB.stockMovements(productId);
       if (historyFor.current === productId) setHistory(list);
-    } catch (e: any) { if (historyFor.current === productId) setHistoryErr(loadErrText(e)); }
+    } catch (e) { if (historyFor.current === productId) setHistoryErr(loadErrText(e)); }
   };
   const openItem = async (row: SB.StockRow) => {
     setSel(row); setQty(''); setReason(''); setKind('purchase'); setHistory([]);
@@ -68,7 +69,7 @@ export function StockScreen({ currency, onBack }: { currency?: string; onBack: (
     try {
       await SB.adjustStock(sel.productId, kind, q, reason.trim());
       setSel(null); load();
-    } catch (e: any) { Alert.alert('Could not record', e?.message ?? 'Try again'); }
+    } catch (e) { Alert.alert('Could not record', userErrorText(e, 'Try again')); }
     finally { setBusy(false); }
   };
 
