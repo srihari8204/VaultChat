@@ -21,9 +21,11 @@ package routes
 import (
 	"context"
 	"crypto/rand"
+	"fmt"
 	"log"
 	"math/big"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -81,7 +83,7 @@ func incidentList(w http.ResponseWriter, r *http.Request) {
 		// Mirrors space_incidents_select. Load-bearing while the API connects as a
 		// superuser and RLS is bypassed — see the header of spaces_roster.go.
 		`SELECT id, run_id, reporter_id, category, note, media_ref, status,
-		        created_at, resolved_at
+		        created_at, resolved_at, pressed_at
 		   FROM space_incidents
 		  WHERE chat_id = $1
 		    AND (vc_space_ops_viewer($1)
@@ -94,16 +96,19 @@ func incidentList(w http.ResponseWriter, r *http.Request) {
 				id, category, status         string
 				runID, reporter, note, media *string
 				createdAt                    time.Time
-				resolvedAt                   *time.Time
+				resolvedAt, pressedAt        *time.Time
 			)
 			if e := rows.Scan(&id, &runID, &reporter, &category, &note, &media, &status,
-				&createdAt, &resolvedAt); e != nil {
+				&createdAt, &resolvedAt, &pressedAt); e != nil {
 				return e
 			}
+			// pressedAt (migration 146): when an SOS was pressed, null when
+			// the client did not say; createdAt is when it reached the server.
 			out = append(out, map[string]any{
 				"id": id, "runId": runID, "reporterId": reporter, "category": category,
 				"note": note, "mediaRef": media, "status": status,
 				"createdAt": httpx.JSTime(createdAt), "resolvedAt": httpx.JST(resolvedAt),
+				"pressedAt": httpx.JST(pressedAt),
 			})
 			return nil
 		})
@@ -147,12 +152,49 @@ func incidentCreate(w http.ResponseWriter, r *http.Request) {
 	if m := strings.TrimSpace(chatsStrOr(b["mediaRef"], "")); m != "" {
 		media = &m
 	}
+	// Optional, migration 146; older clients send neither. clientKey makes a
+	// repeated request (an answer lost on a bad signal) one incident;
+	// pressedAt/pressedClock say when a late SOS was actually pressed.
+	clientKey, ok := incidentClientKey(b["clientKey"])
+	if !ok {
+		httpx.Err(w, 400, "clientKey is invalid")
+		return
+	}
+	now := time.Now()
+	pressedAt := incidentPressedAt(b["pressedAt"], now)
+	pressedClock := incidentClock(b["pressedClock"])
+
+	// An SOS for a run that has finished still reaches the office, but not the
+	// riders' guardians as "an emergency on this run": their children's trip
+	// is over. Unknown run or lookup error: as before, nothing is skipped.
+	runEnded := false
+	if category == "sos" && runID != nil {
+		var st string
+		if err := chatsQRow(ctx, user.ID,
+			`SELECT status FROM runs WHERE id = $1 AND chat_id = $2`,
+			[]any{*runID, chatID}, &st); err == nil {
+			runEnded = st == "completed" || st == "cancelled"
+		}
+	}
 
 	var id string
-	if err := chatsQRow(ctx, user.ID,
-		`INSERT INTO space_incidents (chat_id, run_id, reporter_id, category, note, media_ref)
-		 VALUES ($1, $2, $3, $4, NULLIF($5, ''), $6) RETURNING id`,
-		[]any{chatID, runID, user.ID, category, note, media}, &id); err != nil {
+	err := chatsQRow(ctx, user.ID,
+		`INSERT INTO space_incidents
+		        (chat_id, run_id, reporter_id, category, note, media_ref, client_key, pressed_at)
+		 VALUES ($1, $2, $3, $4, NULLIF($5, ''), $6, NULLIF($7, ''), $8)
+		 ON CONFLICT (chat_id, reporter_id, client_key) WHERE client_key IS NOT NULL DO NOTHING
+		 RETURNING id`,
+		[]any{chatID, runID, user.ID, category, note, media, clientKey, pressedAt}, &id)
+	if db.NoRows(err) && clientKey != "" {
+		// Already filed under this key: the same answer, and nobody is pushed twice.
+		if err = chatsQRow(ctx, user.ID,
+			`SELECT id FROM space_incidents WHERE chat_id = $1 AND reporter_id = $2 AND client_key = $3`,
+			[]any{chatID, user.ID, clientKey}, &id); err == nil {
+			httpx.JSON(w, 200, incidentCreated(id, true, runEnded))
+			return
+		}
+	}
+	if err != nil {
 		log.Printf("[incident POST] %v", err)
 		httpx.Err(w, 500, "Failed to file incident")
 		return
@@ -169,15 +211,23 @@ func incidentCreate(w http.ResponseWriter, r *http.Request) {
 	// to look, which for a breakdown with children aboard is not good enough.
 	// Off the request path: a driver at the roadside waits for the write, never
 	// for Expo.
-	workx.Submit(func() { opsNotifyStaff(chatID, category, runID) })
+	when := ""
+	if category == "sos" {
+		when = sosPressedWhen(pressedAt, pressedClock, now)
+	}
+	staffDetail := when
+	if runEnded {
+		staffDetail += " — the run had already finished"
+	}
+	workx.Submit(func() { opsNotifyStaff(chatID, category, runID, staffDetail) })
 	// An SOS on a run also reaches the riders' guardians, on the sos channel —
 	// the spec's "any emergency" names them, and staff-only left a parent as
 	// the last to know. Scoped exactly like every run push: guardians linked to
-	// a rider on THAT run, never the whole space.
-	if category == "sos" && runID != nil {
+	// a rider on THAT run, never the whole space. Not once the run is over.
+	if category == "sos" && runID != nil && !runEnded {
 		rid := *runID
 		workx.Submit(func() {
-			runNotifyRunWide(chatID, rid, "run_emergency", "An emergency has been reported on this run")
+			runNotifyRunWide(chatID, rid, "run_emergency", sosRunWideText(when))
 		})
 	}
 	// Category and run only. The note is ciphertext and does not belong in a
@@ -185,7 +235,93 @@ func incidentCreate(w http.ResponseWriter, r *http.Request) {
 	emitx.ChatEvent(chatID, "incident_filed", map[string]any{
 		"incidentId": id, "category": category, "runId": runID, "by": user.ID,
 	})
-	httpx.JSON(w, 200, map[string]any{"id": id})
+	httpx.JSON(w, 200, incidentCreated(id, false, runEnded))
+}
+
+// incidentCreated is the POST answer. `duplicate` and `runEnded` are added
+// only when true, so an older client sees exactly {id}.
+func incidentCreated(id string, duplicate, runEnded bool) map[string]any {
+	out := map[string]any{"id": id}
+	if duplicate {
+		out["duplicate"] = true
+	}
+	if runEnded {
+		out["runEnded"] = true
+	}
+	return out
+}
+
+var incidentKeyRe = regexp.MustCompile(`^[A-Za-z0-9_-]{8,64}$`)
+
+// incidentClientKey reads the optional idempotency key: absent or empty is
+// "" (no dedupe); anything else must look like a client-minted id.
+func incidentClientKey(v any) (string, bool) {
+	k := strings.TrimSpace(chatsStrOr(v, ""))
+	if k == "" {
+		return "", true
+	}
+	return k, incidentKeyRe.MatchString(k)
+}
+
+// incidentPressedAt reads the optional press time (RFC 3339). A time ahead of
+// the server (a phone clock running fast) is taken as now; one more than a day
+// old, or unreadable, is ignored.
+func incidentPressedAt(v any, now time.Time) *time.Time {
+	t, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(chatsStrOr(v, "")))
+	if err != nil || now.Sub(t) > 24*time.Hour {
+		return nil
+	}
+	if t.After(now) {
+		t = now
+	}
+	return &t
+}
+
+var incidentClockRe = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
+
+// incidentClock reads the optional "HH:MM" the phone pressed it at, in the
+// phone's own time — the server knows no space time zone to format one in.
+func incidentClock(v any) string {
+	c := strings.TrimSpace(chatsStrOr(v, ""))
+	if !incidentClockRe.MatchString(c) {
+		return ""
+	}
+	return c
+}
+
+// sosLateAfter: an SOS delivered later than this after its press says when
+// it was pressed, so a late alert does not read as happening now.
+const sosLateAfter = 2 * time.Minute
+
+// sosPressedWhen is " (pressed at 08:14, 26 min ago)" for a late SOS, "" for
+// a timely one or one with no press time.
+func sosPressedWhen(pressedAt *time.Time, clock string, now time.Time) string {
+	if pressedAt == nil || now.Sub(*pressedAt) < sosLateAfter {
+		return ""
+	}
+	ago := sosAgo(now.Sub(*pressedAt))
+	if clock != "" {
+		return fmt.Sprintf(" (pressed at %s, %s)", clock, ago)
+	}
+	return fmt.Sprintf(" (pressed %s)", ago)
+}
+
+func sosAgo(d time.Duration) string {
+	m := int(d / time.Minute)
+	if m < 60 {
+		return fmt.Sprintf("%d min ago", m)
+	}
+	if m%60 == 0 {
+		return fmt.Sprintf("%d h ago", m/60)
+	}
+	return fmt.Sprintf("%d h %d min ago", m/60, m%60)
+}
+
+func sosRunWideText(when string) string {
+	if when == "" {
+		return "An emergency has been reported on this run"
+	}
+	return "An emergency was reported on this run" + when
 }
 
 func incidentPatch(w http.ResponseWriter, r *http.Request) {
@@ -242,7 +378,9 @@ func incidentPatch(w http.ResponseWriter, r *http.Request) {
 //
 // The body names the CATEGORY and the vehicle, never the note: the note is
 // ciphertext this server cannot read, and a push is not the place to start.
-func opsNotifyStaff(chatID, category string, runID *string) {
+// detail is appended to the body: when a late SOS was pressed, and whether
+// its run had already finished ("" for everything else).
+func opsNotifyStaff(chatID, category string, runID *string, detail string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -294,7 +432,7 @@ func opsNotifyStaff(chatID, category string, runID *string) {
 			title = "EMERGENCY"
 		}
 	}
-	chatsSendExpoPush(ctx, tokens, title, incidentText(category),
+	chatsSendExpoPush(ctx, tokens, title, incidentText(category)+detail,
 		map[string]any{"type": "incident", "category": category, "chatId": chatID}, channel)
 }
 

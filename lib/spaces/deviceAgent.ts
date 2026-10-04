@@ -26,7 +26,7 @@ import {
 } from './deviceCommands';
 import { readBattery } from '../family/battery';
 import { errStatus } from './errors';
-import { flushSos } from './sosOutbox';
+import { flushSos, tellUndeliveredSos, watchSosOutcomes } from './sosOutbox';
 import { startRingtone, stopRingtone } from '../sounds';
 
 /** Well inside the server's 15-minute staleness window (space_device_stale). */
@@ -118,12 +118,14 @@ async function tick(): Promise<void> {
  * Mount once at the app root. Polls only while the app is active, and checks
  * immediately on every return to the foreground. The same beat sends any
  * driver emergency alert still waiting on this phone (lib/spaces/sosOutbox),
- * so one pressed before the app was closed goes out when it is next opened.
+ * so one pressed before the app was closed goes out when it is next opened,
+ * and says app-wide what became of one: delivered late, refused or expired.
  */
 export function useSpaceDeviceAgent(): void {
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
-    const beat = () => { void tick(); void flushSos(); };
+    const unwatchSos = watchSosOutcomes();
+    const beat = () => { void tick(); void flushSos().then(tellUndeliveredSos); };
     const start = () => {
       if (timer) return;
       beat();
@@ -132,6 +134,6 @@ export function useSpaceDeviceAgent(): void {
     const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
     if (AppState.currentState === 'active') start();
     const sub = AppState.addEventListener('change', (s) => (s === 'active' ? start() : stop()));
-    return () => { stop(); sub.remove(); };
+    return () => { stop(); sub.remove(); unwatchSos(); };
   }, []);
 }

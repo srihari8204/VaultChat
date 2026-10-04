@@ -207,10 +207,23 @@ export const setDutyState = (spaceId: string, dutyState: 'on_duty' | 'on_break' 
 
 export const getIncidents = (spaceId: string) => api<Incident[]>(`/chats/${spaceId}/incidents`);
 
+/**
+ * `clientKey` / `pressedAt` / `pressedClock` (an SOS, lib/spaces/sosQueue
+ * sosBody) are read by a server with migration 146 — one incident per key,
+ * the press time in the push, `runEnded` when the run had finished — and
+ * ignored by one without. `expectedUserId`: refuse to send under another
+ * account's token (lib/api).
+ */
 export const fileIncident = (
   spaceId: string,
-  body: { category: string; note?: string; runId?: string; mediaRef?: string },
-) => api<{ id: string }>(`/chats/${spaceId}/incidents`, { method: 'POST', json: body });
+  body: {
+    category: string; note?: string; runId?: string; mediaRef?: string;
+    clientKey?: string; pressedAt?: string; pressedClock?: string;
+  },
+  opts?: { expectedUserId?: string },
+) => api<{ id: string; duplicate?: boolean; runEnded?: boolean }>(
+  `/chats/${spaceId}/incidents`, { method: 'POST', json: body, ...opts },
+);
 
 export const setIncidentStatus = (spaceId: string, incidentId: string, status: 'open' | 'ack' | 'resolved') =>
   api(`/chats/${spaceId}/incidents/${incidentId}`, { method: 'PATCH', json: { status } });

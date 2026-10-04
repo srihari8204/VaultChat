@@ -190,7 +190,7 @@ export default function SpaceRunDriverScreen() {
 
   // Emergency alerts kept on this phone until the office has them
   // (components/spaces/DriverSos, lib/spaces/sosOutbox).
-  const sos = useDriverSos(spaceId, runId, myId);
+  const sos = useDriverSos(spaceId, runId);
   const { sendSos } = sos;
 
   // The panic control (S5.6). Deliberately NOT one of the incident categories:

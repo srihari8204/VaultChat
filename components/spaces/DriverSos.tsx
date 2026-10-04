@@ -2,128 +2,171 @@
 // the press: kept on the phone until the office has it, and said on screen
 // until then (app/space-run-driver.tsx).
 //
-// The panic button used to retry only while its Alert was open: a driver who
-// dismissed it, or whose app was closed, lost the alert. The storage and the
-// sending are lib/spaces/sosOutbox (rules: lib/spaces/sosQueue); this is the
-// screen's view of it.
+// The storage and the sending are lib/spaces/sosOutbox (rules:
+// lib/spaces/sosQueue); this is the screen's view of it. "Alert sent" is said
+// only from a 2xx for this press (PressResult `sent`, or the direct send's
+// answer); a delivery by a later retry is said once, app-wide, by
+// sosOutbox watchSosOutcomes. A list that cannot be read is "couldn't check",
+// never "nothing waiting".
 
-import React, { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, StyleSheet, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { useFocusEffect } from 'expo-router';
+import * as Crypto from 'expo-crypto';
 import { Ionicons } from '@expo/vector-icons';
 import { AppText as Text } from '../ui/Text';
 import type { SpacePalette as Palette } from '../../lib/spaces/theme';
-import { fileIncident } from '../../lib/spaces/api';
-import { queueSos, flushSos, sosForThisRun, dismissSos, onSosQueueChange } from '../../lib/spaces/sosOutbox';
-import type { PendingSos } from '../../lib/spaces/sosQueue';
+import {
+  queueSos, flushSos, sendUnkept, sosForThisRun, dismissSos, withdrawSos, onSosQueueChange, SosNotKept,
+} from '../../lib/spaces/sosOutbox';
+import { clockOf, ageText, sentText, type PendingSos } from '../../lib/spaces/sosQueue';
+import { errMsg } from '../../lib/spaces/errors';
 
 /** How often the driver screen retries an alert that has not gone yet; the
  *  app-wide beat (lib/spaces/deviceAgent) is every 2 minutes. */
 const SOS_RETRY_MS = 30_000;
 
-export function useDriverSos(spaceId: string, runId: string, myId: MutableRefObject<string>) {
+export function useDriverSos(spaceId: string, runId: string) {
   // This driver's alerts on this run that the server does not have yet.
   const [queue, setQueue] = useState<PendingSos[]>([]);
+  // The list or the account could not be read: the last list stays, and the
+  // screen says it could not check.
+  const [unchecked, setUnchecked] = useState(false);
   const refresh = useCallback(() => {
-    sosForThisRun(spaceId, runId).then(setQueue).catch(() => {});
+    sosForThisRun(spaceId, runId)
+      .then((q) => { setQueue(q); setUnchecked(false); })
+      .catch(() => setUnchecked(true));
   }, [spaceId, runId]);
   useEffect(() => { refresh(); return onSosQueueChange(refresh); }, [refresh]);
   const waiting = queue.filter((e) => !e.dead);
   const dead = queue.filter((e) => !!e.dead);
-  const hasWaiting = waiting.length > 0;
+  const retryWanted = waiting.length > 0 || unchecked;
 
+  // `now` re-renders the "N min ago" with each retry.
+  const [now, setNow] = useState(() => Date.now());
   useFocusEffect(useCallback(() => {
-    if (!hasWaiting) return;
-    const t = setInterval(() => { void flushSos(); }, SOS_RETRY_MS);
+    if (!retryWanted) return;
+    const t = setInterval(() => { setNow(Date.now()); void flushSos().then(refresh); }, SOS_RETRY_MS);
     return () => clearInterval(t);
-  }, [hasWaiting]));
-
-  // Say so when a waiting alert finally reaches the office. `told`: alerts the
-  // driver has seen as waiting (banner or "not sent yet"); `announced`: alerts
-  // already confirmed as sent, so one delivery is never confirmed twice.
-  const told = useRef(new Set<string>());
-  const announced = useRef(new Set<string>());
-  const confirmSent = useCallback((id: string) => {
-    if (announced.current.has(id)) return;
-    announced.current.add(id);
-    Alert.alert('Alert sent', 'The office has your emergency alert.');
-  }, []);
-  useEffect(() => {
-    const present = new Map(queue.map((e) => [e.id, e]));
-    for (const id of [...told.current]) {
-      const e = present.get(id);
-      if (!e) { told.current.delete(id); confirmSent(id); } else if (e.dead) told.current.delete(id);
-    }
-    for (const e of queue) if (!e.dead) told.current.add(e.id);
-  }, [queue, confirmSent]);
+  }, [retryWanted, refresh]));
 
   const [retrying, setRetrying] = useState(false);
   const retryNow = useCallback(async () => {
     setRetrying(true);
-    try { await flushSos(); } finally { setRetrying(false); }
-  }, []);
+    try { await flushSos(); } finally { setRetrying(false); setNow(Date.now()); refresh(); }
+  }, [refresh]);
 
   /** After the driver confirmed the panic control. */
   const sendSos = useCallback(async () => {
-    // The phone could not keep it: send it straight away, with the one-tap
-    // retry, as before the outbox existed.
+    // The phone could not keep it (no known account, or storage failed): send
+    // it once, straight away, with a one-tap retry under the same key.
+    let key = { id: '', at: 0 };
     const direct = (): void => {
-      fileIncident(spaceId, { category: 'sos', runId, note: '' })
-        .then(() => Alert.alert('Alert sent', 'The office has been alerted.'))
-        .catch(() => Alert.alert(
+      sendUnkept(spaceId, runId, key)
+        .then((r) => Alert.alert('Alert sent', sentText(!!(r && r.runEnded))))
+        .catch((e: unknown) => Alert.alert(
           'Alert not sent yet',
-          'It is raised on this device, but the office has not received it, and this phone could not keep it to retry later. Try again when you have signal.',
+          `The office has not received it${errMsg(e) ? ` (${errMsg(e)})` : ''}, and this phone could not keep it `
+          + 'to retry later. Try again when you have signal, or call your transport office.',
           [{ text: 'Later', style: 'cancel' }, { text: 'Try again', onPress: direct }],
         ));
     };
     let r: Awaited<ReturnType<typeof queueSos>>;
-    try { r = await queueSos(spaceId, runId, myId.current); } catch { direct(); return; }
-    if (r.sent) confirmSent(r.id);
-    else if (r.dead) Alert.alert('Alert not accepted', `${r.dead} Call your transport office.`);
-    else {
-      told.current.add(r.id);
+    try { r = await queueSos(spaceId, runId); } catch (e) {
+      key = e instanceof SosNotKept ? e.key : { id: Crypto.randomUUID(), at: Date.now() };
+      direct();
+      return;
+    }
+    refresh();
+    if (r.kind === 'sent') Alert.alert('Alert sent', sentText(r.runEnded));
+    else if (r.kind === 'dead') Alert.alert('Alert not accepted', `${r.why} Call your transport office.`);
+    else if (r.reused) {
+      Alert.alert(
+        'Alert still waiting',
+        `Your alert from ${clockOf(r.at)} has not reached the office yet, so no second alert was added: `
+        + 'crazzychat tried it again now and keeps trying while it is open.',
+      );
+    } else {
       Alert.alert(
         'Alert not sent yet',
         'It is raised on this device and kept on it. crazzychat keeps trying while it is open, '
         + 'including after a restart, and this screen shows it until the office has it.',
       );
     }
-  }, [spaceId, runId, myId, confirmSent]);
+  }, [spaceId, runId, refresh]);
 
-  return { sendSos, waiting, dead, retrying, retryNow };
+  /** The driver takes back a waiting alert (e.g. already phoned the office). */
+  const withdraw = useCallback((e: PendingSos) => {
+    Alert.alert(
+      'Withdraw this alert?',
+      `Your alert from ${clockOf(e.at)} will not be sent. Call your transport office if you still need help.`,
+      [
+        { text: 'Keep trying', style: 'cancel' },
+        {
+          text: 'Withdraw', style: 'destructive',
+          onPress: () => {
+            withdrawSos(e.id).then(({ mayHaveGone }) => {
+              if (mayHaveGone) {
+                Alert.alert('Withdrawn', 'It was being sent at that moment, so the office may still receive it.');
+              }
+            }).catch(() => Alert.alert('Could not withdraw', 'This phone could not update the alert. It is still waiting; try again.'));
+          },
+        },
+      ],
+    );
+  }, []);
+
+  return { sendSos, waiting, dead, unchecked, retrying, retryNow, withdraw, now };
 }
 
 /** Emergency alerts not yet with the office: said, never silent. */
 export function SosNotices({ sos, colors }: { sos: ReturnType<typeof useDriverSos>; colors: Palette }) {
   const s = useMemo(() => styles(colors), [colors]);
-  const { waiting, dead, retrying, retryNow } = sos;
+  const { waiting, dead, unchecked, retrying, retryNow, withdraw, now } = sos;
+  const tryNow = (
+    <TouchableOpacity
+      style={s.btn} onPress={() => { void retryNow(); }} disabled={retrying}
+      accessibilityRole="button" accessibilityLabel="Try sending the emergency alert now"
+      accessibilityState={{ disabled: retrying, busy: retrying }}
+    >
+      {retrying ? <ActivityIndicator size="small" color={colors.primary} /> : <Text style={s.btnText}>Try now</Text>}
+    </TouchableOpacity>
+  );
   return (
     <>
-      {waiting.length > 0 && (
+      {unchecked && (
         <View style={s.notice} accessibilityLiveRegion="polite">
-          <Ionicons name="alert-circle" size={18} color={colors.danger} />
-          <Text style={s.text}>
-            {waiting.length === 1 ? 'Your emergency alert has' : `${waiting.length} emergency alerts have`} not
-            reached the office yet. crazzychat keeps trying while it is open.
-          </Text>
-          <TouchableOpacity
-            style={s.btn} onPress={() => { void retryNow(); }} disabled={retrying}
-            accessibilityRole="button" accessibilityLabel="Try sending the emergency alert now"
-            accessibilityState={{ disabled: retrying, busy: retrying }}
-          >
-            {retrying ? <ActivityIndicator size="small" color={colors.primary} /> : <Text style={s.btnText}>Try now</Text>}
-          </TouchableOpacity>
+          <Ionicons name="help-circle" size={18} color={colors.danger} />
+          <Text style={s.text}>Couldn’t check — your alert may still be waiting.</Text>
+          {tryNow}
         </View>
       )}
+      {waiting.map((e) => (
+        <View key={e.id} style={s.notice} accessibilityLiveRegion="polite">
+          <Ionicons name="alert-circle" size={18} color={colors.danger} />
+          <Text style={s.text}>
+            Your emergency alert from {clockOf(e.at)} ({ageText(e.at, now)}) has not reached the office yet.
+            crazzychat keeps trying while it is open.
+          </Text>
+          <View>
+            {tryNow}
+            <TouchableOpacity
+              style={s.btn} onPress={() => withdraw(e)}
+              accessibilityRole="button" accessibilityLabel={`Withdraw the emergency alert from ${clockOf(e.at)}`}
+            >
+              <Text style={s.btnText}>Withdraw</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ))}
       {dead.map((e) => (
         <View key={e.id} style={s.notice}>
           <Ionicons name="close-circle" size={18} color={colors.danger} />
           <Text style={s.text}>
-            Emergency alert from {new Date(e.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} was
-            not delivered: {e.dead} Call your transport office.
+            Emergency alert from {clockOf(e.at)} was not delivered: {e.dead} Call your transport office.
           </Text>
           <TouchableOpacity
-            style={s.btn} onPress={() => { void dismissSos(e.id); }}
+            style={s.btn} onPress={() => { void dismissSos(e.id).catch(() => {}); }}
             accessibilityRole="button" accessibilityLabel="Dismiss the undelivered alert notice"
           >
             <Text style={s.btnText}>Dismiss</Text>

@@ -1,8 +1,9 @@
 // Run: npx tsx lib/spaces/sosQueue.selftest.ts
 import assert from 'node:assert/strict';
 import {
-  parseSosQueue, dueSos, afterAttempt, markExpired, sosForRun, retryable,
-  SOS_MAX_AGE_MS, EXPIRED_TEXT, type PendingSos,
+  parseSosQueue, dueSos, afterAttempt, markExpired, sosForRun, retryable, liveFor, pruneOthers, clockOf, ageText,
+  sosBody, runEnded, sentText, deliveredText, undeliveredText,
+  SOS_MAX_AGE_MS, SOS_PRUNE_MS, EXPIRED_TEXT, type PendingSos,
 } from './sosQueue';
 
 const now = Date.parse('2026-10-04T08:00:00Z');
@@ -50,5 +51,46 @@ assert.equal(ex.length, q.length);
 // for the driver screen: this run, this driver, oldest first
 const r = sosForRun([e('b', { at: now - 10 }), e('a', { at: now - 20 }), e('x', { runId: 'r2' }), e('y', { reporterId: 'u2' })], 's1', 'r1', 'u1');
 assert.deepEqual(r.map((x) => x.id), ['a', 'b']);
+
+// a repeat press finds the waiting alert for this run and driver, never a dead one
+assert.equal(liveFor([e('d', { dead: 'x' }), e('w')], 's1', 'r1', 'u1', now)?.id, 'w');
+assert.equal(liveFor([e('d', { dead: 'x' })], 's1', 'r1', 'u1', now), undefined);
+assert.equal(liveFor([e('w')], 's1', 'r2', 'u1', now), undefined);
+assert.equal(liveFor([e('w')], 's1', 'r1', 'u2', now), undefined);
+assert.equal(liveFor([e('w', { at: now - SOS_MAX_AGE_MS - 1 })], 's1', 'r1', 'u1', now), undefined, 'too old to send: a new alert instead');
+
+// prune: only another account's entries past a day, and only with a known me
+const old = now - SOS_PRUNE_MS - 1;
+const pq = [e('m', { at: old }), e('o', { reporterId: 'u2', at: old }), e('n', { reporterId: 'u2' })];
+assert.deepEqual(pruneOthers(pq, 'u1', now).map((x) => x.id), ['m', 'n']);
+assert.equal(pruneOthers(pq, '', now), pq, 'unknown account: nothing pruned');
+assert.equal(pruneOthers([e('m')], 'u1', now).length, 1);
+
+// press time and age
+const local = new Date(2026, 9, 4, 8, 5).getTime();
+assert.equal(clockOf(local), '08:05');
+assert.equal(ageText(now - 30_000, now), 'just now');
+assert.equal(ageText(now - 12 * 60_000, now), '12 min ago');
+assert.equal(ageText(now - 125 * 60_000, now), '2 h 5 min ago');
+assert.equal(ageText(now - 120 * 60_000, now), '2 h ago');
+assert.equal(ageText(now + 5_000, now), 'just now', 'a clock that moved back is not negative');
+
+// the request: key, press time, empty note
+const b = sosBody(e('k', { at: local }));
+assert.deepEqual(b, {
+  category: 'sos', runId: 'r1', note: '', clientKey: 'k', pressedAt: new Date(local).toISOString(), pressedClock: '08:05',
+});
+
+assert.ok(runEnded('completed') && runEnded('cancelled') && !runEnded('started') && !runEnded('scheduled') && !runEnded(undefined));
+
+// copy
+assert.equal(sentText(), 'The office has your emergency alert.');
+assert.match(sentText(true), /families on it were not alerted/);
+assert.equal(
+  deliveredText(e('a', { at: local }), local + 26 * 60_000),
+  'Your emergency alert from 08:05 reached the office at 08:31.',
+);
+assert.match(undeliveredText([e('a', { at: local, dead: 'Refused.' })]), /^Your emergency alert from 08:05 was not delivered: Refused\. Call/);
+assert.match(undeliveredText([e('a', { at: local, dead: 'x' }), e('b', { at: local + 60_000, dead: 'y' })]), /^2 emergency alerts \(from 08:05, 08:06\)/);
 
 console.log('spaces/sosQueue self-check OK');
