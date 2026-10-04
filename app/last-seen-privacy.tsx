@@ -9,7 +9,7 @@
 // This is the ONE screen that edits these four settings. Settings and the
 // Privacy Dashboard link here rather than carrying their own copies.
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { View, TouchableOpacity, StyleSheet, ScrollView, Alert, Switch, ActivityIndicator } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
@@ -48,6 +48,8 @@ export default function LastSeenPrivacyScreen() {
   // One save at a time. Two rows saving at once could each roll back over the
   // other's success; serialising keeps the switches equal to the server.
   const [busy, setBusy] = useState<PrivacyKey | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
 
   useEffect(() => {
     let cancel = false;
@@ -63,13 +65,14 @@ export default function LastSeenPrivacyScreen() {
     setSettings({ ...settings, [key]: value });   // optimistic
     setBusy(key);
     try {
-      await updateSettings({ [key]: value } as Partial<UserSettings>);
+      await updateSettings({ [key]: value });
     } catch (e: any) {
+      if (!mounted.current) return;
       // Roll back only the key that failed.
       setSettings((cur) => (cur ? { ...cur, [key]: !value } : cur));
       Alert.alert('Could not save', e?.message ?? 'Try again');
     } finally {
-      setBusy(null);
+      if (mounted.current) setBusy(null);
     }
   };
 
@@ -119,6 +122,7 @@ export default function LastSeenPrivacyScreen() {
                 <Text style={s.toggleLabel}>{settings[row.key] ? 'On' : 'Off'}</Text>
                 <Switch
                   accessibilityLabel={row.title}
+                  accessibilityHint={row.info}
                   value={!!settings[row.key]}
                   onValueChange={(v) => toggle(row.key, v)}
                   disabled={busy !== null}

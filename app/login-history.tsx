@@ -53,8 +53,6 @@ export default function LoginHistoryScreen() {
   // the DELETE twice.
   const [revoking,   setRevoking]   = useState(false);
   const mounted = useRef(true);
-  const rowsRef = useRef<SessionRow[]>([]);
-  rowsRef.current = rows;
   useEffect(() => () => { mounted.current = false; }, []);
 
   const fetchAll = useCallback(async () => {
@@ -65,8 +63,9 @@ export default function LoginHistoryScreen() {
       setError(null);
       writeCache(CACHE_KEY, list);
     } catch (e: any) {
-      // Keep cached rows if we have them; only surface the error on a cold load.
-      if (mounted.current && rowsRef.current.length === 0) setError(e?.message ?? 'Failed to load sessions');
+      // Cached rows stay on screen, and the notice above them says they are
+      // the saved list (a cold-load failure has no list and says so instead).
+      if (mounted.current) setError(e?.message ?? 'Failed to load sessions');
     }
   }, []);
 
@@ -83,7 +82,7 @@ export default function LoginHistoryScreen() {
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await fetchAll();
-    setRefreshing(false);
+    if (mounted.current) setRefreshing(false);
   }, [fetchAll]);
 
   const onRevoke = useCallback((row: SessionRow) => {
@@ -120,7 +119,8 @@ export default function LoginHistoryScreen() {
             setRevoking(true);
             try {
               const r = await revokeAllOtherSessions();
-              Alert.alert('Done', `${r.revoked} device(s) signed out.`);
+              if (!mounted.current) return;
+              Alert.alert('Done', `${r.revoked} ${r.revoked === 1 ? 'device' : 'devices'} signed out.`);
               await fetchAll();
             } catch (e: any) {
               Alert.alert('Failed', e?.message ?? 'Try again');
@@ -164,9 +164,12 @@ export default function LoginHistoryScreen() {
 
       {error && (
         <View style={S.errorRow} accessibilityRole="alert">
-          <Text style={[S.errorTxt, { flex: 1 }]}>{error}</Text>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Try loading devices again" onPress={onRefresh} disabled={refreshing} style={S.retryBtn} activeOpacity={0.7}>
-            <Text style={S.retryTxt}>Try again</Text>
+          <Text style={[S.errorTxt, { flex: 1 }]}>
+            {rows.length > 0 ? `Showing your saved list — it could not be refreshed. ${error}` : error}
+          </Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Try loading devices again" onPress={onRefresh} disabled={refreshing}
+            accessibilityState={{ disabled: refreshing, busy: refreshing }} style={S.retryBtn} activeOpacity={0.7}>
+            {refreshing ? <ActivityIndicator color={colors.primary} /> : <Text style={S.retryTxt}>Try again</Text>}
           </TouchableOpacity>
         </View>
       )}

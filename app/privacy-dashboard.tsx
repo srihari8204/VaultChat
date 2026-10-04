@@ -21,7 +21,7 @@
 
 import { brandAlpha, type Palette } from '../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useFocusEffect, useRouter } from 'expo-router';
+import { Stack, useFocusEffect, useRouter, type Href } from 'expo-router';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -34,7 +34,7 @@ import {
 import { useTheme } from '../lib/theme';
 import Svg, { Circle } from 'react-native-svg';
 import { getSettings, listTrustedContacts, listBlocks, type UserSettings } from '../lib/chatService';
-import { setSecure } from '../lib/screenGuard';
+import { readSecureState } from '../lib/screenGuard';
 import { isMfaEnabled } from '../lib/mfa';
 import { hasPIN } from './(constants)/authService';
 import { E2EE_ENABLED } from '../constants/flags';
@@ -66,20 +66,18 @@ export default function PrivacyDashboardScreen() {
   const load = useCallback(async () => {
     const seq = ++loadSeq.current;
     setLoading(true);
-    const [bs, trusted, pin, mfa, secure] = await Promise.allSettled([
+    const [bs, trusted, pin, mfa] = await Promise.allSettled([
       getSettings(), listTrustedContacts(), hasPIN(), isMfaEnabled(),
-      // The guard's real answer, not a platform guess: setSecure reports
-      // whether blocking is in force (false in a dev build, always false on
-      // iOS). Asking with `true` only re-asserts the app-wide default — it can
-      // never lower FLAG_SECURE.
-      Platform.OS === 'android' ? setSecure(true) : Promise.resolve(null),
     ]);
     if (seq !== loadSeq.current) return;
     setLoading(false);
     setServer(bs.status === 'fulfilled' ? bs.value : null);
     setRows(privacyChecklist({
       e2ee: E2EE_ENABLED,
-      screenshotsBlocked: secure.status === 'fulfilled' ? secure.value : 'unknown',
+      // A read of what the guard last confirmed, not a platform guess and not a
+      // setSecure(true) that would change the answer by asking: false in a dev
+      // build, 'unknown' when no call was confirmed. iOS cannot block at all.
+      screenshotsBlocked: Platform.OS === 'android' ? readSecureState() : null,
       deviceMfa: factOf(mfa, (v) => !!v),
       pinSet: factOf(pin, (v) => !!v),
       trustedContacts: factOf(trusted, (v) => v.length > 0),
@@ -104,9 +102,9 @@ export default function PrivacyDashboardScreen() {
   // Settings is where privacy-dashboard is opened from, and where Device MFA
   // and the blocked-users list live: go back to it rather than stacking a
   // second copy on top.
-  const openRoute = useCallback((route: string) => {
-    if (route === '/settings') router.dismissTo('/settings' as any);
-    else router.push(route as any);
+  const openRoute = useCallback((route: Href) => {
+    if (route === '/settings') router.dismissTo('/settings');
+    else router.push(route);
   }, [router]);
 
   const scoreColor = score >= 80 ? colors.primary : score >= 50 ? colors.accent : colors.danger;
@@ -157,8 +155,7 @@ export default function PrivacyDashboardScreen() {
     const body = (
       <>
         <View style={[s.checkIcon, on ? s.checkIconOn : s.checkIconOff]}>
-          {/* bubbleOutText is the palette's white-on-accent ink. */}
-          <Ionicons name={on ? 'checkmark' : r.on === false ? 'close' : r.on === 'unknown' ? 'help' : 'remove'} size={14} color={on ? colors.bubbleOutText : colors.textDim} />
+          <Ionicons name={on ? 'checkmark' : r.on === false ? 'close' : r.on === 'unknown' ? 'help' : 'remove'} size={14} color={on ? colors.onPrimary : colors.textDim} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={[s.checkLabel, !on && { color: colors.textDim }]}>{r.label}</Text>
@@ -270,7 +267,7 @@ export default function PrivacyDashboardScreen() {
             <TouchableOpacity
               key={r.key}
               style={s.suggestionRow}
-              onPress={() => openRoute(r.route!)}
+              onPress={() => openRoute(r.route)}
               accessibilityRole="button"
               accessibilityLabel={`${r.label}. ${r.suggestion}`}
             >

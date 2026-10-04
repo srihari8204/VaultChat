@@ -67,6 +67,10 @@ function nativeStop(): void {
   if (watchers > 0 && --watchers === 0) { try { Native.stopWatch(); } catch {} }
 }
 
+// What the last setSecure call on Android confirmed it applied: true = FLAG_SECURE
+// set, false = cleared, null = never confirmed (or the last call failed).
+let lastApplied: boolean | null = null;
+
 /** True when the build carries the native guard (capture detection works). */
 export function isGuardAvailable(): boolean { return !!Native; }
 
@@ -102,7 +106,8 @@ export async function getState(): Promise<GuardState> {
 /**
  * Turn capture blocking on/off. Uses the native module when present and falls
  * back to expo-screen-capture (which is the same FLAG_SECURE on Android).
- * Resolves to whether blocking is actually in force — false on iOS, always.
+ * Resolves to whether blocking is now confirmed in force: false on iOS always,
+ * false when clearing, and false when neither path confirmed the call.
  */
 export async function setSecure(enabled: boolean): Promise<boolean> {
   // A DEV BUILD NEVER BLOCKS CAPTURE.
@@ -125,11 +130,59 @@ export async function setSecure(enabled: boolean): Promise<boolean> {
   // expo-screen-capture is the portable path and is already a dependency; on
   // Android it sets the same window flag, so running both is harmless and keeps
   // protection working in builds without the native module.
+  let expo = false;
   try {
     if (enabled) await ScreenCapture.preventScreenCaptureAsync();
     else await ScreenCapture.allowScreenCaptureAsync();
+    expo = true;
   } catch { /* best-effort */ }
-  return native || Platform.OS === 'android';
+  // Only a call that one of the two paths confirmed counts. When both failed
+  // the window flag is whatever it was before, which this module cannot see.
+  const confirmed = Platform.OS === 'android' && (native || expo);
+  lastApplied = confirmed ? enabled : null;
+  return confirmed && enabled;
+}
+
+/**
+ * Is screen capture blocked right now? A READ: unlike setSecure(true) it never
+ * touches the window flag, so asking does not change the answer.
+ *
+ * false in a dev build (setSecure never blocks there) and on every platform but
+ * Android (nothing can block there); otherwise what the last confirmed
+ * setSecure call applied, or 'unknown' when none was confirmed.
+ *
+ * ponytail: this is the flag as this module last set it. lib/call/engine.ts
+ * toggles FLAG_SECURE for screen share through VaultCalls.setWindowSecure,
+ * which bypasses this module, so while a share is live the answer can be stale
+ * until that path reports through noteWindowSecure. Replace with a native read
+ * of the window flag (a VaultViewGuard.isSecure method) once one ships.
+ */
+export function readSecureState(): boolean | 'unknown' {
+  if (__DEV__ || Platform.OS !== 'android') return false;
+  return lastApplied ?? 'unknown';
+}
+
+/** For code that sets FLAG_SECURE without setSecure (VaultCalls.setWindowSecure),
+ *  so readSecureState stays true to the window. `null` = outcome unknown. */
+export function noteWindowSecure(secure: boolean | null): void {
+  if (Platform.OS === 'android') lastApplied = secure;
+}
+
+// iOS cannot block capture, but it can blur the app-switcher snapshot and the
+// screen while the app is inactive (Control Center, notification shade).
+// Refcounted so two screens holding it do not switch it off for each other.
+// Android needs nothing: FLAG_SECURE already blanks the recents thumbnail.
+let blurHolds = 0;
+/** Blur this app while it is not in front (iOS). Returns the release function. */
+export function holdAppSwitcherBlur(): () => void {
+  if (Platform.OS !== 'ios') return () => {};
+  if (blurHolds++ === 0) ScreenCapture.enableAppSwitcherProtectionAsync(0.9).catch(() => {});
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    if (--blurHolds === 0) ScreenCapture.disableAppSwitcherProtectionAsync().catch(() => {});
+  };
 }
 
 /**

@@ -83,11 +83,21 @@ export default function SettingsScreen() {
   const [loadTick,    setLoadTick]    = useState(0);
   const authHeader = useAuthHeader();
   const [profile, setProfile] = useState<{ name?: string; email?: string; status?: string; photoURL?: string } | null>(null);
+  const [profileFailed, setProfileFailed] = useState(false);
   const [autoDl, setAutoDl] = useState<AutoDownloadPolicy>('always');
   const [picker, setPicker] = useState<Picker>(null);
   const [toGallery, setToGallery] = useState(true);
-  useEffect(() => { getAutoDownload().then(setAutoDl); }, []);
-  useEffect(() => { getSaveToGallery().then(setToGallery); }, []);
+  useEffect(() => { getAutoDownload().then(setAutoDl).catch(() => {}); }, []);
+  useEffect(() => { getSaveToGallery().then(setToGallery).catch(() => {}); }, []);
+  // Device-local preferences: shown at once, put back with a notice if the
+  // write is refused, so the row never claims a choice that was not kept.
+  const saveLocal = useCallback(<T,>(apply: (v: T) => void, prev: T, next: T, write: (v: T) => Promise<void>) => {
+    apply(next);
+    write(next).catch(() => {
+      apply(prev);
+      Alert.alert('Not saved', 'This setting could not be saved on this phone. Try again.');
+    });
+  }, []);
   const autoDlLabel = (p: AutoDownloadPolicy) => p === 'never' ? 'Never' : p === 'wifi' ? 'Wi-Fi only' : 'Wi-Fi & mobile data';
 
   const loadBlocks = useCallback((cancelled: () => boolean = () => false) => {
@@ -110,8 +120,9 @@ export default function SettingsScreen() {
     loadBlocks(() => cancel);
     api<{ name?: string; email?: string; status?: string; photoURL?: string }>(
       '/user/profile', { proto: profileFromProtobuf })
-      .then((p) => { if (!cancel) setProfile(p); })
-      .catch(() => {});
+      .then((p) => { if (!cancel) { setProfile(p); setProfileFailed(false); } })
+      // Said on the card: "Your name" would read as if the profile had no name.
+      .catch(() => { if (!cancel) setProfileFailed(true); });
     return () => { cancel = true; };
   }, [loadTick, loadBlocks]);
   const reload = useCallback(() => setLoadTick((t) => t + 1), []);
@@ -141,20 +152,23 @@ export default function SettingsScreen() {
   // live value, and this mirrors it for the control.
   const [usageOn, setUsageOn] = useState(usageCounterEnabled());
   useEffect(() => { initUsageCounter().then(setUsageOn).catch(() => {}); }, []);
-  const toggleUsage = useCallback(async (on: boolean) => {
-    setUsageOn(on);
-    await setUsageCounterEnabled(on);
-  }, []);
+  const toggleUsage = useCallback((on: boolean) => {
+    saveLocal(setUsageOn, !on, on, setUsageCounterEnabled);
+  }, [saveLocal]);
   const [mfaBusy, setMfaBusy] = useState(false);
-  useEffect(() => { isMfaEnabled().then(setMfaOn); }, []);
+  // A failed read is not "off": the row says it could not check.
+  const [mfaReadFailed, setMfaReadFailed] = useState(false);
+  useEffect(() => {
+    isMfaEnabled().then((on) => { setMfaOn(on); setMfaReadFailed(false); }).catch(() => setMfaReadFailed(true));
+  }, []);
   const toggleMfa = useCallback(async () => {
     if (mfaBusy) return;
     setMfaBusy(true);
     try {
-      if (mfaOn) { await disableMfa(); setMfaOn(false); }
+      if (mfaOn) { await disableMfa(); setMfaOn(false); setMfaReadFailed(false); }
       else {
         const ok = await enableMfa();
-        if (ok) setMfaOn(true);
+        if (ok) { setMfaOn(true); setMfaReadFailed(false); }
         else Alert.alert('Could not enable', 'No device biometrics/PIN found, or the prompt was dismissed.');
       }
     } catch { Alert.alert('Error', 'Could not update MFA.'); }
@@ -195,23 +209,30 @@ export default function SettingsScreen() {
   // be able to do in two taps, and the consequences need more room than an
   // alert body gives them — same reasoning as WhatsApp's dedicated screen.
   const onDeleteAccount = useCallback(() => {
-    router.push('/delete-account' as any);
+    router.push('/delete-account');
   }, [router]);
 
+  // One unblock at a time: a second tap while the DELETE is in flight would
+  // send it twice and could report a failure for a user already unblocked.
+  const [unblocking, setUnblocking] = useState<string | null>(null);
   const onUnblock = useCallback((u: BlockedUser) => {
+    if (unblocking) return;
     Alert.alert('Unblock?', `${u.name || u.email || 'This user'} will be able to message you again.`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Unblock', style: 'destructive', onPress: async () => {
+          setUnblocking(u.userId);
           try {
             await unblockUser(u.userId);
             setBlocks(prev => prev.filter(x => x.userId !== u.userId));
           } catch (e: any) {
             Alert.alert('Could not unblock', e?.message ?? 'Try again');
+          } finally {
+            setUnblocking(null);
           }
         }
       },
     ]);
-  }, []);
+  }, [unblocking]);
 
   if (loading || !settings) {
     return (
@@ -256,8 +277,8 @@ export default function SettingsScreen() {
           button BESIDE it, not inside it: an accessible touchable hides its
           children from VoiceOver, so a nested QR button could not be reached. */}
       <View style={S.profileCard}>
-        <TouchableOpacity style={S.profileMain} activeOpacity={0.8} onPress={() => router.push('/(tabs)/profile' as any)}
-          accessibilityRole="button" accessibilityLabel={`Your profile, ${profile?.name || 'Your name'}`}>
+        <TouchableOpacity style={S.profileMain} activeOpacity={0.8} onPress={() => router.push('/(tabs)/profile')}
+          accessibilityRole="button" accessibilityLabel={profileFailed && !profile ? 'Your profile. It could not be loaded' : `Your profile, ${profile?.name || 'Your name'}`}>
           <View style={S.profileAvatar}>
             {profile?.photoURL && authHeader ? (
               <Image source={{ uri: attachmentUrl(profile.photoURL), headers: { Authorization: authHeader } }} style={S.profileAvatarImg} />
@@ -266,11 +287,11 @@ export default function SettingsScreen() {
             )}
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={S.profileName}>{profile?.name || 'Your name'}</Text>
-            <Text style={S.profileSub}>{profile?.status || profile?.email || ''}</Text>
+            <Text style={S.profileName}>{profileFailed && !profile ? 'Your profile' : profile?.name || 'Your name'}</Text>
+            <Text style={S.profileSub}>{profileFailed && !profile ? 'Could not be loaded — tap to open it' : profile?.status || profile?.email || ''}</Text>
           </View>
         </TouchableOpacity>
-        <TouchableOpacity style={S.qrBtn} accessibilityRole="button" accessibilityLabel="Show your QR code" onPress={() => router.push('/qr-contact' as any)} hitSlop={6}>
+        <TouchableOpacity style={S.qrBtn} accessibilityRole="button" accessibilityLabel="Show your QR code" onPress={() => router.push('/qr-contact')} hitSlop={6}>
           <Ionicons name="qr-code-outline" size={22} color={colors.primary} />
         </TouchableOpacity>
       </View>
@@ -280,22 +301,22 @@ export default function SettingsScreen() {
       <View style={S.section}>
         <Text style={S.label}>ACCESSIBILITY</Text>
         <View style={S.linkCard}>
-          <LinkRow icon="eye-outline" title="Vision Comfort" sub={`Active: ${activeProfile === 'with-glasses' ? 'With glasses' : 'Without glasses'}`} onPress={() => router.push('/vision-comfort' as any)} last />
+          <LinkRow icon="eye-outline" title="Vision Comfort" sub={`Active: ${activeProfile === 'with-glasses' ? 'With glasses' : 'Without glasses'}`} onPress={() => router.push('/vision-comfort')} last />
         </View>
       </View>
 
       <View style={S.section}>
         <Text style={S.label}>CHATS</Text>
         <View style={S.linkCard}>
-          <LinkRow icon="color-palette-outline" title="Bubble theme" sub="Color of your sent messages" onPress={() => router.push('/chat-themes' as any)} />
-          <LinkRow icon="image-outline" title="Wallpaper" sub="Default chat background" onPress={() => router.push('/chat-wallpaper' as any)} />
+          <LinkRow icon="color-palette-outline" title="Bubble theme" sub="Color of your sent messages" onPress={() => router.push('/chat-themes')} />
+          <LinkRow icon="image-outline" title="Wallpaper" sub="Default chat background" onPress={() => router.push('/chat-wallpaper')} />
           <TouchableOpacity style={[S.linkRow, { borderBottomWidth: 0 }]} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`Media auto-download, ${autoDlLabel(autoDl)}`} onPress={() => setPicker({
             title: 'Media auto-download',
             message: 'When to download photos automatically.',
             actions: [
-              { label: 'Wi-Fi & mobile data', selected: autoDl === 'always', onPress: () => { setAutoDl('always'); setAutoDownload('always'); } },
-              { label: 'Wi-Fi only', selected: autoDl === 'wifi', onPress: () => { setAutoDl('wifi'); setAutoDownload('wifi'); } },
-              { label: 'Never', selected: autoDl === 'never', onPress: () => { setAutoDl('never'); setAutoDownload('never'); } },
+              { label: 'Wi-Fi & mobile data', selected: autoDl === 'always', onPress: () => saveLocal(setAutoDl, autoDl, 'always', setAutoDownload) },
+              { label: 'Wi-Fi only', selected: autoDl === 'wifi', onPress: () => saveLocal(setAutoDl, autoDl, 'wifi', setAutoDownload) },
+              { label: 'Never', selected: autoDl === 'never', onPress: () => saveLocal(setAutoDl, autoDl, 'never', setAutoDownload) },
             ],
           })}>
             <View style={S.linkIconWrap}><Ionicons name="cloud-download-outline" size={22} color={colors.text} /></View>
@@ -317,9 +338,9 @@ export default function SettingsScreen() {
             <Switch
               accessibilityLabel="Save to gallery"
               value={toGallery}
-              onValueChange={(v) => { setToGallery(v); setSaveToGallery(v); }}
+              onValueChange={(v) => saveLocal(setToGallery, !v, v, setSaveToGallery)}
               trackColor={{ false: colors.border, true: colors.accentDeep }}
-              thumbColor={colors.bubbleOutText}
+              thumbColor={colors.onPrimary}
             />
           </View>
         </View>
@@ -334,7 +355,7 @@ export default function SettingsScreen() {
             one server value, each able to show a stale state after another
             had saved. Settings and the dashboard link to it instead. */}
         <View style={[S.linkCard, { marginBottom: 4 }]}>
-          <LinkRow icon="time-outline" title="Last seen & privacy" sub="Last seen, read receipts, profile photo, discoverable by phone" onPress={() => router.push('/last-seen-privacy' as any)} last />
+          <LinkRow icon="time-outline" title="Last seen & privacy" sub="Last seen, read receipts, profile photo, discoverable by phone" onPress={() => router.push('/last-seen-privacy')} last />
         </View>
         <TouchableOpacity style={S.prefRow} activeOpacity={0.7} disabled={prefBusy} accessibilityRole="button" accessibilityLabel={`Add me to groups, ${groupAddLabel(settings.groupAddPolicy)}`} accessibilityState={{ disabled: prefBusy }} onPress={() => setPicker({
           title: 'Who can add me to groups',
@@ -372,7 +393,9 @@ export default function SettingsScreen() {
         <Text style={S.label}>SECURITY</Text>
         <ToggleRow
           title="Device MFA (PIN / fingerprint / face)"
-          sub="Require your device biometrics or MPIN each time crazzychat launches."
+          sub={mfaReadFailed
+            ? 'Could not check whether this is on. Require your device biometrics or MPIN each time crazzychat launches.'
+            : 'Require your device biometrics or MPIN each time crazzychat launches.'}
           value={mfaOn}
           busy={mfaBusy}
           onValueChange={toggleMfa}
@@ -385,21 +408,21 @@ export default function SettingsScreen() {
           {/* The sub-line used to advertise screenshot alerts and an incognito
               keyboard, which nothing reads (2026-10-04 audit). It names only
               what the screen really does; the message timer lives below. */}
-          <LinkRow icon="shield-checkmark-outline" title="Vault features" sub="Temp invite codes, auto screen lock, Vault" onPress={() => router.push('/vault-features' as any)} />
+          <LinkRow icon="shield-checkmark-outline" title="Vault features" sub="Temp invite codes, auto screen lock, Vault" onPress={() => router.push('/vault-features')} />
           {/* #32: the opt-in for session sealing. Setting a device PIN is what
               seals the signed-in session under it (services/security/pinStore);
               nobody is migrated into it, they choose it here. */}
-          <LinkRow icon="keypad-outline" title="Device PIN" sub="Lock this device's session behind a PIN only you know" onPress={() => router.push('/backup-pin?from=settings' as any)} />
-          <LinkRow icon="lock-closed-outline" title="Chat locks" sub="Lock individual chats behind a PIN or biometrics" onPress={() => router.push('/app-lock-chats' as any)} />
+          <LinkRow icon="keypad-outline" title="Device PIN" sub="Lock this device's session behind a PIN only you know" onPress={() => router.push('/backup-pin?from=settings')} />
+          <LinkRow icon="lock-closed-outline" title="Chat locks" sub="Lock individual chats behind a PIN or biometrics" onPress={() => router.push('/app-lock-chats')} />
           {/* app/permissions.tsx existed with no entry point: the only way in was
               the old onboarding chain, whose first screen nothing reaches. It is a
               genuine feature - one place to see and re-request every permission,
               including full-screen-intent, which no other screen surfaces - so it
               is routed here rather than deleted (2026-09-17). */}
-          <LinkRow icon="options-outline" title="App permissions" sub="Camera, microphone, contacts, location and notifications" onPress={() => router.push('/permissions?from=settings' as any)} />
-          <LinkRow icon="speedometer-outline" title="Privacy dashboard" sub="Your privacy score and what is protecting you" onPress={() => router.push('/privacy-dashboard' as any)} />
-          <LinkRow icon="shield-half-outline" title="Security Hub" sub="Your account's security overview" onPress={() => router.push('/dashboard' as any)} />
-          <LinkRow icon="checkmark-done-outline" title="Per-contact receipts" sub="Hide read receipts, typing or last seen from chosen people" onPress={() => router.push('/receipt-control' as any)} />
+          <LinkRow icon="options-outline" title="App permissions" sub="Camera, microphone, contacts, location and notifications" onPress={() => router.push('/permissions?from=settings')} />
+          <LinkRow icon="speedometer-outline" title="Privacy dashboard" sub="Your privacy score and what is protecting you" onPress={() => router.push('/privacy-dashboard')} />
+          <LinkRow icon="shield-half-outline" title="Security Hub" sub="Your account's security overview" onPress={() => router.push('/dashboard')} />
+          <LinkRow icon="checkmark-done-outline" title="Per-contact receipts" sub="Hide read receipts, typing or last seen from chosen people" onPress={() => router.push('/receipt-control')} />
           {/* Opens in the browser, not a WebView: a privacy policy is the one
               document a person should be able to see is served from the real
               domain, with the padlock their own browser drew. Play also expects
@@ -422,29 +445,29 @@ export default function SettingsScreen() {
       <View style={S.section}>
         <Text style={S.label}>DATA & ACCOUNT</Text>
         <View style={S.linkCard}>
-          <LinkRow icon="notifications-outline" title="Notifications & Sounds" sub="Message tones, ringtone, vibration" onPress={() => router.push('/notification-sounds' as any)} />
-          <LinkRow icon="call-outline" title="Call reliability" sub="Make calls ring when the app is closed" onPress={() => router.push('/call-reliability' as any)} />
-          <LinkRow icon="cloud-upload-outline" title="Chat backup" sub="Encrypted backup to cloud or file" onPress={() => router.push('/chat-backup' as any)} />
+          <LinkRow icon="notifications-outline" title="Notifications & Sounds" sub="Message tones, ringtone, vibration" onPress={() => router.push('/notification-sounds')} />
+          <LinkRow icon="call-outline" title="Call reliability" sub="Make calls ring when the app is closed" onPress={() => router.push('/call-reliability')} />
+          <LinkRow icon="cloud-upload-outline" title="Chat backup" sub="Encrypted backup to cloud or file" onPress={() => router.push('/chat-backup')} />
           {/* Routes into the same one-conversation-at-a-time flow as the chat's
               ⋮ menu. Deliberately not a migration dashboard: the screen picks one
               contact, then imports one export. */}
-          <LinkRow icon="download-outline" title="Import chats" sub="Bring one conversation over from WhatsApp" onPress={() => router.push('/import-chats' as any)} />
-          <LinkRow icon="cube-outline" title="VaultBeam auto-download" sub="Auto-accept incoming files by network, sender & size" onPress={() => router.push('/vaultbeam-settings' as any)} />
-          <LinkRow icon="time-outline" title="Scheduled messages" sub="Messages waiting to send later" onPress={() => router.push('/scheduled' as any)} />
-          <LinkRow icon="bookmark-outline" title="Bookmarks" sub="Messages you've saved across chats" onPress={() => router.push('/bookmarks' as any)} />
-          <LinkRow icon="alarm-outline" title="Message reminders" sub="Notifications you've scheduled" onPress={() => router.push('/message-reminder' as any)} />
-          <LinkRow icon="eye-off-outline" title="Hidden chats" sub="PIN-gated chats, hidden from the list" onPress={() => router.push('/hidden-chats' as any)} />
-          <LinkRow icon="desktop-outline" title="Active devices" sub="Where you're signed in" onPress={() => router.push('/login-history' as any)} />
-          <LinkRow icon="pie-chart-outline" title="Storage & data" sub="What is using space on this device" onPress={() => router.push('/storage-manager' as any)} />
-          <LinkRow icon="cloud-offline-outline" title="Offline mode" sub="What works without a connection, and the pending queue" onPress={() => router.push('/offline-mode' as any)} />
-          <LinkRow icon="glasses-outline" title="Ghost Mode contacts" sub="Hidden online, typing, read, last-seen" onPress={() => router.push('/ghost-mode' as any)} />
+          <LinkRow icon="download-outline" title="Import chats" sub="Bring one conversation over from WhatsApp" onPress={() => router.push('/import-chats')} />
+          <LinkRow icon="cube-outline" title="VaultBeam auto-download" sub="Auto-accept incoming files by network, sender & size" onPress={() => router.push('/vaultbeam-settings')} />
+          <LinkRow icon="time-outline" title="Scheduled messages" sub="Messages waiting to send later" onPress={() => router.push('/scheduled')} />
+          <LinkRow icon="bookmark-outline" title="Bookmarks" sub="Messages you've saved across chats" onPress={() => router.push('/bookmarks')} />
+          <LinkRow icon="alarm-outline" title="Message reminders" sub="Notifications you've scheduled" onPress={() => router.push('/message-reminder')} />
+          <LinkRow icon="eye-off-outline" title="Hidden chats" sub="PIN-gated chats, hidden from the list" onPress={() => router.push('/hidden-chats')} />
+          <LinkRow icon="desktop-outline" title="Active devices" sub="Where you're signed in" onPress={() => router.push('/login-history')} />
+          <LinkRow icon="pie-chart-outline" title="Storage & data" sub="What is using space on this device" onPress={() => router.push('/storage-manager')} />
+          <LinkRow icon="cloud-offline-outline" title="Offline mode" sub="What works without a connection, and the pending queue" onPress={() => router.push('/offline-mode')} />
+          <LinkRow icon="glasses-outline" title="Ghost Mode contacts" sub="Hidden online, typing, read, last-seen" onPress={() => router.push('/ghost-mode')} />
           <LinkRow icon="download-outline" title="Export my data" sub="Download a JSON of your account" onPress={onExport} busy={exporting} />
           {/* Both were unreachable. They are support tools, not dead code: the
               network test is what tells you whether a call failure is the app or
               the link, and d2de-status lists the encryption layers this build
               uses. Routed at the end of the section, after the everyday rows. */}
-          <LinkRow icon="pulse-outline" title="Network test" sub="Check the connection this device is actually getting" onPress={() => router.push('/network-test' as any)} />
-          <LinkRow icon="git-compare-outline" title="Encryption status" sub="Which encryption layers this build uses" onPress={() => router.push('/d2de-status' as any)} last />
+          <LinkRow icon="pulse-outline" title="Network test" sub="Check the connection this device is actually getting" onPress={() => router.push('/network-test')} />
+          <LinkRow icon="git-compare-outline" title="Encryption status" sub="Which encryption layers this build uses" onPress={() => router.push('/d2de-status')} last />
         </View>
 
         <TouchableOpacity
@@ -486,9 +509,11 @@ export default function SettingsScreen() {
                 <Text style={S.blockName} numberOfLines={1}>{u.name || u.email || u.userId.slice(0, 8)}</Text>
                 {u.email && u.name && <Text style={S.blockEmail} numberOfLines={1}>{u.email}</Text>}
               </View>
-              <TouchableOpacity onPress={() => onUnblock(u)} style={S.unblockBtn} activeOpacity={0.7}
-                accessibilityRole="button" accessibilityLabel={`Unblock ${u.name || u.email || 'this user'}`}>
-                <Text style={S.unblockTxt}>Unblock</Text>
+              <TouchableOpacity onPress={() => onUnblock(u)} style={[S.unblockBtn, !!unblocking && unblocking !== u.userId && { opacity: 0.5 }]} activeOpacity={0.7}
+                disabled={!!unblocking}
+                accessibilityRole="button" accessibilityLabel={`Unblock ${u.name || u.email || 'this user'}`}
+                accessibilityState={{ disabled: !!unblocking, busy: unblocking === u.userId }}>
+                {unblocking === u.userId ? <ActivityIndicator size="small" color={colors.danger} /> : <Text style={S.unblockTxt}>Unblock</Text>}
               </TouchableOpacity>
             </View>
           ))
@@ -554,9 +579,8 @@ function AppearanceSection() {
               accessibilityLabel={`Appearance: ${o.label}`}
               accessibilityState={{ selected: active, checked: active }}
             >
-              {/* bubbleOutText is the palette's white-on-accent ink. */}
-              <Ionicons name={o.icon} size={16} color={active ? colors.bubbleOutText : colors.textDim} />
-              <Text style={[apS.pillTxt, { color: active ? colors.bubbleOutText : colors.textDim }]}>{o.label}</Text>
+              <Ionicons name={o.icon} size={16} color={active ? colors.onPrimary : colors.textDim} />
+              <Text style={[apS.pillTxt, { color: active ? colors.onPrimary : colors.textDim }]}>{o.label}</Text>
             </TouchableOpacity>
           );
         })}
@@ -605,7 +629,7 @@ function ToggleRow({
           value={value}
           onValueChange={onValueChange}
           trackColor={{ true: colors.primary, false: colors.border }}
-          thumbColor={colors.bubbleOutText}
+          thumbColor={colors.onPrimary}
         />
       )}
     </View>
@@ -629,7 +653,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   qrBtn:         { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   profileAvatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   profileAvatarImg: { width: '100%', height: '100%' },
-  profileAvatarTxt: { color: c.bubbleOutText, fontSize: 22, fontWeight: '800' },
+  profileAvatarTxt: { color: c.onPrimary, fontSize: 22, fontWeight: '800' },
   profileName:   { color: c.text, fontSize: 17, fontWeight: '700' },
   profileSub:    { color: c.textDim, fontSize: 13, marginTop: 2 },
 
@@ -651,10 +675,10 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   blockRow:      { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   blockAvatar:   { width: 40, height: 40, borderRadius: 20, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   blockAvatarImg:{ width: '100%', height: '100%' },
-  blockAvatarTxt:{ color: c.bubbleOutText, fontWeight: '700' },
+  blockAvatarTxt:{ color: c.onPrimary, fontWeight: '700' },
   blockName:     { color: c.text, fontSize: 15, fontWeight: '600' },
   blockEmail:    { color: c.textDim, fontSize: 12, marginTop: 2 },
-  unblockBtn:    { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, borderWidth: 1, borderColor: c.danger },
+  unblockBtn:    { minHeight: 44, minWidth: 88, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12, borderRadius: 22, borderWidth: 1, borderColor: c.danger },
   unblockTxt:    { color: c.danger, fontSize: 12, fontWeight: '700' },
 
   emptySub:      { color: c.textDim, fontSize: 13, lineHeight: 18, paddingVertical: 16 },

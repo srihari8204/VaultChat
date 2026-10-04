@@ -9,6 +9,10 @@
 //     the vault opens without the v2 key: older v1 files still open, new files
 //     fall back to v1, and the record is left alone in case it is ever needed.
 //   • Only a successful open under the OLD PIN re-wraps under the new one.
+//   • New files need the key (lib/vaultCrypto no longer falls back to the
+//     constant-salt v1 format). When the record cannot be opened, the user may
+//     start a NEW key: the old record is first copied to an archive entry and
+//     never deleted, so an old PIN that comes back can still be tried.
 
 import * as SecureStore from 'expo-secure-store';
 import {
@@ -62,4 +66,27 @@ export async function rewrapVaultKeys(oldPin: string, newPin: string): Promise<v
   const keys = openVaultKeys(oldPin, await readRecord());
   if (!keys) return;
   await SecureStore.setItemAsync(KEY, JSON.stringify(sealVaultKeys(newPin, keys)));
+}
+
+/**
+ * Start a new vault key for `pin` when the existing record cannot be opened
+ * (this PIN did not seal it, or it is damaged). The existing record is copied
+ * to `vault_key_v2_prev_<time>` FIRST and the copy is never deleted; if that
+ * copy cannot be written nothing changes. Files sealed under the old key stay
+ * listed and stay unreadable with this PIN, exactly as before; v1 files still
+ * open with the PIN that sealed them.
+ */
+export async function replaceVaultKeys(pin: string): Promise<VaultKeys> {
+  const raw = await SecureStore.getItemAsync(KEY);
+  if (raw) {
+    // Never replace a record this PIN can open.
+    let rec: VaultKeyRecord | null = null;
+    try { rec = JSON.parse(raw) as VaultKeyRecord; } catch { /* damaged: archive it */ }
+    const current = openVaultKeys(pin, rec);
+    if (current) return current;
+    await SecureStore.setItemAsync(`${KEY}_prev_${Date.now()}`, raw);
+  }
+  const keys = newVaultKeys(pin);
+  await SecureStore.setItemAsync(KEY, JSON.stringify(sealVaultKeys(pin, keys)));
+  return keys;
 }

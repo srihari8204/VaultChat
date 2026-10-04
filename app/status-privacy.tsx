@@ -41,18 +41,38 @@ export default function StatusPrivacyScreen() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadTick, setLoadTick] = useState(0);
   const [saving, setSaving] = useState(false);
+  // The contact list is only for picking people. If it fails, the saved mode
+  // still loads and stays editable; the list says it could not load.
+  const [contactsError, setContactsError] = useState<string | null>(null);
+  const [contactsTick, setContactsTick] = useState(0);
   const mounted = useRef(true);
   useEffect(() => () => { mounted.current = false; }, []);
+  // What the server last accepted, and the newest state waiting to be saved.
+  const saved = useRef<{ mode: StatusPrivacyMode; ids: Set<string> }>({ mode: 'contacts', ids: new Set() });
+  const wanted = useRef<{ mode: StatusPrivacyMode; ids: Set<string> } | null>(null);
+  const flushing = useRef(false);
 
   useEffect(() => {
     let cancel = false;
     setLoading(true);
     setLoadError(null);
-    (async () => {
-      try {
-        const [priv, chats] = await Promise.all([getStatusPrivacy(), listChats()]);
+    getStatusPrivacy()
+      .then((priv) => {
         if (cancel) return;
         setMode(priv.mode); setSelected(new Set(priv.userIds));
+        saved.current = { mode: priv.mode, ids: new Set(priv.userIds) };
+      })
+      .catch((e: any) => { if (!cancel) setLoadError(e?.message ?? 'Could not load status privacy'); })
+      .finally(() => { if (!cancel) setLoading(false); });
+    return () => { cancel = true; };
+  }, [loadTick]);
+
+  useEffect(() => {
+    let cancel = false;
+    setContactsError(null);
+    listChats()
+      .then((chats) => {
+        if (cancel) return;
         const seen = new Set<string>();
         const c: Contact[] = [];
         for (const ch of chats) {
@@ -62,25 +82,44 @@ export default function StatusPrivacyScreen() {
           }
         }
         setContacts(c);
-      } catch (e: any) {
-        if (!cancel) setLoadError(e?.message ?? 'Could not load status privacy');
-      } finally { if (!cancel) setLoading(false); }
-    })();
+      })
+      .catch((e: any) => { if (!cancel) setContactsError(e?.message ?? 'Could not load your contacts'); });
     return () => { cancel = true; };
-  }, [loadTick]);
+  }, [loadTick, contactsTick]);
 
-  // One save at a time, applied optimistically and rolled back on failure, so
-  // two quick taps cannot race and leave the server on the older choice.
-  const commit = useCallback(async (m: StatusPrivacyMode, ids: Set<string>) => {
-    if (saving) return;
-    const prevMode = mode, prevSelected = selected;
-    setMode(m); setSelected(ids); setSaving(true);
-    try { await setStatusPrivacy(m, privacyUserIds(m, ids)); }
-    catch (e: any) {
-      if (mounted.current) { setMode(prevMode); setSelected(prevSelected); }
-      Alert.alert('Could not save', e?.message ?? 'Try again');
-    } finally { if (mounted.current) setSaving(false); }
-  }, [saving, mode, selected]);
+  // Saves run one at a time and the latest wanted state wins: ticking several
+  // people while a save is in flight queues ONE more save with all of them,
+  // instead of a PUT per tap or locking every row. A failure puts the screen
+  // back to what the server last accepted.
+  const flush = useCallback(async () => {
+    if (flushing.current) return;
+    flushing.current = true;
+    setSaving(true);
+    try {
+      while (wanted.current) {
+        const w = wanted.current;
+        wanted.current = null;
+        try {
+          await setStatusPrivacy(w.mode, privacyUserIds(w.mode, w.ids));
+          saved.current = w;
+        } catch (e: any) {
+          wanted.current = null;
+          if (mounted.current) {
+            setMode(saved.current.mode); setSelected(new Set(saved.current.ids));
+            Alert.alert('Could not save', e?.message ?? 'Try again');
+          }
+        }
+      }
+    } finally {
+      flushing.current = false;
+      if (mounted.current) setSaving(false);
+    }
+  }, []);
+  const commit = useCallback((m: StatusPrivacyMode, ids: Set<string>) => {
+    setMode(m); setSelected(ids);
+    wanted.current = { mode: m, ids };
+    flush();
+  }, [flush]);
 
   // Each mode starts from an empty list: the excluded people must never become
   // the only people who can see the status (lib/statusPrivacySelection). The
@@ -97,7 +136,9 @@ export default function StatusPrivacyScreen() {
     );
   };
   const toggle = (id: string) => {
-    const n = new Set(selected);
+    // Builds on the newest wanted list, so a tap before the last one rendered
+    // is not lost.
+    const n = new Set(wanted.current?.ids ?? selected);
     if (n.has(id)) n.delete(id); else n.add(id);
     commit(mode, n);
   };
@@ -163,7 +204,14 @@ export default function StatusPrivacyScreen() {
               )}
             </View>
           }
-          ListEmptyComponent={mode === 'contacts' ? null : (
+          ListEmptyComponent={mode === 'contacts' ? null : contactsError ? (
+            <View style={{ marginHorizontal: 16, marginTop: 8, gap: 8 }} accessibilityRole="alert">
+              <Text style={S.modeSub}>Your contacts could not be loaded, so nobody can be picked right now. {contactsError}</Text>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Try loading contacts again" onPress={() => setContactsTick(t => t + 1)} style={[S.retryBtn, { alignSelf: 'flex-start' }]} activeOpacity={0.7}>
+                <Text style={S.retryTxt}>Try again</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
             <Text style={[S.modeSub, { marginHorizontal: 16, marginTop: 8 }]}>
               No contacts yet. People you have a direct chat with appear here.
             </Text>
@@ -175,10 +223,9 @@ export default function StatusPrivacyScreen() {
                 style={S.contactRow}
                 activeOpacity={0.7}
                 onPress={() => toggle(item.id)}
-                disabled={saving}
                 accessibilityRole="checkbox"
                 accessibilityLabel={item.name}
-                accessibilityState={{ checked: on, disabled: saving, busy: saving }}
+                accessibilityState={{ checked: on }}
               >
                 <Avatar uri={item.photoURL && authHeader ? attachmentUrl(item.photoURL) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={item.name} size={44} ring />
                 <Text style={S.contactName} numberOfLines={1}>{item.name}</Text>

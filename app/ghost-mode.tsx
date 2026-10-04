@@ -154,7 +154,7 @@ function ListView() {
               accessibilityRole="button"
               accessibilityLabel={`${item.name || item.email || 'Contact'}. ${summarise(item)}`}
               onPress={() => router.push({
-                pathname: '/ghost-mode' as any,
+                pathname: '/ghost-mode',
                 params: { targetId: item.targetId, targetName: item.name || item.email || '' },
               })}
             >
@@ -214,11 +214,14 @@ function PerTargetEditor({ targetId, targetName }: { targetId: string; targetNam
   const [saving,  setSaving]  = useState<null | keyof GhostMode>(null);
   const [loadTick, setLoadTick] = useState(0);
   const [clearing, setClearing] = useState(false);
+  // A refresh that failed while the saved copy is on screen (see the list view).
+  const [stale, setStale] = useState<string | null>(null);
 
   useEffect(() => {
     let cancel = false;
     setLoading(true);
     setError(null);
+    setStale(null);
     (async () => {
       // Local-first: paint this contact's last-known overrides, then refresh.
       const cached = await readCache<GhostMode>('ghost-mode:' + targetId);
@@ -228,7 +231,8 @@ function PerTargetEditor({ targetId, targetName }: { targetId: string; targetNam
         if (!cancel) setState(g);
         writeCache('ghost-mode:' + targetId, g);
       } catch (e: any) {
-        if (!cancel && !cached) setError(e?.message ?? 'Could not load Ghost Mode');
+        const msg = e?.message ?? 'Could not load Ghost Mode';
+        if (!cancel) { if (cached) setStale(msg); else setError(msg); }
       } finally {
         if (!cancel) setLoading(false);
       }
@@ -302,6 +306,15 @@ function PerTargetEditor({ targetId, targetName }: { targetId: string; targetNam
     <ScrollView style={S.screen} contentContainerStyle={{ paddingBottom: 64 }}>
       {header}
 
+      {stale ? (
+        <View style={S.staleBox} accessibilityRole="alert">
+          <Text style={[S.introTxt, { flex: 1 }]}>Showing the saved settings for this contact — they could not be refreshed. {stale}</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Try refreshing this contact's Ghost Mode again" onPress={() => setLoadTick(t => t + 1)} style={S.retryBtn} activeOpacity={0.7}>
+            <Text style={S.retryTxt}>Try again</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
       <View style={S.intro}>
         <Text style={S.introTxt}>
           Hide live signals from <Text style={{ color: colors.primary, fontWeight: '700' }}>{targetName || targetId.slice(0, 8)}</Text>.
@@ -315,6 +328,7 @@ function PerTargetEditor({ targetId, targetName }: { targetId: string; targetNam
           sub="Appear offline to this contact even when you're using the app."
           value={state.hideOnline}
           busy={saving === 'hideOnline'}
+          waiting={saving !== null && saving !== 'hideOnline'}
           onChange={() => toggle('hideOnline')}
         />
         <ToggleRow
@@ -322,6 +336,7 @@ function PerTargetEditor({ targetId, targetName }: { targetId: string; targetNam
           sub="They won't see “typing…” when you compose a reply."
           value={state.hideTyping}
           busy={saving === 'hideTyping'}
+          waiting={saving !== null && saving !== 'hideTyping'}
           onChange={() => toggle('hideTyping')}
         />
         <ToggleRow
@@ -329,6 +344,7 @@ function PerTargetEditor({ targetId, targetName }: { targetId: string; targetNam
           sub="They'll still see ✓✓ delivered, but not the blue read tick."
           value={state.hideRead}
           busy={saving === 'hideRead'}
+          waiting={saving !== null && saving !== 'hideRead'}
           onChange={() => toggle('hideRead')}
         />
         <ToggleRow
@@ -336,6 +352,7 @@ function PerTargetEditor({ targetId, targetName }: { targetId: string; targetNam
           sub="Your last-active timestamp won't appear in their chat list or header."
           value={state.hideLastSeen}
           busy={saving === 'hideLastSeen'}
+          waiting={saving !== null && saving !== 'hideLastSeen'}
           onChange={() => toggle('hideLastSeen')}
         />
       </View>
@@ -351,9 +368,10 @@ function PerTargetEditor({ targetId, targetName }: { targetId: string; targetNam
 }
 
 function ToggleRow({
-  title, sub, value, busy, onChange,
+  title, sub, value, busy, waiting, onChange,
 }: {
-  title: string; sub: string; value: boolean; busy: boolean; onChange: () => void;
+  // waiting: another switch is saving; this one is disabled until it finishes.
+  title: string; sub: string; value: boolean; busy: boolean; waiting: boolean; onChange: () => void;
 }) {
   const S = useS();
   const { colors } = useTheme();
@@ -368,10 +386,12 @@ function ToggleRow({
       ) : (
         <Switch
           accessibilityLabel={title}
+          accessibilityHint={sub}
           value={value}
           onValueChange={onChange}
+          disabled={waiting}
           trackColor={{ true: colors.primary, false: colors.border }}
-          thumbColor={colors.bubbleOutText}
+          thumbColor={colors.onPrimary}
         />
       )}
     </View>
@@ -396,7 +416,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   row:           { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   avatar:        { width: 44, height: 44, borderRadius: 22, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   avatarImg:     { width: '100%', height: '100%' },
-  avatarTxt:     { color: c.bubbleOutText, fontWeight: '700' },  // white-on-accent ink
+  avatarTxt:     { color: c.onPrimary, fontWeight: '700' },
   rowName:       { color: c.text, fontSize: 15, fontWeight: '600' },
   rowSub:        { color: c.textDim, fontSize: 12, marginTop: 2 },
 

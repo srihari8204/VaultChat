@@ -127,7 +127,7 @@ export default function VaultCheckScreen() {
 
         {!!error && (
           <View style={S.card} accessibilityRole="alert">
-            <Ionicons name="warning-outline" size={28} color={colors.danger} />
+            <Ionicons name="warning-outline" size={28} color={colors.danger} importantForAccessibility="no" accessibilityElementsHidden />
             <Text style={S.cardTitle}>Could not check this file</Text>
             <Text style={S.cardBody}>{error}</Text>
             <Text style={S.cardBody}>
@@ -143,7 +143,7 @@ export default function VaultCheckScreen() {
         {report && v && (
           <>
             <View style={[S.verdict, { borderColor: vColor }]}>
-              <Ionicons name={v.icon} size={40} color={vColor} />
+              <Ionicons name={v.icon} size={40} color={vColor} importantForAccessibility="no" accessibilityElementsHidden />
               <Text style={[S.verdictLabel, { color: vColor }]} accessibilityRole="header">{v.label}</Text>
               <Text style={S.verdictHeadline}>{report.headline}</Text>
               <Text style={S.verdictDetail}>{report.detail}</Text>
@@ -152,7 +152,7 @@ export default function VaultCheckScreen() {
             {/* ── C2PA ── */}
             <View style={S.card}>
               <View style={S.rowHead}>
-                <Ionicons name="ribbon-outline" size={18} color={colors.text} />
+                <Ionicons name="ribbon-outline" size={18} color={colors.text} importantForAccessibility="no" accessibilityElementsHidden />
                 <Text style={S.cardTitle}>Content Credentials</Text>
               </View>
               {!report.c2pa.present ? (
@@ -169,7 +169,7 @@ export default function VaultCheckScreen() {
                   {!!report.c2pa.signerName && <Row label="Signer" value={report.c2pa.signerName} S={S} />}
                   <Row label="Issuer trust" value="not checked against a trust list" S={S} />
                   {report.c2pa.actions.map((a, i) => (
-                    <Row key={i} label="Action" value={a.action + (a.when ? ` · ${a.when}` : '')} S={S} />
+                    <Row key={`${i}:${a.action}:${a.when ?? ''}`} label="Action" value={a.action + (a.when ? ` · ${a.when}` : '')} S={S} />
                   ))}
                 </>
               )}
@@ -179,7 +179,7 @@ export default function VaultCheckScreen() {
             {!!report.rppg && (
               <View style={S.card}>
                 <View style={S.rowHead}>
-                  <Ionicons name="heart-outline" size={18} color={colors.text} />
+                  <Ionicons name="heart-outline" size={18} color={colors.text} importantForAccessibility="no" accessibilityElementsHidden />
                   <Text style={S.cardTitle}>Heartbeat analysis</Text>
                 </View>
                 <Row label="Result" value={report.rppg.verdict} S={S} />
@@ -193,19 +193,18 @@ export default function VaultCheckScreen() {
             {report.notChecked.length > 0 && (
               <View style={[S.card, S.cardMuted]}>
                 <View style={S.rowHead}>
-                  <Ionicons name="information-circle-outline" size={18} color={colors.textDim} />
+                  <Ionicons name="information-circle-outline" size={18} color={colors.textDim} importantForAccessibility="no" accessibilityElementsHidden />
                   <Text style={[S.cardTitle, { color: colors.textDim }]}>Not checked</Text>
                 </View>
                 {report.notChecked.map((n, i) => (
-                  <Text key={i} style={S.cardBody}>• {n}</Text>
+                  <Text key={`${i}:${n}`} style={S.cardBody}>• {n}</Text>
                 ))}
               </View>
             )}
 
             <TouchableOpacity style={S.shareBtn} onPress={onShare} activeOpacity={0.85}
               accessibilityRole="button" accessibilityLabel="Share this report">
-              {/* bubbleOutText is the palette's white-on-accent ink. */}
-              <Ionicons name="share-outline" size={16} color={colors.bubbleOutText} />
+              <Ionicons name="share-outline" size={16} color={colors.onPrimary} importantForAccessibility="no" accessibilityElementsHidden />
               <Text style={S.shareTxt}>Share this report</Text>
             </TouchableOpacity>
 
@@ -263,7 +262,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     backgroundColor: c.primary, borderRadius: 14, paddingVertical: 14, marginTop: 4,
   },
-  shareTxt: { color: c.bubbleOutText, fontSize: 14, fontWeight: '800' },
+  shareTxt: { color: c.onPrimary, fontSize: 14, fontWeight: '800' },
   retryBtn: { alignSelf: 'flex-start', minHeight: 44, paddingHorizontal: 18, marginTop: 4, justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glass },
   retryTxt: { color: c.primary, fontWeight: '700' },
   disclaimer: { color: c.textDim, fontSize: 12, lineHeight: 16, textAlign: 'center', marginTop: 14 },

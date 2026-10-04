@@ -10,6 +10,7 @@ import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
 import { Stack } from 'expo-router';
 import { getD2DEStatus } from '../services/d2deService';
+import { E2EE_ENABLED } from '../constants/flags';
 
 // Keyed by the layer names services/d2deService.ts returns — a key that does
 // not match leaves the card's explanation blank ('Android Keystore' vs
@@ -79,10 +80,12 @@ export default function D2DEStatusScreen() {
         ))}
 
         <View style={s.uniqueBox}>
+          {/* Same flag as the card in app/contact-info.tsx, which is titled
+              "Encrypted in Transit" and cannot be tapped while it is off. */}
           <Text style={s.uniqueBody}>
-            This lists what this version of the app is built to use. To check that a particular conversation is end-to-end
-            encrypted with the right person, open the chat, tap their name, then tap the End-to-End Encrypted card, and
-            compare the safety number with the one on their phone.
+            {E2EE_ENABLED
+              ? 'This lists what this version of the app is built to use. To check that a particular conversation is end-to-end encrypted with the right person, open the chat, tap their name, then tap the End-to-End Encrypted card, and compare the safety number with the one on their phone.'
+              : 'This lists what this version of the app is built to use. End-to-end encryption is not switched on in this build, so there is no safety number to compare yet; messages are encrypted in transit.'}
           </Text>
         </View>
 

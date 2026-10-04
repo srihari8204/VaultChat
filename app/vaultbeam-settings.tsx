@@ -13,8 +13,7 @@ import { AppText as Text, AuroraBackground } from '../components/ui';
 import { type Palette } from '../constants/theme';
 import { VB_AUTODOWNLOAD } from '../constants/flags';
 import {
-  useVBSettings, patchSettings, SIZE_OPTIONS,
-  type VBMode, type VBNetwork, type VBSettings,
+  useVBSettings, patchSettings, SIZE_OPTIONS, type VBSettings,
 } from '../lib/vaultBeamSettings';
 
 export default function VaultBeamSettings() {
@@ -22,10 +21,14 @@ export default function VaultBeamSettings() {
   const { colors, scheme } = useTheme();
   const s = useVBSettings();
   const auto = s.mode === 'auto';
-  // A failed write still applies for this session; say it will not survive a restart.
+  // A failed write still applies for this session; say it will not survive a
+  // restart, and offer to write it again.
   const [saveFailed, setSaveFailed] = React.useState(false);
+  // Writes go one after another: each writes the whole settings object, so two
+  // overlapping writes finishing out of order could persist the older one.
+  const queue = React.useRef<Promise<void>>(Promise.resolve());
   const save = (p: Partial<VBSettings>) => {
-    patchSettings(p).then(() => setSaveFailed(false), () => setSaveFailed(true));
+    queue.current = queue.current.then(() => patchSettings(p)).then(() => setSaveFailed(false), () => setSaveFailed(true));
   };
 
   const C = colors;
@@ -57,24 +60,29 @@ export default function VaultBeamSettings() {
         )}
 
         {saveFailed && (
-          <View style={[styles.notice, { backgroundColor: C.glassSoft, borderColor: C.danger }]} accessibilityLiveRegion="polite">
+          <View style={[styles.notice, { backgroundColor: C.glassSoft, borderColor: C.danger, alignItems: 'center' }]} accessibilityLiveRegion="polite">
             <Ionicons name="alert-circle-outline" size={16} color={C.danger} />
             <Text style={[styles.noticeTxt, { color: C.text }]}>Couldn’t save your last change. It applies until the app restarts.</Text>
+            {/* Writes the whole current settings again (patchSettings with no change). */}
+            <TouchableOpacity onPress={() => save({})} accessibilityRole="button" accessibilityLabel="Try saving again"
+              style={[styles.retryBtn, { borderColor: C.glassStroke }]}>
+              <Text style={{ color: C.primary, fontWeight: '700' }}>Try again</Text>
+            </TouchableOpacity>
           </View>
         )}
 
         {/* Mode */}
         <Section title="Mode" colors={C}>
-          <Radio label="Manual approval" desc="Tap Accept for every file (current behavior)" active={s.mode === 'manual'} onPress={() => save({ mode: 'manual' as VBMode })} card={card} colors={C} />
-          <Radio label="Auto-download" desc="Accept eligible files automatically" active={auto} onPress={() => save({ mode: 'auto' as VBMode })} card={card} colors={C} />
+          <Radio label="Manual approval" desc="Tap Accept for every file (current behavior)" active={s.mode === 'manual'} onPress={() => save({ mode: 'manual' })} card={card} colors={C} />
+          <Radio label="Auto-download" desc="Accept eligible files automatically" active={auto} onPress={() => save({ mode: 'auto' })} card={card} colors={C} />
         </Section>
 
         {auto && (
           <>
             <Section title="Network" colors={C}>
-              <Radio label="Wi-Fi only" active={s.network === 'wifi'} onPress={() => save({ network: 'wifi' as VBNetwork })} card={card} colors={C} />
-              <Radio label="Mobile data only" active={cellular} onPress={() => save({ network: 'cellular' as VBNetwork, unmeteredOnly: false })} card={card} colors={C} />
-              <Radio label="Any network" active={s.network === 'any'} onPress={() => save({ network: 'any' as VBNetwork })} card={card} colors={C} />
+              <Radio label="Wi-Fi only" active={s.network === 'wifi'} onPress={() => save({ network: 'wifi' })} card={card} colors={C} />
+              <Radio label="Mobile data only" active={cellular} onPress={() => save({ network: 'cellular', unmeteredOnly: false })} card={card} colors={C} />
+              <Radio label="Any network" active={s.network === 'any'} onPress={() => save({ network: 'any' })} card={card} colors={C} />
               <Toggle label="Only on unmetered networks"
                 desc={cellular ? 'Not available with Mobile data only: mobile data is always metered.' : undefined}
                 value={s.unmeteredOnly && !cellular} disabled={cellular}
@@ -136,7 +144,7 @@ function Toggle({ label, desc, value, disabled, onValueChange, card, colors }: {
         <Text style={[styles.rowLabel, { color: colors.text }]}>{label}</Text>
         {desc ? <Text style={[styles.rowDesc, { color: colors.textDim }]}>{desc}</Text> : null}
       </View>
-      <Switch accessibilityLabel={desc ? `${label}. ${desc}` : label} value={value} disabled={disabled} onValueChange={onValueChange} trackColor={{ true: colors.primary, false: colors.border }} />
+      <Switch accessibilityLabel={desc ? `${label}. ${desc}` : label} value={value} disabled={disabled} onValueChange={onValueChange} trackColor={{ true: colors.primary, false: colors.border }} thumbColor={colors.onPrimary} />
     </View>
   );
 }
@@ -157,4 +165,5 @@ const styles = StyleSheet.create({
   rowLabel: { fontSize: 14.5, fontWeight: '600' },
   rowDesc: { fontSize: 12, marginTop: 2 },
   hint: { fontSize: 11.5, lineHeight: 17, marginTop: 4, paddingHorizontal: 2 },
+  retryBtn: { minHeight: 44, paddingHorizontal: 12, justifyContent: 'center', borderRadius: 10, borderWidth: 1 },
 });

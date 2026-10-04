@@ -17,13 +17,13 @@
 import { AppText as Text } from '../components/ui/Text';
 import { AuroraBackground } from '../components/ui';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   View, TouchableOpacity, StyleSheet,
   ScrollView, Alert, ActivityIndicator,
   Modal, Share,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
 import { createSyncCode } from '../lib/chatService';
@@ -105,10 +105,17 @@ export default function VaultFeaturesScreen() {
   // The relock applies to a user with Device MFA on or a Device PIN set (the
   // same condition as ResumeLock); say so rather than offer a timer that does nothing.
   const [lockApplies,   setLockApplies]   = useState<boolean | null>(null);
-  useEffect(() => {
+  // Re-read on focus: turning on Device MFA or setting a PIN happens on other
+  // screens, and the note must not stay stale when the user comes back.
+  useFocusEffect(useCallback(() => {
+    let live = true;
     Promise.all([isMfaEnabled().catch(() => false), hasPIN().catch(() => false)])
-      .then(([mfaOn, hasDevicePin]) => setLockApplies(lockAppliesTo({ signedIn: true, mfaOn, hasDevicePin })));
-  }, []);
+      .then(([mfaOn, hasDevicePin]) => { if (live) setLockApplies(lockAppliesTo({ signedIn: true, mfaOn, hasDevicePin })); });
+    return () => { live = false; };
+  }, []));
+  // The "Copied" reset timer, cleared if the screen goes first.
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (copiedTimer.current) clearTimeout(copiedTimer.current); }, []);
 
   const clearLocalCode = useCallback(async () => {
     setChatCode(null);
@@ -197,7 +204,8 @@ export default function VaultFeaturesScreen() {
     try {
       await copyAndAutoClear(chatCode);
       setCodeCopied(true);
-      setTimeout(() => setCodeCopied(false), 2000);
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(() => setCodeCopied(false), 2000);
     } catch {
       Alert.alert('Could not copy', 'Use Share instead, or try again.');
     }
@@ -313,7 +321,7 @@ export default function VaultFeaturesScreen() {
               accessibilityState={{ disabled: generatingCode, busy: generatingCode }}
             >
               {generatingCode
-                ? <ActivityIndicator color={c.bubbleOutText} size="small" />
+                ? <ActivityIndicator color={c.onPrimary} size="small" />
                 : <Text style={styles.actionBtnText}>Generate Invite Code</Text>
               }
             </TouchableOpacity>
@@ -519,8 +527,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     paddingVertical: 12, alignItems: 'center', justifyContent: 'center',
   },
   actionBtnDim:   { opacity: 0.5 },
-  // bubbleOutText is the palette's white-on-accent ink.
-  actionBtnText:  { color: c.bubbleOutText, fontWeight: 'bold', fontSize: 14 },
+  actionBtnText:  { color: c.onPrimary, fontWeight: 'bold', fontSize: 14 },
 
   // Picker row
   pickerRow: {

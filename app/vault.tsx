@@ -1,8 +1,10 @@
 // app/vault.tsx
 // Device-PIN gated local file vault (the PIN set in Settings → Device PIN,
 // 4–8 digits — services/security/pinFormat).
-// Files are AES-256-GCM encrypted on this phone (lib/vaultCrypto v2: a random
+// Files are AES-256-GCM encrypted on this phone (lib/vaultCrypto: a random
 // file key wrapped under the PIN, so changing the PIN does not orphan files).
+// New files are v3, streamed in chunks from disk to disk
+// (components/vault/vaultFileIO); older v1/v2 files still open.
 // Tabs: Documents / Photos / Voice / Videos
 // "Export file list" shares names/sizes/dates only — not the files, not encrypted.
 // There is no automatic or server backup of vault files.
@@ -27,8 +29,10 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import { clearVaultKeyCache, vaultFileDecrypt, vaultFileEncrypt, type VaultKeys } from '../lib/vaultCrypto';
-import { unlockVaultKeys, type VaultKeyMiss } from '../lib/vaultKeyStore';
+import { clearVaultKeyCache, type VaultKeys } from '../lib/vaultCrypto';
+import { replaceVaultKeys, unlockVaultKeys, type VaultKeyMiss } from '../lib/vaultKeyStore';
+import { holdAppSwitcherBlur } from '../lib/screenGuard';
+import { openVaultFileTo, sealFileToVault } from '../components/vault/vaultFileIO';
 import type { Palette } from '../constants/theme';
 import { useColors } from '../lib/theme';
 import { HEADER_TOP } from '../constants/layout';
@@ -138,7 +142,7 @@ function PinGate({ onUnlock }: { onUnlock: (pin: string) => Promise<void> }) {
         </Text>
         <TouchableOpacity
           style={pinStyles.setBtn}
-          onPress={() => router.push('/backup-pin?from=settings' as any)}
+          onPress={() => router.push('/backup-pin?from=settings')}
           accessibilityRole="button"
           accessibilityLabel="Set a Device PIN"
         >
@@ -196,9 +200,10 @@ export default function VaultScreen() {
 
   const [unlocked,    setUnlocked]    = useState(false);
   const [vaultPin,    setVaultPin]    = useState('');
-  // The v2 file key. null when this PIN cannot open the key record (the PIN
-  // was reset somewhere that could not re-wrap it): older files still open via
-  // the PIN, new files fall back to the PIN-derived format — see vaultKeyStore.
+  // The file key. null when this PIN cannot open the key record (the PIN was
+  // reset somewhere that could not re-wrap it), or storage failed: older v1
+  // files still open via the PIN, and ADDING is off until the key is back —
+  // there is no weaker fallback format (lib/vaultCrypto, round 4).
   const [vaultKeys,   setVaultKeys]   = useState<VaultKeys | null>(null);
   const [keyMiss,     setKeyMiss]     = useState<VaultKeyMiss | undefined>(undefined);
   const [activeTab,   setActiveTab]   = useState<VaultTab>('Documents');
@@ -228,6 +233,11 @@ export default function VaultScreen() {
     setVaultPin(pin);
     setUnlocked(true);
   };
+
+  // iOS: blur the app-switcher snapshot and the screen while the app is
+  // inactive (Control Center), which the background re-lock below does not
+  // cover. Android's FLAG_SECURE already blanks the recents thumbnail.
+  useEffect(() => (unlocked ? holdAppSwitcherBlur() : undefined), [unlocked]);
 
   // Re-lock when the app goes to the background. A picker or share sheet this
   // screen opened also backgrounds the app (Android runs it as another
@@ -300,8 +310,34 @@ export default function VaultScreen() {
     if (d) setLastBackup(d);
   };
 
+  const [keyBusy, setKeyBusy] = useState(false);
   const retryKeys = async () => {
-    if (vaultPin) await unlock(vaultPin);
+    if (!vaultPin || keyBusy) return;
+    setKeyBusy(true);
+    try { await unlock(vaultPin); } finally { setKeyBusy(false); }
+  };
+
+  // The way out when the key record cannot be opened with this PIN (or is
+  // damaged): a fresh key, after the old record is archived — never deleted.
+  const startNewKey = () => {
+    if (!vaultPin || keyBusy) return;
+    Alert.alert(
+      'Start a new vault key?',
+      'Files added with the old key stay in the list but still cannot be opened with this PIN. The old key is kept on this phone, not deleted. New files will use the new key.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Start new key', style: 'destructive', onPress: async () => {
+          setKeyBusy(true);
+          try {
+            const keys = await replaceVaultKeys(vaultPin);
+            setVaultKeys(keys);
+            setKeyMiss(undefined);
+          } catch (e: any) {
+            Alert.alert('No new key', `Nothing was changed. ${e?.message ?? 'Try again.'}`);
+          } finally { setKeyBusy(false); }
+        } },
+      ],
+    );
   };
 
   // ── File encryption + save ────────────────────────────────────
@@ -314,27 +350,16 @@ export default function VaultScreen() {
   ): Promise<void> => {
     setLoading(true);
     try {
-      // 1. Read file as base64
-      const base64 = await FileSystem.readAsStringAsync(uri, {
-        encoding: 'base64',
-      });
-
-      // 2. Encrypt with AES-256-GCM using a key derived from the Vault PIN
-      const encrypted = vaultFileEncrypt(vaultKeys, vaultPin, base64);
-
-      // 3. Save encrypted payload to disk
+      // 1–3. Seal it chunk by chunk under the vault key straight to disk
+      // (v3): the file is never held whole in memory, and without the key
+      // nothing is written (no weaker fallback).
       const fileId  = `vault_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const encPath = VAULT_DIR + fileId + '.enc';
-
-      await FileSystem.writeAsStringAsync(
-        encPath,
-        JSON.stringify(encrypted),
-        { encoding: 'utf8' }
-      );
+      const sealedBytes = await sealFileToVault(vaultKeys, uri, encPath);
 
       // 4. Add to manifest
       const newFile: VaultFile = {
-        id: fileId, name, size, type,
+        id: fileId, name, size: sealedBytes || size, type,
         encPath, addedAt: Date.now(), mimeType,
       };
       try {
@@ -346,7 +371,7 @@ export default function VaultScreen() {
 
       Alert.alert('Added to Vault', `${name} encrypted and stored.`);
     } catch (e: any) {
-      Alert.alert('Error', e.message || 'Failed to encrypt file');
+      Alert.alert('Not added', e?.message || 'The file could not be encrypted. Try again.');
     } finally {
       setLoading(false);
     }
@@ -354,7 +379,7 @@ export default function VaultScreen() {
 
   // ── Add file handlers per tab ─────────────────────────────────
   const handleAdd = async () => {
-    if (adding.current || loading || manifestState !== 'ok') return;
+    if (adding.current || loading || manifestState !== 'ok' || !vaultKeys) return;
     adding.current = true;
     // The whole add (picker, encrypt, manifest save) is one bracket, so going
     // to the background mid-encrypt cannot lock the vault under it.
@@ -376,7 +401,7 @@ export default function VaultScreen() {
         const asset = result.assets[0];
         const name  = asset.fileName || `photo_${Date.now()}.jpg`;
         await encryptAndSave(
-          asset.uri, name, asset.fileSize || 0, 'image/jpeg', 'Photos'
+          asset.uri, name, asset.fileSize || 0, asset.mimeType || 'image/jpeg', 'Photos'
         );
       }
     } else if (activeTab === 'Videos') {
@@ -392,7 +417,7 @@ export default function VaultScreen() {
         const asset = result.assets[0];
         const name  = asset.fileName || `video_${Date.now()}.mp4`;
         await encryptAndSave(
-          asset.uri, name, asset.fileSize || 0, 'video/mp4', 'Videos'
+          asset.uri, name, asset.fileSize || 0, asset.mimeType || 'video/mp4', 'Videos'
         );
       }
     } else {
@@ -420,21 +445,11 @@ export default function VaultScreen() {
     setLoading(true);
     let tempPath: string | null = null;
     try {
-      // 1. Read encrypted payload from disk
-      const raw = await FileSystem.readAsStringAsync(file.encPath, {
-        encoding: 'utf8',
-      });
-      const payload = JSON.parse(raw);
-
-      // 2. Decrypt with the PIN-derived key
-      const base64 = vaultFileDecrypt(vaultKeys, vaultPin, payload);
-
-      // 3. Write decrypted file to temp location (deleted below)
+      // 1–3. Decrypt to a temp copy (deleted below): v3 streams chunk by
+      // chunk, older v1/v2 files take the whole-file path.
       await FileSystem.makeDirectoryAsync(OPEN_DIR, { intermediates: true }).catch(() => {});
       tempPath = OPEN_DIR + safeName(file.name);
-      await FileSystem.writeAsStringAsync(tempPath, base64, {
-        encoding: 'base64',
-      });
+      await openVaultFileTo(vaultKeys, vaultPin, file.encPath, tempPath);
 
       // 4. Share/open with system viewer
       const canShare = await Sharing.isAvailableAsync();
@@ -448,7 +463,7 @@ export default function VaultScreen() {
         Alert.alert('Cannot open', 'This device has no app to open the file with.');
       }
     } catch (e: any) {
-      Alert.alert('Error', 'Failed to decrypt file: ' + e.message);
+      Alert.alert('Could not open', e?.message || 'The file could not be decrypted.');
     } finally {
       // ponytail: deleted as soon as the share sheet returns. Android resolves
       // shareAsync once the chooser closes, which is after a viewer has read the
@@ -580,23 +595,20 @@ export default function VaultScreen() {
       </View>
 
       {!vaultKeys && (
-        keyMiss === 'storage' ? (
-          <View style={styles.keyNoticeRow}>
-            <Text style={[styles.keyNotice, { flex: 1 }]} accessibilityLiveRegion="polite">
-              This phone&apos;s secure storage could not be read, so the vault key did not load. Files may
-              not open until it does.
-            </Text>
-            <TouchableOpacity style={styles.keyRetryBtn} onPress={retryKeys} accessibilityRole="button" accessibilityLabel="Try loading the vault key again">
-              <Text style={styles.keyRetryText}>Try again</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <Text style={styles.keyNotice} accessibilityLiveRegion="polite">
-            {keyMiss === 'damaged'
-              ? 'The saved vault key is damaged, so files added with it may not open. It has been left as it is. New files are still encrypted with your PIN.'
-              : 'This PIN cannot open the vault key from before your PIN was reset, so files added under the old PIN may not open. New files are still encrypted with this PIN.'}
+        <View style={styles.keyNoticeRow}>
+          <Text style={[styles.keyNotice, { flex: 1 }]} accessibilityLiveRegion="polite">
+            {keyMiss === 'storage'
+              ? 'This phone\'s secure storage could not be read, so the vault key did not load. Files may not open, and adding files is paused, until it does.'
+              : keyMiss === 'damaged'
+                ? 'The saved vault key is damaged, so files added with it cannot open. It has been left as it is. Adding files is paused until you start a new key.'
+                : 'This PIN cannot open the vault key from before your PIN was reset, so files added under the old PIN cannot open. Adding files is paused until you start a new key.'}
           </Text>
-        )
+          <TouchableOpacity style={styles.keyRetryBtn} onPress={keyMiss === 'storage' ? retryKeys : startNewKey} disabled={keyBusy}
+            accessibilityRole="button" accessibilityState={{ disabled: keyBusy, busy: keyBusy }}
+            accessibilityLabel={keyMiss === 'storage' ? 'Try loading the vault key again' : 'Start a new vault key'}>
+            {keyBusy ? <ActivityIndicator color={c.primary} /> : <Text style={styles.keyRetryText}>{keyMiss === 'storage' ? 'Try again' : 'New key'}</Text>}
+          </TouchableOpacity>
+        </View>
       )}
 
       {/* Tabs */}
@@ -713,13 +725,12 @@ export default function VaultScreen() {
       <TouchableOpacity
         accessibilityRole="button"
         accessibilityLabel="Add to vault"
-        accessibilityState={{ disabled: loading || manifestState !== 'ok' }}
-        disabled={loading || manifestState !== 'ok'}
-        style={[styles.fab, (loading || manifestState !== 'ok') && styles.fabDisabled]}
+        accessibilityState={{ disabled: loading || manifestState !== 'ok' || !vaultKeys }}
+        disabled={loading || manifestState !== 'ok' || !vaultKeys}
+        style={[styles.fab, (loading || manifestState !== 'ok' || !vaultKeys) && styles.fabDisabled]}
         onPress={handleAdd}
       >
-        {/* bubbleOutText is the palette's white-on-accent ink. */}
-        <Ionicons name="add" size={28} color={c.bubbleOutText} />
+        <Ionicons name="add" size={28} color={c.onPrimary} />
       </TouchableOpacity>
 
       {/* Backup modal */}
@@ -760,7 +771,7 @@ export default function VaultScreen() {
                 accessibilityState={{ disabled: loading || manifestState !== 'ok', busy: loading }}
               >
                 {loading
-                  ? <ActivityIndicator color={c.bubbleOutText} size="small" />
+                  ? <ActivityIndicator color={c.onPrimary} size="small" />
                   : <Text style={styles.backupConfirmText}>Export</Text>
                 }
               </TouchableOpacity>
@@ -800,7 +811,7 @@ const makePinStyles = (c: Palette) => StyleSheet.create({
   error:     { color: c.danger, fontSize: 13, marginTop: 12, textAlign: 'center', paddingHorizontal: 24 },
   note:      { marginTop: 28, color: c.textDim, fontSize: 11 },
   setBtn:    { marginTop: 8, minHeight: 48, paddingHorizontal: 24, borderRadius: 12, backgroundColor: c.primary, justifyContent: 'center', alignItems: 'center' },
-  setBtnText:{ color: c.bubbleOutText, fontWeight: 'bold', fontSize: 15 },
+  setBtnText:{ color: c.onPrimary, fontWeight: 'bold', fontSize: 15 },
 });
 
 const makeStyles = (c: Palette) => StyleSheet.create({
@@ -908,7 +919,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   },
   fabDisabled: { opacity: 0.4 },
   retryBtn: { minHeight: 44, paddingHorizontal: 24, borderRadius: 12, backgroundColor: c.primary, justifyContent: 'center', alignItems: 'center' },
-  retryText: { color: c.bubbleOutText, fontWeight: 'bold', fontSize: 15 },
+  retryText: { color: c.onPrimary, fontWeight: 'bold', fontSize: 15 },
 
   // Backup modal
   // Modal scrim: a translucent black dims whatever is behind in either theme.
@@ -943,7 +954,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     flex: 1, backgroundColor: c.primary,
     borderRadius: 10, paddingVertical: 13, alignItems: 'center',
   },
-  backupConfirmText: { color: c.bubbleOutText, fontWeight: 'bold', fontSize: 15 },
+  backupConfirmText: { color: c.onPrimary, fontWeight: 'bold', fontSize: 15 },
   backupLastText:    { fontSize: 12, color: c.textDim, textAlign: 'center' },
   backupNote:        { fontSize: 12, color: c.text, textAlign: 'center', marginTop: 6 },
 });
