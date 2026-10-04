@@ -17,11 +17,10 @@ export type ResolvedViewer = { name: string; uri?: string | null; headers?: Reco
 type Resolve = (userId: string) => ResolvedViewer;
 
 // Colours are palette roles, so the activity text stays readable in both themes.
-// Uploading keeps a fixed amber: the palette has no warning role yet.
 const ACTIVITY: Record<string, { icon: keyof typeof Ionicons.glyphMap; label: string; color: (c: Palette) => string }> = {
   reading:   { icon: 'eye',                    label: 'Reading',   color: c => c.success },
   typing:    { icon: 'ellipsis-horizontal',    label: 'Typing…',   color: c => c.accentOn },
-  uploading: { icon: 'arrow-up-circle',        label: 'Uploading', color: () => '#B45309' },
+  uploading: { icon: 'arrow-up-circle',        label: 'Uploading', color: c => c.warning },
 };
 const act = (a?: string) => ACTIVITY[a || 'reading'] || ACTIVITY.reading;
 

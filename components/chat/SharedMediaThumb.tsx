@@ -16,6 +16,7 @@ import { type Palette } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
 import { attachmentUrl, decryptFromChat, type Message } from '../../lib/chatService';
 import { getDecryptedAttachmentUri, parseMediaContent } from '../../lib/mediaAttachments';
+import { ON_MEDIA_SCRIM } from './chatStyles';
 
 export default function SharedMediaThumb({ m, chatId, authHeader, size, onPress }: {
   m: Message;
@@ -53,7 +54,7 @@ export default function SharedMediaThumb({ m, chatId, authHeader, size, onPress 
       {src
         ? <Image source={src} style={s.img} />
         : <Ionicons name={m.type === 'video' ? 'videocam' : 'image'} size={24} color={colors.textFaint} />}
-      {m.type === 'video' && <View style={s.videoBadge}><Ionicons name="play" size={12} color="#fff" /></View>}
+      {m.type === 'video' && <View style={s.videoBadge}><Ionicons name="play" size={12} color={ON_MEDIA_SCRIM} /></View>}
     </>
   );
 
@@ -64,6 +65,7 @@ export default function SharedMediaThumb({ m, chatId, authHeader, size, onPress 
       style={[s.tile, { width: size, height: size }]}
       onPress={onPress}
       activeOpacity={0.8}
+      accessibilityRole="button"
       accessibilityLabel={m.type === 'video' ? 'Shared video' : 'Shared photo'}
     >
       {inner}

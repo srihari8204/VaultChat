@@ -28,7 +28,7 @@ export default function SmartReplyBar({ lastMessage, onSelect, visible }: Props)
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.wrap} contentContainerStyle={s.row}>
       {replies.map((r, i) => (
-        <TouchableOpacity key={i} style={s.chip} onPress={() => onSelect(r)}>
+        <TouchableOpacity key={i} style={s.chip} onPress={() => onSelect(r)} accessibilityRole="button" accessibilityLabel={`Reply: ${r}`}>
           <Text style={s.chipTxt}>{r}</Text>
         </TouchableOpacity>
       ))}
@@ -39,6 +39,6 @@ export default function SmartReplyBar({ lastMessage, onSelect, visible }: Props)
 const makeS = (c: Palette) => StyleSheet.create({
   wrap: { backgroundColor: c.bg, borderTopWidth: 1, borderTopColor: c.glassStroke, maxHeight: 44 },
   row: { paddingHorizontal: 10, gap: 8, alignItems: 'center', paddingVertical: 6 },
-  chip: { backgroundColor: c.bg, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 7, borderWidth: 1, borderColor: '#00E5FF33' },
-  chipTxt: { color: '#00E5FF', fontSize: 13 },
+  chip: { backgroundColor: c.bg, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 7, borderWidth: 1, borderColor: c.glassStroke },
+  chipTxt: { color: c.accentOn, fontSize: 13 },
 });

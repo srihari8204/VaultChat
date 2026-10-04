@@ -7,7 +7,8 @@
 // lockInfo` that used to be on it is exactly what rendered the chat in full
 // when getLock threw.
 
-import { Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useEffect } from 'react';
+import { AccessibilityInfo, Platform, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../lib/theme';
@@ -17,7 +18,7 @@ import { useS } from './chatStyles';
 export type LockState = 'checking' | 'open' | 'locked';
 
 export function ChatLockGate({
-  lockState, setLockState, lockInfo, lockBio, setLockBio, lockPin, setLockPin, lockErr, setLockErr, submitLockPin,
+  lockState, setLockState, lockInfo, lockBio, setLockBio, lockPin, setLockPin, lockErr, setLockErr, submitLockPin, embedded,
 }: {
   lockState: LockState;
   setLockState: (s: LockState) => void;
@@ -29,10 +30,17 @@ export function ChatLockGate({
   lockErr: string | null;
   setLockErr: (e: string | null) => void;
   submitLockPin: () => void;
+  /** A split-view pane (app/split.tsx): navigating from here would replace the whole split. */
+  embedded?: boolean;
 }) {
   const S = useS();
   const { colors } = useTheme();
   const router = useRouter();
+  // Speak a new PIN error. Android reads the live region on the Text below;
+  // iOS has no live regions, so it is announced explicitly there.
+  useEffect(() => {
+    if (lockErr && Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(lockErr);
+  }, [lockErr]);
   if (lockState === 'open') return null;
   return (
     <View style={S.lockGate} accessibilityViewIsModal>
@@ -64,7 +72,7 @@ export function ChatLockGate({
             if (lockInfo?.lockMethod !== 'both') setLockState('open');
           }}
         >
-          <Ionicons name={lockBio ? 'checkmark-circle' : 'finger-print'} size={18} color="#fff" />
+          <Ionicons name={lockBio ? 'checkmark-circle' : 'finger-print'} size={18} color={colors.onPrimary} />
           <Text style={S.lockGateBtnTxt}>{lockBio ? 'Biometrics verified' : 'Use biometrics'}</Text>
         </TouchableOpacity>
       )}
@@ -83,16 +91,23 @@ export function ChatLockGate({
             accessibilityLabel="Chat PIN"
             onSubmitEditing={submitLockPin}
           />
-          {!!lockErr && <Text style={S.lockGateErr}>{lockErr}</Text>}
+          {!!lockErr && <Text style={S.lockGateErr} accessibilityRole="alert" accessibilityLiveRegion="polite">{lockErr}</Text>}
           <TouchableOpacity style={[S.lockGateBtn, { marginTop: 12 }]} onPress={submitLockPin} accessibilityRole="button" accessibilityLabel="Unlock">
             <Text style={S.lockGateBtnTxt}>Unlock</Text>
           </TouchableOpacity>
         </View>
       )}
 
-      <TouchableOpacity style={{ marginTop: 20 }} onPress={() => router.replace('/(tabs)/chats' as any)} accessibilityRole="button" accessibilityLabel="Back to chats">
-        <Text style={S.lockGateBack}>Back to chats</Text>
-      </TouchableOpacity>
+      {embedded ? (
+        // A pane has no screen of its own to leave: router.replace here swapped
+        // the whole split view (and the other chat) for the chat list. The split
+        // bar's Swap / Close are this pane's exits, as for the hidden header Back.
+        <Text style={[S.lockGateSub, { marginTop: 20 }]}>Use Swap or Close in the split bar to leave this chat.</Text>
+      ) : (
+        <TouchableOpacity style={{ marginTop: 20 }} hitSlop={10} onPress={() => router.replace('/(tabs)/chats')} accessibilityRole="button" accessibilityLabel="Back to chats">
+          <Text style={S.lockGateBack}>Back to chats</Text>
+        </TouchableOpacity>
+      )}
       </>)}
     </View>
   );

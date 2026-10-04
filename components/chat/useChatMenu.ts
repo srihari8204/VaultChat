@@ -25,14 +25,14 @@ import {
   type ChatDetail,
   type ScreenshotMode,
 } from '../../lib/chatService';
-import { DISAPPEARING_PRESETS, formatDisappearing, formatScreenshotMode } from './MessageBubble';
+import { DISAPPEARING_PRESETS, formatDisappearing, formatScreenshotMode } from './chatFormat';
 import type { DisplayMessage } from './chatStyles';
 
 export type OverflowMenu = { title: string; actions: MenuAction[] };
 
 export function useChatMenu({
   chat, setChat, chatId, meId, router, compactHeader, embedded, activeProfile, setActiveProfile,
-  setOverflowMenu, setSearchOpen, setMessages,
+  setOverflowMenu, setSearchOpen, setMessages, onPaneEnded,
 }: {
   chat: ChatDetail | null;
   setChat: Dispatch<SetStateAction<ChatDetail | null>>;
@@ -46,6 +46,13 @@ export function useChatMenu({
   setOverflowMenu: (menu: OverflowMenu | null) => void;
   setSearchOpen: (open: boolean) => void;
   setMessages: Dispatch<SetStateAction<DisplayMessage[]>>;
+  /**
+   * Embedded (split-view pane) only. A pane cannot navigate away from itself —
+   * back/replace would pop or replace the whole split screen, the other chat
+   * included — so an action that ends this chat for the user (leave, hide,
+   * clear) reports it here and the pane shows that instead of the chat.
+   */
+  onPaneEnded?: (notice: string) => void;
 }) {
   // Screenshot-mode picker (header menu entry)
   const openScreenshotPicker = useCallback(() => {
@@ -78,20 +85,32 @@ export function useChatMenu({
 
   // Per-chat notification sound picker (themed sheet). Sets the Android channel
   // the server will address for this chat's pushes.
+  //
+  // The current sound is marked only when the server says what it is:
+  // `notifSound` on GET /chats/:id (written, not yet deployed — SP R4BE C2).
+  // Until then the field is absent and no option claims to be current, rather
+  // than guessing "Default".
   const openNotifSoundPicker = useCallback(() => {
     if (!chat) return;
+    const current = (chat as ChatDetail & { notifSound?: string }).notifSound;
+    const known = NOTIF_CHANNELS.some(ch => ch.id === current);
     setOverflowMenu({
       title: 'Notification sound',
       actions: NOTIF_CHANNELS.map(ch => ({
         label: ch.name,
-        icon: 'musical-note-outline' as const,
+        icon: !known ? 'musical-note-outline' as const
+          : current === ch.id ? 'radio-button-on' as const : 'radio-button-off' as const,
         onPress: async () => {
-          try { await setChatNotifSound(chatId, ch.id); }
-          catch (e: any) { Alert.alert('Could not update', e?.message ?? 'Try again'); }
+          if (current === ch.id) return;
+          try {
+            await setChatNotifSound(chatId, ch.id);
+            // Mark it locally too, so reopening the picker agrees with what was saved.
+            setChat(prev => prev ? { ...prev, notifSound: ch.id } as ChatDetail : prev);
+          } catch (e: any) { Alert.alert('Could not update', e?.message ?? 'Try again'); }
         },
       })),
     });
-  }, [chat, chatId, setOverflowMenu]);
+  }, [chat, chatId, setChat, setOverflowMenu]);
 
   // Disappearing-messages picker — Alert sheet, Off / 24h / 7d / 90d.
   // Any member can change the timer (privacy is shared, not admin-gated).
@@ -133,13 +152,13 @@ export function useChatMenu({
       ...(compactHeader ? [{
         label: 'Voice call', icon: 'call-outline' as const,
         onPress: () => chat.type === 'group'
-          ? router.push({ pathname: '/group-calls' as any, params: { chatId, groupName: chat.name ?? 'Group', mode: 'voice' } })
-          : peer && router.push({ pathname: '/voicecall' as any, params: { chatId, peerUid: peer.userId, peerName: peer.name || peer.email || 'crazzychat user' } }),
+          ? router.push({ pathname: '/group-calls', params: { chatId, groupName: chat.name ?? 'Group', mode: 'voice' } })
+          : peer && router.push({ pathname: '/voicecall', params: { chatId, peerUid: peer.userId, peerName: peer.name || peer.email || 'crazzychat user' } }),
       }, {
         label: 'Video call', icon: 'videocam-outline' as const,
         onPress: () => chat.type === 'group'
-          ? router.push({ pathname: '/group-calls' as any, params: { chatId, groupName: chat.name ?? 'Group', mode: 'video' } })
-          : peer && router.push({ pathname: '/videocall' as any, params: { chatId, peerUid: peer.userId, peerName: peer.name || peer.email || 'crazzychat user' } }),
+          ? router.push({ pathname: '/group-calls', params: { chatId, groupName: chat.name ?? 'Group', mode: 'video' } })
+          : peer && router.push({ pathname: '/videocall', params: { chatId, peerUid: peer.userId, peerName: peer.name || peer.email || 'crazzychat user' } }),
       }] : []),
       // The header's fourth trailing icon, relocated. Tap-to-switch survives —
       // it is one press deeper, which is the trade the three-action header
@@ -153,7 +172,7 @@ export function useChatMenu({
       {
         label: 'Vision Comfort settings',
         icon: 'options-outline',
-        onPress: () => router.push('/vision-comfort' as any),
+        onPress: () => router.push('/vision-comfort'),
       },
       // Search lives here, not in the header.
       //
@@ -174,7 +193,7 @@ export function useChatMenu({
         label: 'Export chat',
         icon: 'share-outline',
         onPress: () => router.push({
-          pathname: '/chat-export' as any,
+          pathname: '/chat-export',
           params: { chatId, peerName: peer?.name || peer?.email || chat.name || '' },
         }),
       },
@@ -226,7 +245,8 @@ export function useChatMenu({
           const next = !chat.hidden;
           try {
             await setHidden(chatId, next);
-            if (next) router.replace('/(tabs)/chats' as any);
+            // From a pane, replace would swap out the whole split screen.
+            if (next) { if (embedded) onPaneEnded?.('Chat hidden.'); else router.replace('/(tabs)/chats'); }
             else setChat(prev => prev ? { ...prev, hidden: next } : prev);
           } catch (e: any) { Alert.alert('Could not update', e?.message ?? 'Try again'); }
         },
@@ -237,25 +257,25 @@ export function useChatMenu({
         // chat's settings directly.
         label: 'Chat lock',
         icon: 'lock-closed-outline',
-        onPress: () => router.push({ pathname: '/app-lock-chats' as any, params: { chatId, chatName: chat.name || peer?.name || peer?.email || '' } }),
+        onPress: () => router.push({ pathname: '/app-lock-chats', params: { chatId, chatName: chat.name || peer?.name || peer?.email || '' } }),
       },
       {
         label: 'Schedule a message',
         icon: 'calendar-outline',
         onPress: () => router.push({
-          pathname: '/schedule-message' as any,
+          pathname: '/schedule-message',
           params: { chatId, peerName: peer?.name ?? chat.name ?? '' },
         }),
       },
       {
         label: 'Wallpaper',
         icon: 'image-outline',
-        onPress: () => router.push({ pathname: '/chat-wallpaper' as any, params: { chatId } }),
+        onPress: () => router.push({ pathname: '/chat-wallpaper', params: { chatId } }),
       },
       {
         label: 'Bubble theme',
         icon: 'color-palette-outline',
-        onPress: () => router.push({ pathname: '/chat-themes' as any, params: { chatId } }),
+        onPress: () => router.push({ pathname: '/chat-themes', params: { chatId } }),
       },
     ];
 
@@ -288,7 +308,8 @@ export function useChatMenu({
                 setMessages([]);
                 // A split-view pane has no screen of its own: back would pop
                 // the whole split screen (same reason as the hidden Back).
-                if (!embedded) router.back();
+                if (embedded) onPaneEnded?.('Chat cleared from this device.');
+                else router.back();
               } catch (e: any) { Alert.alert('Could not clear', e?.message ?? 'Try again'); }
             } },
         ],
@@ -299,7 +320,7 @@ export function useChatMenu({
       actions.push({
         label: 'Group info',
         icon: 'people-outline',
-        onPress: () => router.push({ pathname: '/group-info' as any, params: { id: chatId } }),
+        onPress: () => router.push({ pathname: '/group-info', params: { id: chatId } }),
       });
       actions.push(clearAction);
       // Same call and wording as Leave in group-info.
@@ -313,8 +334,11 @@ export function useChatMenu({
             { text: 'Leave', style: 'destructive', onPress: async () => {
                 try {
                   await removeChatMember(chatId, meId);
-                  // Not from a split-view pane: that would replace the whole split screen.
-                  if (!embedded) router.replace('/(tabs)/chats' as any);
+                  // Not from a split-view pane: that would replace the whole split
+                  // screen. The pane stops showing the group instead of stranding
+                  // you in a chat you no longer belong to.
+                  if (embedded) onPaneEnded?.('You left this group.');
+                  else router.replace('/(tabs)/chats');
                 } catch (e: any) { Alert.alert('Leave failed', e?.message ?? 'Try again'); }
               } },
           ]),
@@ -330,7 +354,7 @@ export function useChatMenu({
         label: 'Exit Kit',
         icon: 'download-outline',
         onPress: () => router.push({
-          pathname: '/import-chats' as any,
+          pathname: '/import-chats',
           params: { chatId, peerName: peer.name || peer.email || '' },
         }),
       });
@@ -365,7 +389,7 @@ export function useChatMenu({
         label: 'Ghost Mode',
         icon: 'eye-off-outline',
         onPress: () => router.push({
-          pathname: '/ghost-mode' as any,
+          pathname: '/ghost-mode',
           params: { targetId: peer.userId, targetName: peer.name || peer.email || '' },
         }),
       });
@@ -410,7 +434,8 @@ export function useChatMenu({
 
     setOverflowMenu({ title: chat.name || (peer?.name ?? 'Chat'), actions });
   }, [chat, meId, chatId, router, compactHeader, embedded, activeProfile, setActiveProfile,
-    openNotifSoundPicker, openDisappearingPicker, openScreenshotPicker, setChat, setMessages, setOverflowMenu, setSearchOpen]);
+    openNotifSoundPicker, openDisappearingPicker, openScreenshotPicker, setChat, setMessages, setOverflowMenu, setSearchOpen,
+    onPaneEnded]);
 
   return onPressMenu;
 }

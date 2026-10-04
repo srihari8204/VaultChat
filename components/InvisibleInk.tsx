@@ -109,7 +109,7 @@ const makeS = (c: Palette) => StyleSheet.create({
     overflow: 'hidden',
   },
   containerMe: {
-    backgroundColor: '#6C63FF',
+    backgroundColor: c.primary,
   },
   containerPeer: {
     backgroundColor: c.bg,
@@ -119,7 +119,7 @@ const makeS = (c: Palette) => StyleSheet.create({
     lineHeight: 20,
   },
   textMe: {
-    color: '#FFFFFF',
+    color: c.onPrimary,
   },
   textPeer: {
     color: c.text,
@@ -141,7 +141,7 @@ const makeS = (c: Palette) => StyleSheet.create({
     fontSize: 14,
   },
   inkLabel: {
-    color: '#A78BFA',
+    color: c.accentOn,
     fontSize: 11,
     fontWeight: '600',
   },
@@ -154,7 +154,7 @@ const makeS = (c: Palette) => StyleSheet.create({
     borderRadius: 4,
   },
   revealedTag: {
-    color: '#A78BFA',
+    color: c.accentOn,
     fontSize: 9,
     marginTop: 4,
     fontWeight: '600',

@@ -19,15 +19,18 @@ export default function ReactionPicker({ visible, onSelect, onClose }: Props) {
   const s = useMemo(() => makeS(c), [c]);
   if (!visible) return null;
   return (
-    <Pressable style={s.overlay} onPress={onClose}>
+    // The dismiss target is a sibling behind the emoji row, not its parent:
+    // an accessible parent folds the row into one VoiceOver element.
+    <View style={s.overlay}>
+      <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close reactions" />
       <View style={s.bubble}>
         {EMOJIS.map(e => (
-          <TouchableOpacity key={e} onPress={() => onSelect(e)} style={s.emojiBtn}>
+          <TouchableOpacity key={e} onPress={() => onSelect(e)} style={s.emojiBtn} accessibilityRole="button" accessibilityLabel={`React ${e}`}>
             <Text style={s.emoji}>{e}</Text>
           </TouchableOpacity>
         ))}
       </View>
-    </Pressable>
+    </View>
   );
 }
 

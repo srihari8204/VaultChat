@@ -8,7 +8,9 @@ import { brandAlpha } from '../../constants/theme';
 import { IMPORT_SOURCE } from '../../constants/importSources';
 import { useTheme } from '../../lib/theme';
 import type { ChatMember, PollVoteSummary, ReactionSummary } from '../../lib/chatService';
-import { MemoBubble, DateChip, UnreadDivider, ImportedDivider, SwipeToReply, isSameCalendarDay } from './MessageBubble';
+import { MemoBubble } from './MessageBubble';
+import { DateChip, UnreadDivider, ImportedDivider, SwipeToReply } from './ThreadDecor';
+import { isSameCalendarDay } from './chatFormat';
 import type { DisplayMessage } from './chatStyles';
 
 export function MessageRow({
@@ -65,6 +67,8 @@ export function MessageRow({
   const importMark = !IMPORT_SOURCE[mine!] && IMPORT_SOURCE[theirs!] ? { origin: theirs!, atStart: false }
     : IMPORT_SOURCE[mine!] && !older ? { origin: mine!, atStart: true }
     : null;
+  // Swipe-to-reply, and the bubble's Reply accessibility action.
+  const replyToItem = () => { if (!item.deletedAt && item.type !== 'system') onReply(item); };
   return (
     <View>
       {newerGapBeforeId === item.id && (
@@ -84,7 +88,7 @@ export function MessageRow({
       {importMark && <ImportedDivider origin={importMark.origin} atStart={importMark.atStart} />}
       {showDate && <DateChip iso={item.createdAt} />}
       {showUnread && <UnreadDivider count={unreadInfo!.count} />}
-      <SwipeToReply onReply={() => { if (!item.deletedAt && item.type !== 'system') onReply(item); }}>
+      <SwipeToReply onReply={replyToItem}>
       <View style={item.id === flashId ? { backgroundColor: brandAlpha(0.18), borderRadius: 12 } : undefined}>
       {item._album ? (
         // Album: several media picked in one action, laid out in a
@@ -137,6 +141,7 @@ export function MessageRow({
         otherMembers={otherMembers}
         onLongPress={onLongPressMessage}
         onJumpTo={jumpToMessage}
+        onReply={replyToItem}
         reactionsForMsg={mergedReactions[item.id]}
         onToggleReaction={(emoji) => toggleReaction(item, emoji)}
         replyTarget={replyTarget}

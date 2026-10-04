@@ -229,7 +229,7 @@ export default function GifPicker({ visible, onClose, onSelect, initialTab = 'gi
                   accessibilityRole="button"
                   accessibilityLabel="Send"
                 >
-                  <Ionicons name="send" size={16} color="#fff" />
+                  <Ionicons name="send" size={16} color={colors.onPrimary} />
                   <Text style={s.previewSendTxt}>Send</Text>
                 </TouchableOpacity>
               </View>
@@ -258,7 +258,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   tab:       { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, backgroundColor: c.glassSoft },
   tabOn:     { backgroundColor: c.primary },
   tabTxt:    { color: c.textDim, fontSize: 13, fontWeight: '700' },
-  tabTxtOn:  { color: '#fff' },
+  tabTxtOn:  { color: c.onPrimary },
   grid:      { padding: 4 },
   gifCell:   { flex: 1, margin: 2, height: 100, backgroundColor: c.glassSoft, borderRadius: 8, overflow: 'hidden' },
   gifImg:    { width: '100%', height: '100%' },
@@ -275,5 +275,5 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   previewCancelTxt:{ color: c.textDim, fontSize: 15, fontWeight: '700' },
   previewSend:     { flex: 2, flexDirection: 'row', gap: 8, paddingVertical: 12, borderRadius: 12,
                      alignItems: 'center', justifyContent: 'center', backgroundColor: c.primary },
-  previewSendTxt:  { color: '#fff', fontSize: 15, fontWeight: '800' },
+  previewSendTxt:  { color: c.onPrimary, fontSize: 15, fontWeight: '800' },
 });

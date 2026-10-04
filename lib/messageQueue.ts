@@ -16,8 +16,9 @@
 // UI: subscribe via .on('pending'|'sent'|'failed', ...) to mirror state.
 //
 // Scope (MVP):
-//   * TEXT messages only (image/file/audio uploads still require live network
-//     because the upload step is not in the queue yet — Phase 4b polish).
+//   * Text, reactions, edits/deletes, and messages whose media needs no upload
+//     (GIF cards, forwards — enqueueMessage). Uploads go through
+//     lib/mediaOutbox, which has its own durable queue.
 
 import NetInfo from '@react-native-community/netinfo';
 import * as Crypto from 'expo-crypto';
@@ -243,6 +244,34 @@ export async function enqueueReaction(
 ): Promise<QueuedMessage> {
   return enqueue({ ...baseItem(chatId), type: 'reaction',
     plaintext: JSON.stringify({ reactsTo: msgId, op, emoji }) });
+}
+
+/**
+ * Enqueue a message whose media (if any) is already addressable, so nothing
+ * has to be uploaded first: a GIF/sticker card (its image is `meta.gifUrl`) or
+ * a forward (it reuses the source's `attachmentId`). It gets text's guarantees:
+ * a pending bubble, clock-forever retry, survival across restarts, and the same
+ * E2EE path at flush (lib/msgEnvelope: only META_PUBLIC_KEYS reach the server,
+ * the rest of `meta` rides inside the ciphertext). A GIF or forward used to be
+ * a bare sendMessage() call, so offline it simply failed and was lost.
+ *
+ * Media that still needs uploading (`meta.localUri`) is refused: a device path
+ * means nothing to the recipient, and lib/mediaOutbox owns the upload step.
+ */
+export async function enqueueMessage(
+  chatId: string,
+  msg: {
+    type: Message['type'];
+    plaintext?: string;
+    replyToId?: number | null;
+    meta?: Record<string, unknown> | null;
+  },
+): Promise<QueuedMessage> {
+  if (msg.meta && 'localUri' in msg.meta) {
+    throw new Error('This file has not been uploaded yet — send it as media instead.');
+  }
+  return enqueue({ ...baseItem(chatId), type: msg.type, plaintext: msg.plaintext ?? '',
+    replyToId: msg.replyToId ?? null, meta: msg.meta ?? null });
 }
 
 /** Enqueue an edit of an existing message. Content is re-encrypted at flush. */
@@ -544,7 +573,10 @@ async function postOnce(item: QueuedMessage): Promise<PostResult> {
   // The server copy is untouched — it received `content`, the DR1/GSK1
   // envelope, and never sees any of this.
   let committed = true;
-  if (real && (item.op ?? 'send') === 'send' && item.plaintext) {
+  // `|| item.meta`: a GIF card or an uncaptioned forward has NO text, only
+  // meta (enqueueMessage). Its local record still needs the full meta and an
+  // empty body — the ack's content is ciphertext and its meta the routing subset.
+  if (real && (item.op ?? 'send') === 'send' && (item.plaintext || item.meta)) {
     (real as any).content = item.plaintext;
     // ...and the FULL meta, not the subset that came back from the server.
     // `real` is the POST response, so its meta is the routing subset we just

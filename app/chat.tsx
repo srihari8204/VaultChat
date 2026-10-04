@@ -88,7 +88,6 @@ import {
   attachmentUrl,
   getPollVotesBulk,
   type PollVoteSummary,
-  forwardMessage,
   getChat,
   getMessages,
   hydrateMessages,
@@ -98,7 +97,6 @@ import {
   pinMessage,
   reportScreenshotCaptured,
   persistMessageDeletion,
-  sendMessage,
   type ChatDetail,
   type ChatMember,
   type ChatSummary,
@@ -107,6 +105,7 @@ import {
   normalizeMsgIds,
 } from '../lib/chatService';
 import { markReadDurable, markDeliveredDurable } from '../lib/receipts';
+import { forwardPayload } from '../lib/forwardPayload';
 import { type MediaType } from '../lib/sendMedia';
 import { enqueueMedia, cancelMedia, retryMedia, pendingForChat as mediaPendingForChat, on as onMediaOutbox } from '../lib/mediaOutbox';
 import ConnectionBanner from '../components/ConnectionBanner';
@@ -119,6 +118,7 @@ import { TASK_PREFIX } from '../lib/groups/tasks';
 import {
   cancel as queueCancel,
   enqueueText,
+  enqueueMessage,
   enqueueReaction,
   enqueueEdit,
   initQueue,
@@ -135,7 +135,7 @@ import {
   leaveChatRoom,
 } from '../lib/socket';
 import { useS, type DisplayMessage } from '../components/chat/chatStyles';
-import { bumpPollVote } from '../components/chat/MessageBubble';
+import { bumpPollVote } from '../components/chat/chatFormat';
 
 // Fire-and-forget haptic (no-op on web / if unavailable).
 const haptic = (style: Haptics.ImpactFeedbackStyle = Haptics.ImpactFeedbackStyle.Light) => {
@@ -350,6 +350,10 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   }, [input]);
   const [attachOpen, setAttachOpen] = useState(false);
   const [gifOpen, setGifOpen] = useState(false);
+  // Embedded (split pane) only: set when Leave / Hide / Clear ended this chat
+  // for the user. A pane cannot navigate away (useChatMenu onPaneEnded), so it
+  // says what happened instead of going on showing the chat.
+  const [paneNotice, setPaneNotice] = useState<string | null>(null);
 
   // @mentions (groups): active typed query (null = none) + recorded picks.
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -639,6 +643,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     setLiveLoc(null);
     setExtraReplies(new Map());
     setNewSinceUp(0);
+    setPaneNotice(null);
     mentionsRef.current = [];   // a mention picked in one chat must not ride a send in another
   }, [chatId]);
 
@@ -732,8 +737,10 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         }
 
         const pendingBubbles = (pendingQ as any[]).map(q => ({
+          // meta too: a queued GIF card is nothing but meta, and a text keeps
+          // its ink / mentions / link preview across the restart.
           id: 0, chatId: q.chatId, senderId: myId ?? '', type: q.type, content: q.plaintext,
-          meta: null, replyToId: q.replyToId, editedAt: null, deletedAt: null,
+          meta: q.meta ?? null, replyToId: q.replyToId, editedAt: null, deletedAt: null,
           createdAt: new Date(q.createdAt).toISOString(), _tempId: q.tempId,
           // A permanently-rejected row is KEPT by the outbox now (it is the only
           // copy of the text), so it must come back RED with tap-to-retry rather
@@ -1691,7 +1698,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   // ── Chat-level overflow menu (⋮) and its pickers ──
   const onPressMenu = useChatMenu({
     chat, setChat, chatId, meId, router, compactHeader, embedded, activeProfile, setActiveProfile,
-    setOverflowMenu, setSearchOpen, setMessages,
+    setOverflowMenu, setSearchOpen, setMessages, onPaneEnded: embedded ? setPaneNotice : undefined,
   });
 
   // ── React / Reply / Forward handlers ──────────────────────
@@ -1731,10 +1738,15 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     const m = forwardMsg;
     setForwardMsg(null);
     try {
-      await forwardMessage({
+      // Through the outbox (durable offline, same E2EE path as text). The rules
+      // forwardMessage applied — no protected content, no local path, the hop
+      // count — live in forwardPayload. The pending bubble is in the TARGET
+      // chat, so it shows there (pendingForChat) rather than here.
+      const p = forwardPayload({
         id: m.id, chatId: m.chatId, senderId: m.senderId, type: m.type,
         content: m.content, meta: m.meta,
-      }, target.id);
+      });
+      await enqueueMessage(target.id, { type: p.type as DisplayMessage['type'], plaintext: p.plaintext, meta: p.meta });
     } catch (e: any) {
       Alert.alert('Forward failed', e?.message ?? 'Try again');
     }
@@ -1809,7 +1821,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     if (sending) return;
     Keyboard.dismiss();
     const peerName = (chat?.type === 'direct' && meId ? chat.members.find(m => m.userId !== meId)?.name : chat?.name) || '';
-    router.push({ pathname: '/camera' as any, params: { chatId, peerName, returnTo: '/chat', ...(startMode ? { startMode } : {}) } });
+    router.push({ pathname: '/camera', params: { chatId, peerName, returnTo: '/chat', ...(startMode ? { startMode } : {}) } });
   }, [sending, chat, meId, chatId, router]);
   // ── Attach file (Day 9) ───────────────────────────────────
   // Generic doc picker. The server accepts any mime via /uploads; the bubble
@@ -1883,27 +1895,35 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1, allowsEditing: false });
     if (result.canceled || !result.assets?.[0]) return;
     const peer = chat?.type === 'direct' && meId ? chat.members.find(m => m.userId !== meId) : null;
-    router.push({ pathname: '/image-editor' as any, params: {
+    router.push({ pathname: '/image-editor', params: {
       uri: result.assets[0].uri, chatId, returnTo: '/chat',
       peerUid: peer?.userId || '', peerName: peer?.name || chat?.name || '',
     } });
   }, [chatId, sending, router, chat, meId]);
 
-  // ── Send a GIF (external Tenor URL — no upload; rendered from the URL) ──
+  // ── Send a GIF (external KLIPY URL — no upload; rendered from the URL) ──
+  // Through the outbox like text: a pending bubble now, durable retry offline,
+  // and the 'sent'/'failed' queue events above swap or mark it.
   const sendGif = useCallback(async (url: string, preview: string) => {
     setGifOpen(false);
     if (!url) return;
+    // source marks WHERE this came from, so the bubble can show KLIPY's
+    // watermark on KLIPY content and only on KLIPY content. Messages sent
+    // before the switch came from GIPHY and carry no source — stamping those
+    // with KLIPY's mark would misattribute someone else's library.
+    const meta = { gifUrl: url, preview, source: 'klipy' };
     try {
-      // source marks WHERE this came from, so the bubble can show KLIPY's
-      // watermark on KLIPY content and only on KLIPY content. Messages sent
-      // before the switch came from GIPHY and carry no source — stamping those
-      // with KLIPY's mark would misattribute someone else's library.
-      const msg = await sendMessage(chatId, '', 'image', { meta: { gifUrl: url, preview, source: 'klipy' } });
-      setMessages(prev => prev.some(x => x.id === msg.id) ? prev : [msg, ...prev]);
+      const q = await enqueueMessage(chatId, { type: 'image', meta });
+      const optimistic: DisplayMessage = {
+        id: 0, chatId, senderId: meId ?? '', type: 'image', content: '', meta,
+        replyToId: null, editedAt: null, deletedAt: null,
+        createdAt: new Date().toISOString(), _tempId: q.tempId, _state: 'pending',
+      };
+      setMessages(prev => [optimistic, ...prev]);
     } catch (e: any) {
       Alert.alert('Could not send GIF', e?.message ?? 'Try again');
     }
-  }, [chatId]);
+  }, [chatId, meId]);
 
   // ── Attach menu (bottom sheet — U4) ───────────────────────
   // Camera / Gallery / Video / View once / Edit photo / File / Big File / Scan /
@@ -1918,7 +1938,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     const peerName = peer?.name || chat?.name || '';
     const isDirect = chat?.type === 'direct';
     return [
-      { label: 'Camera',        icon: 'camera' as const, onPress: () => router.push({ pathname: '/camera' as any, params: { chatId, peerName, returnTo: '/chat' } }) },
+      { label: 'Camera',        icon: 'camera' as const, onPress: () => router.push({ pathname: '/camera', params: { chatId, peerName, returnTo: '/chat' } }) },
       { label: 'Gallery',       icon: 'image' as const, onPress: () => onPickMedia('images') },
       { label: 'Video',         icon: 'videocam' as const, onPress: () => onPickMedia('videos') },
       // View once was reachable only from the camera toggle and the send-preview
@@ -1929,15 +1949,15 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       { label: 'File',          icon: 'document' as const, onPress: onPickFile },
       // VaultBeam large-file transfer (up to 12 GB, R2 relay) — 1:1 only.
       ...(isDirect ? [{ label: 'Big File', icon: 'cube' as const, onPress: onSendVaultBeam }] : []),
-      { label: 'Scan',          icon: 'scan' as const, onPress: () => router.push({ pathname: '/camera' as any, params: { chatId, peerName, returnTo: '/chat', startMode: 'scan' } }) },
-      { label: 'Location',      icon: 'location' as const, onPress: () => router.push({ pathname: '/location' as any, params: { chatId, name: peerName } }) },
+      { label: 'Scan',          icon: 'scan' as const, onPress: () => router.push({ pathname: '/camera', params: { chatId, peerName, returnTo: '/chat', startMode: 'scan' } }) },
+      { label: 'Location',      icon: 'location' as const, onPress: () => router.push({ pathname: '/location', params: { chatId, name: peerName } }) },
       { label: 'Navigate',      icon: 'navigate' as const, onPress: () => openNavigator() },
-      { label: 'Poll',          icon: 'stats-chart' as const, onPress: () => router.push({ pathname: '/create-poll' as any, params: { chatId, peerName } }) },
+      { label: 'Poll',          icon: 'stats-chart' as const, onPress: () => router.push({ pathname: '/create-poll', params: { chatId, peerName } }) },
       // Whiteboard: returns the drawing to this chat through the same
       // capturedUri contract as /image-editor, so it needs the same params.
       { label: 'Whiteboard',    icon: 'brush' as const, onPress: () => {
         const peer = chat?.type === 'direct' && meId ? chat.members.find(m => m.userId !== meId) : null;
-        router.push({ pathname: '/whiteboard' as any, params: {
+        router.push({ pathname: '/whiteboard', params: {
           chatId, returnTo: '/chat', peerUid: peer?.userId || '', peerName: peer?.name || chat?.name || '',
         } });
       } },
@@ -2106,7 +2126,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       try {
         const feed = await listStoriesFeed();
         if (feed.some(e => e.userId === peer.userId)) {
-          router.push({ pathname: '/story-viewer' as any, params: { userId: peer.userId, userName: peer.name || peer.email || title } });
+          router.push({ pathname: '/story-viewer', params: { userId: peer.userId, userName: peer.name || peer.email || title } });
           return;
         }
       } catch {}
@@ -2119,12 +2139,12 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     if (chat?.type === 'group') {
       // group-info reads `id` — passing `chatId` sent it fetching /chats/ (empty
       // id), which lands on go-api's catch-all "route not migrated" message.
-      router.push({ pathname: '/group-info' as any, params: { id: chatId } });
+      router.push({ pathname: '/group-info', params: { id: chatId } });
       return;
     }
     const peer = directPeer();
     if (!peer) return;
-    router.push({ pathname: '/contact-info' as any, params: { chatId, peerUid: peer.userId, peerName: peer.name || peer.email || 'crazzychat user' } });
+    router.push({ pathname: '/contact-info', params: { chatId, peerUid: peer.userId, peerName: peer.name || peer.email || 'crazzychat user' } });
   }, [chat, chatId, directPeer, router]);
 
   const [screenAuthHeader, setScreenAuthHeader] = useState<string | null>(null);
@@ -2169,13 +2189,32 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           This link did not carry a conversation, or the chat has been deleted.
         </Text>
         <TouchableOpacity
-          onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/chats' as any))}
+          onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/chats'))}
           accessibilityRole="button"
           accessibilityLabel="Back to chats"
           style={{ marginTop: 8, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, backgroundColor: colors.primary }}
         >
-          <Text style={{ color: '#fff', fontWeight: '700' }}>Back to chats</Text>
+          <Text style={{ color: colors.onPrimary, fontWeight: '700' }}>Back to chats</Text>
         </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // The chat is hidden from screen readers while something covers it: the lock
+  // veil, or the GIF sheet — an absolute overlay, not a Modal, so on Android
+  // TalkBack would otherwise walk the conversation behind it.
+  const behindA11y = lockState !== 'open' || gifOpen;
+
+  if (embedded && paneNotice) {
+    return (
+      <View style={[S.screen, S.center, { padding: 24, gap: 10 }]}>
+        <Ionicons name="checkmark-circle-outline" size={40} color={colors.textDim} />
+        <Text accessibilityRole="header" style={{ color: colors.text, fontSize: 16, fontWeight: '700', textAlign: 'center' }}>
+          {paneNotice}
+        </Text>
+        <Text style={{ color: colors.textDim, fontSize: 14, textAlign: 'center' }}>
+          Use Swap or Close in the split bar to continue.
+        </Text>
       </View>
     );
   }
@@ -2213,8 +2252,8 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           veil is up, like the list and composer below: on Android TalkBack still
           walks the veil's siblings, and ⋮ / Search here act on the locked chat. */}
       <View
-        importantForAccessibility={lockState === 'open' ? 'auto' : 'no-hide-descendants'}
-        accessibilityElementsHidden={lockState !== 'open'}
+        importantForAccessibility={behindA11y ? 'no-hide-descendants' : 'auto'}
+        accessibilityElementsHidden={behindA11y}
       >
       {/* Header — glass, so the thread scrolls visibly beneath it */}
       <ChatHeader
@@ -2243,6 +2282,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           setSearchQ={setSearchQ}
           onClose={() => { setSearchOpen(false); setSearchQ(''); }}
           onGoTo={goToRow}
+          onSearchAll={() => router.push({ pathname: '/in-chat-search', params: { chatId } })}
         />
       )}
 
@@ -2286,8 +2326,8 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       <FlatList
         ref={listRef}
         data={renderMessages}
-        importantForAccessibility={lockState === 'open' ? 'auto' : 'no-hide-descendants'}
-        accessibilityElementsHidden={lockState !== 'open'}
+        importantForAccessibility={behindA11y ? 'no-hide-descendants' : 'auto'}
+        accessibilityElementsHidden={behindA11y}
         keyExtractor={(m) => m._tempId ?? String(m.id)}
         inverted
         contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 8 }}
@@ -2356,8 +2396,8 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           }}
           accessibilityRole="button"
           accessibilityLabel={newSinceUp > 0 ? `Scroll to latest, ${newSinceUp} new` : 'Scroll to latest'}
-          importantForAccessibility={lockState === 'open' ? 'auto' : 'no-hide-descendants'}
-          accessibilityElementsHidden={lockState !== 'open'}
+          importantForAccessibility={behindA11y ? 'no-hide-descendants' : 'auto'}
+          accessibilityElementsHidden={behindA11y}
         >
           <Ionicons name="chevron-down" size={24} color={colors.text} />
           {newSinceUp > 0 && (
@@ -2371,8 +2411,8 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           composer can hold a draft. iOS already skips the veil's siblings
           (accessibilityViewIsModal); Android needs this. */}
       <View
-        importantForAccessibility={lockState === 'open' ? 'auto' : 'no-hide-descendants'}
-        accessibilityElementsHidden={lockState !== 'open'}
+        importantForAccessibility={behindA11y ? 'no-hide-descendants' : 'auto'}
+        accessibilityElementsHidden={behindA11y}
       >
         {/* @mention picker (W15) — appears while typing "@name" in a group */}
         <MentionPicker candidates={mentionCandidates} onPick={pickMention} screenAuthHeader={screenAuthHeader} />
@@ -2424,7 +2464,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       />
 
       {/* Message Info — who delivered/read this message (WhatsApp-style) */}
-      <MessageInfoModal infoMsg={infoMsg} onClose={() => setInfoMsg(null)} otherMembers={otherMembers} screenAuthHeader={screenAuthHeader} />
+      <MessageInfoModal infoMsg={infoMsg} onClose={() => setInfoMsg(null)} otherMembers={otherMembers} screenAuthHeader={screenAuthHeader} chatId={chatId} />
 
       {/* Profile photo viewer (avatar tap with no active story) — WhatsApp popup */}
       <ProfilePhotoModal
@@ -2436,7 +2476,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         isDirect={chat?.type === 'direct'}
         onCall={(kind) => {
           const p = directPeer();
-          if (p) router.push({ pathname: (kind === 'voice' ? '/voicecall' : '/videocall') as any, params: { chatId, peerUid: p.userId, peerName: p.name || p.email || title } });
+          if (p) router.push({ pathname: kind === 'voice' ? '/voicecall' : '/videocall', params: { chatId, peerUid: p.userId, peerName: p.name || p.email || title } });
         }}
         onInfo={openProfile}
       />
@@ -2494,6 +2534,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         lockErr={lockErr}
         setLockErr={setLockErr}
         submitLockPin={submitLockPin}
+        embedded={embedded}
       />
     </View>
   );

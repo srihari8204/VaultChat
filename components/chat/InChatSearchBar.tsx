@@ -3,7 +3,8 @@
 //
 // It searches the rows the thread RENDERS (app/chat.tsx renderMessages), so the
 // count and the stepping agree with what the bubbles highlight. Older history
-// that is not loaded is the /in-chat-search screen's job.
+// that is not loaded is the /in-chat-search screen's job; the bar's "all
+// messages" button opens it (onSearchAll), and a picked result jumps back here.
 
 import { useEffect, useMemo, useState } from 'react';
 import { Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -13,13 +14,15 @@ import { countVisibleMatches } from '../../lib/inChatSearchCount';
 import { useS, type DisplayMessage } from './chatStyles';
 import { isProtectedMessage } from './protectedText';
 
-export function InChatSearchBar({ renderMessages: renderedRows, searchQ, setSearchQ, onClose, onGoTo }: {
+export function InChatSearchBar({ renderMessages: renderedRows, searchQ, setSearchQ, onClose, onGoTo, onSearchAll }: {
   renderMessages: DisplayMessage[];
   searchQ: string;
   setSearchQ: (q: string) => void;
   onClose: () => void;
   /** Scroll the thread to this row (an element of renderMessages). */
   onGoTo: (row: DisplayMessage) => void;
+  /** Open the full-history search (/in-chat-search) for what is not loaded. */
+  onSearchAll: () => void;
 }) {
   const S = useS();
   const { colors } = useTheme();
@@ -85,6 +88,15 @@ export function InChatSearchBar({ renderMessages: renderedRows, searchQ, setSear
         accessibilityState={{ disabled: !hits.length }}
       >
         <Ionicons name="chevron-down" size={20} color={hits.length ? colors.text : colors.textFaint} />
+      </TouchableOpacity>
+      <TouchableOpacity
+        onPress={onSearchAll}
+        hitSlop={10}
+        accessibilityRole="button"
+        accessibilityLabel="Search all messages"
+        accessibilityHint="Also searches older history that is not loaded here"
+      >
+        <Ionicons name="albums-outline" size={19} color={colors.text} />
       </TouchableOpacity>
       {/* The dismiss lives on the bar now that the header toggle is gone.
           It belongs here anyway — you close a search field from the field,

@@ -44,6 +44,7 @@ const H = () => globalThis.__H2;
 export async function cacheMessages(chatId, msgs) {
   if (H().commitFails) throw new Error('disk full');
   H().committed.push(msgs[0]?.id);
+  H().committedRows.push(msgs[0]);
 }
 `);
 
@@ -122,7 +123,7 @@ writeFileSync(join(WORK, 'msgIds.ts'), readFileSync(join(HERE, 'msgIds.ts'), 'ut
 writeFileSync(join(WORK, 'mq.ts'), src);
 
 const H: any = {
-  rows: [], netListeners: [], committed: [] as number[],
+  rows: [], netListeners: [], committed: [] as number[], committedRows: [] as any[],
   commitFails: false, putFails: false, online: true,
   posted: [] as any[], serverSeq: 100, failClientIds: new Set<string>(),
   api: async (path: string, opts: any) => {
@@ -133,7 +134,7 @@ const H: any = {
     if (H.failClientIds.has(cid)) {
       const e: any = new Error('server busy'); e.status = 503; throw e;  // transient
     }
-    H.posted.push({ clientId: cid, content: opts?.json?.content });
+    H.posted.push({ clientId: cid, content: opts?.json?.content, type: opts?.json?.type, meta: opts?.json?.meta });
     return { id: ++H.serverSeq, chatId: 'c1', content: 'CT:x', createdAt: new Date().toISOString() };
   },
 };
@@ -150,7 +151,7 @@ const settle = () => new Promise(r => setTimeout(r, 1400));
 const reset = async () => {
   H.rows.length = 0;
   await settle();
-  H.posted.length = 0; H.committed.length = 0;
+  H.posted.length = 0; H.committed.length = 0; H.committedRows.length = 0;
   H.failClientIds.clear(); H.commitFails = false; H.putFails = false; H.online = true;
 };
 const rowFor = (id: string) => H.rows.find((r: any) => r.id === id)?.data;
@@ -248,6 +249,33 @@ try {
   check('the retry POSTs the SAME clientId the first attempt used',
     H.posted.length === 1 && H.posted[0].clientId === k.clientId,
     `${H.posted.length} posts, clientId ${H.posted[0]?.clientId} vs ${k.clientId}`);
+
+  // ── 5. enqueueMessage: GIF cards and forwards ride the outbox too ────────
+  console.log('enqueueMessage (GIF / forward)');
+  await reset();
+  H.online = false;                                 // first attempt fails transiently
+  const gif = await Q.enqueueMessage('c1', {
+    type: 'image', meta: { gifUrl: 'https://g.example/x.gif', preview: 'https://g.example/p.gif', source: 'klipy' },
+  });
+  const pend = await Q.pendingForChat('c1');
+  check('an offline GIF is kept as a pending row, with its meta (restart restore)',
+    pend.length === 1 && pend[0].tempId === gif.tempId && pend[0].meta?.gifUrl === 'https://g.example/x.gif');
+  H.online = true;
+  await settle();
+  const gp = H.posted.find((p: any) => p.clientId === gif.clientId);
+  check('it is posted once the network is back, with its own type',
+    !!gp && gp.type === 'image', JSON.stringify(gp));
+  check('the server receives only the routing subset of meta',
+    JSON.stringify(gp?.meta) === JSON.stringify({ gifUrl: 'https://g.example/x.gif' }), JSON.stringify(gp?.meta));
+  check('the private meta rides inside the encrypted body',
+    typeof gp?.content === 'string' && gp.content.startsWith('CT:') && gp.content.includes('klipy'));
+  const local = H.committedRows.find((r: any) => r?.meta?.gifUrl);
+  check('the sender\'s local record has an empty body and the FULL meta',
+    !!local && local.content === '' && local.meta.source === 'klipy' && local.meta.preview === 'https://g.example/p.gif',
+    JSON.stringify(local));
+  let refused = false;
+  try { await Q.enqueueMessage('c1', { type: 'image', meta: { localUri: 'file:///x.jpg' } }); } catch { refused = true; }
+  check('a not-yet-uploaded file (localUri) is refused, never posted', refused);
 
   // The server half of that contract: ON CONFLICT DO NOTHING + return the
   // original row. Asserted here because the client guarantee is worthless

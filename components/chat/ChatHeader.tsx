@@ -11,7 +11,7 @@ import { Avatar, GlassView } from '../ui';
 import { useTheme } from '../../lib/theme';
 import { useVisionComfort } from '../../lib/visionComfort';
 import { attachmentUrl, type ChatDetail } from '../../lib/chatService';
-import { formatLastSeen } from './MessageBubble';
+import { formatLastSeen } from './chatFormat';
 import { useS } from './chatStyles';
 
 export function ChatHeader({

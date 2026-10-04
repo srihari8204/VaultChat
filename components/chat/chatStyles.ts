@@ -16,10 +16,6 @@ import { type Message } from '../../lib/chatService';
 import { chatCardMax } from '../../constants/layoutMath';
 import { tint } from '../../lib/tintColor';
 
-// Amber for "heads up" banners (screenshot, security-code change, Vanish Mode).
-// Palette has no warning role yet, so the TINT stays fixed; the text on it uses
-// the theme's own ink so it reads in both themes.
-const WARN = '#F59E0B';
 
 // Optimistic bubbles carry a few extra fields beyond a server Message.
 export type DisplayMessage = Message & {
@@ -101,12 +97,19 @@ export function idealText(hex: string): string {
   return lum > 0.6 ? '#0e0e14' : '#ffffff';
 }
 
-// Fixed accent styles (theme-agnostic) used by the plain renderWithHighlight helper.
+// The search-hit mark (renderWithHighlight). Deliberately fixed: yellow under
+// near-black reads on every bubble colour. Link and mention colours are themed
+// per bubble (bubbleText.tsx BubbleInk).
 export const HL = StyleSheet.create({
   highlight: { backgroundColor: 'rgba(252, 211, 77, 0.45)', color: '#111' },
-  link:      { color: '#7DD3FC', textDecorationLine: 'underline' },
-  mention:   { color: '#34D399', fontWeight: '700' },
 });
+
+/**
+ * White on an always-dark media scrim (video play button, download overlay):
+ * the plate under it is #000 / rgba(0,0,0,·) in both themes, so the ink is
+ * fixed on purpose, like the plates themselves (theme-exempt below).
+ */
+export const ON_MEDIA_SCRIM = '#fff';
 
 // `m` is optional so the one other caller (MessageBubble's direct makeStyles
 // import) keeps working unchanged; it renders bubbles, not the header, so the
@@ -123,7 +126,7 @@ export const makeStyles = (
   lockGateTitle: { color: c.text, fontSize: 20, fontWeight: '800', marginTop: 16 },
   lockGateSub:   { color: c.textDim, fontSize: 14, marginTop: 6, textAlign: 'center' },
   lockGateBtn:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: c.primary, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 24, marginTop: 20, minWidth: 200 },
-  lockGateBtnTxt:{ color: '#fff', fontSize: 15, fontWeight: '800' },
+  lockGateBtnTxt:{ color: c.onPrimary, fontSize: 15, fontWeight: '800' },
   lockGateInput: { backgroundColor: c.card, borderRadius: 12, borderWidth: 1, borderColor: c.border, color: c.text, fontSize: 18, textAlign: 'center', letterSpacing: 6, paddingVertical: 12 },
   lockGateErr:   { color: c.danger, fontSize: 13, textAlign: 'center', marginTop: 8 },
   lockGateBack:  { color: c.textDim, fontSize: 14, fontWeight: '600' },
@@ -143,7 +146,7 @@ export const makeStyles = (
   // Scroll-to-bottom FAB
   scrollDownBtn:     { position: 'absolute', right: 14, bottom: 92, width: 44, height: 44, borderRadius: 22, backgroundColor: c.surfaceSolid, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, alignItems: 'center', justifyContent: 'center', ...ELEVATION.md, shadowColor: '#000' },
   scrollDownBadge:   { position: 'absolute', top: -5, right: -5, minWidth: 20, height: 20, borderRadius: 10, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5, borderWidth: 2, borderColor: c.bg },
-  scrollDownBadgeTxt:{ color: '#fff', fontSize: 11, fontWeight: '800' },
+  scrollDownBadgeTxt:{ color: c.onPrimary, fontSize: 11, fontWeight: '800' },
   // Message Info sheet
   infoBackdrop:      { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   infoSheet:         { backgroundColor: c.surfaceSolid, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 18, paddingTop: 8, paddingBottom: 28 },
@@ -153,6 +156,7 @@ export const makeStyles = (
   infoSecTitle:      { color: c.textDim, fontSize: 12, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase' },
   infoRow:           { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 7 },
   infoName:          { color: c.text, fontSize: 15, fontWeight: '600', flex: 1 },
+  infoDetail:        { color: c.textDim, fontSize: 12, marginTop: 1 },
   infoEmpty:         { color: c.textDim, fontSize: 13, paddingVertical: 16, textAlign: 'center' },
   // Profile-photo popup (avatar tap)
   photoBackdrop:     { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', alignItems: 'center', justifyContent: 'center', padding: 28 },
@@ -195,7 +199,7 @@ export const makeStyles = (
 
   errorBar:      { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: tint(c.danger, 0.12), borderColor: tint(c.danger, 0.4), borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 10 },
   errorTxt:      { color: c.danger, fontSize: 12 },
-  screenshotBanner:    { backgroundColor: tint(WARN, 0.14), borderColor: tint(WARN, 0.5), borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 10 },
+  screenshotBanner:    { backgroundColor: tint(c.warning, 0.14), borderColor: tint(c.warning, 0.5), borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 10 },
   // Memory Bubble — anniversary banner under the chat header. Distinct
   // from screenshot/error banners (purple) so the user reads it as a
   // "nostalgia" moment rather than an alert.
@@ -209,7 +213,7 @@ export const makeStyles = (
   // reinstalled, and colouring an ordinary event as an attack teaches people to
   // ignore the one time it is not.
   keyChangeBanner: {
-    backgroundColor: tint(WARN, 0.12), borderColor: tint(WARN, 0.35),
+    backgroundColor: tint(c.warning, 0.12), borderColor: tint(c.warning, 0.35),
     borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 12, borderRadius: 10,
   },
   keyChangeTxt:     { color: c.text, fontSize: 12, lineHeight: 18 },
@@ -226,6 +230,8 @@ export const makeStyles = (
   mentionRow:    { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 8 },
   mentionName:   { color: c.text, fontSize: 14, fontWeight: '600', flex: 1 },
 
+  // The tappable part of a banner whose dismiss ✕ is its sibling.
+  bannerMain:    { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
   pinnedBar:     { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: c.surfaceSolid, borderBottomWidth: 1, borderBottomColor: c.border },
   pinnedBarTitle:{ color: c.primary, fontSize: 11, fontWeight: '700' },
   pinnedBarSub:  { color: c.textDim, fontSize: 12.5, marginTop: 1 },
@@ -275,7 +281,7 @@ export const makeStyles = (
 
   editBar:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8, backgroundColor: brandAlpha(0.12), borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border },
   // Vanish-Mode banner above the composer when chat.vanishMode is ON.
-  vanishBar:     { paddingHorizontal: 16, paddingVertical: 8, backgroundColor: tint(WARN, 0.10), borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: tint(WARN, 0.40) },
+  vanishBar:     { paddingHorizontal: 16, paddingVertical: 8, backgroundColor: tint(c.warning, 0.10), borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: tint(c.warning, 0.40) },
   vanishBarTxt:  { color: c.text, fontSize: 12, fontWeight: '600' },
   // 💨 badge inside the bubble meta line for messages stamped vanish_after_read.
   vanishBadge:   { fontSize: 10, fontWeight: '700' },
@@ -294,7 +300,7 @@ export const makeStyles = (
   camWrap:       { width: 38, height: 46, alignItems: 'center', justifyContent: 'center', position: 'relative' },
   camRing:       { position: 'absolute', width: 40, height: 40, borderRadius: 20, borderWidth: 2, borderColor: c.primary, backgroundColor: 'rgba(0,0,0,0)' },
   camDragHint:   { position: 'absolute', bottom: 50, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: c.primary, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14, ...ELEVATION.sm, shadowColor: c.primary },
-  camDragHintTxt:{ color: '#fff', fontSize: 12, fontWeight: '800' },
+  camDragHintTxt:{ color: c.onPrimary, fontSize: 12, fontWeight: '800' },
   camHintChevron:{ position: 'absolute', bottom: 42, alignSelf: 'center' },
   sendFab:       { width: 50 * v.controlScale, height: 50 * v.controlScale, borderRadius: 25 * v.controlScale, backgroundColor: c.accentDeep, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, elevation: 6, shadowColor: c.accentDeep, shadowOpacity: 0.55, shadowOffset: { width: 0, height: 6 }, shadowRadius: 18 },
   attachBtn:     { width: 40, height: 40, borderRadius: 20, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' },

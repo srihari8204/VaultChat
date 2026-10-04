@@ -9,7 +9,7 @@ import { ActivityIndicator, Animated, PanResponder, Text, TextInput, TouchableOp
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { GlassView } from '../ui';
 import { useTheme } from '../../lib/theme';
-import { formatRecDuration } from './MessageBubble';
+import { formatRecDuration } from './chatFormat';
 import { useS } from './chatStyles';
 
 export function Composer({
@@ -121,6 +121,9 @@ export function Composer({
           <TouchableOpacity style={S.recCancelBtn} onPress={cancelRecording} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Discard voice message">
             <Ionicons name="trash-outline" size={22} color={colors.danger} />
           </TouchableOpacity>
+          {/* White on sendFab is deliberate: its fill is accentDeep #1552E0 in both
+              themes (6.33:1). colors.onPrimary is for the `primary` fill, and its
+              dark-theme night ink would be ~2.6:1 here. */}
           <TouchableOpacity style={S.sendFab} onPress={stopAndSendRecording} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel="Send voice message">
             <Ionicons name="send" size={20} color="#fff" style={{ marginLeft: 2 }} />
           </TouchableOpacity>
@@ -155,6 +158,7 @@ export function Composer({
               onChangeText={onInputChange}
               multiline
               maxLength={4000}
+              accessibilityLabel={editingId != null ? 'Edit message' : 'Message'}
             />
             {editingId == null && (
               <>
@@ -181,7 +185,7 @@ export function Composer({
                         ],
                       }]}
                     >
-                      <Ionicons name="videocam" size={13} color="#fff" />
+                      <Ionicons name="videocam" size={13} color={colors.onPrimary} />
                       <Text style={S.camDragHintTxt}>Video note</Text>
                     </Animated.View>
                   )}
@@ -243,6 +247,12 @@ export function Composer({
               onPress={() => onSend(false)} accessibilityRole="button" accessibilityLabel={editingId != null ? 'Save edit' : 'Send'}
               accessibilityHint={editingId == null ? 'Long-press to send without sound' : undefined}
               accessibilityState={{ disabled: !input.trim() || sending, busy: sending }}
+              // The silent long-press, for screen readers (which cannot long-press reliably).
+              accessibilityActions={editingId == null ? [{ name: 'activate' }, { name: 'silent', label: 'Send without sound' }] : undefined}
+              onAccessibilityAction={(e) => {
+                if (e.nativeEvent.actionName === 'activate') onSend(false);
+                else if (e.nativeEvent.actionName === 'silent' && input.trim() && !sending) onSend(true);
+              }}
               onLongPress={() => { if (input.trim() && !sending && editingId == null) onSend(true); }}
               delayLongPress={300}
               disabled={!input.trim() || sending}

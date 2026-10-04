@@ -61,7 +61,7 @@ export default function VoiceRecorder({ onSend, onCancel }: Props) {
 
   return (
     <View style={s.wrap}>
-      <TouchableOpacity onPress={cancel} style={s.cancelBtn}>
+      <TouchableOpacity onPress={cancel} style={s.cancelBtn} accessibilityRole="button" accessibilityLabel="Cancel recording" hitSlop={8}>
         <Text style={s.cancelTxt}>✕</Text>
       </TouchableOpacity>
 
@@ -76,12 +76,12 @@ export default function VoiceRecorder({ onSend, onCancel }: Props) {
       </View>
 
       {uploading
-        ? <ActivityIndicator color="#00E5FF" />
+        ? <ActivityIndicator color={c.primary} accessibilityLabel="Sending voice message" />
         : recording
-          ? <TouchableOpacity onPress={stopAndSend} style={[s.micBtn, s.micStop]}>
+          ? <TouchableOpacity onPress={stopAndSend} style={[s.micBtn, s.micStop]} accessibilityRole="button" accessibilityLabel="Stop and send voice message">
               <Text style={s.micIco}>⬛</Text>
             </TouchableOpacity>
-          : <TouchableOpacity onPress={startRecording} style={s.micBtn}>
+          : <TouchableOpacity onPress={startRecording} style={s.micBtn} accessibilityRole="button" accessibilityLabel="Record a voice message">
               <Text style={s.micIco}>🎤</Text>
             </TouchableOpacity>
       }
@@ -95,10 +95,10 @@ const makeS = (c: Palette) => StyleSheet.create({
   cancelTxt: { color: c.textDim, fontSize: 20 },
   center: { flex: 1, alignItems: 'center' },
   recRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  dot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#FF3C6E' },
+  dot: { width: 10, height: 10, borderRadius: 5, backgroundColor: c.danger },
   timer: { color: c.text, fontSize: 16, fontVariant: ['tabular-nums'] },
   hint: { color: c.textDim, fontSize: 13 },
-  micBtn: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#00E5FF', alignItems: 'center', justifyContent: 'center' },
-  micStop: { backgroundColor: '#FF3C6E' },
+  micBtn: { width: 48, height: 48, borderRadius: 24, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
+  micStop: { backgroundColor: c.danger },
   micIco: { fontSize: 22 },
 });

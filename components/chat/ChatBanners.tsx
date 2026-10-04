@@ -180,26 +180,30 @@ export type LiveLoc = { userId: string; latitude: number; longitude: number; add
 export function LiveLocationBanner({ liveLoc, membersById, onHide }: { liveLoc: LiveLoc; membersById: Members; onHide: () => void }) {
   const S = useS();
   const { colors } = useTheme();
+  // The ✕ is a SIBLING of the navigate target, not nested in it: a touchable
+  // inside an accessible touchable is folded into it and unreachable on iOS.
   return (
-    <TouchableOpacity
-      style={S.liveLocBanner}
-      activeOpacity={0.85}
-      onPress={() => navigateTo(liveLoc.latitude, liveLoc.longitude, membersById.get(liveLoc.userId)?.name || 'Live location')}
-      accessibilityRole="button"
-      accessibilityHint="Opens navigation to their location"
-    >
-      <Ionicons name="navigate" size={20} color={colors.primary} />
-      <View style={{ flex: 1 }}>
-        <Text style={S.liveLocTitle}>{membersById.get(liveLoc.userId)?.name || 'Someone'} is sharing live location</Text>
-        {/* Falls back to raw lat/long, which at fontSize 11 ellipsised mid-
-            coordinate - and half a coordinate points somewhere else entirely.
-            Shrink the glyphs instead of cutting them (2026-09-17). */}
-        <Text style={S.liveLocSub} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{liveLoc.address || `${liveLoc.latitude.toFixed(5)}, ${liveLoc.longitude.toFixed(5)}`} · Navigate</Text>
-      </View>
-      <TouchableOpacity onPress={onHide} hitSlop={8} accessibilityRole="button" accessibilityLabel="Hide live location banner">
+    <View style={S.liveLocBanner}>
+      <TouchableOpacity
+        style={S.bannerMain}
+        activeOpacity={0.85}
+        onPress={() => navigateTo(liveLoc.latitude, liveLoc.longitude, membersById.get(liveLoc.userId)?.name || 'Live location')}
+        accessibilityRole="button"
+        accessibilityHint="Opens navigation to their location"
+      >
+        <Ionicons name="navigate" size={20} color={colors.primary} />
+        <View style={{ flex: 1 }}>
+          <Text style={S.liveLocTitle}>{membersById.get(liveLoc.userId)?.name || 'Someone'} is sharing live location</Text>
+          {/* Falls back to raw lat/long, which at fontSize 11 ellipsised mid-
+              coordinate - and half a coordinate points somewhere else entirely.
+              Shrink the glyphs instead of cutting them (2026-09-17). */}
+          <Text style={S.liveLocSub} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{liveLoc.address || `${liveLoc.latitude.toFixed(5)}, ${liveLoc.longitude.toFixed(5)}`} · Navigate</Text>
+        </View>
+      </TouchableOpacity>
+      <TouchableOpacity onPress={onHide} hitSlop={12} accessibilityRole="button" accessibilityLabel="Hide live location banner">
         <Ionicons name="close" size={18} color={colors.textDim} />
       </TouchableOpacity>
-    </TouchableOpacity>
+    </View>
   );
 }
 
@@ -221,23 +225,26 @@ export function PinnedBar({ pinnedId, messages, onJump, onUnpin }: {
       : pm.meta?.invisibleInk ? 'Invisible Ink message'
       : pm.type === 'text' && pm.content && !looksEncrypted(pm.content) ? pm.content
       : 'Message';
+    // Unpin is a sibling of the jump target, not nested in it (see LiveLocationBanner).
     return (
-      <TouchableOpacity
-        style={S.pinnedBar}
-        activeOpacity={0.8}
-        onPress={onJump}
-        accessibilityRole="button"
-        accessibilityLabel={`Pinned message: ${label}`}
-        accessibilityHint="Jumps to the pinned message"
-      >
-        <Ionicons name="pin" size={15} color={colors.primary} />
-        <View style={{ flex: 1 }}>
-          <Text style={S.pinnedBarTitle}>Pinned message</Text>
-          <Text style={S.pinnedBarSub} numberOfLines={1}>{label}</Text>
-        </View>
-        <TouchableOpacity hitSlop={10} onPress={onUnpin} accessibilityRole="button" accessibilityLabel="Unpin message">
+      <View style={S.pinnedBar}>
+        <TouchableOpacity
+          style={S.bannerMain}
+          activeOpacity={0.8}
+          onPress={onJump}
+          accessibilityRole="button"
+          accessibilityLabel={`Pinned message: ${label}`}
+          accessibilityHint="Jumps to the pinned message"
+        >
+          <Ionicons name="pin" size={15} color={colors.primary} />
+          <View style={{ flex: 1 }}>
+            <Text style={S.pinnedBarTitle}>Pinned message</Text>
+            <Text style={S.pinnedBarSub} numberOfLines={1}>{label}</Text>
+          </View>
+        </TouchableOpacity>
+        <TouchableOpacity hitSlop={14} onPress={onUnpin} accessibilityRole="button" accessibilityLabel="Unpin message">
           <Ionicons name="close" size={16} color={colors.textDim} />
         </TouchableOpacity>
-      </TouchableOpacity>
+      </View>
     );
 }

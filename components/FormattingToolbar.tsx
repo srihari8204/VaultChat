@@ -53,15 +53,17 @@ export default function FormattingToolbar({ inputText, onChangeText, visible }: 
           key={i}
           style={s.btn}
           onPress={() => applyFormat(f.symbol)}
+          accessibilityRole="button"
+          accessibilityLabel={f.desc}
         >
           <Text style={[s.label, f.style]}>{f.label}</Text>
         </TouchableOpacity>
       ))}
       <View style={s.divider} />
-      <TouchableOpacity style={s.btn} onPress={() => onChangeText(inputText + '• ')}>
+      <TouchableOpacity style={s.btn} onPress={() => onChangeText(inputText + '• ')} accessibilityRole="button" accessibilityLabel="Bullet point">
         <Text style={s.label}>•</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={s.btn} onPress={() => onChangeText(inputText + '\n> ')}>
+      <TouchableOpacity style={s.btn} onPress={() => onChangeText(inputText + '\n> ')} accessibilityRole="button" accessibilityLabel="Quote">
         <Text style={s.label}>❝</Text>
       </TouchableOpacity>
     </View>
