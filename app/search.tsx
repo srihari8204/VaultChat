@@ -17,6 +17,7 @@ import { AppText as Text } from '../components/ui/Text';
 import { attachmentUrl, listChats, chatTitle as chatDisplayName, type ChatSummary } from '../lib/chatService';
 import { searchAllMessages, getCachedChats } from '../lib/localDb';
 import { setPendingJump } from '../lib/chatJump';
+import { searchSnippet } from '../lib/searchSnippet';
 
 function useS() {
   const { colors } = useTheme();
@@ -27,6 +28,9 @@ function useS() {
 const titleOf = chatDisplayName;
 
 type MsgHit = { chatId: string; id: number; content: string; senderId: string | null; createdAt: string };
+type Section =
+  | { title: string; kind: 'chat'; data: ChatSummary[] }
+  | { title: string; kind: 'msg'; data: MsgHit[] };
 
 export default function SearchScreen() {
   const { colors } = useTheme();
@@ -36,6 +40,10 @@ export default function SearchScreen() {
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [msgs, setMsgs] = useState<MsgHit[]>([]);
   const [loading, setLoading] = useState(true);
+  // listChats failed: chat names below come from the device cache.
+  const [chatsOffline, setChatsOffline] = useState(false);
+  // The on-device message search threw: "Nothing found" would be a lie.
+  const [msgError, setMsgError] = useState(false);
   const authHeader = useAuthHeader();
   const debounce = useRef<any>(null);
 
@@ -48,6 +56,7 @@ export default function SearchScreen() {
         setChats(list);
       } catch {
         // Offline: chat names still come from the device cache, as on the Chats tab.
+        if (!cancel) setChatsOffline(true);
         const cached = await getCachedChats().catch(() => []);
         if (!cancel) setChats((cached ?? []) as ChatSummary[]);
       }
@@ -60,13 +69,13 @@ export default function SearchScreen() {
   useEffect(() => {
     clearTimeout(debounce.current);
     const q = query.trim();
-    if (q.length < 2) { setMsgs([]); return; }
+    if (q.length < 2) { setMsgs([]); setMsgError(false); return; }
     // `stale` stops an older, slower search from overwriting a newer query's hits.
     let stale = false;
     debounce.current = setTimeout(() => {
       searchAllMessages(q, 50)
-        .then((hits) => { if (!stale) setMsgs(hits); })
-        .catch(() => { if (!stale) setMsgs([]); });
+        .then((hits) => { if (!stale) { setMsgs(hits); setMsgError(false); } })
+        .catch(() => { if (!stale) { setMsgs([]); setMsgError(true); } });
     }, 220);
     return () => { stale = true; clearTimeout(debounce.current); };
   }, [query]);
@@ -84,7 +93,7 @@ export default function SearchScreen() {
   }, [query, chats]);
 
   const sections = useMemo(() => {
-    const out: { title: string; kind: 'chat' | 'msg'; data: any[] }[] = [];
+    const out: Section[] = [];
     if (filteredChats.length) out.push({ title: 'Chats', kind: 'chat', data: filteredChats });
     if (msgs.length) out.push({ title: 'Messages', kind: 'msg', data: msgs });
     return out;
@@ -115,21 +124,30 @@ export default function SearchScreen() {
         />
       </View>
 
+      {(chatsOffline || msgError) && !loading && (
+        <View style={S.notice} accessibilityLiveRegion="polite">
+          <Ionicons name="alert-circle-outline" size={16} color={colors.textDim} />
+          <Text style={S.noticeTxt}>
+            {[chatsOffline && 'Offline: chat names are from this device.', msgError && 'Couldn’t search messages. Try again.'].filter(Boolean).join(' ')}
+          </Text>
+        </View>
+      )}
+
       {loading ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
       ) : sections.length === 0 ? (
         <View style={S.empty}>
-          <Text style={S.emptyTitle}>{query.trim() ? 'Nothing found' : 'Search your chats'}</Text>
-          {!!query.trim() && <Text style={S.emptySub}>Try a different name or word.</Text>}
+          <Text style={S.emptyTitle}>{!query.trim() ? 'Search your chats' : msgError ? 'No chats match' : 'Nothing found'}</Text>
+          {!!query.trim() && !msgError && <Text style={S.emptySub}>Try a different name or word.</Text>}
         </View>
       ) : (
-        <SectionList
+        <SectionList<ChatSummary | MsgHit, Section>
           sections={sections}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
-          keyExtractor={(item, i) => (item.id ?? '') + ':' + i}
+          keyExtractor={(item, i) => ('chatId' in item ? `m:${item.chatId}:${item.id}` : `c:${item.id}`) + ':' + i}
           contentContainerStyle={{ paddingBottom: SCREEN_BOTTOM + 16 }}
-          renderSectionHeader={({ section }) => <Text numberOfLines={1} style={S.sectionLabel}>{section.title.toUpperCase()}</Text>}
+          renderSectionHeader={({ section }) => <Text numberOfLines={1} style={S.sectionLabel} accessibilityRole="header">{section.title.toUpperCase()}</Text>}
           renderItem={({ item, section }) => {
             if (section.kind === 'chat') {
               const c = item as ChatSummary;
@@ -147,6 +165,7 @@ export default function SearchScreen() {
             }
             const h = item as MsgHit;
             const c = chatTitle.get(h.chatId);
+            const snip = searchSnippet(h.content ?? '', query);
             const photoId = c?.type === 'direct' ? c?.peerPhotoURL : c?.photoURL;
             return (
               <TouchableOpacity style={S.row} onPress={() => openChat(h.chatId, h.id)} activeOpacity={0.7}
@@ -154,7 +173,9 @@ export default function SearchScreen() {
                 <Avatar uri={photoId && authHeader ? attachmentUrl(photoId) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={c ? titleOf(c) : 'Chat'} size={44} ring />
                 <View style={{ flex: 1 }}>
                   <Text style={S.rowTitle} numberOfLines={1}>{c ? titleOf(c) : 'Chat'}</Text>
-                  <Text style={S.rowSub} numberOfLines={1}>{h.content}</Text>
+                  <Text style={S.rowSub} numberOfLines={1}>
+                    {snip.before}<Text style={S.hit}>{snip.match}</Text>{snip.after}
+                  </Text>
                 </View>
               </TouchableOpacity>
             );
@@ -177,4 +198,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   row:        { flexDirection: 'row', gap: 12, alignItems: 'center', marginHorizontal: 16, marginBottom: 8, padding: 14, borderRadius: 20, backgroundColor: c.glassSoft, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
   rowTitle:   { color: c.text, fontSize: 16, fontWeight: '600' },
   rowSub:     { color: c.textDim, fontSize: 13, lineHeight: 19, marginTop: 4 },
+  hit:        { color: c.text, fontWeight: '800' },
+  notice:     { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginTop: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, backgroundColor: c.glassSoft },
+  noticeTxt:  { flex: 1, color: c.textDim, fontSize: 12.5, lineHeight: 17 },
 });

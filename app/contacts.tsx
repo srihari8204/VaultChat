@@ -14,7 +14,15 @@
 // Privacy: numbers are sent as UNSALTED SHA-256 hashes. That hides them from
 // casual reading but not from anyone who enumerates the (small) phone-number
 // space, so do not describe this as "numbers never leave the device". The
-// server only matches users who opted in to `discoverable=TRUE`.
+// server peppers each submitted hash (HMAC with a server-only secret) before
+// comparing, so a leaked users table is not rainbow-tableable, and caps hashes
+// per account per day — see the comment above hashPhoneForLookup in
+// lib/chatService.ts and vaultchat-backend-go/internal/routes/contacts.go.
+// The server only matches users who opted in to `discoverable=TRUE`.
+//
+// The result is cached (sealed, lib/localCache) for a day, so reopening this
+// screen does not re-hash the whole address book or spend the daily match
+// quota; the refresh button rescans on demand.
 
 import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,9 +32,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   Linking,
   Platform,
+  SectionList,
   Share,
   StyleSheet,
   TouchableOpacity,
@@ -42,6 +50,8 @@ import {
 } from '../lib/chatService';
 import { AppText as Text, AuroraBackground } from '../components/ui';
 import { initialOf } from '../lib/format';
+import { readSealedCache, writeSealedCache } from '../lib/localCache';
+import { tint } from '../lib/tintColor';
 
 interface PhoneEntry {
   hash:        string;
@@ -62,6 +72,14 @@ interface InviteRow {
 }
 
 const INVITE_URL = 'https://vaultchat.app/invite';
+
+const CACHE_KEY = 'contacts-match-v1';
+const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+type CachedScan = { at: number; matched: MatchedRow[]; invite: InviteRow[] };
+
+type Section =
+  | { key: 'matched'; title: string; data: MatchedRow[] }
+  | { key: 'invite'; title: string; data: InviteRow[] };
 
 function useS() {
   const { colors } = useTheme();
@@ -86,6 +104,8 @@ export default function ContactsScreen() {
   // Hashing is one async digest PER PHONE NUMBER, so a 1000-contact book is
   // minutes of work behind a spinner that never moves. Count it out loud.
   const [progress,   setProgress]     = useState<{ done: number; total: number } | null>(null);
+  // When the rows on screen were matched (from the cache or a scan just now).
+  const [scannedAt,  setScannedAt]    = useState<number | null>(null);
 
   // ── Request permission + scan ─────────────────────────────
   const scan = useCallback(async () => {
@@ -180,6 +200,12 @@ export default function ContactsScreen() {
       // contacts under "Invite" would be wrong, so show the error instead.
       setInvite(chunkFailed ? [] : inviteRows);
       if (chunkFailed) setError("Couldn't check all your contacts — you may be offline. Tap refresh to try again.");
+      else {
+        // Only a complete scan is cached; a partial one would hide contacts.
+        const at = Date.now();
+        setScannedAt(at);
+        writeSealedCache<CachedScan>(CACHE_KEY, { at, matched: matchedRows, invite: inviteRows });
+      }
     } catch (e: any) {
       setError(e?.message ?? 'Contact scan failed');
     } finally {
@@ -188,7 +214,26 @@ export default function ContactsScreen() {
     }
   }, []);
 
-  useEffect(() => { scan(); }, [scan]);
+  // Paint the last complete scan when there is a fresh one and access is still
+  // granted (a revoked permission must not keep showing the address book);
+  // otherwise scan. The refresh button always rescans.
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      const perm = await Contacts.getPermissionsAsync().catch(() => null);
+      const cached = perm?.status === 'granted' ? await readSealedCache<CachedScan>(CACHE_KEY) : null;
+      if (cancel) return;
+      if (cached && Date.now() - cached.at < CACHE_MAX_AGE_MS) {
+        setPermission('granted');
+        setMatched(cached.matched ?? []);
+        setInvite(cached.invite ?? []);
+        setScannedAt(cached.at);
+        return;
+      }
+      scan();
+    })();
+    return () => { cancel = true; };
+  }, [scan]);
 
   const openChat = useCallback(async (m: MatchedRow, call?: 'voice' | 'video') => {
     if (openingId) return;
@@ -237,14 +282,16 @@ export default function ContactsScreen() {
     }
   }, []);
 
-  const sections = useMemo(() => ([
-    { key: 'matched', title: `On crazzychat (${matched.length})`, data: matched },
-    { key: 'invite',  title: `Invite to crazzychat (${invite.length})`, data: invite },
-  ]), [matched, invite]);
+  const sections = useMemo<Section[]>(() => {
+    const out: Section[] = [];
+    if (matched.length) out.push({ key: 'matched', title: `On crazzychat (${matched.length})`, data: matched });
+    if (invite.length) out.push({ key: 'invite', title: `Invite to crazzychat (${invite.length})`, data: invite });
+    return out;
+  }, [matched, invite]);
 
-  const renderItem = ({ item, section }: any) => {
-    if (section === 'matched') {
-      const m: MatchedRow = item;
+  const renderItem = ({ item, section }: { item: MatchedRow | InviteRow; section: Section }) => {
+    if (section.key === 'matched') {
+      const m = item as MatchedRow;
       const initial = initialOf(m.contactName, m.name);
       return (
         <TouchableOpacity style={S.row} onPress={() => (callMode ? pickCall(m) : openChat(m))} activeOpacity={0.7} disabled={openingId === m.id}
@@ -262,12 +309,12 @@ export default function ContactsScreen() {
         </TouchableOpacity>
       );
     }
-    const r: InviteRow = item;
+    const r = item as InviteRow;
     const initial = initialOf(r.contactName);
     return (
       <TouchableOpacity style={S.row} onPress={() => sendInvite(r)} activeOpacity={0.7}
         accessibilityRole="button" accessibilityLabel={`${r.contactName}. Invite to crazzychat`}>
-        <View style={[S.avatar, S.avatarInvite]}><Text style={S.avatarTxt}>{initial}</Text></View>
+        <View style={[S.avatar, S.avatarInvite]}><Text style={[S.avatarTxt, S.avatarInviteTxt]}>{initial}</Text></View>
         <View style={S.rowBody}>
           <Text style={S.rowName} numberOfLines={1}>{r.contactName}</Text>
           <Text style={S.rowSub} numberOfLines={1}>{r.rawPhone}</Text>
@@ -277,18 +324,6 @@ export default function ContactsScreen() {
     );
   };
 
-  const flat = useMemo(() => {
-    const out: any[] = [];
-    for (const s of sections) {
-      if (s.data.length === 0) continue;
-      out.push({ _header: true, key: 's-' + s.key, title: s.title });
-      for (const item of s.data) {
-        out.push({ ...item, _section: s.key });
-      }
-    }
-    return out;
-  }, [sections]);
-
   return (
     <View style={S.screen}>
       <AuroraBackground />
@@ -296,11 +331,18 @@ export default function ContactsScreen() {
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={S.title}>{callMode ? 'New call' : 'Contacts'}</Text>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Refresh contacts" onPress={scan} disabled={scanning} style={S.refreshBtn} activeOpacity={0.7}>
-          {scanning ? <Text style={S.refreshTxt}>…</Text> : <Ionicons name="refresh" size={22} color={colors.primary} />}
+        <Text style={S.title} accessibilityRole="header">{callMode ? 'New call' : 'Contacts'}</Text>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Rescan contacts" onPress={scan} disabled={scanning} style={S.refreshBtn} activeOpacity={0.7}
+          accessibilityState={{ disabled: scanning, busy: scanning }}>
+          {scanning ? <ActivityIndicator color={colors.primary} /> : <Ionicons name="refresh" size={22} color={colors.primary} />}
         </TouchableOpacity>
       </View>
+
+      {scannedAt != null && !scanning && sections.length > 0 && (
+        <Text style={S.scannedAt}>
+          Checked {new Date(scannedAt).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · tap refresh to rescan
+        </Text>
+      )}
 
       {scanning && matched.length === 0 && invite.length === 0 && (
         <View style={S.center}>
@@ -315,8 +357,8 @@ export default function ContactsScreen() {
 
       {permission === 'denied' && !scanning && (
         <View style={S.center}>
-          <Text style={S.icon}>📇</Text>
-          <Text style={S.heading}>Contacts permission needed</Text>
+          <Text style={S.icon} accessible={false} importantForAccessibility="no">📇</Text>
+          <Text style={S.heading} accessibilityRole="header">Contacts permission needed</Text>
           <Text style={S.sub}>{error ?? 'Allow crazzychat to read your contacts so you can find friends who are on the app.'}</Text>
           <TouchableOpacity style={S.ctaBtn} onPress={blocked ? () => { Linking.openSettings().catch(() => {}); } : scan} activeOpacity={0.85} accessibilityRole="button">
             <Text style={S.ctaTxt}>{blocked ? 'Open settings' : 'Try again'}</Text>
@@ -325,18 +367,18 @@ export default function ContactsScreen() {
       )}
 
       {error && permission === 'granted' && (
-        <View style={S.errorBar}>
+        <View style={S.errorBar} accessibilityLiveRegion="polite">
           <Text style={S.errorTxt}>{error}</Text>
         </View>
       )}
 
-      {flat.length > 0 && (
-        <FlatList
-          data={flat}
-          keyExtractor={(it, idx) => it._header ? it.key : `${it._section}-${it.id ?? it.contactId}-${idx}`}
-          renderItem={({ item }) => item._header
-            ? <Text numberOfLines={1} style={S.sectionHeader}>{item.title}</Text>
-            : renderItem({ item, section: item._section })}
+      {sections.length > 0 && (
+        <SectionList<MatchedRow | InviteRow, Section>
+          sections={sections}
+          keyExtractor={(it, idx) => ('id' in it ? `m-${it.id}` : `i-${it.contactId}`) + `-${idx}`}
+          renderItem={renderItem}
+          renderSectionHeader={({ section }) => <Text numberOfLines={1} style={S.sectionHeader} accessibilityRole="header">{section.title}</Text>}
+          stickySectionHeadersEnabled={false}
           // Device contact books run to thousands of rows; without these the
           // list mounts far more than it needs on first paint. No getItemLayout
           // here — header and contact rows have different heights.
@@ -355,11 +397,10 @@ export default function ContactsScreen() {
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke, gap: 8 },
-  backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backTxt:       { color: c.text, fontSize: 24 },
+  backBtn:       { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   title:         { color: c.text, fontSize: 18, fontWeight: '700', flex: 1 },
-  refreshBtn:    { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  refreshTxt:    { color: c.primary, fontSize: 22, fontWeight: '700' },
+  refreshBtn:    { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  scannedAt:     { color: c.textFaint, fontSize: 12, paddingHorizontal: 20, paddingTop: 8 },
 
   center:        { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32, gap: 12 },
   icon:          { fontSize: 56, marginBottom: 8 },
@@ -367,7 +408,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   sub:           { color: c.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 8 },
   scanHint:      { color: c.textDim, fontSize: 13, marginTop: 8 },
 
-  errorBar:      { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.4)', borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 10 },
+  errorBar:      { backgroundColor: tint(c.danger, 0.12), borderColor: tint(c.danger, 0.4), borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 10 },
   errorTxt:      { color: c.danger, fontSize: 12 },
 
   sectionHeader: { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 8 },
@@ -377,6 +418,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   avatarOnApp:   { backgroundColor: c.primary },
   avatarInvite:  { backgroundColor: c.glassSoft, borderWidth: 1, borderColor: c.glassStroke },
   avatarTxt:     { color: '#fff', fontSize: 16, fontWeight: '700' },
+  // The invite disc is glass, not accent: white initials vanished on it in light mode.
+  avatarInviteTxt: { color: c.text },
   rowBody:       { flex: 1 },
   rowName:       { color: c.text, fontSize: 15, fontWeight: '600' },
   rowSub:        { color: c.textDim, fontSize: 12, marginTop: 2 },

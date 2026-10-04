@@ -2,14 +2,14 @@
 //
 // Shows the 60-digit safety number derived from both parties' public identity
 // keys. If it matches what the contact sees on their device (read aloud or
-// compared), there is no man-in-the-middle. The "verified" decision is the
+// compared, or copied into a trusted channel), there is no man-in-the-middle. The "verified" decision is the
 // user's own and is persisted (synced across their devices).
 
 import { HEADER_TOP } from '../constants/layout';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useState , useMemo} from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View,
+  ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, ToastAndroid, TouchableOpacity, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
@@ -18,10 +18,12 @@ import { getCachedUser } from '../lib/api';
 import { computeSafetyNumber, formatSafetyNumber } from '../services/security/safetyNumber';
 import { fetchIdentityKey, getVerifiedContacts, setContactVerified } from '../lib/verification';
 import { AuroraBackground } from '../components/ui';
+import { AppText as Text } from '../components/ui/Text';
+import { copyAndAutoClear } from '../lib/clipboardSafe';
 
 type State =
   | { kind: 'loading' }
-  | { kind: 'unavailable'; reason: string }
+  | { kind: 'unavailable'; reason: string; retryable: boolean }
   | { kind: 'ready'; number: string };
 
 function useS() {
@@ -46,7 +48,7 @@ export default function VerifyContactScreen() {
     try {
       const me = await getCachedUser();
       const myId = me?.id;
-      if (!myId || !peerId) { setState({ kind: 'unavailable', reason: 'Missing account or contact.' }); return; }
+      if (!myId || !peerId) { setState({ kind: 'unavailable', reason: 'Missing account or contact.', retryable: false }); return; }
 
       const [myKey, peerKey, verifiedList] = await Promise.all([
         fetchIdentityKey(myId),
@@ -54,13 +56,13 @@ export default function VerifyContactScreen() {
         getVerifiedContacts().catch(() => [] as string[]),
       ]);
 
-      if (!myKey) { setState({ kind: 'unavailable', reason: 'Your encryption keys aren’t published yet. Open a chat once to set up E2EE, then try again.' }); return; }
-      if (!peerKey) { setState({ kind: 'unavailable', reason: `${peerName} hasn’t set up end-to-end encryption yet, so there’s no safety number to compare.` }); return; }
+      if (!myKey) { setState({ kind: 'unavailable', reason: 'Your encryption keys aren’t published yet. Open a chat once to set up E2EE, then try again.', retryable: true }); return; }
+      if (!peerKey) { setState({ kind: 'unavailable', reason: `${peerName} hasn’t set up end-to-end encryption yet, so there’s no safety number to compare.`, retryable: true }); return; }
 
       setVerified(verifiedList.includes(peerId));
       setState({ kind: 'ready', number: computeSafetyNumber(myId, myKey, peerId, peerKey) });
     } catch (e: any) {
-      setState({ kind: 'unavailable', reason: e?.message ?? 'Could not load the safety number.' });
+      setState({ kind: 'unavailable', reason: e?.message ?? 'Could not load the safety number.', retryable: true });
     }
   }, [peerId, peerName]);
 
@@ -81,15 +83,26 @@ export default function VerifyContactScreen() {
     }
   }, [saving, verified, peerId]);
 
+  // Copy for comparing over a trusted text channel; the clipboard clears itself.
+  const copyNumber = useCallback(async (n: string) => {
+    try {
+      await copyAndAutoClear(formatSafetyNumber(n));
+      if (Platform.OS === 'android') ToastAndroid.show('Safety number copied', ToastAndroid.SHORT);
+      else Alert.alert('Copied', 'The safety number was copied. It is cleared from the clipboard shortly.');
+    } catch {
+      Alert.alert('Could not copy', 'Try again.');
+    }
+  }, []);
+
   return (
     <View style={S.container}>
       <AuroraBackground />
       <View style={S.header}>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
           <Ionicons name="chevron-back" size={26} color={colors.text} />
         </TouchableOpacity>
-        <Text style={[S.title, { flexShrink: 1, textAlign: 'center' }]} numberOfLines={1}>Verify {peerName}</Text>
-        <View style={{ width: 26 }} />
+        <Text style={[S.title, { flexShrink: 1, textAlign: 'center' }]} numberOfLines={1} accessibilityRole="header">Verify {peerName}</Text>
+        <View style={{ width: 44 }} />
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
@@ -101,9 +114,11 @@ export default function VerifyContactScreen() {
           <View style={S.card}>
             <Ionicons name="information-circle" size={28} color={colors.textDim} />
             <Text style={S.unavailable}>{state.reason}</Text>
-            <TouchableOpacity onPress={load} accessibilityRole="button" accessibilityLabel="Try again" style={{ padding: 10 }}>
-              <Text style={{ color: colors.primary, fontWeight: '700' }}>Try again</Text>
-            </TouchableOpacity>
+            {state.retryable && (
+              <TouchableOpacity onPress={load} accessibilityRole="button" accessibilityLabel="Try again" style={{ padding: 10, minHeight: 44, justifyContent: 'center' }}>
+                <Text style={{ color: colors.primary, fontWeight: '700' }}>Try again</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
 
@@ -113,11 +128,15 @@ export default function VerifyContactScreen() {
               <Text style={S.numberLabel}>Safety number</Text>
               {/* Read in five-digit groups, not as one 60-digit number. */}
               <Text style={S.number} accessibilityLabel={`Safety number: ${formatSafetyNumber(state.number).split(/\s+/).join(', ')}`}>{formatSafetyNumber(state.number)}</Text>
+              <TouchableOpacity onPress={() => copyNumber(state.number)} style={S.copyBtn} accessibilityRole="button" accessibilityLabel="Copy safety number">
+                <Ionicons name="copy-outline" size={16} color={colors.primary} />
+                <Text style={S.copyTxt}>Copy</Text>
+              </TouchableOpacity>
             </View>
 
             <Text style={S.explain}>
               Compare this 60-digit number with {peerName} in person or over a trusted channel
-              (read it aloud or screen-share). If it matches on both devices, your conversation is
+              (read it aloud, screen-share, or copy it into a chat you already trust). If it matches on both devices, your conversation is
               not being intercepted. If the numbers ever differ, the keys changed — do not trust
               the chat until you re-verify.
             </Text>
@@ -157,6 +176,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingBottom: 12, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: c.glassStroke },
   title: { color: c.text, fontSize: 17, fontWeight: '800' },
+  backBtn: { width: 44, height: 44, justifyContent: 'center' },
+  copyBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44, paddingHorizontal: 14 },
+  copyTxt: { color: c.primary, fontSize: 14, fontWeight: '700' },
   center: { paddingVertical: 60, alignItems: 'center' },
 
   card: { backgroundColor: c.glassSoft, borderRadius: 16, borderWidth: 1, borderColor: c.glassStroke, padding: 20, alignItems: 'center', gap: 10 },

@@ -9,6 +9,11 @@
 /** Server ids are 'v' + 12 hex today; allow a bounded, URL-safe superset. */
 const VAULT_ID_RE = /^[A-Za-z0-9_.-]{3,64}$/;
 
+/** True when `id` (without a leading '@') has the VaultID shape. */
+export function isVaultId(id: string): boolean {
+  return VAULT_ID_RE.test(id ?? '');
+}
+
 const ADD_PREFIXES = ['vaultchat://add/', 'crazzychat://add/', 'https://vaultchat.app/add/'];
 
 /** The VaultID in `data`, or '' when the payload is not one of ours. */
@@ -20,5 +25,5 @@ export function parseVaultIdPayload(data: string): string {
   else if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return '';   // some other URL / scheme
   else id = raw;
   id = id.replace(/^@/, '');
-  return VAULT_ID_RE.test(id) ? id : '';
+  return isVaultId(id) ? id : '';
 }

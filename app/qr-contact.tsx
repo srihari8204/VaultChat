@@ -7,7 +7,7 @@
 import { HEADER_TOP } from '../constants/layout';
 import { brandAlpha, type Palette } from '../constants/theme';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Share, Linking } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Share, Linking } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import QRCode from 'react-native-qrcode-svg';
@@ -15,6 +15,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useTheme } from '../lib/theme';
 import { getMyProfile, resolveVaultId, createDirectChat } from '../lib/chatService';
 import { AuroraBackground } from '../components/ui';
+import { AppText as Text } from '../components/ui/Text';
 import { parseVaultIdPayload } from '../lib/vaultIdLink';
 
 function useS() {
@@ -30,22 +31,29 @@ export default function QRContactScreen() {
   const [myVaultId, setMyVaultId] = useState('');
   const [myName, setMyName] = useState('crazzychat User');
   const [loading, setLoading] = useState(true);
+  // getMyProfile failed: "No VaultID yet" would be a false statement.
+  const [loadError, setLoadError] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [processing, setProcessing] = useState(false);
 
   useEffect(() => {
     let active = true;
+    setLoading(true);
+    setLoadError('');
     (async () => {
       try {
         const p = await getMyProfile();
         if (active) { setMyVaultId(p.vaultId || ''); setMyName(p.name || 'crazzychat User'); }
-      } catch { /* header still renders */ } finally {
+      } catch (e: any) {
+        if (active) setLoadError(e?.message || 'Could not load your VaultID.');
+      } finally {
         if (active) setLoading(false);
       }
     })();
     return () => { active = false; };
-  }, []);
+  }, [reloadKey]);
 
   const qrData = `vaultchat://add/${myVaultId}/${encodeURIComponent(myName)}`;
 
@@ -71,7 +79,7 @@ export default function QRContactScreen() {
 
       const peer = await resolveVaultId(vaultId);
       Alert.alert('Contact found', `${peer.name || vaultId} (@${peer.vaultId})`, [
-        { text: 'Cancel', onPress: () => setScanned(false) },
+        { text: 'Cancel', style: 'cancel', onPress: () => setScanned(false) },
         {
           text: 'Open chat',
           onPress: async () => {
@@ -101,8 +109,8 @@ export default function QRContactScreen() {
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={s.title}>QR Contact</Text>
-        <View style={{ width: 40 }} />
+        <Text style={s.title} accessibilityRole="header">QR Contact</Text>
+        <View style={{ width: 44 }} />
       </View>
 
       <View style={s.tabs}>
@@ -120,6 +128,14 @@ export default function QRContactScreen() {
         <View style={s.myQR}>
           {loading ? (
             <ActivityIndicator color={colors.primary} size="large" />
+          ) : loadError ? (
+            <View style={s.noPerm}>
+              <Ionicons name="cloud-offline-outline" size={40} color={colors.textDim} />
+              <Text style={s.noPermTxt}>Couldn’t load your QR code. {loadError}</Text>
+              <TouchableOpacity style={s.shareBtn} onPress={() => setReloadKey(k => k + 1)} accessibilityRole="button">
+                <Text style={s.shareTxt}>Try again</Text>
+              </TouchableOpacity>
+            </View>
           ) : (
             <>
               <View style={s.qrCard}>
@@ -181,10 +197,10 @@ export default function QRContactScreen() {
 const makeStyles = (c: Palette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingHorizontal: 16, paddingBottom: 12 },
-  backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
+  backBtn: { width: 44, height: 44, justifyContent: 'center', alignItems: 'center' },
   title: { color: c.text, fontSize: 18, fontWeight: '800' },
   tabs: { flexDirection: 'row', marginHorizontal: 16, backgroundColor: c.glassSoft, borderRadius: 12, padding: 3, borderWidth: 1, borderColor: c.glassStroke },
-  tab: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 10 },
+  tab: { flex: 1, paddingVertical: 10, minHeight: 44, justifyContent: 'center', alignItems: 'center', borderRadius: 10 },
   tabActive: { backgroundColor: c.primary },
   tabTxt: { color: c.textDim, fontSize: 14, fontWeight: '700' },
   tabTxtActive: { color: '#FFFFFF' },

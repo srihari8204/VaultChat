@@ -10,7 +10,7 @@ import { HEADER_TOP, TAB_BAR_SPACE } from '../../constants/layout';
 import { brandAlpha, type Palette } from '../../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useState , useMemo} from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet,
   TouchableOpacity, View,
@@ -25,14 +25,21 @@ import { scanDeviceAndRecord } from '../../services/securityService';
 import { holdSecurityVerdict } from '../../lib/securityVerdict';
 import { AppText as Text } from '../../components/ui/Text';
 import { AuroraBackground } from '../../components/ui';
+import { tint } from '../../lib/tintColor';
 
-const SEV_COLOR: Record<AuditSeverity, string> = {
-  critical: '#EF4444',
-  high:     '#F59E0B',
-  medium:   '#FBBF24',
-  low:      '#34D399',
-  info:     '#06B6D4',
+// Severity ink per theme. Critical/low reuse the palette's danger/success; the
+// three hues the palette has no role for get a darker light-theme variant so the
+// icon and the SEVERITY label stay readable on the light ground.
+const SEV_INK: Record<'high' | 'medium' | 'info', { light: string; dark: string }> = {
+  high:   { light: '#B45309', dark: '#F59E0B' },
+  medium: { light: '#A16207', dark: '#FBBF24' },
+  info:   { light: '#0E7490', dark: '#06B6D4' },
 };
+function sevColor(sev: AuditSeverity, c: Palette, scheme: 'light' | 'dark'): string {
+  if (sev === 'critical') return c.danger;
+  if (sev === 'low') return c.success;
+  return (SEV_INK[sev] ?? SEV_INK.info)[scheme];
+}
 
 function iconForType(type: string): keyof typeof Ionicons.glyphMap {
   switch (type) {
@@ -65,7 +72,7 @@ function useS() {
 }
 
 export default function AlertsScreen() {
-  const { colors } = useTheme();
+  const { colors, scheme } = useTheme();
   const S = useS();
   const router = useRouter();
   const [events, setEvents] = useState<SecurityEvent[]>([]);
@@ -76,6 +83,10 @@ export default function AlertsScreen() {
   const [error, setError] = useState('');
   const [scanning, setScanning] = useState(false);
   const [expanded, setExpanded] = useState<number | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  // The background sync below settles after the tab may have unmounted.
+  const alive = useRef(true);
+  useEffect(() => () => { alive.current = false; }, []);
 
   const load = useCallback(async () => {
     // try/finally added 2026-09-17. setLoading(false) used to sit on the success
@@ -86,18 +97,20 @@ export default function AlertsScreen() {
     try {
       setError('');
       const [evs, st] = await Promise.all([listSecurityEvents(), verifyAuditChain()]);
+      if (!alive.current) return;
       setEvents(evs);
       setStatus(st);
     } catch (e: any) {
-      setError(e?.message || 'Could not load security events');
+      if (alive.current) setError(e?.message || 'Could not load security events');
     } finally {
-      setLoading(false);
+      if (alive.current) setLoading(false);
     }
     markAllSeen().catch(() => {});
     // Background: mirror new events to the zero-knowledge backup and restore on
     // a fresh install, then refresh the feed if anything changed.
     syncAuditChain().then(async () => {
       const [e2, s2] = await Promise.all([listSecurityEvents(), verifyAuditChain()]);
+      if (!alive.current) return;
       setEvents(e2);
       setStatus(s2);
     }).catch(() => {});
@@ -105,6 +118,12 @@ export default function AlertsScreen() {
 
   // Refresh whenever the tab gains focus so new events appear immediately.
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await load();
+    if (alive.current) setRefreshing(false);
+  }, [load]);
 
   // A scan is not read-only: on a wipe-level verdict (root / hooking tools)
   // runSecurityCheck ERASES this phone's encryption keys before it returns
@@ -118,7 +137,7 @@ export default function AlertsScreen() {
         // Same routing as the launch scan in app/_layout.tsx. /blocked reads the
         // held verdict, not route params (a crafted link must not fake one).
         holdSecurityVerdict(report);
-        router.replace({ pathname: '/blocked', params: { threats: JSON.stringify(report.threats), level: report.level } } as any);
+        router.replace('/blocked' as any);
         return;
       }
       Alert.alert(
@@ -148,15 +167,19 @@ export default function AlertsScreen() {
   }, [scanning, runScan]);
 
   const renderItem = useCallback(({ item }: { item: SecurityEvent }) => {
-    const color = SEV_COLOR[item.severity] ?? SEV_COLOR.info;
+    const color = sevColor(item.severity, colors, scheme);
     const isOpen = expanded === item.seq;
     return (
       <TouchableOpacity
         style={S.row}
         activeOpacity={0.7}
         onPress={() => setExpanded(isOpen ? null : item.seq)}
+        accessibilityRole="button"
+        accessibilityLabel={`${item.title}, ${item.severity} severity, ${timeAgo(item.ts)}`}
+        accessibilityHint={isOpen ? 'Hides the details' : 'Shows the details'}
+        accessibilityState={{ expanded: isOpen }}
       >
-        <View style={[S.iconWrap, { backgroundColor: color + '22' }]}>
+        <View style={[S.iconWrap, { backgroundColor: tint(color, 0.13) }]}>
           <Ionicons name={iconForType(item.type)} size={20} color={color} />
         </View>
         <View style={S.rowBody}>
@@ -184,14 +207,14 @@ export default function AlertsScreen() {
         </View>
       </TouchableOpacity>
     );
-  }, [expanded, S]);
+  }, [expanded, S, colors, scheme]);
 
   return (
     <View style={S.screen}>
       <AuroraBackground />
       <View style={S.header}>
         <View style={{ flex: 1 }}>
-          <Text style={S.title}>Alerts</Text>
+          <Text style={S.title} accessibilityRole="header">Alerts</Text>
           <Text style={S.subtitle}>Tamper-evident security log</Text>
         </View>
         <TouchableOpacity
@@ -225,6 +248,19 @@ export default function AlertsScreen() {
         </View>
       )}
 
+      {/* A failed refresh must not hide behind the events already listed. */}
+      {!!error && events.length > 0 && (
+        <TouchableOpacity
+          style={[S.banner, S.bannerBad]}
+          onPress={onRefresh}
+          accessibilityRole="button"
+          accessibilityLabel={`Couldn't refresh security events. ${error}. Tap to retry.`}
+        >
+          <Ionicons name="cloud-offline-outline" size={15} color={colors.danger} />
+          <Text style={[S.bannerText, { color: colors.danger }]}>Couldn’t refresh: {error} · Tap to retry</Text>
+        </TouchableOpacity>
+      )}
+
       {loading ? (
         <View style={S.center}><ActivityIndicator color={colors.primary} /></View>
       ) : (
@@ -234,7 +270,7 @@ export default function AlertsScreen() {
           renderItem={renderItem}
           contentContainerStyle={events.length === 0 ? S.emptyWrap : { paddingVertical: 8, paddingBottom: TAB_BAR_SPACE + 16 }}
           refreshControl={
-            <RefreshControl refreshing={false} onRefresh={load} tintColor={colors.primary} />
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} colors={[colors.primary]} />
           }
           ListEmptyComponent={
             error ? (
@@ -274,7 +310,7 @@ const makeStyles = (c: Palette, m: ReturnType<typeof useVisionComfort>['metrics'
 
   banner:   { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10, borderWidth: 1 },
   bannerOk: { backgroundColor: brandAlpha(0.08), borderColor: brandAlpha(0.3) },
-  bannerBad:{ backgroundColor: 'rgba(239,68,68,0.08)', borderColor: 'rgba(239,68,68,0.35)' },
+  bannerBad:{ backgroundColor: tint(c.danger, 0.08), borderColor: tint(c.danger, 0.35) },
   bannerText: { fontSize: 12.5, fontWeight: '600', flex: 1 },
 
   center:   { flex: 1, justifyContent: 'center', alignItems: 'center' },

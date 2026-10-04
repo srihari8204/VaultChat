@@ -6,7 +6,7 @@
 import { useAuthHeader } from '../hooks/useAuthHeader';
 import { HEADER_TOP } from '../constants/layout';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator, Alert, FlatList,
   StyleSheet, TextInput, TouchableOpacity, View,
@@ -18,8 +18,24 @@ import { AppText as Text, Avatar, AuroraBackground, KeyboardSafe } from '../comp
 import { PhoneField, toE164 } from '../components/auth/PhoneField';
 import { createDirectChat, listChats, attachmentUrl, setDisappearing, type ChatSummary } from '../lib/chatService';
 import { getCachedChats } from '../lib/localDb';
+import { getCachedUser } from '../lib/api';
+import { dialCodeOf } from '../lib/dialCodeOf';
 
 type Contact = { chatId: string; userId: string; name: string; photoURL: string | null; online: boolean };
+
+// Hoisted out of render so React keeps one component identity across renders.
+function ActionRow({ icon, title, onPress, expanded }: {
+  icon: React.ComponentProps<typeof Ionicons>['name']; title: string; onPress: () => void; expanded?: boolean;
+}) {
+  const S = useS();
+  return (
+    <TouchableOpacity style={S.action} onPress={onPress} activeOpacity={0.7} accessibilityRole="button"
+      accessibilityState={expanded === undefined ? undefined : { expanded }}>
+      <View style={S.actionIcon}><Ionicons name={icon} size={22} color="#fff" /></View>
+      <Text style={S.actionTitle}>{title}</Text>
+    </TouchableOpacity>
+  );
+}
 
 export default function NewChatScreen() {
   const { colors } = useTheme();
@@ -74,6 +90,16 @@ export default function NewChatScreen() {
   const [addOpen, setAddOpen] = useState(false);
   const [dialCode, setDialCode] = useState('+91');
   const [national, setNational] = useState('');
+  // Start on the user's own country code; '+91' is only the fallback. A code
+  // the user already picked is never overwritten.
+  const dialTouched = useRef(false);
+  useEffect(() => {
+    let cancel = false;
+    getCachedUser().then((u) => {
+      if (!cancel && !dialTouched.current) setDialCode(dialCodeOf(u?.phone, '+91'));
+    }).catch(() => {});
+    return () => { cancel = true; };
+  }, []);
   const [adding, setAdding] = useState(false);
   const e164 = toE164(dialCode, national);
 
@@ -104,9 +130,12 @@ export default function NewChatScreen() {
     } finally { if (!isCancelled()) setLoadingList(false); }
   }, []);
 
+  // Also guards the retry below, which can settle after the screen is gone.
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
   useEffect(() => {
     let cancel = false;
-    loadContacts(() => cancel);
+    loadContacts(() => cancel || !mounted.current);
     return () => { cancel = true; };
   }, [loadContacts]);
 
@@ -126,13 +155,6 @@ export default function NewChatScreen() {
     } finally { setAdding(false); }
   };
 
-  const ActionRow = ({ icon, title, onPress }: { icon: any; title: string; onPress: () => void }) => (
-    <TouchableOpacity style={S.action} onPress={onPress} activeOpacity={0.7} accessibilityRole="button">
-      <View style={S.actionIcon}><Ionicons name={icon} size={22} color="#fff" /></View>
-      <Text style={S.actionTitle}>{title}</Text>
-    </TouchableOpacity>
-  );
-
   const searching = query.trim().length > 0;
 
   return (
@@ -142,7 +164,7 @@ export default function NewChatScreen() {
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={S.title}>{ttlSeconds ? 'Temporary chat' : 'New chat'}</Text>
+        <Text style={S.title} accessibilityRole="header">{ttlSeconds ? 'Temporary chat' : 'New chat'}</Text>
       </View>
 
       {/* Say what is about to happen, on the screen where the person is chosen.
@@ -167,8 +189,9 @@ export default function NewChatScreen() {
           placeholder="Search name"
           placeholderTextColor={colors.textDim}
           autoCorrect={false}
+          accessibilityLabel="Search contacts by name"
         />
-        {searching && <TouchableOpacity accessibilityLabel="Clear search" onPress={() => setQuery('')} hitSlop={8}><Ionicons name="close-circle" size={18} color={colors.textDim} /></TouchableOpacity>}
+        {searching && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Clear search" onPress={() => setQuery('')} hitSlop={13}><Ionicons name="close-circle" size={18} color={colors.textDim} /></TouchableOpacity>}
       </View>
 
       <FlatList
@@ -183,11 +206,11 @@ export default function NewChatScreen() {
                   temporary mode they would quietly make a NORMAL chat. Hidden. */}
               {!ttlSeconds && <ActionRow icon="people" title="New group" onPress={() => router.push('/create-group' as any)} />}
               {!ttlSeconds && <ActionRow icon="people-circle" title="New community" onPress={() => router.push('/communities' as any)} />}
-              <ActionRow icon="person-add" title="New contact" onPress={() => setAddOpen(v => !v)} />
+              <ActionRow icon="person-add" title="New contact" onPress={() => setAddOpen(v => !v)} expanded={addOpen} />
 
               {addOpen && (
                 <View style={S.addBox}>
-                  <PhoneField dialCode={dialCode} national={national} onChange={(d, n) => { setDialCode(d); setNational(n); }} />
+                  <PhoneField dialCode={dialCode} national={national} onChange={(d, n) => { if (d !== dialCode) dialTouched.current = true; setDialCode(d); setNational(n); }} />
                   <TouchableOpacity style={[S.cta, !e164 && S.ctaOff]} onPress={startByPhone} disabled={!e164 || adding} activeOpacity={0.85}
                     accessibilityRole="button" accessibilityState={{ disabled: !e164 || adding, busy: adding }}>
                     {adding ? <ActivityIndicator color="#fff" /> : <Text style={S.ctaTxt}>Start chat</Text>}
@@ -199,7 +222,7 @@ export default function NewChatScreen() {
               {!ttlSeconds && <ActionRow icon="book" title="Find from address book" onPress={() => router.push('/contacts' as any)} />}
 
               {listError && (
-                <TouchableOpacity onPress={() => loadContacts()} accessibilityRole="button" accessibilityLabel="Couldn't refresh contacts. Tap to retry">
+                <TouchableOpacity onPress={() => loadContacts(() => !mounted.current)} accessibilityRole="button" accessibilityLabel="Couldn't refresh contacts. Tap to retry">
                   <Text style={[S.hint, { color: colors.danger, marginHorizontal: 16 }]}>Couldn&apos;t refresh — showing saved contacts. Tap to retry.</Text>
                 </TouchableOpacity>
               )}
@@ -234,7 +257,7 @@ function useS() {
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8 },
-  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  backBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   title: { color: c.text, fontSize: 20, fontWeight: '800' },
   ttlBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginBottom: 4,
                paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12,

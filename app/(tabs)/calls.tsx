@@ -53,6 +53,20 @@ function fmtDuration(sec: number): string {
 const dirLabel = (d: CallLogEntry['direction']) =>
   d === 'missed' ? 'Missed' : d === 'declined' ? 'Declined' : d === 'incoming' ? 'Incoming' : 'Outgoing';
 
+// Hoisted out of render so React keeps one component identity across renders.
+function DirArrow({ d, size = 15 }: { d: CallLogEntry['direction']; size?: number }) {
+  const { colors } = useTheme();
+  return (
+    <Ionicons
+      name="arrow-up-outline" size={size}
+      // Declined is not a failure, so it is dimmed rather than red - red is
+      // reserved for a call that got away from you.
+      color={d === 'missed' ? colors.danger : d === 'declined' ? colors.textDim : colors.online}
+      style={{ transform: [{ rotate: d === 'outgoing' ? '45deg' : '-135deg' }] }}
+    />
+  );
+}
+
 type CallGroup = {
   key: string;
   peerUid: string;
@@ -74,6 +88,11 @@ export default function CallsScreen() {
   const [photos, setPhotos] = useState<Map<string, string>>(new Map());
   const authHeader = useAuthHeader();
   const [infoGroup, setInfoGroup] = useState<CallGroup | null>(null);
+  // The server half (names, photos, other devices' calls) failed. The device
+  // log is still shown; this only says the list may be incomplete.
+  const [syncFailed, setSyncFailed] = useState(false);
+  // Bumped by the notice's retry; a new callback identity re-runs the focus effect.
+  const [syncTry, setSyncTry] = useState(0);
 
   useFocusEffect(useCallback(() => {
     let alive = true;
@@ -86,6 +105,7 @@ export default function CallsScreen() {
     Promise.all([listChats(), getCachedUser(), fetchCallHistory(), getHiddenServerCalls()])
       .then(([chats, me, server, hidden]) => {
         if (!alive) return;
+        setSyncFailed(false);
         const m = new Map<string, string>();
         // chatId → how to name a call the server told us about but this device
         // never made. Built from the chat list the screen already loads.
@@ -107,9 +127,11 @@ export default function CallsScreen() {
             if (alive) setLog(mergeCallHistory(local, server, me.id, { get: (id) => byChat.get(id) }, hidden));
           }).catch(() => {});
         }
-      }).catch(() => {});
+      }).catch(() => { if (alive) setSyncFailed(true); });
     return () => { alive = false; };
-  }, []));
+    // syncTry is the retry trigger, not read inside.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncTry]));
 
   // Group consecutive calls with the same person (WhatsApp "(3)"), or with the
   // same group chat — a group call has no peer uid, so it keys by chat instead.
@@ -147,11 +169,19 @@ export default function CallsScreen() {
   // The row is dropped only once both writes succeeded; a failed write keeps
   // it on screen and says so (both writes are safe to retry).
   const removeGroup = useCallback(async (g: CallGroup) => {
+    const local = new Set(g.entries.filter(e => !e.remote).map(e => e.id));
     try {
-      await removeCallLog(g.entries.filter(e => !e.remote).map(e => e.id));
-      await hideServerCalls(g.entries.filter(e => e.remote && e.callId).map(e => e.callId!));
+      await removeCallLog([...local]);
     } catch {
       Alert.alert('Could not remove', 'The call is still in your call history. Try again.');
+      return;
+    }
+    try {
+      await hideServerCalls(g.entries.filter(e => e.remote && e.callId).map(e => e.callId!));
+    } catch {
+      // The device half is already gone; keep only the synced rows on screen.
+      setLog(prev => prev.filter(e => !local.has(e.id)));
+      Alert.alert('Partly removed', 'Calls saved on this device were removed, but calls synced from your account could not be hidden and are still listed. Try again.');
       return;
     }
     setLog(prev => prev.filter(e => !g.entries.some(x => x.id === e.id)));
@@ -184,31 +214,24 @@ export default function CallsScreen() {
       { text: 'Clear', style: 'destructive', onPress: async () => {
         // Synced rows have to be dismissed too, or "clear" would leave the list
         // repopulating itself from the server a moment later.
-        try {
-          await Promise.all([
-            clearCallLog(),
-            hideServerCalls(log.filter(e => e.remote && e.callId).map(e => e.callId!)),
-          ]);
-        } catch {
-          Alert.alert('Could not clear', 'Some calls may still be in your call history. Try again.');
-          return;
+        const [cleared, hidden] = await Promise.allSettled([
+          clearCallLog(),
+          hideServerCalls(log.filter(e => e.remote && e.callId).map(e => e.callId!)),
+        ]);
+        const localOk = cleared.status === 'fulfilled', remoteOk = hidden.status === 'fulfilled';
+        // Drop exactly the half that was written; the rest stays listed.
+        setLog(prev => prev.filter(e => (e.remote ? !remoteOk : !localOk)));
+        if (!localOk || !remoteOk) {
+          Alert.alert('Could not clear everything',
+            !localOk && !remoteOk ? 'Your call history was not changed. Try again.'
+              : !localOk ? 'Calls saved on this device could not be cleared and are still listed. Try again.'
+                : 'Calls synced from your account could not be hidden and are still listed. Try again.');
         }
-        setLog([]);
       } },
     ]);
   }, [log]);
 
-  const DirArrow = ({ d, size = 15 }: { d: CallLogEntry['direction']; size?: number }) => (
-    <Ionicons
-      name="arrow-up-outline" size={size}
-      // Declined is not a failure, so it is dimmed rather than red - red is
-      // reserved for a call that got away from you.
-      color={d === 'missed' ? colors.danger : d === 'declined' ? colors.textDim : colors.online}
-      style={{ transform: [{ rotate: d === 'outgoing' ? '45deg' : '-135deg' }] }}
-    />
-  );
-
-  const renderItem = ({ item: g }: { item: CallGroup }) => {
+  const renderItem = useCallback(({ item: g }: { item: CallGroup }) => {
     const latest = g.entries[0];
     const missed = latest.direction === 'missed';
     const count = g.entries.length;
@@ -246,19 +269,27 @@ export default function CallsScreen() {
         </View>
       </TouchableOpacity>
     );
-  };
+  }, [S, colors, photos, authHeader, onLongPress, call]);
 
   return (
     <View style={S.screen}>
       <AuroraBackground variant="calls" />
       <View style={S.header}>
-        <Text style={S.title}>Calls</Text>
+        <Text style={S.title} accessibilityRole="header">Calls</Text>
         {log.length > 0 && (
-          <TouchableOpacity onPress={confirmClear} hitSlop={8} accessibilityRole="button" accessibilityLabel="Clear call history">
+          <TouchableOpacity onPress={confirmClear} hitSlop={11} accessibilityRole="button" accessibilityLabel="Clear call history">
             <Ionicons name="trash-outline" size={22} color={colors.textDim} />
           </TouchableOpacity>
         )}
       </View>
+
+      {syncFailed && (
+        <TouchableOpacity style={S.notice} onPress={() => setSyncTry(n => n + 1)} accessibilityRole="button"
+          accessibilityLabel="Couldn't sync calls from your account. Showing calls saved on this device. Tap to retry.">
+          <Ionicons name="cloud-offline-outline" size={16} color={colors.textDim} />
+          <Text style={S.noticeTxt}>Couldn’t sync calls from your account. Showing calls saved on this device. Tap to retry.</Text>
+        </TouchableOpacity>
+      )}
 
       {groups.length === 0 ? (
         <ScrollView contentContainerStyle={S.body}>
@@ -283,14 +314,20 @@ export default function CallsScreen() {
 
       {/* Call info — every call with this person */}
       <Modal visible={infoGroup != null} transparent animationType="slide" onRequestClose={() => setInfoGroup(null)}>
-        <Pressable style={S.infoBackdrop} onPress={() => setInfoGroup(null)} accessibilityRole="button" accessibilityLabel="Close call info">
-          <Pressable style={S.infoSheet} onPress={() => {}} accessibilityViewIsModal>
+        {/* The backdrop is a sibling of the sheet, so screen readers reach the
+            sheet's own controls instead of one big "close" button around them. */}
+        <View style={S.infoWrap}>
+          <Pressable style={[StyleSheet.absoluteFill, S.infoBackdrop]} onPress={() => setInfoGroup(null)} accessibilityRole="button" accessibilityLabel="Close call info" />
+          <View style={S.infoSheet} accessibilityViewIsModal>
             <View style={S.grip} />
             {infoGroup && (
               <>
                 <View style={S.infoHead}>
                   <Avatar uri={(infoGroup.peerPhoto || photos.get(infoGroup.peerUid)) && authHeader ? attachmentUrl(infoGroup.peerPhoto || photos.get(infoGroup.peerUid)!) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={infoGroup.peerName} size={48} ring />
-                  <Text style={S.infoName}>{infoGroup.peerName}</Text>
+                  <Text style={S.infoName} accessibilityRole="header">{infoGroup.peerName}</Text>
+                  <TouchableOpacity onPress={() => setInfoGroup(null)} style={S.callBtn} accessibilityRole="button" accessibilityLabel="Close call info">
+                    <Ionicons name="close" size={24} color={colors.textDim} />
+                  </TouchableOpacity>
                 </View>
                 <View style={S.infoActions}>
                   <TouchableOpacity style={S.infoAction} accessibilityRole="button" accessibilityLabel={`Voice call ${infoGroup.peerName}`} onPress={() => { const u = infoGroup; setInfoGroup(null); call({ chatId: u.entries[0].chatId, peerUid: u.peerUid, peerName: u.peerName, group: u.group }, 'audio'); }}>
@@ -314,8 +351,8 @@ export default function CallsScreen() {
                 </ScrollView>
               </>
             )}
-          </Pressable>
-        </Pressable>
+          </View>
+        </View>
       </Modal>
 
       <Sheet
@@ -351,7 +388,11 @@ const makeStyles = (c: Palette, m: ReturnType<typeof useVisionComfort>['metrics'
 
   fab:     { position: 'absolute', right: 20, bottom: TAB_BAR_SPACE + 12, width: 56 * m.controlScale, height: 56 * m.controlScale, borderRadius: 28 * m.controlScale, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', shadowColor: c.primary, shadowOpacity: 0.4, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 6 },
 
-  infoBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  notice:       { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginBottom: 6, paddingHorizontal: 12, paddingVertical: 9, minHeight: 44, borderRadius: 12, backgroundColor: c.glassSoft, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
+  noticeTxt:    { flex: 1, color: c.textDim, fontSize: 12.5, lineHeight: 17 },
+  infoWrap:     { flex: 1, justifyContent: 'flex-end' },
+  // Scrim over whatever is behind the modal: dark in both themes by design.
+  infoBackdrop: { backgroundColor: 'rgba(0,0,0,0.5)' },
   infoSheet:    { backgroundColor: c.surfaceSolid, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 18, paddingTop: 8, paddingBottom: 28 },
   grip:         { alignSelf: 'center', width: 38, height: 4, borderRadius: 2, backgroundColor: c.border, marginBottom: 12 },
   infoHead:     { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 14 },

@@ -9,6 +9,9 @@ import { useAuthHeader } from '../../hooks/useAuthHeader';
 import { HEADER_TOP, TAB_BAR_SPACE } from '../../constants/layout';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+// RN Text, not AppText, on purpose: every font size below is already multiplied
+// by the vision-comfort scale (makeStyles `v`), and AppText applies that scale
+// again, which would double it.
 import { ActivityIndicator, Alert, AppState, InteractionManager, Modal, Pressable, RefreshControl, ScrollView, SectionList, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
 import { Swipeable } from 'react-native-gesture-handler';
@@ -41,6 +44,7 @@ import { isFamEvent } from '../../lib/family/alerts';
 import { NOTE_PREFIX } from '../../lib/groups/notes';
 import { TASK_PREFIX } from '../../lib/groups/tasks';
 import { initialOf } from '../../lib/format';
+import { tint } from '../../lib/tintColor';
 
 type LastMsg = { content: string | null; type: string | null; senderId: string | null; id: number };
 
@@ -414,15 +418,25 @@ export default function ChatsScreen() {
 
   // Avatar tap (WhatsApp): peer has a story → open it; else show photo popup.
   const [avatarView, setAvatarView] = useState<ChatSummary | null>(null);
+  // Who has a story, remembered for a minute: a second avatar tap answers at
+  // once instead of waiting on /stories/feed again. `avatarBusy` drops taps
+  // that land while a lookup is still in flight (no double push).
+  const storyUsers = useRef<{ at: number; ids: Set<string> } | null>(null);
+  const avatarBusy = useRef(false);
   const onAvatarPress = useCallback(async (chat: ChatSummary) => {
+    if (avatarBusy.current) return;
     if (chat.type === 'direct' && chat.peerUserId) {
+      avatarBusy.current = true;
       try {
-        const feed = await listStoriesFeed();
-        if (feed.some(e => e.userId === chat.peerUserId)) {
+        if (!storyUsers.current || Date.now() - storyUsers.current.at > 60_000) {
+          const feed = await listStoriesFeed();
+          storyUsers.current = { at: Date.now(), ids: new Set(feed.map(e => e.userId)) };
+        }
+        if (storyUsers.current.ids.has(chat.peerUserId)) {
           router.push({ pathname: '/story-viewer' as any, params: { userId: chat.peerUserId, userName: chat.peerName ?? chat.name ?? '' } });
           return;
         }
-      } catch {}
+      } catch {} finally { avatarBusy.current = false; }
     }
     setAvatarView(chat);
   }, [router]);
@@ -473,7 +487,7 @@ export default function ChatsScreen() {
   const enterSelect = (id: string) => { setSelectMode(true); setSelected(new Set([id])); };
   const toggleSelect = (id: string) => setSelected(prev => {
     const n = new Set(prev);
-    n.has(id) ? n.delete(id) : n.add(id);
+    if (n.has(id)) n.delete(id); else n.add(id);
     if (n.size === 0) setSelectMode(false);
     return n;
   });
@@ -488,8 +502,9 @@ export default function ChatsScreen() {
   const bulkRun = async (fn: (id: string) => Promise<any>, label: string) => {
     const ids = [...selected];
     exitSelect();
-    let failed = 0;
-    for (const id of ids) { try { await fn(id); } catch { failed++; } }
+    // In parallel: one slow request no longer holds up the rest.
+    const results = await Promise.allSettled(ids.map(id => fn(id)));
+    const failed = results.filter(r => r.status === 'rejected').length;
     await fetchList();
     if (failed) setError(`${label} failed for ${failed} of ${ids.length} chat${ids.length > 1 ? 's' : ''}`);
   };
@@ -514,8 +529,8 @@ export default function ChatsScreen() {
       { text: 'Delete', style: 'destructive', onPress: async () => {
         exitSelect();
         setChats(prev => prev.filter(c => !ids.includes(c.id)));
-        let failed = 0;
-        for (const id of ids) { try { await setHidden(id, true); } catch { failed++; } }
+        const results = await Promise.allSettled(ids.map(id => setHidden(id, true)));
+        const failed = results.filter(r => r.status === 'rejected').length;
         await fetchList();
         // The refetch puts an undeleted chat straight back in the list, so the
         // row reappearing is the rollback; this names why it came back.
@@ -549,6 +564,18 @@ export default function ChatsScreen() {
     return [{ title: FOLDERS.find(f => f.id === folder)?.label ?? '', data: visibleChats }];
   }, [visibleChats, folder]);
 
+  // Folder chip counts, once per list change rather than four filters per render.
+  const folderCounts = useMemo(() => {
+    const n = { unread: 0, favourites: 0, pinned: 0, archive: 0 };
+    for (const c of chats) {
+      if (c.archived) { n.archive++; continue; }
+      if (c.unreadCount > 0) n.unread++;
+      if (c.favourite) n.favourites++;
+      if (c.pinned) n.pinned++;
+    }
+    return n;
+  }, [chats]);
+
   if (loading) {
     return <View style={[S.screen, S.center]}><ActivityIndicator color={colors.primary} size="large" /></View>;
   }
@@ -559,8 +586,8 @@ export default function ChatsScreen() {
       {selectMode ? (
         <View style={S.header}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-            <TouchableOpacity onPress={exitSelect} hitSlop={8} accessibilityLabel="Cancel selection"><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
-            <Text style={S.title}>{selected.size}</Text>
+            <TouchableOpacity onPress={exitSelect} hitSlop={10} accessibilityRole="button" accessibilityLabel="Cancel selection"><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
+            <Text style={S.title} accessibilityLabel={`${selected.size} selected`}>{selected.size}</Text>
           </View>
           <View style={{ flexDirection: 'row', gap: 4 }}>
             {/* Split view: shown only with EXACTLY two chats picked, and only
@@ -573,6 +600,10 @@ export default function ChatsScreen() {
                 disabled={selected.size !== 2}
                 onPress={() => { const [a, b] = [...selected]; exitSelect(); router.push({ pathname: '/split', params: { a, b } } as any); }}
                 style={[S.headerBtn, { flexDirection: 'row', alignItems: 'center', gap: 4 }]}
+                hitSlop={4}
+                accessibilityRole="button"
+                accessibilityLabel={selected.size === 2 ? 'Open the two selected chats side by side' : 'Split view: pick two chats'}
+                accessibilityState={{ disabled: selected.size !== 2 }}
               >
                 <Ionicons
                   name="git-compare-outline"
@@ -590,16 +621,16 @@ export default function ChatsScreen() {
                 </Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity onPress={bulkPin} style={S.headerBtn} accessibilityLabel="Pin selected chats"><Ionicons name="pin" size={20} color={colors.text} /></TouchableOpacity>
-            <TouchableOpacity onPress={bulkFav} style={S.headerBtn} accessibilityLabel={allSelectedFav() ? 'Remove selected chats from favourites' : 'Add selected chats to favourites'}><Ionicons name={allSelectedFav() ? 'heart' : 'heart-outline'} size={20} color={colors.text} /></TouchableOpacity>
-            <TouchableOpacity onPress={bulkMute} style={S.headerBtn} accessibilityLabel="Mute selected chats"><Ionicons name="notifications-off-outline" size={20} color={colors.text} /></TouchableOpacity>
-            <TouchableOpacity onPress={bulkArchive} style={S.headerBtn} accessibilityLabel="Archive selected chats"><Ionicons name="archive-outline" size={20} color={colors.text} /></TouchableOpacity>
-            <TouchableOpacity onPress={bulkDelete} style={S.headerBtn} accessibilityLabel="Delete selected chats"><Ionicons name="trash-outline" size={20} color={colors.danger} /></TouchableOpacity>
+            <TouchableOpacity onPress={bulkPin} style={S.headerBtn} hitSlop={4} accessibilityRole="button" accessibilityLabel="Pin selected chats"><Ionicons name="pin" size={20} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity onPress={bulkFav} style={S.headerBtn} hitSlop={4} accessibilityRole="button" accessibilityLabel={allSelectedFav() ? 'Remove selected chats from favourites' : 'Add selected chats to favourites'}><Ionicons name={allSelectedFav() ? 'heart' : 'heart-outline'} size={20} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity onPress={bulkMute} style={S.headerBtn} hitSlop={4} accessibilityRole="button" accessibilityLabel="Mute selected chats"><Ionicons name="notifications-off-outline" size={20} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity onPress={bulkArchive} style={S.headerBtn} hitSlop={4} accessibilityRole="button" accessibilityLabel="Archive selected chats"><Ionicons name="archive-outline" size={20} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity onPress={bulkDelete} style={S.headerBtn} hitSlop={4} accessibilityRole="button" accessibilityLabel="Delete selected chats"><Ionicons name="trash-outline" size={20} color={colors.danger} /></TouchableOpacity>
           </View>
         </View>
       ) : (
         <View style={[S.header, winW < 360 && { paddingHorizontal: 12 }]}>
-          <Text style={[S.title, { flexShrink: 1, marginRight: 8 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>Chats</Text>
+          <Text style={[S.title, { flexShrink: 1, marginRight: 8 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} accessibilityRole="header">Chats</Text>
           <View style={{ flexDirection: 'row', gap: 4 }}>
             {/* Split view's own entry point. It used to exist ONLY inside
                 selection mode, so reaching it meant long-pressing a chat and
@@ -611,6 +642,8 @@ export default function ChatsScreen() {
               <TouchableOpacity
                 onPress={() => { setSelectMode(true); setSelected(new Set()); }}
                 style={S.headerBtn}
+                hitSlop={4}
+                accessibilityRole="button"
                 accessibilityLabel="Split view: pick two chats"
               >
                 <Ionicons name="git-compare-outline" size={22} color={colors.text} />
@@ -640,6 +673,8 @@ export default function ChatsScreen() {
           onPress={() => router.push('/group-invitations' as any)}
           activeOpacity={0.8}
           style={S.inviteBanner}
+          accessibilityRole="button"
+          accessibilityLabel={`${pendingInvites === 1 ? '1 group invitation' : `${pendingInvites} group invitations`}. View`}
         >
           <Ionicons name="mail-unread-outline" size={18} color={colors.primary} />
           <Text style={S.inviteBannerTxt}>
@@ -658,10 +693,7 @@ export default function ChatsScreen() {
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={S.folderScroll} contentContainerStyle={S.folderRow}>
         {FOLDERS.map(f => {
-          const count = f.id === 'unread' ? chats.filter(c => !c.archived && c.unreadCount > 0).length
-            : f.id === 'favourites' ? chats.filter(c => !c.archived && c.favourite).length
-            : f.id === 'pinned' ? chats.filter(c => !c.archived && c.pinned).length
-            : f.id === 'archive' ? chats.filter(c => c.archived).length : 0;
+          const count = f.id === 'all' || f.id === 'groups' ? 0 : folderCounts[f.id];
           const active = folder === f.id;
           return (
             <GlassChip
@@ -682,8 +714,10 @@ export default function ChatsScreen() {
           contentContainerStyle={[S.center, { flexGrow: 1, paddingHorizontal: 32 }]}
           refreshControl={<RefreshControl tintColor={colors.primary} refreshing={refreshing} onRefresh={onRefresh} />}
         >
-          <Text style={S.emptyTitle}>No chats yet</Text>
-          <Text style={S.emptySub}>Tap the button below to start one.</Text>
+          {/* A failed first load is not "no chats": the error bar above says
+              what went wrong, and this must not contradict it. */}
+          <Text style={S.emptyTitle}>{error ? 'Couldn’t load your chats' : 'No chats yet'}</Text>
+          <Text style={S.emptySub}>{error ? 'Pull down to try again, or start a new chat.' : 'Tap the button below to start one.'}</Text>
           <TouchableOpacity style={S.emptyBtn} onPress={onNewChat} activeOpacity={0.85} accessibilityRole="button"><Text style={S.emptyBtnTxt}>Start a chat</Text></TouchableOpacity>
         </ScrollView>
       ) : visibleChats.length === 0 ? (
@@ -698,7 +732,7 @@ export default function ChatsScreen() {
           stickySectionHeadersEnabled
           renderSectionHeader={({ section }) =>
             sections.length > 1 || section.title !== 'All Chats'
-              ? <Text numberOfLines={1} style={S.sectionHeader}>{section.title}</Text> : <View style={{ height: 4 }} />}
+              ? <Text numberOfLines={1} style={S.sectionHeader} accessibilityRole="header">{section.title}</Text> : <View style={{ height: 4 }} />}
           renderItem={({ item }) => (
             <ChatRow
               chat={item}
@@ -728,7 +762,7 @@ export default function ChatsScreen() {
         />
       )}
 
-      <TouchableOpacity style={S.fab} onPress={onNewChat} activeOpacity={0.85} accessibilityLabel="New chat">
+      <TouchableOpacity style={S.fab} onPress={onNewChat} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel="New chat">
         <Ionicons name="create-outline" size={26} color="#fff" />
       </TouchableOpacity>
 
@@ -749,8 +783,8 @@ export default function ChatsScreen() {
           timer, not a new mechanism: the server already expires on
           chats.disappearing_seconds. */}
       <Modal visible={tempSheet} transparent animationType="fade" onRequestClose={() => setTempSheet(false)}>
-        <Pressable style={S.sheetBackdrop} onPress={() => setTempSheet(false)}>
-          <Pressable style={S.sheet} onPress={() => {}}>
+        <Pressable style={S.sheetBackdrop} onPress={() => setTempSheet(false)} accessibilityRole="button" accessibilityLabel="Close">
+          <Pressable style={S.sheet} onPress={() => {}} accessibilityViewIsModal>
             <View style={S.sheetHandle} />
             <Text style={S.sheetTitle}>TEMPORARY CHAT — MESSAGES DELETE THEMSELVES</Text>
             <SheetItem icon="timer-outline" label="1 hour" onPress={() => startTemporary(3600)} />
@@ -769,7 +803,7 @@ export default function ChatsScreen() {
 
       {/* Avatar photo popup (WhatsApp-style) — photo + quick actions */}
       <Modal visible={!!avatarView} transparent animationType="fade" onRequestClose={() => setAvatarView(null)}>
-        <Pressable style={S.avBackdrop} onPress={() => setAvatarView(null)}>
+        <Pressable style={S.avBackdrop} onPress={() => setAvatarView(null)} accessibilityRole="button" accessibilityLabel="Close">
           {avatarView && (() => {
             const av = avatarView;
             const isDirect = av.type === 'direct';
@@ -778,7 +812,7 @@ export default function ChatsScreen() {
             const peerUid = av.peerUserId ?? '';
             const go = (fn: () => void) => { setAvatarView(null); fn(); };
             return (
-              <Pressable style={S.avCard} onPress={() => {}}>
+              <Pressable style={S.avCard} onPress={() => {}} accessibilityViewIsModal>
                 <View style={S.avImgWrap}>
                   {avPhoto && authHeader ? (
                     <Image source={{ uri: attachmentUrl(avPhoto), headers: { Authorization: authHeader } }} style={S.avImg} contentFit="cover" cachePolicy="memory-disk" />
@@ -788,20 +822,20 @@ export default function ChatsScreen() {
                   <View style={S.avNameBar}><Text style={S.avNameTxt} numberOfLines={1}>{avTitle}</Text></View>
                 </View>
                 <View style={S.avActions}>
-                  <TouchableOpacity style={S.avActionBtn} onPress={() => go(() => onOpenChat(av.id))}>
+                  <TouchableOpacity style={S.avActionBtn} onPress={() => go(() => onOpenChat(av.id))} accessibilityRole="button" accessibilityLabel={`Message ${avTitle}`}>
                     <Ionicons name="chatbubble-ellipses" size={22} color={colors.primary} /><Text style={S.avActionTxt}>Message</Text>
                   </TouchableOpacity>
                   {isDirect && (
                     <>
-                      <TouchableOpacity style={S.avActionBtn} onPress={() => go(() => router.push({ pathname: '/voicecall' as any, params: { chatId: av.id, peerUid, peerName: avTitle } }))}>
+                      <TouchableOpacity style={S.avActionBtn} onPress={() => go(() => router.push({ pathname: '/voicecall' as any, params: { chatId: av.id, peerUid, peerName: avTitle } }))} accessibilityRole="button" accessibilityLabel={`Voice call ${avTitle}`}>
                         <Ionicons name="call" size={22} color={colors.primary} /><Text style={S.avActionTxt}>Audio</Text>
                       </TouchableOpacity>
-                      <TouchableOpacity style={S.avActionBtn} onPress={() => go(() => router.push({ pathname: '/videocall' as any, params: { chatId: av.id, peerUid, peerName: avTitle } }))}>
+                      <TouchableOpacity style={S.avActionBtn} onPress={() => go(() => router.push({ pathname: '/videocall' as any, params: { chatId: av.id, peerUid, peerName: avTitle } }))} accessibilityRole="button" accessibilityLabel={`Video call ${avTitle}`}>
                         <Ionicons name="videocam" size={22} color={colors.primary} /><Text style={S.avActionTxt}>Video</Text>
                       </TouchableOpacity>
                     </>
                   )}
-                  <TouchableOpacity style={S.avActionBtn} onPress={() => go(() => isDirect
+                  <TouchableOpacity style={S.avActionBtn} accessibilityRole="button" accessibilityLabel={`${avTitle} info`} onPress={() => go(() => isDirect
                     ? router.push({ pathname: '/contact-info' as any, params: { chatId: av.id, peerUid, peerName: avTitle } })
                     // group-info reads `id`, not `chatId` — see app/chat.tsx.
                     : router.push({ pathname: '/group-info' as any, params: { id: av.id } }))}>
@@ -839,7 +873,6 @@ const ChatRow = memo(function ChatRow({
   const S = useS();
   const swipeRef = useRef<Swipeable>(null);
   const title = chat.type === 'direct' ? (chat.peerName || chat.name || 'Direct chat') : (chat.name || 'Group chat');
-  const avatarLetter = initialOf(title, '#');
   const photoId = chat.type === 'direct' ? chat.peerPhotoURL : chat.photoURL;
   const showPhoto = !!photoId && !!authHeader;
   const time = chat.lastMessageAt ? formatRelative(chat.lastMessageAt) : '';
@@ -886,20 +919,22 @@ const ChatRow = memo(function ChatRow({
 
   const leftActions = () => (
     <View style={S.actionsRow}>
-      <TouchableOpacity style={[S.action, { backgroundColor: colors.primary }]} onPress={() => act(onPin)}>
+      <TouchableOpacity style={[S.action, { backgroundColor: colors.primary }]} onPress={() => act(onPin)} accessibilityRole="button">
         <Ionicons name={chat.pinned ? 'pin' : 'pin-outline'} size={20} color="#fff" /><Text style={S.actionLbl}>{chat.pinned ? 'Unpin' : 'Pin'}</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={[S.action, { backgroundColor: colors.purple }]} onPress={() => act(onMute)}>
+      <TouchableOpacity style={[S.action, { backgroundColor: colors.purple }]} onPress={() => act(onMute)} accessibilityRole="button">
         <Ionicons name={chat.muted ? 'notifications-outline' : 'notifications-off-outline'} size={20} color="#fff" /><Text style={S.actionLbl}>{chat.muted ? 'Unmute' : 'Mute'}</Text>
       </TouchableOpacity>
     </View>
   );
   const rightActions = () => (
     <View style={S.actionsRow}>
-      <TouchableOpacity style={[S.action, { backgroundColor: colors.surfaceSolid }]} onPress={() => act(onArchive)}>
-        <Ionicons name={chat.archived ? 'archive' : 'archive-outline'} size={20} color="#fff" /><Text style={S.actionLbl}>{chat.archived ? 'Unarchive' : 'Archive'}</Text>
+      {/* Neutral, not accent: the ink is the theme's text colour, so it holds
+          contrast on surfaceSolid in both themes (white vanished in light). */}
+      <TouchableOpacity style={[S.action, { backgroundColor: colors.surfaceSolid }]} onPress={() => act(onArchive)} accessibilityRole="button">
+        <Ionicons name={chat.archived ? 'archive' : 'archive-outline'} size={20} color={colors.text} /><Text style={[S.actionLbl, { color: colors.text }]}>{chat.archived ? 'Unarchive' : 'Archive'}</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={[S.action, { backgroundColor: colors.danger }]} onPress={() => act(onDelete)}>
+      <TouchableOpacity style={[S.action, { backgroundColor: colors.danger }]} onPress={() => act(onDelete)} accessibilityRole="button">
         <Ionicons name="trash-outline" size={20} color="#fff" /><Text style={S.actionLbl}>Delete</Text>
       </TouchableOpacity>
     </View>
@@ -924,7 +959,7 @@ const ChatRow = memo(function ChatRow({
           const n = e.nativeEvent.actionName;
           if (n === 'pin') onPin(); else if (n === 'mute') onMute(); else if (n === 'archive') onArchive(); else if (n === 'delete') onDelete();
         }}>
-        <TouchableOpacity style={S.avatarWrap} activeOpacity={0.7} onPress={onAvatarPress} accessibilityLabel="Open profile photo">
+        <TouchableOpacity style={S.avatarWrap} activeOpacity={0.7} onPress={onAvatarPress} accessibilityRole="button" accessibilityLabel={selectMode ? `Select ${title}` : `${title}: story or profile photo`}>
           <Avatar
             ring
             uri={showPhoto ? attachmentUrl(photoId!) : null}
@@ -991,7 +1026,7 @@ const ChatRow = memo(function ChatRow({
                   <Ionicons
                     name={((chat.peerLastReadMessageId ?? 0) >= lastMsg.id || (chat.peerLastDeliveredMessageId ?? 0) >= lastMsg.id) ? 'checkmark-done' : 'checkmark'}
                     size={15}
-                    color={(chat.peerLastReadMessageId ?? 0) >= lastMsg.id ? '#4A9FFF' : colors.textDim}
+                    color={(chat.peerLastReadMessageId ?? 0) >= lastMsg.id ? colors.accentOn : colors.textDim}
                     style={{ marginRight: 3 }}
                   />
                 )}
@@ -1037,8 +1072,10 @@ const makeStyles = (c: Palette, v = { textScale: 1, lineScale: 1, spacingScale: 
   center: { justifyContent: 'center', alignItems: 'center' },
   header: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 22, paddingTop: HEADER_TOP, paddingBottom: 14 },
   title: { color: c.text, fontSize: 28 * v.textScale, fontWeight: '800', flexShrink: 1 },
+  // 40dp to keep six of them on one line; each carries hitSlop up to 44+.
   headerBtn: { minWidth: 40 * v.controlScale, minHeight: 40 * v.controlScale, borderRadius: 20, backgroundColor: c.glassSoft, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
-  // Avatar photo popup
+  // Avatar photo popup. The scrim and the name bar over the photo are dark in
+  // both themes on purpose: they sit over an arbitrary photo, under white text.
   avBackdrop:   { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', alignItems: 'center', justifyContent: 'center', padding: 28 },
   avCard:       { width: '100%', maxWidth: 360, borderRadius: 16, overflow: 'hidden', backgroundColor: c.surfaceSolid },
   avImgWrap:    { width: '100%', aspectRatio: 1, backgroundColor: c.primary },
@@ -1048,9 +1085,8 @@ const makeStyles = (c: Palette, v = { textScale: 1, lineScale: 1, spacingScale: 
   avNameBar:    { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: 'rgba(0,0,0,0.45)' },
   avNameTxt:    { color: '#fff', fontSize: 19 * v.textScale, fontWeight: '700' },
   avActions:    { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 12, backgroundColor: c.surfaceSolid },
-  avActionBtn:  { alignItems: 'center', gap: 4, paddingHorizontal: 6 },
+  avActionBtn:  { alignItems: 'center', justifyContent: 'center', gap: 4, paddingHorizontal: 6, minWidth: 44, minHeight: 44 },
   avActionTxt:  { color: c.primary, fontSize: 12 * v.textScale, fontWeight: '600' },
-  headerBtnTxt: { fontSize: 17 },
   inviteBanner: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
     paddingHorizontal: 16, paddingVertical: 11,
@@ -1059,7 +1095,7 @@ const makeStyles = (c: Palette, v = { textScale: 1, lineScale: 1, spacingScale: 
   },
   inviteBannerTxt: { flex: 1, color: c.text, fontSize: 14 * v.textScale, fontWeight: '600' },
   inviteBannerCta: { color: c.primary, fontSize: 13 * v.textScale, fontWeight: '800' },
-  errorBar: { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.4)', borderWidth: 1, marginHorizontal: 16, padding: 10, borderRadius: 10 },
+  errorBar: { backgroundColor: tint(c.danger, 0.12), borderColor: tint(c.danger, 0.4), borderWidth: 1, marginHorizontal: 16, padding: 10, borderRadius: 10 },
   errorTxt: { color: c.danger, fontSize: 12 * v.textScale },
 
   emptyTitle: { color: c.text, fontSize: 18 * v.textScale, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
@@ -1092,17 +1128,10 @@ const makeStyles = (c: Palette, v = { textScale: 1, lineScale: 1, spacingScale: 
   selBadge: { position: 'absolute', right: -2, bottom: -2, width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: c.bg },
   selBadgeOn: { backgroundColor: c.primary },
   selBadgeOff: { backgroundColor: c.surfaceSolid, borderColor: c.textDim },
-  avatar: { width: 50, height: 50, borderRadius: 25, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  avatarGroup: { backgroundColor: c.accent },
-  avatarImg: { width: '100%', height: '100%' },
-  avatarTxt: { color: '#FFFFFF', fontSize: 20, fontWeight: '800' },
-  presenceDot: { position: 'absolute', right: 0, bottom: 0, width: 14, height: 14, borderRadius: 7, backgroundColor: c.online, borderWidth: 2.5, borderColor: c.bg },
 
   rowBody: { flex: 1, minWidth: 0, gap: 3 * v.spacingScale },
   rowTop: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  rowPin: { fontSize: 11 },
   rowName: { color: c.text, fontSize: 17 * v.textScale, lineHeight: Math.ceil(22 * v.textScale * v.lineScale), fontWeight: v.bold ? '700' : '600', flex: 1, minWidth: 0 },
-  rowMuted: { fontSize: 12 },
   // flexShrink: 0 — the name is the flexible child and the only thing that may
   // truncate. marginLeft:'auto' is gone: it dates from when the name took its
   // natural width, and with the name at flex:1 there is no free space left for
@@ -1114,13 +1143,13 @@ const makeStyles = (c: Palette, v = { textScale: 1, lineScale: 1, spacingScale: 
   rowBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
   rowPreview: { color: highContrast ? c.text : c.textDim, fontSize: 14 * v.textScale, lineHeight: Math.ceil(19 * v.textScale * v.lineScale), flex: 1, minWidth: 0 },
   rowPreviewUnread: { color: c.text, fontWeight: '600' },
-  // Long-press action sheet
+  // Temporary-chat sheet
   sheetBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   sheet: { backgroundColor: c.surfaceSolid, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 32, paddingTop: 10 },
   sheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: c.border, alignSelf: 'center', marginBottom: 8 },
   sheetTitle: { color: c.textDim, fontSize: 13 * v.textScale, fontWeight: '700', paddingHorizontal: 20, paddingVertical: 10 },
   sheetDivider: { height: StyleSheet.hairlineWidth, backgroundColor: c.border, marginVertical: 6, marginHorizontal: 20 },
-  sheetItem: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingHorizontal: 20, paddingVertical: 15 },
+  sheetItem: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingHorizontal: 20, paddingVertical: 15, minHeight: 44 },
   sheetItemTxt: { color: c.text, fontSize: 16 * v.textScale, fontWeight: '500' },
   draftLabel: { color: c.danger, fontWeight: '700' },
   unreadBadge: { backgroundColor: c.primary, borderRadius: 11, minWidth: 22 * v.controlScale, minHeight: 22 * v.controlScale, paddingHorizontal: 7, alignItems: 'center', justifyContent: 'center' },
@@ -1128,9 +1157,7 @@ const makeStyles = (c: Palette, v = { textScale: 1, lineScale: 1, spacingScale: 
 
   actionsRow: { flexDirection: 'row' },
   action: { width: 76, alignItems: 'center', justifyContent: 'center', gap: 4 },
-  actionIcon: { fontSize: 20 },
   actionLbl: { color: '#fff', fontSize: 11 * v.textScale, fontWeight: '700' },
 
   fab: { position: 'absolute', right: 22, bottom: TAB_BAR_SPACE + 18, width: 60 * v.controlScale, height: 60 * v.controlScale, borderRadius: 30 * v.controlScale, backgroundColor: c.accentDeep, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, elevation: 8, shadowColor: c.accentDeep, shadowOpacity: 0.55, shadowOffset: { width: 0, height: 10 }, shadowRadius: 24 },
-  fabTxt: { fontSize: 22 },
 });

@@ -14,7 +14,7 @@
 // On success we land in the chat; if the group needs admin approval we tell the
 // user their request was sent.
 
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { View, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,7 +28,7 @@ type Phase =
   | { kind: 'confirm' }
   | { kind: 'joining' }
   | { kind: 'pending' }
-  | { kind: 'error'; message: string };
+  | { kind: 'error'; message: string; retry: boolean };
 
 export default function JoinScreen() {
   const { colors } = useTheme();
@@ -36,25 +36,32 @@ export default function JoinScreen() {
   const router = useRouter();
   const { code } = useLocalSearchParams<{ code: string }>();
   const [phase, setPhase] = useState<Phase>({ kind: 'confirm' });
+  // Set by Cancel (and on unmount). The request cannot be recalled once sent,
+  // but its result must not pull the user into a chat they walked away from.
+  const cancelledRef = useRef(false);
+  useEffect(() => () => { cancelledRef.current = true; }, []);
 
   const redeem = useCallback(async () => {
     const clean = String(code ?? '').trim();
-    if (!clean) { setPhase({ kind: 'error', message: 'This invite link is missing its code.' }); return; }
+    if (!clean) { setPhase({ kind: 'error', message: 'This invite link is missing its code.', retry: false }); return; }
+    cancelledRef.current = false;
     setPhase({ kind: 'joining' });
     try {
       const res = await joinViaInvite(clean);
+      if (cancelledRef.current) return;
       if (res.pending) { setPhase({ kind: 'pending' }); return; }
       // Joined (or already a member) — go straight to the chat, replacing this
       // screen so Back doesn't bounce through the redeem flow.
       router.replace({ pathname: '/chat', params: { id: res.chatId } } as any);
     } catch (e: any) {
-      setPhase({ kind: 'error', message: e?.message ?? 'This link is invalid, expired, or revoked.' });
+      if (cancelledRef.current) return;
+      setPhase({ kind: 'error', message: e?.message ?? 'This link is invalid, expired, or revoked.', retry: true });
     }
   }, [code, router]);
 
   // A link with no code has nothing to confirm.
   useEffect(() => {
-    if (!String(code ?? '').trim()) setPhase({ kind: 'error', message: 'This invite link is missing its code.' });
+    if (!String(code ?? '').trim()) setPhase({ kind: 'error', message: 'This invite link is missing its code.', retry: false });
   }, [code]);
 
   const goHome = () => router.replace('/(tabs)/chats' as any);
@@ -84,15 +91,19 @@ export default function JoinScreen() {
         {phase.kind === 'joining' && (
           <>
             <ActivityIndicator size="large" color={colors.primary} />
-            <Text style={s.title}>Joining group…</Text>
+            <Text style={s.title} accessibilityRole="header">Joining group…</Text>
             <Text style={s.sub}>Redeeming your invite</Text>
+            <TouchableOpacity style={s.ghost} onPress={() => { cancelledRef.current = true; goHome(); }} activeOpacity={0.7}
+              accessibilityRole="button" accessibilityHint="Stops waiting and goes to chats. A join the server already accepted still completes.">
+              <Text style={s.ghostTxt}>Cancel</Text>
+            </TouchableOpacity>
           </>
         )}
 
         {phase.kind === 'pending' && (
           <>
             <Ionicons name="hourglass-outline" size={56} color={colors.accent} />
-            <Text style={s.title}>Request sent</Text>
+            <Text style={s.title} accessibilityRole="header">Request sent</Text>
             <Text style={s.sub}>This group approves new members. An admin will review your request to join.</Text>
             <TouchableOpacity style={s.cta} onPress={goHome} activeOpacity={0.85} accessibilityRole="button">
               <Text style={s.ctaTxt}>Back to chats</Text>
@@ -103,11 +114,13 @@ export default function JoinScreen() {
         {phase.kind === 'error' && (
           <>
             <Ionicons name="alert-circle-outline" size={56} color={colors.danger} />
-            <Text style={s.title}>Couldn’t join</Text>
+            <Text style={s.title} accessibilityRole="header">Couldn’t join</Text>
             <Text style={s.sub}>{phase.message}</Text>
-            <TouchableOpacity style={[s.cta, { backgroundColor: colors.primary }]} onPress={redeem} activeOpacity={0.85} accessibilityRole="button">
-              <Text style={s.ctaTxt}>Try again</Text>
-            </TouchableOpacity>
+            {phase.retry && (
+              <TouchableOpacity style={[s.cta, { backgroundColor: colors.primary }]} onPress={redeem} activeOpacity={0.85} accessibilityRole="button">
+                <Text style={s.ctaTxt}>Try again</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity style={s.ghost} onPress={goHome} activeOpacity={0.7} accessibilityRole="button">
               <Text style={s.ghostTxt}>Back to chats</Text>
             </TouchableOpacity>
@@ -133,6 +146,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   // 52 stays the floor and the padding keeps the pill identical at scale 1.0.
   cta: { marginTop: 20, minHeight: 52, paddingVertical: 10, borderRadius: 14, backgroundColor: c.accent, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, minWidth: 200 },
   ctaTxt: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  ghost: { marginTop: 6, paddingVertical: 10 },
+  ghost: { marginTop: 6, paddingVertical: 10, paddingHorizontal: 16, minHeight: 44, justifyContent: 'center' },
   ghostTxt: { color: c.textDim, fontSize: 14, fontWeight: '600' },
 });

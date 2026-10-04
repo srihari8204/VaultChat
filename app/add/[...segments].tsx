@@ -17,6 +17,7 @@ import { useTheme } from '../../lib/theme';
 import { createDirectChat, getMyProfile, resolveVaultId } from '../../lib/chatService';
 import { AuroraBackground } from '../../components/ui';
 import { AppText as Text } from '../../components/ui/Text';
+import { isVaultId } from '../../lib/vaultIdLink';
 
 function useS() {
   const { colors } = useTheme();
@@ -50,6 +51,9 @@ export default function AddByVaultIdScreen() {
 
   const resolve = useCallback(async () => {
     if (!vaultId) { setPhase({ k: 'error', msg: 'This link is missing a VaultID.', retry: false }); return; }
+    // Same charset the QR scanner accepts (lib/vaultIdLink.ts): a crafted link
+    // must not put arbitrary text into the lookup path.
+    if (!isVaultId(vaultId)) { setPhase({ k: 'error', msg: 'This link does not contain a valid VaultID.', retry: false }); return; }
     setPhase({ k: 'resolving' });
     try {
       const me = await getMyProfile();
@@ -91,7 +95,7 @@ export default function AddByVaultIdScreen() {
       <AuroraBackground />
       {phase.k === 'error' ? (
         <>
-          <Text style={S.icon}>🔗</Text>
+          <Text style={S.icon} accessible={false} importantForAccessibility="no-hide-descendants">🔗</Text>
           <Text style={S.title} accessibilityRole="header">Couldn’t add contact</Text>
           <Text style={S.sub}>{phase.msg}</Text>
           {phase.retry && (
@@ -125,7 +129,7 @@ export default function AddByVaultIdScreen() {
       ) : (
         <>
           <ActivityIndicator color={colors.primary} size="large" />
-          <Text style={S.sub}>Looking up {nameHint || `@${vaultId}`}…</Text>
+          <Text style={S.sub} accessibilityLiveRegion="polite">Looking up {nameHint || `@${vaultId}`}…</Text>
           <TouchableOpacity style={S.ghost} onPress={goChats} activeOpacity={0.85} accessibilityRole="button">
             <Text style={S.ghostTxt}>Cancel</Text>
           </TouchableOpacity>

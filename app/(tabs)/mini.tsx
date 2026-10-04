@@ -14,11 +14,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { flagEnabled } from '../../lib/remoteFlags';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Stack, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { HEADER_TOP, SCREEN_BOTTOM } from '../../constants/layout';
 import React, { useMemo } from 'react';
 import {
-  Alert,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
@@ -64,8 +63,9 @@ const MINI_APPS_MAIN = [
 // sealed with the cache DEK. NOT deleted with the feature: that key holds the
 // user's own text, and removing a screen is reversible while destroying what
 // someone wrote is not. It is also not in purgeAccountData()'s scoped list, so
-// it already outlived sign-out before this change. Decide it deliberately —
-// purge it, or leave it — rather than as a side effect of deleting a tile.
+// it already outlived sign-out before this change. Decision (2026-10-04): it
+// stays on device (never destroyed by a UI change); removing it at sign-out
+// belongs in purgeAccountData(), next to the other user content it purges.
 
 export default function MiniAppsScreen() {
   const c = useColors();
@@ -83,34 +83,26 @@ export default function MiniAppsScreen() {
     // route still opens is a half-disabled feature, which is the failure mode a
     // kill switch exists to avoid.
     if (!flagEnabled(`mini.${appId}`)) return;
+    // Every entry has a route (the `satisfies` above); there is no "Soon" tile.
     const mainApp = MINI_APPS_MAIN.find(a => a.id === appId);
-    if (mainApp?.route) {
-      router.push(mainApp.route as any);
-      return;
-    }
-    if (mainApp && !mainApp.route) {
-      Alert.alert('Coming Soon', `${mainApp.name} is under development.`);
-      return;
-    }
-    Alert.alert('Coming Soon', 'This mini app is under development.');
+    if (mainApp) router.push(mainApp.route as any);
   };
 
   // ── Main grid view ────────────────────────────────────────────
   return (
     <View style={styles.container}>
-      <Stack.Screen options={{ headerShown: false }} />
       <AuroraBackground variant="mini" />
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* ── Header ────────────────────────────────── */}
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} accessibilityLabel="Back">
+          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} accessibilityRole="button" accessibilityLabel="Back">
             <Ionicons name="arrow-back" size={20} color={c.text} />
           </TouchableOpacity>
           <View style={{ flex: 1, minWidth: 0 }}>
             <View style={styles.titleRow}>
               <Ionicons name="grid-outline" size={24} color={c.accentOn} />
-              <AppText variant="title" style={styles.headerTitle}>Mini Apps</AppText>
+              <AppText variant="title" style={styles.headerTitle} accessibilityRole="header">Mini Apps</AppText>
             </View>
             <AppText variant="callout" style={styles.headerSub}>Powerful tools right inside your chats</AppText>
           </View>
@@ -140,7 +132,6 @@ export default function MiniAppsScreen() {
                 <Ionicons name={app.icon} size={24} color="#FFFFFF" />
               </LinearGradient>
               <AppText variant="tiny" style={styles.appName}>{app.name}</AppText>
-              {!app.route && <AppText variant="tiny" style={styles.comingSoon}>Soon</AppText>}
             </TouchableOpacity>
           ))}
         </View>
@@ -181,9 +172,9 @@ const makeStyles = (c: Palette, width: number, m: ReturnType<typeof useVisionCom
     marginBottom: 24,
   },
   backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: c.glassSoft,
     justifyContent: 'center',
     alignItems: 'center',
@@ -247,11 +238,6 @@ const makeStyles = (c: Palette, width: number, m: ReturnType<typeof useVisionCom
     color: c.text,
     textAlign: 'center',
     flexShrink: 1,
-  },
-  comingSoon: {
-    color: c.textDim,
-    marginTop: 2,
-    fontStyle: 'italic',
   },
   });
 };

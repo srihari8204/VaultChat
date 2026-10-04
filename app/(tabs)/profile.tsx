@@ -1,13 +1,14 @@
 // app/(tabs)/profile.tsx — Phase 3a profile tab.
 //
-// Backed by /user/profile (Postgres). Edit name + status, sign out.
-// Photo upload is deferred to Phase 4 (file storage).
+// Backed by /user/profile (Postgres). Edit name, About and photo; verify a
+// phone number by SMS OTP; sign out.
 
 import { useAuthHeader } from '../../hooks/useAuthHeader';
 import { HEADER_TOP, SCREEN_BOTTOM } from '../../constants/layout';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState, type ComponentProps } from 'react';
+import type { KeyboardTypeOptions } from 'react-native';
 import { useTheme } from '../../lib/theme';
 import { useVisionComfort } from '../../lib/visionComfort';
 import { type Palette } from '../../constants/theme';
@@ -31,7 +32,7 @@ import { unregisterPushToken } from '../../lib/push';
 import { disconnect as disconnectSocket } from '../../lib/socket';
 import { readCache, writeCache } from '../../lib/localCache';
 import { AppText as Text } from '../../components/ui/Text';
-import { AuroraBackground } from '../../components/ui';
+import { AuroraBackground, KeyboardSafe } from '../../components/ui';
 import { initialOf } from '../../lib/format';
 import { currentVersionName } from '../../lib/appVersion';
 import { permissionDenied } from '../../lib/permissionDenied';
@@ -76,15 +77,6 @@ export default function ProfileScreen() {
   const [phone,  setPhone]  = useState('');
   const [editing, setEditing] = useState<null | 'name' | 'status' | 'phone'>(null);
 
-  // Fetch the Bearer header once so RN's <Image> can pull the photo via
-  // the auth-gated /uploads endpoint.
-  useEffect(() => {
-    let cancel = false;
-    (async () => {
-    })();
-    return () => { cancel = true; };
-  }, []);
-
   const load = useCallback(async () => {
     // Local-first: paint last-known profile instantly, then fetch fresh.
     //
@@ -125,8 +117,10 @@ export default function ProfileScreen() {
 
   // Saves ONE field. Sending all three meant saving the name also PUT an
   // edited, unverified phone; a phone change goes through the SMS OTP below.
-  const onSave = useCallback(async (field: 'name' | 'status') => {
-    if (saving) return;
+  // Resolves true once saved, so a failed save keeps the editor open with the
+  // typed text instead of collapsing onto a value the server never took.
+  const onSave = useCallback(async (field: 'name' | 'status'): Promise<boolean> => {
+    if (saving) return false;
     setSaving(true);
     try {
       const updated = await api<UserProfile>('/user/profile', {
@@ -134,8 +128,10 @@ export default function ProfileScreen() {
         json: field === 'name' ? { name: name.trim() } : { status: status.trim() },
       });
       setProfile(updated);
+      return true;
     } catch (e: any) {
       Alert.alert('Save failed', e?.message ?? 'Try again');
+      return false;
     } finally {
       setSaving(false);
     }
@@ -144,7 +140,7 @@ export default function ProfileScreen() {
   // Inline per-row save (WhatsApp-style): commit then collapse the editor.
   // The phone row only collapses: the number is saved by verifying it.
   const saveField = useCallback(async () => {
-    if (editing === 'name' || editing === 'status') await onSave(editing);
+    if ((editing === 'name' || editing === 'status') && !(await onSave(editing))) return;
     setEditing(null);
   }, [onSave, editing]);
 
@@ -208,6 +204,13 @@ export default function ProfileScreen() {
   const [verifyStep,   setVerifyStep]   = useState<'idle' | 'code' | 'done'>('idle');
   const [phoneCode,    setPhoneCode]    = useState('');
   const [verifyDevHint, setVerifyDevHint] = useState(false);
+  // Seconds until "Resend code" is offered again.
+  const [resendIn, setResendIn] = useState(0);
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const t = setTimeout(() => setResendIn((n) => n - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendIn]);
 
   const onSendPhoneOtp = useCallback(async () => {
     const p = phone.trim();
@@ -218,6 +221,7 @@ export default function ProfileScreen() {
       setVerifyDevHint(!!r.dev);
       setVerifyStep('code');
       setPhoneCode('');
+      setResendIn(30);
     } catch (e: any) {
       Alert.alert('Could not send code', e?.message ?? 'Try again');
     } finally {
@@ -249,7 +253,12 @@ export default function ProfileScreen() {
       { text: 'Sign out', style: 'destructive', onPress: async () => {
           try { await unregisterPushToken(); } catch {}
           try { disconnectSocket(); } catch {}
-          await logoutUser();
+          try {
+            await logoutUser();
+          } catch (e: any) {
+            Alert.alert('Could not sign out', e?.message ?? 'Something went wrong. Try again.');
+            return;
+          }
           // resetTo, not replace: anything pushed above the tabs stayed in the
           // history under the sign-in screen, so BACK re-entered the signed-out
           // account (lib/authNav.ts).
@@ -268,6 +277,14 @@ export default function ProfileScreen() {
     );
   }
 
+  // Leaving a row without saving puts back what the account actually holds.
+  const cancelEdit = () => {
+    if (editing === 'name') setName(profile?.name ?? '');
+    else if (editing === 'status') setStatus(profile?.status ?? '');
+    else if (editing === 'phone') { setPhone(profile?.phone ?? ''); setVerifyStep('idle'); setPhoneCode(''); }
+    setEditing(null);
+  };
+
   // Phone is deliberately not in this chain: its first character is '+' or a
   // digit, which is a worse avatar than the '?' placeholder.
   const avatarLetter = initialOf(profile?.name, profile?.email);
@@ -279,7 +296,8 @@ export default function ProfileScreen() {
         (app/(tabs)/_layout.tsx), so reserving room for it left ~80px of dead
         space under Sign out. SCREEN_BOTTOM is the safe-area inset, which is all
         that is actually below the content now. */}
-    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: SCREEN_BOTTOM + 16 }}>
+    <KeyboardSafe keyboardOnly>
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: SCREEN_BOTTOM + 16 }} keyboardShouldPersistTaps="handled">
       <View style={S.header}>
         {/* ADDED WITH THE TAB BAR'S REMOVAL (2026-09-23). This screen had no
             way off it except the bar — no header back, no router.back() in the
@@ -290,14 +308,15 @@ export default function ProfileScreen() {
             Chats, which is where the bar would have taken you. */}
         <TouchableOpacity
           onPress={() => { if (router.canGoBack()) router.back(); else router.replace('/(tabs)/chats' as any); }}
-          hitSlop={10}
+          hitSlop={11}
+          accessibilityRole="button"
           accessibilityLabel="Back"
           style={{ marginRight: 10 }}
         >
           <Ionicons name="arrow-back" size={22} color={colors.text} />
         </TouchableOpacity>
-        <Text style={[S.title, { flex: 1 }]}>Profile</Text>
-        <TouchableOpacity onPress={() => router.push('/settings' as any)} hitSlop={8} accessibilityLabel="Settings">
+        <Text style={[S.title, { flex: 1 }]} accessibilityRole="header">Profile</Text>
+        <TouchableOpacity onPress={() => router.push('/settings' as any)} hitSlop={11} accessibilityRole="button" accessibilityLabel="Settings">
           <Ionicons name="settings-outline" size={22} color={colors.text} />
         </TouchableOpacity>
       </View>
@@ -328,7 +347,7 @@ export default function ProfileScreen() {
               { text: 'Cancel', style: 'cancel' },
               { text: 'Remove', style: 'destructive', onPress: () => { onRemovePhoto(); } },
             ])}
-            disabled={photoBusy} hitSlop={8} accessibilityRole="button">
+            disabled={photoBusy} hitSlop={12} accessibilityRole="button" accessibilityState={{ disabled: photoBusy }}>
             <Text style={S.removePhotoTxt}>Remove photo</Text>
           </TouchableOpacity>
         )}
@@ -350,10 +369,10 @@ export default function ProfileScreen() {
               // alert rather than confirming nothing at all.
               if (Platform.OS === 'android') ToastAndroid.show('VaultID copied', ToastAndroid.SHORT);
               else Alert.alert('Copied', `@${profile?.vaultId} copied to clipboard.`);
-            }} accessibilityLabel="Copy your VaultID">
+            }} accessibilityRole="button" accessibilityLabel="Copy your VaultID">
             <Ionicons name="copy-outline" size={20} color={colors.primary} />
           </TouchableOpacity>
-          <TouchableOpacity hitSlop={10} style={{ padding: 6 }} onPress={() => router.push('/qr-contact' as any)} accessibilityLabel="Show your QR code">
+          <TouchableOpacity hitSlop={10} style={{ padding: 6 }} onPress={() => router.push('/qr-contact' as any)} accessibilityRole="button" accessibilityLabel="Show your QR code">
             <Ionicons name="qr-code-outline" size={20} color={colors.primary} />
           </TouchableOpacity>
         </View>
@@ -363,19 +382,19 @@ export default function ProfileScreen() {
       <View style={S.card}>
         <EditRow
           icon="person-outline" label="Name" value={name} placeholder="Your name"
-          editing={editing === 'name'} onEdit={() => setEditing('name')}
+          editing={editing === 'name'} onEdit={() => setEditing('name')} onCancel={cancelEdit}
           onChangeText={setName} onSave={saveField} saving={saving} maxLength={100}
         />
         <View style={S.rowSep} />
         <EditRow
           icon="information-circle-outline" label="About" value={status} placeholder="Hey, I'm on crazzychat"
-          editing={editing === 'status'} onEdit={() => setEditing('status')}
+          editing={editing === 'status'} onEdit={() => setEditing('status')} onCancel={cancelEdit}
           onChangeText={setStatus} onSave={saveField} saving={saving} maxLength={200} multiline
         />
         <View style={S.rowSep} />
         <EditRow
           icon="call-outline" label="Phone" value={phone} placeholder="Add phone number"
-          editing={editing === 'phone'} onEdit={() => setEditing('phone')}
+          editing={editing === 'phone'} onEdit={() => setEditing('phone')} onCancel={cancelEdit}
           onChangeText={(v) => {
             setPhone(v);
             // A code was sent to the OLD number: editing it must not let that
@@ -404,7 +423,8 @@ export default function ProfileScreen() {
 
       {/* Phone verification (kept) */}
       {!!phone.trim() && verifyStep !== 'done' && (verifyStep === 'idle' ? (
-        <TouchableOpacity onPress={onSendPhoneOtp} disabled={verifying || !phone.trim()} style={[S.verifyRow, (verifying || !phone.trim()) && { opacity: 0.5 }]} activeOpacity={0.7}>
+        <TouchableOpacity onPress={onSendPhoneOtp} disabled={verifying || !phone.trim()} style={[S.verifyRow, (verifying || !phone.trim()) && { opacity: 0.5 }]} activeOpacity={0.7}
+          accessibilityRole="button" accessibilityState={{ disabled: verifying || !phone.trim(), busy: verifying }}>
           <Ionicons name="shield-checkmark-outline" size={18} color={colors.primary} />
           <Text style={S.verifyLinkTxt}>{verifying ? 'Sending…' : 'Verify this number via SMS'}</Text>
         </TouchableOpacity>
@@ -416,15 +436,24 @@ export default function ProfileScreen() {
             style={[S.input, { letterSpacing: 6, textAlign: 'center', fontSize: 20 }]}
             value={phoneCode} onChangeText={(v) => setPhoneCode(v.replace(/\D/g, '').slice(0, 6))}
             placeholder="123456" placeholderTextColor={colors.textDim} keyboardType="number-pad" maxLength={6}
+            accessibilityLabel="6-digit verification code" textContentType="oneTimeCode" autoComplete="sms-otp"
           />
           <View style={{ flexDirection: 'row', gap: 8 }}>
-            <TouchableOpacity style={[S.btn, { flex: 1 }, verifying && S.btnOff]} onPress={onVerifyPhoneOtp} disabled={verifying} activeOpacity={0.85}>
+            <TouchableOpacity style={[S.btn, { flex: 1 }, verifying && S.btnOff]} onPress={onVerifyPhoneOtp} disabled={verifying} activeOpacity={0.85}
+              accessibilityRole="button" accessibilityLabel="Verify" accessibilityState={{ disabled: verifying, busy: verifying }}>
               {verifying ? <ActivityIndicator color="#fff" /> : <Text style={S.btnTxt}>Verify</Text>}
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => { setVerifyStep('idle'); setPhoneCode(''); }} style={[S.btn, S.btnGhost, { flex: 0.5 }]} disabled={verifying} activeOpacity={0.85}>
+            <TouchableOpacity onPress={() => { setVerifyStep('idle'); setPhoneCode(''); }} style={[S.btn, S.btnGhost, { flex: 0.5 }]} disabled={verifying} activeOpacity={0.85}
+              accessibilityRole="button" accessibilityState={{ disabled: verifying }}>
               <Text style={[S.btnTxt, { color: colors.text }]}>Cancel</Text>
             </TouchableOpacity>
           </View>
+          <TouchableOpacity onPress={onSendPhoneOtp} disabled={verifying || resendIn > 0} style={S.resendRow} hitSlop={6}
+            accessibilityRole="button" accessibilityState={{ disabled: verifying || resendIn > 0 }}>
+            <Text style={[S.verifyLinkTxt, (verifying || resendIn > 0) && { color: colors.textDim }]}>
+              {resendIn > 0 ? `Resend code in ${resendIn}s` : 'Resend code'}
+            </Text>
+          </TouchableOpacity>
         </View>
       ))}
 
@@ -441,12 +470,12 @@ export default function ProfileScreen() {
       </View>
 
       {/* Actions */}
-      <TouchableOpacity style={S.actionRow} onPress={() => router.push('/settings' as any)} activeOpacity={0.85}>
+      <TouchableOpacity style={S.actionRow} onPress={() => router.push('/settings' as any)} activeOpacity={0.85} accessibilityRole="button">
         <Ionicons name="settings-outline" size={20} color={colors.text} />
         <Text style={S.actionTxt}>Privacy & settings</Text>
         <Ionicons name="chevron-forward" size={18} color={colors.textDim} style={{ marginLeft: 'auto' }} />
       </TouchableOpacity>
-      <TouchableOpacity style={[S.actionRow, { borderColor: colors.danger }]} onPress={onSignOut} activeOpacity={0.85}>
+      <TouchableOpacity style={[S.actionRow, { borderColor: colors.danger }]} onPress={onSignOut} activeOpacity={0.85} accessibilityRole="button">
         <Ionicons name="log-out-outline" size={20} color={colors.danger} />
         <Text style={[S.actionTxt, { color: colors.danger }]}>Sign out</Text>
       </TouchableOpacity>
@@ -456,6 +485,9 @@ export default function ProfileScreen() {
         onLongPress={() => router.push('/perf-debug' as any)}
         delayLongPress={800}
         activeOpacity={1}
+        accessibilityRole="text"
+        accessibilityActions={[{ name: 'longpress', label: 'Open diagnostics' }]}
+        onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'longpress') router.push('/perf-debug' as any); }}
         style={{ alignItems: 'center', paddingVertical: 24 }}
       >
         {/* Read, never hardcoded: this line said 1.1.1 while the build was
@@ -465,16 +497,17 @@ export default function ProfileScreen() {
         </Text>
       </TouchableOpacity>
     </ScrollView>
+    </KeyboardSafe>
     </View>
   );
 }
 
 // A WhatsApp-style info row: leading icon, label + value (or inline editor),
 // trailing pencil → checkmark to save.
-function EditRow({ icon, label, value, placeholder, editing, onEdit, onChangeText, onSave, saving, multiline, keyboardType, maxLength, verified }: {
+function EditRow({ icon, label, value, placeholder, editing, onEdit, onCancel, onChangeText, onSave, saving, multiline, keyboardType, maxLength, verified }: {
   icon: ComponentProps<typeof Ionicons>['name']; label: string; value: string; placeholder: string;
-  editing: boolean; onEdit: () => void; onChangeText: (t: string) => void; onSave: () => void; saving?: boolean;
-  multiline?: boolean; keyboardType?: any; maxLength?: number; verified?: boolean;
+  editing: boolean; onEdit: () => void; onCancel: () => void; onChangeText: (t: string) => void; onSave: () => void; saving?: boolean;
+  multiline?: boolean; keyboardType?: KeyboardTypeOptions; maxLength?: number; verified?: boolean;
 }) {
   const { colors } = useTheme();
   const S = useS();
@@ -487,7 +520,7 @@ function EditRow({ icon, label, value, placeholder, editing, onEdit, onChangeTex
           <TextInput
             style={S.editInput} value={value} onChangeText={onChangeText} placeholder={placeholder}
             placeholderTextColor={colors.textDim} multiline={multiline} keyboardType={keyboardType}
-            maxLength={maxLength} autoFocus
+            maxLength={maxLength} autoFocus accessibilityLabel={label}
           />
         ) : (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -498,6 +531,12 @@ function EditRow({ icon, label, value, placeholder, editing, onEdit, onChangeTex
           </View>
         )}
       </View>
+      {editing && (
+        <TouchableOpacity onPress={onCancel} style={S.editPencil} disabled={saving}
+          accessibilityRole="button" accessibilityLabel={`Cancel editing ${label.toLowerCase()}`} accessibilityState={{ disabled: !!saving }}>
+          <Ionicons name="close" size={20} color={colors.textDim} />
+        </TouchableOpacity>
+      )}
       <TouchableOpacity onPress={editing ? onSave : onEdit} hitSlop={10} style={S.editPencil} disabled={saving}
         accessibilityRole="button" accessibilityLabel={`${editing ? 'Save' : 'Edit'} ${label.toLowerCase()}`} accessibilityState={{ disabled: !!saving, busy: editing && !!saving }}>
         {editing && saving ? <ActivityIndicator size="small" color={colors.primary} /> : (
@@ -554,8 +593,9 @@ const makeStyles = (c: Palette, m: ReturnType<typeof useVisionComfort>['metrics'
 
   input:        { color: c.text, backgroundColor: c.glassSoft, borderColor: c.glassStroke, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 * m.textScale },
   subHint:      { color: c.textDim, fontSize: 12, lineHeight: 16 },
-  verifyRow:    { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 22, marginTop: 12, paddingVertical: 6 },
+  verifyRow:    { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 22, marginTop: 12, paddingVertical: 6, minHeight: 44 },
   verifyLinkTxt:{ color: c.primary, fontWeight: '700', fontSize: 13 },
+  resendRow:    { alignSelf: 'center', minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 },
   verifyBox:    { marginHorizontal: 16, marginTop: 10, gap: 8, backgroundColor: c.glassSoft, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, padding: 14 },
   btn:          { backgroundColor: c.primary, paddingVertical: 14, borderRadius: 16, alignItems: 'center' },
   btnGhost:     { backgroundColor: c.glassSoft },

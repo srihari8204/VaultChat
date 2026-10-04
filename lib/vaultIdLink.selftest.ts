@@ -1,6 +1,6 @@
 // lib/vaultIdLink.selftest.ts — run: npx tsx lib/vaultIdLink.selftest.ts
 import assert from 'node:assert/strict';
-import { parseVaultIdPayload as p } from './vaultIdLink';
+import { parseVaultIdPayload as p, isVaultId } from './vaultIdLink';
 
 // what the app produces
 assert.equal(p('vaultchat://add/v0a1b2c3d4e5f/Alice%20B'), 'v0a1b2c3d4e5f');
@@ -19,5 +19,12 @@ assert.equal(p('vaultchat://add/'), '', 'empty id');
 assert.equal(p('vaultchat://add/../../x'), '', 'path tricks');
 assert.equal(p(''), '');
 assert.equal(p('x'.repeat(200)), '', 'too long');
+
+// isVaultId — the deep-link route checks the raw path segment with it
+assert.equal(isVaultId('v0a1b2c3d4e5f'), true);
+assert.equal(isVaultId('a/b'), false, 'no path separators');
+assert.equal(isVaultId('..%2F'), false, 'no encoded tricks');
+assert.equal(isVaultId('ab'), false, 'too short');
+assert.equal(isVaultId(''), false);
 
 console.log('vaultIdLink selftest: ok');

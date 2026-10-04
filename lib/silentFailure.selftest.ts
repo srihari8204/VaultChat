@@ -88,13 +88,13 @@ check('6. the server-side hide is not swallowed',
 
 // ── C.6 bulk chat actions ───────────────────────────────────────────────────
 check('8. bulk actions count their per-item failures',
-  /for \(const id of ids\) \{ try \{ await fn\(id\); \} catch \{ failed\+\+; \} \}/.test(CHATS),
+  /const results = await Promise\.allSettled\(ids\.map\(id => fn\(id\)\)\);\s*\n\s*const failed = results\.filter\(r => r\.status === 'rejected'\)\.length;/.test(CHATS),
   'catch {} here makes a partial bulk action look identical to a complete one');
 check('9. the bulk failure is reported after the refetch is awaited',
   /await fetchList\(\);\s*\n\s*if \(failed\) setError\(/.test(CHATS),
   'loadList() calls setError(null) on success and would erase the message');
 check('10. bulk delete reports its failures too',
-  /for \(const id of ids\) \{ try \{ await setHidden\(id, true\); \} catch \{ failed\+\+; \} \}/.test(CHATS));
+  /Promise\.allSettled\(ids\.map\(id => setHidden\(id, true\)\)\)/.test(CHATS) && /const failed = results\.filter\(r => r\.status === 'rejected'\)\.length;/.test(CHATS));
 
 // ── C.8 the sheet that could never open ─────────────────────────────────────
 check('11. the dead long-press sheet stays deleted',
