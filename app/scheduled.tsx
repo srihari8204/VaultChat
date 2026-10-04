@@ -35,6 +35,7 @@ import { getScheduledCopy, deleteScheduledCopy, pruneScheduledCopies } from '../
 import { isChatLocked } from '../lib/chatLock';
 import { AuroraBackground } from '../components/ui';
 import { AppText as Text } from '../components/ui/Text';
+import { userErrorText } from '../lib/userErrorText';
 
 const CACHE_KEY = 'scheduled';
 /** GET /user/scheduled-messages returns at most this many rows (LIMIT 200). */
@@ -83,23 +84,30 @@ export default function ScheduledScreen() {
   // invoke of updaters cannot run the side effect twice).
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
+  // The cache paint and every load await storage and the network; none may
+  // set state after the screen has closed.
+  const alive = useRef(true);
+  useEffect(() => () => { alive.current = false; }, []);
 
   const load = useCallback(async () => {
     try {
       const server = await listScheduledMessages();
+      if (!alive.current) return;
       loadedRef.current = true;
       // Local copies of rows the server no longer lists (delivered > 7 days ago)
       // are dropped — but only from a complete list, never a truncated one.
       if (server.length < SERVER_LIST_LIMIT) pruneScheduledCopies(server.map(r => String(r.id))).catch(() => {});
       const list = await withLocalCopies(server);
+      if (!alive.current) return;
       setRows(list);
       setError(null);
       writeCache(CACHE_KEY, withoutContent(list));
     } catch (e: any) {
+      if (!alive.current) return;
       // Keep cached rows if we have them: over rows the error is a one-line
       // "Couldn't refresh"; on a cold load it is the full error state.
       setError(rowsRef.current.length ? "Couldn't refresh — showing the saved list. Pull down to try again."
-        : e?.message ?? 'Failed to load');
+        : userErrorText(e, 'Your scheduled messages could not be loaded.'));
     }
   }, []);
 
@@ -111,7 +119,7 @@ export default function ScheduledScreen() {
       // Older builds cached decrypted previews here; scrub them.
       if (cached.some(r => r.content != null)) writeCache(CACHE_KEY, withoutContent(cached));
       const rowsFromCache = await withLocalCopies(withoutContent(cached));
-      if (loadedRef.current) return;
+      if (loadedRef.current || !alive.current) return;
       setRows(rowsFromCache);
       setLoading(false);
     })();
@@ -120,19 +128,19 @@ export default function ScheduledScreen() {
   // The one server load: on first focus, and again on every return (e.g. after
   // scheduling from a chat).
   useFocusEffect(useCallback(() => {
-    load().finally(() => setLoading(false));
+    load().finally(() => { if (alive.current) setLoading(false); });
   }, [load]));
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await load();
-    setRefreshing(false);
+    if (alive.current) setRefreshing(false);
   }, [load]);
 
   const removeRow = useCallback(async (row: ScheduledMessageRow) => {
     await cancelScheduledMessage(row.id);
     await deleteScheduledCopy(String(row.id));
-    setRows(prev => prev.filter(r => r.id !== row.id));
+    if (alive.current) setRows(prev => prev.filter(r => r.id !== row.id));
   }, []);
 
   const onCancel = useCallback((row: ScheduledMessageRow) => {
@@ -141,7 +149,7 @@ export default function ScheduledScreen() {
       `"${(row.content || '').slice(0, 80) || row.type}" — scheduled for ${new Date(row.sendAt).toLocaleString()}.`,
       [
         { text: 'Cancel message', style: 'destructive', onPress: async () => {
-          try { await removeRow(row); } catch (e: any) { Alert.alert('Could not cancel', e?.message ?? 'Try again'); }
+          try { await removeRow(row); } catch (e: any) { Alert.alert('Could not cancel', `The message is still scheduled. ${userErrorText(e, 'Please try again.')}`); }
         } },
         { text: 'Keep', style: 'cancel' },
       ],

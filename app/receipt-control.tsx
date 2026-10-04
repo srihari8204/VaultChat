@@ -21,6 +21,7 @@ import { listChats, listGhostMode, setGhostMode, type GhostMode } from '../lib/c
 import { AppText as Text, AuroraBackground } from '../components/ui';
 import { initialOf } from '../lib/format';
 import { tint } from '../lib/tintColor';
+import { userErrorText } from '../lib/userErrorText';
 
 interface Contact { userId: string; name: string }
 type Field = 'read' | 'typing' | 'lastSeen';
@@ -35,6 +36,13 @@ function useS() {
 // find out. The label names the setting; accessibilityState carries state.
 // Styles and colours come from the screen: one StyleSheet per screen, not
 // one per toggle (three per row).
+// "Shown" state for a contact (defaults to all visible when no rule exists).
+const shownFor = (g: GhostMode | undefined) => ({
+  read: !(g?.hideRead),
+  typing: !(g?.hideTyping),
+  lastSeen: !(g?.hideLastSeen),
+});
+
 function Toggle({ on, icon, onPress, label, s, colors }: {
   on: boolean; icon: React.ComponentProps<typeof Ionicons>['name']; onPress: () => void; label: string;
   s: ReturnType<typeof makeStyles>; colors: Palette;
@@ -66,9 +74,21 @@ export default function ReceiptControlScreen() {
   // Pull-to-refresh reloads under the list instead of swapping it for a spinner.
   const [refreshing, setRefreshing] = useState(false);
   const pulling = useRef(false);
-  const onRefresh = useCallback(() => {
+
+  // The latest rules, updated synchronously on every patch, so a second tap
+  // before the re-render toggles from the value the first tap set, not a stale one.
+  const rulesRef = useRef(rules);
+  // One request at a time per contact+flag, so responses cannot land out of
+  // order and leave the server on a different value than the screen.
+  const chains = useRef<Record<string, Promise<void>>>({});
+  // Toggles whose request has not settled. A reload must not replace rulesRef
+  // under them: their rollback would then apply to the reloaded rules.
+  const inFlight = useRef(0);
+
+  const onRefresh = useCallback(async () => {
     pulling.current = true;
     setRefreshing(true);
+    await Promise.all(Object.values(chains.current));   // chains never reject
     setReloadKey(k => k + 1);
   }, []);
 
@@ -88,13 +108,13 @@ export default function ReceiptControlScreen() {
         for (const g of ghost) rmap[g.targetId] = g;
         if (active) {
           setContacts(Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name)));
-          setRules(rmap);
-          rulesRef.current = rmap;
+          // A toggle tapped while this load was out keeps the screen's rules.
+          if (inFlight.current === 0) { setRules(rmap); rulesRef.current = rmap; }
           setLoadFailed(false);
           setError(null);
         }
       } catch (e: any) {
-        if (active) { setError(e?.message ?? 'Failed to load contacts'); setLoadFailed(true); }
+        if (active) { setError(userErrorText(e, 'Your contacts could not be loaded.')); setLoadFailed(true); }
       } finally {
         pulling.current = false;
         if (active) { setLoading(false); setRefreshing(false); }
@@ -102,20 +122,6 @@ export default function ReceiptControlScreen() {
     })();
     return () => { active = false; };
   }, [reloadKey]);
-
-  // The latest rules, updated synchronously on every patch, so a second tap
-  // before the re-render toggles from the value the first tap set, not a stale one.
-  const rulesRef = useRef(rules);
-  // One request at a time per contact+flag, so responses cannot land out of
-  // order and leave the server on a different value than the screen.
-  const chains = useRef<Record<string, Promise<void>>>({});
-
-  // "Shown" state for a contact (defaults to all visible when no rule exists).
-  const shownFor = (g: GhostMode | undefined) => ({
-    read: !(g?.hideRead),
-    typing: !(g?.hideTyping),
-    lastSeen: !(g?.hideLastSeen),
-  });
 
   const toggleRule = useCallback((userId: string, field: Field) => {
     const nextShown = !shownFor(rulesRef.current[userId])[field];   // user is toggling visibility
@@ -133,6 +139,7 @@ export default function ReceiptControlScreen() {
     };
     patchFlag(!nextShown);
     const k = `${userId}:${hideKey}`;
+    inFlight.current++;
     chains.current[k] = (chains.current[k] ?? Promise.resolve()).then(async () => {
       try {
         await setGhostMode(userId, { [hideKey]: !nextShown } as Partial<Record<typeof hideKey, boolean>>);
@@ -140,10 +147,27 @@ export default function ReceiptControlScreen() {
       } catch (e: any) {
         // Roll back only if no later tap has changed this flag since.
         if (!!rulesRef.current[userId]?.[hideKey] === !nextShown) patchFlag(nextShown);
-        setError(e?.message ?? 'Failed to update');
+        setError(userErrorText(e, 'That setting could not be changed. Try again.'));
+      } finally {
+        inFlight.current--;
       }
     });
   }, []);
+
+  const renderItem = useCallback(({ item }: { item: Contact }) => {
+    const r = shownFor(rules[item.userId]);
+    return (
+      <View style={s.contactRow}>
+        <View style={s.avatar}><Text style={s.avatarTxt}>{initialOf(item.name, '#')}</Text></View>
+        <Text style={s.contactName} numberOfLines={1}>{item.name}</Text>
+        <View style={s.toggleGroup}>
+          <Toggle s={s} colors={colors} label={`Read receipts for ${item.name}`} on={r.read} icon="checkmark-done" onPress={() => toggleRule(item.userId, 'read')} />
+          <Toggle s={s} colors={colors} label={`Typing indicator for ${item.name}`} on={r.typing} icon="create-outline" onPress={() => toggleRule(item.userId, 'typing')} />
+          <Toggle s={s} colors={colors} label={`Last seen for ${item.name}`} on={r.lastSeen} icon="time-outline" onPress={() => toggleRule(item.userId, 'lastSeen')} />
+        </View>
+      </View>
+    );
+  }, [s, colors, rules, toggleRule]);
 
   const filtered = useMemo(
     () => contacts.filter(c => !search || c.name.toLowerCase().includes(search.toLowerCase())),
@@ -205,20 +229,7 @@ export default function ReceiptControlScreen() {
             data={filtered}
             keyExtractor={c => c.userId}
             refreshControl={<RefreshControl tintColor={colors.primary} refreshing={refreshing} onRefresh={onRefresh} />}
-            renderItem={({ item }) => {
-              const r = shownFor(rules[item.userId]);
-              return (
-                <View style={s.contactRow}>
-                  <View style={s.avatar}><Text style={s.avatarTxt}>{initialOf(item.name, '#')}</Text></View>
-                  <Text style={s.contactName} numberOfLines={1}>{item.name}</Text>
-                  <View style={s.toggleGroup}>
-                    <Toggle s={s} colors={colors} label={`Read receipts for ${item.name}`} on={r.read} icon="checkmark-done" onPress={() => toggleRule(item.userId, 'read')} />
-                    <Toggle s={s} colors={colors} label={`Typing indicator for ${item.name}`} on={r.typing} icon="create-outline" onPress={() => toggleRule(item.userId, 'typing')} />
-                    <Toggle s={s} colors={colors} label={`Last seen for ${item.name}`} on={r.lastSeen} icon="time-outline" onPress={() => toggleRule(item.userId, 'lastSeen')} />
-                  </View>
-                </View>
-              );
-            }}
+            renderItem={renderItem}
             ListEmptyComponent={loadFailed ? null : (
               <View style={{ alignItems: 'center', padding: 40 }}>
                 <Text style={s.emptyTxt}>{contacts.length === 0 ? 'No contacts yet — start a direct chat first.' : 'No contacts found'}</Text>

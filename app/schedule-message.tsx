@@ -19,6 +19,7 @@ import { useTheme } from '../lib/theme';
 import { scheduleEncryptedMessage } from '../lib/chatService';
 import { putScheduledCopy } from '../lib/scheduledLocalCopy';
 import { AuroraBackground, KeyboardSafe } from '../components/ui';
+import { userErrorText } from '../lib/userErrorText';
 // Cross-platform picker (Android dialogs, iOS inline sheet); shared, not finance-specific in behaviour.
 import { useDatePicker } from '../components/ui/useDatePicker';
 
@@ -104,7 +105,7 @@ export default function ScheduleMessageScreen() {
         [{ text: 'OK', onPress: () => router.back() }],
       );
     } catch (e: any) {
-      Alert.alert('Could not schedule', e?.message ?? 'Try again');
+      Alert.alert('Could not schedule', userErrorText(e, 'The message could not be scheduled. Please try again.'));
     } finally {
       busyRef.current = false;
       setScheduling(false);
@@ -114,11 +115,20 @@ export default function ScheduleMessageScreen() {
   const sendIn = useCallback((mins: number) => doSchedule(scheduleTimeFor(mins)), [doSchedule]);
 
   // Custom date + time. Android chains its date and time dialogs; iOS (which
-  // has no DateTimePickerAndroid) gets an inline picker sheet. A past pick is
-  // rejected by doSchedule.
+  // has no DateTimePickerAndroid) gets an inline picker sheet. A past time is
+  // refused as soon as it is picked, not later at Schedule (doSchedule checks
+  // again, since a time can pass while the screen is open).
+  // ponytail: components/ui/useDatePicker has no minimumDate, so the picker
+  // still lets a past time be chosen; pass one once the hook takes it.
   const picker = useDatePicker();
   const pickCustom = useCallback(() => {
-    picker.open(customWhen ?? new Date(Date.now() + 60 * 60 * 1000), setCustomWhen, 'datetime');
+    picker.open(customWhen ?? new Date(Date.now() + 60 * 60 * 1000), (d) => {
+      if (d.getTime() <= Date.now() + 60_000) {
+        Alert.alert('Pick a future time', 'That time has already passed. Choose a later one.');
+        return;
+      }
+      setCustomWhen(d);
+    }, 'datetime');
   }, [customWhen, picker]);
 
   return (

@@ -18,8 +18,9 @@ import {
   backupToGoogleDrive, restoreFromGoogleDrive,
   writeLocalBackup, restoreLocalBackup, listLocalBackups, type LocalBackup,
   uploadCloudBackup, restoreCloudBackup, cloudBackupMeta, type BackupMeta,
-  getBackupMode, isSecretRequired,
+  getBackupMode, isSecretRequired, isBackupSettingsUnreadable,
 } from '../lib/cloudBackup';
+import { backupErrorText } from '../lib/backupSecretSwitch';
 import { driveBackupMeta, getDriveEmail, getDriveToken } from '../lib/googleDrive';
 import {
   getBackupSettings, saveBackupSettings, markBackupDone, type BackupSettings,
@@ -38,6 +39,15 @@ const NET = [
   { id: 'any', label: 'Wi-Fi or mobile data' },
 ] as const;
 
+// Restore order: the account copy first — it is the only one that exists after
+// a reinstall, which is the case this button is for.
+type Source = 'cloud' | 'drive' | 'local';
+const SOURCES: Source[] = ['cloud', 'drive', 'local'];
+const SOURCE_NAME: Record<Source, string> = { cloud: 'your account', drive: 'Google Drive', local: 'this device' };
+const restoreFrom = (src: Source, secret?: string) => (src === 'cloud' ? restoreCloudBackup(secret)
+  : src === 'drive' ? restoreFromGoogleDrive(secret) : restoreLocalBackup(undefined, secret));
+const isNoBackup = (e: any) => e?.message === 'No backup found' || e?.message === 'No local backup found';
+
 function fmt(ms: number | undefined | null): string {
   if (!ms) return 'Never';
   const d = new Date(ms);
@@ -55,10 +65,14 @@ export default function ChatBackupScreen() {
   const [gEmail, setGEmail] = useState<string | null>(null);
   const [local, setLocal] = useState<LocalBackup[]>([]);
   const [cloud, setCloud] = useState<BackupMeta>({ exists: false });
-  const [mode, setMode] = useState<'account' | 'password' | 'key'>('account');
+  // 'unknown': this phone's e2ee settings could not be read. Never shown as
+  // "Off" — backups are paused (lib/cloudBackup fails closed) until it can.
+  const [mode, setMode] = useState<'account' | 'password' | 'key' | 'unknown'>('account');
   // Set when a restore hits a blob this device holds no key for — the secret
-  // lives only with the user, so the only way forward is to ask.
-  const [askSecret, setAskSecret] = useState<'password' | 'key' | null>(null);
+  // lives only with the user, so the only way forward is to ask. `from` is the
+  // copy that asked: the typed secret is tried on that copy only.
+  const [ask, setAsk] = useState<{ mode: 'password' | 'key'; from: Source } | null>(null);
+  const askSecret = ask?.mode ?? null;
   const [secretInput, setSecretInput] = useState('');
   // The secret is masked by default (shoulder-surfing); Show reveals it to check a long key.
   const [showSecret, setShowSecret] = useState(false);
@@ -79,7 +93,7 @@ export default function ChatBackupScreen() {
     getDriveEmail().then(live(setGEmail)).catch(() => {});
     listLocalBackups().then(live(setLocal)).catch(() => {});
     cloudBackupMeta().then(live(setCloud)).catch(() => {});
-    getBackupMode().then(live(setMode)).catch(() => {});
+    getBackupMode().then(live(setMode)).catch(() => { if (mounted.current) setMode('unknown'); });
   }, []);
 
   const connectGoogle = async () => {
@@ -89,7 +103,7 @@ export default function ChatBackupScreen() {
       setGEmail(await getDriveEmail());
       setDrive(await driveBackupMeta());
     } catch (e: any) {
-      Alert.alert('Google sign-in failed', e?.message ?? 'Please try again.');
+      Alert.alert('Google sign-in failed', backupErrorText(e));
     } finally { setBusy(null); }
   };
   // On focus, not just mount: returning from /backup-e2ee must refresh `mode`.
@@ -102,7 +116,7 @@ export default function ChatBackupScreen() {
     try { await saveBackupSettings(next); }
     catch (e: any) {
       setSettings(prev);
-      Alert.alert('Could not save', e?.message ?? 'Try again');
+      Alert.alert('Could not save', backupErrorText(e));
     }
   };
 
@@ -119,9 +133,10 @@ export default function ChatBackupScreen() {
       // chats back" was the one destination never written, and the screen
       // reported "Backup complete" regardless.
       let cloudOk = false;
+      let cloudErr: unknown = null;
       // Reported below as "Partly backed up" / "Backup failed".
-      try { await uploadCloudBackup(); cloudOk = true; } catch { /* reported below */ }
-      await writeLocalBackup(new Date()).catch(() => {});
+      try { await uploadCloudBackup(); cloudOk = true; } catch (e) { cloudErr = e; }
+      const localOk = await writeLocalBackup(new Date()).then(() => true, () => false);
       let driveOk = false;
       try { await backupToGoogleDrive(true); driveOk = true; } catch { /* not signed in / cancelled */ }
       // Only a real backup resets the due-timer, and only a real backup is
@@ -130,68 +145,81 @@ export default function ChatBackupScreen() {
       // reach for exactly once, after everything else is already gone.
       if (cloudOk || driveOk) await markBackupDone();
       await refresh();
-      if (cloudOk) {
+      const onDevice = localOk ? ' and this device' : '';
+      if (isBackupSettingsUnreadable(cloudErr)) {
+        // Every destination refused: nothing may be written without the
+        // secret, and nothing was.
+        Alert.alert('Backup paused', backupErrorText(cloudErr));
+      } else if (cloudOk) {
         Alert.alert('Backup complete', driveOk
-          ? 'Backed up to your account, Google Drive and this device.'
-          : 'Backed up to your account and this device. You can restore it when you reinstall.');
+          ? `Backed up to your account, Google Drive${onDevice}.`
+          : `Backed up to your account${onDevice}. You can restore it when you reinstall.`);
       } else if (driveOk) {
         Alert.alert('Partly backed up',
-          'Saved to Google Drive and this device, but the backup to your account failed. Tap Back Up again when you have a stable connection.');
+          `Saved to Google Drive${onDevice}, but the backup to your account failed. ${backupErrorText(cloudErr)}`);
       } else {
-        Alert.alert('Backup failed',
-          'Saved to this device only — that copy is deleted if you uninstall the app. Tap Back Up again when you have a stable connection.');
+        Alert.alert('Backup failed', (localOk
+          ? 'Saved to this device only — that copy is deleted if you uninstall the app. '
+          : 'Nothing was saved. ') + backupErrorText(cloudErr));
       }
     } catch (e: any) {
-      Alert.alert('Backup failed', e?.message ?? 'Please try again.');
+      Alert.alert('Backup failed', backupErrorText(e));
     } finally { setBusy(null); }
   };
 
-  const doRestore = async (userSecret?: string) => {
+  const savedAt = (src: Source): string | null => {
+    const t = src === 'cloud' ? (cloud.updatedAt ? new Date(cloud.updatedAt).getTime() : 0)
+      : src === 'drive' ? (drive.modifiedTime ? new Date(drive.modifiedTime).getTime() : 0) : local[0]?.mtime;
+    return t ? fmt(t) : null;
+  };
+
+  const closeAsk = () => { setAsk(null); setSecretInput(''); setShowSecret(false); };
+
+  // `only`: retry the copy that asked for a secret, with the secret — never fall
+  // through to an older copy because the typed secret was wrong.
+  const doRestore = async (userSecret?: string, only?: Source) => {
     setBusy('restore');
     try {
-      // ACCOUNT COPY FIRST — it is the only one that exists after a reinstall,
-      // which is the case this button is for. The old order tried Drive then the
-      // local file: on a fresh install the local file was deleted with the
-      // previous install and Drive needs both GMS and a prior sign-in, so the
-      // restore prompt led here and then failed for most users while their
-      // backup sat on the server.
-      //
       // "This backup needs a secret" is NOT a reason to try the next
-      // destination — the other copies are encrypted the same way, so falling
-      // through would just fail twice more and report "no backup found" for a
-      // backup that is sitting right there, intact.
+      // destination — the user is asked for it, for THAT copy. Any other
+      // failure (none there, offline) moves on to the next copy, and the result
+      // names which copy was applied, so an older one is never restored silently.
       let n = 0;
-      try { n = await restoreCloudBackup(userSecret); }
-      catch (e) {
-        if (isSecretRequired(e)) throw e;
-        try { n = await restoreFromGoogleDrive(userSecret); }
-        catch (e2) {
-          if (isSecretRequired(e2)) throw e2;
-          n = await restoreLocalBackup(undefined, userSecret);
+      let from: Source | null = null;
+      let lastErr: unknown = null;
+      for (const src of only ? [only] : SOURCES) {
+        try { n = await restoreFrom(src, userSecret); from = src; break; }
+        catch (e) {
+          if (isSecretRequired(e)) { setAsk({ mode: e.mode, from: src }); return; }
+          // Report the first real failure (offline, server), not a later "none here".
+          if (!lastErr || isNoBackup(lastErr)) lastErr = e;
         }
       }
-      setAskSecret(null); setSecretInput(''); setShowSecret(false);
+      if (!from) throw lastErr;
+      closeAsk();
+      const when = savedAt(from);
       // Restored rows go straight into the local store, which every chat reads
       // when it opens, and the Chats list re-reads itself on focus — so going
       // back to Chats shows them; no restart needed.
-      Alert.alert('Restore complete', `${n} messages restored.`, [
-        { text: 'Stay here', style: 'cancel' },
-        { text: 'Open chats', onPress: () => router.dismissTo('/(tabs)/chats') },
-      ]);
+      Alert.alert('Restore complete',
+        `${n} messages restored from ${SOURCE_NAME[from]}${when ? ` (backup from ${when})` : ''}.`
+        + (from !== 'cloud' ? ' The copy in your account could not be used.' : ''), [
+          { text: 'Stay here', style: 'cancel' },
+          { text: 'Open chats', onPress: () => router.dismissTo('/(tabs)/chats') },
+        ]);
     } catch (e: any) {
-      if (isSecretRequired(e)) { setAskSecret(e.mode); return; }
       // A supplied secret that did not open it is the overwhelmingly likely
       // cause here, and AES-GCM's failure surfaces as an opaque decrypt error.
       // Saying "wrong password" is both the truthful reading and the only one
       // the user can act on.
-      if (userSecret) {
+      if (userSecret && !isNoBackup(e) && !backupErrorText(e, '')) {
         Alert.alert('Could not unlock the backup',
-          askSecret === 'key' ? 'That key did not work. Check it and try again.'
-                              : 'That password did not work. Check it and try again.');
+          askSecret === 'key' ? 'That key did not work. If you have made a new key since this backup, use the key you had then.'
+                              : 'That password did not work. If you have changed it since this backup, use the password you had then.');
         return;
       }
-      Alert.alert('Restore failed', e?.message === 'No backup found' || e?.message === 'No local backup found'
-        ? 'No backup found for this account yet.' : (e?.message ?? 'Please try again.'));
+      Alert.alert('Restore failed', isNoBackup(e)
+        ? 'No backup found for this account yet.' : backupErrorText(e));
     } finally { setBusy(null); }
   };
 
@@ -295,17 +323,19 @@ export default function ChatBackupScreen() {
           disabled={!!busy}
           activeOpacity={0.7}
           accessibilityRole="button"
-          accessibilityLabel={`End-to-end encrypted backup: ${mode === 'account' ? 'off' : 'on'}`}
+          accessibilityLabel={`End-to-end encrypted backup: ${mode === 'account' ? 'off' : mode === 'unknown' ? 'could not be read' : 'on'}`}
           accessibilityHint="Opens end-to-end encrypted backup settings"
           accessibilityState={{ disabled: !!busy }}
         >
-          <Ionicons name={mode === 'account' ? 'lock-open-outline' : 'lock-closed'} size={22}
-                    color={mode === 'account' ? colors.textDim : colors.primary} />
+          <Ionicons name={mode === 'account' ? 'lock-open-outline' : mode === 'unknown' ? 'alert-circle-outline' : 'lock-closed'} size={22}
+                    color={mode === 'account' ? colors.textDim : mode === 'unknown' ? colors.danger : colors.primary} />
           <View style={{ flex: 1 }}>
-            <Text style={s.optLabel}>{mode === 'account' ? 'Off' : 'On'}</Text>
-            <Text style={s.optSub} numberOfLines={2}>
+            <Text style={s.optLabel}>{mode === 'account' ? 'Off' : mode === 'unknown' ? "Couldn't read this setting" : 'On'}</Text>
+            <Text style={s.optSub} numberOfLines={3}>
               {mode === 'account'
                 ? 'Your backup is encrypted with a key stored by your account, so it can be restored automatically.'
+                : mode === 'unknown'
+                  ? 'Backups are paused until this phone can read your encryption settings. Tap to try again.'
                 : mode === 'key'
                   ? 'Only your 64-character key can unlock this backup.'
                   : 'Only your password can unlock this backup.'}
@@ -347,6 +377,8 @@ export default function ChatBackupScreen() {
         <Text style={s.note}>
           {mode === 'account'
             ? 'Backups are encrypted and restore automatically when you reinstall and sign in.'
+            : mode === 'unknown'
+              ? 'Backups are paused: nothing is uploaded until this phone can read your encryption settings.'
             : 'Backups are end-to-end encrypted. You will need your ' +
               (mode === 'key' ? '64-character key' : 'password') + ' to restore them.'}
         </Text>
@@ -356,7 +388,7 @@ export default function ChatBackupScreen() {
           this is exactly the moment a returning Android user hits — a fresh
           install with their whole history behind one secret. */}
       <Modal visible={askSecret !== null} transparent animationType="fade"
-             onRequestClose={() => { setAskSecret(null); setSecretInput(''); setShowSecret(false); }}>
+             onRequestClose={closeAsk}>
         <KeyboardSafe keyboardOnly>
         <View style={s.modalWrap}>
           <View style={s.modalCard}>
@@ -364,8 +396,9 @@ export default function ChatBackupScreen() {
               {askSecret === 'key' ? 'Enter your 64-character key' : 'Enter your backup password'}
             </Text>
             <Text style={s.modalBody}>
-              This backup is end-to-end encrypted. It can only be unlocked with the
-              {askSecret === 'key' ? ' key' : ' password'} you set when you turned it on.
+              The copy in {ask ? SOURCE_NAME[ask.from] : 'your backup'} is end-to-end encrypted. It can only be
+              unlocked with the {askSecret === 'key' ? 'key' : 'password'} it was made with — if you have changed
+              it since, use the one you had then.
             </Text>
             <TextInput
               style={[s.modalInput, askSecret === 'key' && s.modalInputMono, askSecret === 'key' && showSecret && s.modalInputTall]}
@@ -393,11 +426,11 @@ export default function ChatBackupScreen() {
               <Text style={s.restoreLink}>{showSecret ? 'Hide' : 'Show'}</Text>
             </TouchableOpacity>
             <View style={s.modalBtns}>
-              <TouchableOpacity onPress={() => { setAskSecret(null); setSecretInput(''); setShowSecret(false); }} disabled={!!busy} style={s.modalBtn} accessibilityRole="button">
+              <TouchableOpacity onPress={closeAsk} disabled={!!busy} style={s.modalBtn} accessibilityRole="button">
                 <Text style={s.modalCancel}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                onPress={() => doRestore(secretInput)}
+                onPress={() => doRestore(secretInput, ask?.from)}
                 disabled={!!busy || !secretInput.trim()}
                 style={s.modalBtn}
                 accessibilityRole="button"
@@ -439,7 +472,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   optSub: { color: c.textFaint, fontSize: 12, lineHeight: 16, marginTop: 2 },
   note: { color: c.textFaint, fontSize: 12, lineHeight: 17, paddingHorizontal: 18, paddingTop: 18 },
 
-  // Fixed scrim: dims whatever is behind the dialog the same way in both themes (no scrim token exists).
+  // The theme's scrim dims whatever is behind the dialog.
   modalWrap: { flex: 1, backgroundColor: c.scrim, alignItems: 'center', justifyContent: 'center', padding: 24 },
   modalCard: { width: '100%', maxWidth: 420, backgroundColor: c.bg, borderRadius: 14, padding: 20 },
   modalTitle: { color: c.text, fontSize: 17, fontWeight: '700', marginBottom: 8 },

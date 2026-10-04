@@ -233,8 +233,8 @@ export default function ChatCodeScreen() {
             </Text>
 
             {loadErr && !live && (
-              <TouchableOpacity onPress={refresh} accessibilityRole="button" style={{ paddingVertical: 8 }}>
-                <Text style={[S.hint, { color: colors.danger }]}>
+              <TouchableOpacity onPress={refresh} accessibilityRole="button" style={S.retryRow}>
+                <Text style={[S.hint, S.retryTxt]}>
                   Could not check for a live code. Tap to try again.
                 </Text>
               </TouchableOpacity>
@@ -260,7 +260,7 @@ export default function ChatCodeScreen() {
                       try {
                         await copyAndAutoClear(live.code!);
                         Alert.alert('Copied', 'The code is on your clipboard for 30 seconds.');
-                      } catch (e: any) { Alert.alert('Could not copy', e?.message ?? 'Try again.'); }
+                      } catch { Alert.alert('Could not copy', 'Read the code out instead, or try again.'); }
                     }}>
                     <Ionicons name="copy-outline" size={20} color={colors.primary} />
                     <Text style={S.codeActionTxt}>Copy</Text>
@@ -411,4 +411,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   stopTxt: { color: c.danger, fontSize: 13.5, fontWeight: '700' },
 
   hint: { color: c.textFaint, fontSize: 12, marginTop: 10, lineHeight: 17 },
+  retryRow: { minHeight: 44, justifyContent: 'center', paddingVertical: 8 },
+  retryTxt: { color: c.danger, marginTop: 0 },
 });

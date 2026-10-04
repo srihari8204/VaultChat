@@ -45,6 +45,7 @@
 
 import 'react-native-get-random-values';
 import { randomBytes } from '@noble/hashes/utils.js';
+import { sha256 } from '@noble/hashes/sha2.js';
 import { Buffer } from 'buffer';
 import { pbkdf2Bytes, pbkdf2BytesAsync } from './vaultCrypto';
 
@@ -59,6 +60,13 @@ export interface E2EEHeader {
   kdf:  'pbkdf2-sha256';
   iter: number;
   salt: string;   // base64; absent-but-present as '' for 'key' mode (no KDF)
+  /**
+   * 'key' mode only: recoveryKeyId() of the key the blob is under. Every key
+   * header has salt '', so without this a device that made a new key could not
+   * tell an older copy from a current one, and fed it the wrong key. Absent on
+   * key-mode blobs written before 2026-10-04.
+   */
+  kid?: string;
 }
 
 /** The parsed header of a blob, or null when it is an account-managed backup. */
@@ -127,9 +135,32 @@ export async function backupSecretAsync(header: E2EEHeader, userSecret: string):
   return Buffer.from(await pbkdf2BytesAsync(userSecret, salt, header.iter)).toString('base64');
 }
 
-/** Header for a NEW e2ee backup in the given mode. */
-export function newHeader(mode: BackupMode): E2EEHeader {
-  return { mode, kdf: 'pbkdf2-sha256', iter: KDF_ITERATIONS, salt: mode === 'password' ? newSalt() : '' };
+/**
+ * A short, non-secret id for a recovery key: 8 bytes of SHA-256 over a
+ * domain-separated copy of it. It names which key a blob needs; with 256 bits
+ * of key entropy behind it, it tells an attacker nothing about the key.
+ */
+export function recoveryKeyId(key: string): string {
+  const k = normalizeRecoveryKey(key);
+  return Buffer.from(sha256(new TextEncoder().encode(`vc-backup-kid:${k}`)).slice(0, 8)).toString('hex');
+}
+
+/** Header for a NEW e2ee backup in the given mode ('key' mode: pass the key, for its id). */
+export function newHeader(mode: BackupMode, recoveryKey?: string): E2EEHeader {
+  const h: E2EEHeader = { mode, kdf: 'pbkdf2-sha256', iter: KDF_ITERATIONS, salt: mode === 'password' ? newSalt() : '' };
+  if (mode === 'key' && recoveryKey) h.kid = recoveryKeyId(recoveryKey);
+  return h;
+}
+
+/**
+ * Can the secret stored under `held` open a blob stamped `blob`? False means
+ * "certainly not — ask the user". True for a key-mode blob without a key id
+ * (written before ids existed): the caller tries it and asks if it fails.
+ */
+export function heldSecretMayOpen(held: E2EEHeader, blob: E2EEHeader): boolean {
+  if (held.mode !== blob.mode) return false;
+  if (blob.mode === 'password') return held.salt === blob.salt;
+  return !blob.kid || !held.kid || held.kid === blob.kid;
 }
 
 /**

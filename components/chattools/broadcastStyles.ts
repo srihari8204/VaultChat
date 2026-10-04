@@ -38,6 +38,8 @@ export const makeBroadcastStyles = (c: Palette) => StyleSheet.create({
   channelMeta: { color: c.textDim, fontSize: 12 },
   channelDesc: { color: c.textDim, fontSize: 12, marginTop: 4 },
   postCard: { backgroundColor: c.glassSoft, borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: c.glassStroke },
+  postCardAdmin: { paddingRight: 48 },
+  postDelete: { position: 'absolute', top: 2, right: 2, width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   postAuthor: { color: c.accent, fontSize: 12, fontWeight: '700', marginBottom: 4 },
   postText: { color: c.text, fontSize: 15, lineHeight: 22 },
   postTime: { color: c.textFaint, fontSize: 10, marginTop: 6, textAlign: 'right' },
@@ -51,7 +53,7 @@ export const makeBroadcastStyles = (c: Palette) => StyleSheet.create({
   emptyBox: { alignItems: 'center', padding: 40 },
   emptyTxt: { color: c.textDim, fontSize: 14 },
   emptySub: { color: c.textFaint, fontSize: 12, marginTop: 8 },
-  // Fixed scrim: dims whatever is behind the sheet the same way in both themes (no scrim token exists).
+  // The theme's scrim dims whatever is behind the sheet.
   modalBg: { flex: 1, backgroundColor: c.scrim, justifyContent: 'flex-end' },
   modal: { backgroundColor: c.surfaceSolid, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40, borderTopWidth: 1, borderColor: c.glassStroke },
   modalTitle: { color: c.text, fontSize: 18, fontWeight: '900', marginBottom: 16 },

@@ -20,12 +20,12 @@
 // the same, for the same reason.
 //
 // OPT-IN (end-to-end). The key comes from the user's password or a generated
-// 64-digit recovery key and never reaches the server; blobs carry a `vcE2EE`
+// 64-character recovery key and never reaches the server; blobs carry a `vcE2EE`
 // header with the non-secret KDF parameters. See lib/backupCrypto — including
 // why there is deliberately no escrow, and therefore no recovery from a
 // forgotten secret.
 //
-// Everything below funnels through writeSecret()/readSecret(), so both modes
+// Everything below funnels through writeSecret()/decryptBlob(), so both modes
 // cover all three destinations (server, Drive, local file) without any
 // destination needing to know which mode is active.
 //
@@ -50,11 +50,14 @@ import { isSecretBackupKey } from './backupSecretKeys';
 import { VISION_COMFORT_STORAGE_KEY } from './visionComfortModel';
 import { vaultEncrypt, vaultDecrypt } from './vaultCrypto';
 import {
-  readE2EEHeader, stampE2EEHeader, newHeader, backupSecret, generateRecoveryKey,
-  passwordProblem, type E2EEHeader, type BackupMode,
+  readE2EEHeader, stampE2EEHeader, newHeader, backupSecretAsync, generateRecoveryKey,
+  passwordProblem, recoveryKeyId, normalizeRecoveryKey, heldSecretMayOpen, type E2EEHeader, type BackupMode,
 } from './backupCrypto';
 import { exportAll, importAll } from './localDb';
-import { switchBackupSecret, type SecretPair, type SecretSlot } from './backupSecretSwitch';
+import {
+  switchBackupSecret, createLock, isBackupSwitchError,
+  type SecretPair, type SecretSlot, type PendingMarker,
+} from './backupSecretSwitch';
 // getCachedUser is what app/(constants)/authService's getCurrentUserAsync
 // returned anyway — it is a one-line passthrough to this. Taken directly, so
 // lib no longer reaches up into app (2026-09-17).
@@ -110,98 +113,165 @@ async function accountBackupKey(): Promise<string> {
 // ── End-to-end encrypted backup (opt-in) ────────────────────────────────
 // The derived secret is cached on-device so scheduled backups keep running
 // silently — the user enters their password or recovery key when they turn this
-// on and when they restore, never on the daily path. Both entries die with the
-// app, which is the point: after a reinstall the secret must come from the user,
+// on and when they restore, never on the daily path. It dies with the app,
+// which is the point: after a reinstall the secret must come from the user,
 // because that is the only place it exists.
-const E2EE_SECRET_STORE = 'vc_backup_e2ee_secret';
-const E2EE_HEADER_STORE = 'vc_backup_e2ee_header';
+//
+// ONE SecureStore record holds the secret AND its header, so a write is all or
+// nothing. They used to be two items written one after the other: a failure
+// between them left the new secret beside the old header, and every later
+// backup was stamped with a salt its key was not derived from — unopenable on
+// any other phone. The two legacy items are still read until the next write.
+const E2EE_STORE = 'vc_backup_e2ee';
+const LEGACY_SECRET_STORE = 'vc_backup_e2ee_secret';
+const LEGACY_HEADER_STORE = 'vc_backup_e2ee_header';
 
-async function storedE2EE(): Promise<{ secret: string; header: E2EEHeader } | null> {
-  try {
-    const [secret, raw] = await Promise.all([
-      SecureStore.getItemAsync(E2EE_SECRET_STORE),
-      SecureStore.getItemAsync(E2EE_HEADER_STORE),
-    ]);
-    if (!secret || !raw) return null;
-    return { secret, header: JSON.parse(raw) as E2EEHeader };
-  } catch { return null; }
+/**
+ * The stored pair. `unconfirmed` marks a recovery key the user has not yet
+ * typed back on the key screen: it may never have been shown (the app died
+ * between storing it and drawing it), so app/backup-e2ee shows it again until
+ * it is confirmed. In 'key' mode the stored secret IS the key (backupSecret
+ * passes it straight through).
+ */
+type StoredE2EE = SecretPair<E2EEHeader> & { unconfirmed?: boolean };
+
+/** Thrown when this device's e2ee settings cannot be read. NEVER means "off". */
+function unreadable(cause?: unknown): Error {
+  const err: any = new Error('Backup encryption settings could not be read on this device.');
+  err.code = 'BACKUP_SETTINGS_UNREADABLE';
+  err.cause = cause;
+  return err;
+}
+export function isBackupSettingsUnreadable(e: any): boolean {
+  return e?.code === 'BACKUP_SETTINGS_UNREADABLE';
 }
 
-/** The stored pair for switchBackupSecret — unlike storedE2EE, a read failure throws. */
-const e2eeSlot: SecretSlot<E2EEHeader> = {
-  async get() {
-    const [secret, raw] = await Promise.all([
-      SecureStore.getItemAsync(E2EE_SECRET_STORE),
-      SecureStore.getItemAsync(E2EE_HEADER_STORE),
+function asStored(p: any): StoredE2EE {
+  if (typeof p?.secret !== 'string' || !p.secret || (p.header?.mode !== 'password' && p.header?.mode !== 'key')) {
+    throw new Error('malformed');
+  }
+  return p as StoredE2EE;
+}
+
+/**
+ * This device's e2ee pair, or null in account mode. FAILS CLOSED: a SecureStore
+ * error or a corrupt record throws BACKUP_SETTINGS_UNREADABLE. It used to
+ * return null, which read as "account mode" — the screen showed Off and the
+ * next scheduled backup uploaded a server-readable copy over the user's
+ * end-to-end encrypted one.
+ */
+async function storedE2EE(): Promise<StoredE2EE | null> {
+  try {
+    const raw = await SecureStore.getItemAsync(E2EE_STORE);
+    if (raw) return asStored(JSON.parse(raw));
+    const [secret, header] = await Promise.all([
+      SecureStore.getItemAsync(LEGACY_SECRET_STORE),
+      SecureStore.getItemAsync(LEGACY_HEADER_STORE),
     ]);
-    return secret && raw ? { secret, header: JSON.parse(raw) as E2EEHeader } : null;
-  },
-  async put({ secret, header }) {
-    await SecureStore.setItemAsync(E2EE_SECRET_STORE, secret);
-    await SecureStore.setItemAsync(E2EE_HEADER_STORE, JSON.stringify(header));
+    // Half a legacy pair was always account mode (the old reader's rule).
+    return secret && header ? asStored({ secret, header: JSON.parse(header) }) : null;
+  } catch (e) { throw unreadable(e); }
+}
+
+const e2eeSlot: SecretSlot<E2EEHeader> = {
+  get: storedE2EE,
+  async put(pair) {
+    await SecureStore.setItemAsync(E2EE_STORE, JSON.stringify(pair));
+    // The record wins over the legacy items, so leftovers are harmless.
+    await SecureStore.deleteItemAsync(LEGACY_SECRET_STORE).catch(() => {});
+    await SecureStore.deleteItemAsync(LEGACY_HEADER_STORE).catch(() => {});
   },
   async clear() {
-    await SecureStore.deleteItemAsync(E2EE_SECRET_STORE);
-    await SecureStore.deleteItemAsync(E2EE_HEADER_STORE);
+    // Legacy first: while the record exists it wins, so a failure part-way
+    // leaves the device still on its secret, never on half a legacy pair.
+    await SecureStore.deleteItemAsync(LEGACY_SECRET_STORE);
+    await SecureStore.deleteItemAsync(LEGACY_HEADER_STORE);
+    await SecureStore.deleteItemAsync(E2EE_STORE);
   },
 };
 
-/** Which mode this device is currently backing up in. */
+// "A switch has not finished": the next backup run re-uploads under whatever
+// the device holds, without waiting for the schedule. lib/backupScheduler reads
+// the same key (it cannot import this module's constants under its selftest).
+// Device-local, so it is never swept into a backup bundle. Holds no secret.
+export const SWITCH_PENDING_KEY = 'vc_backup_switch_pending';
+const pendingMarker: PendingMarker = {
+  set: () => AsyncStorage.setItem(SWITCH_PENDING_KEY, String(Date.now())),
+  clear: () => AsyncStorage.removeItem(SWITCH_PENDING_KEY),
+};
+
+// Every write that resolves a secret and uploads, and every switch, runs under
+// this one lock (lib/backupSecretSwitch.createLock).
+const backupLock = createLock();
+
+/** Which mode this device is currently backing up in. Rejects when it cannot be read. */
 export async function getBackupMode(): Promise<'account' | BackupMode> {
   return (await storedE2EE())?.header.mode ?? 'account';
 }
 
+/** The recovery key while it has not been confirmed as saved, else null. */
+export async function getUnconfirmedRecoveryKey(): Promise<string | null> {
+  const p = await storedE2EE();
+  return p?.unconfirmed && p.header.mode === 'key' ? p.secret : null;
+}
+
+/** The user typed the key back: stop showing it. Only for the key the device holds. */
+export function confirmRecoveryKey(key: string): Promise<void> {
+  return backupLock(async () => {
+    const p = await storedE2EE();
+    if (p?.unconfirmed && p.secret === normalizeRecoveryKey(key)) {
+      await e2eeSlot.put({ secret: p.secret, header: p.header });
+    }
+  });
+}
+
 /**
- * Turn on end-to-end encrypted backup — or, while it is on, change the password
- * or switch between password and key — and re-upload under the new key. Returns
- * the recovery key when mode is 'key' — shown once, never stored anywhere we
- * could hand back later.
+ * Turn on end-to-end encrypted backup — or, while it is on, change the password,
+ * make a new key, or switch between them — and re-upload under the new key.
+ * Returns the recovery key in 'key' mode. It is also kept, flagged unconfirmed,
+ * until the user types it back (see StoredE2EE).
  *
  * The re-upload is not optional. Leaving the previous account-encrypted blob in
  * place would mean switching this on changed nothing an attacker cares about:
  * the old copy is still there and the server can still read it.
  *
- * Transactional (lib/backupSecretSwitch): the new secret is stored only after
- * the upload under it succeeds, so a failed upload leaves the device exactly as
- * it was — still on its old password or key, or still account-managed.
+ * Transactional (lib/backupSecretSwitch): on failure it throws a
+ * BackupSwitchError saying what the device and the server copy are now under.
+ * In 'key' mode, when the server copy was left under the new key, the error
+ * carries that key as `recoveryKey`, so the screen can show it.
  */
-export async function enableE2EEBackup(
+export function enableE2EEBackup(
   mode: BackupMode, password?: string,
 ): Promise<{ recoveryKey?: string }> {
-  const header = newHeader(mode);
   const userSecret = mode === 'key' ? generateRecoveryKey() : (password ?? '');
   if (mode === 'password') {
     const problem = passwordProblem(userSecret);
-    if (problem) throw new Error(problem);
+    if (problem) return Promise.reject(new Error(problem));
   }
-  const next = { secret: backupSecret(header, userSecret), header };
-  await switchBackupSecret(e2eeSlot, next, async (using) => { await uploadCloudBackupUsing(using); });
-  return mode === 'key' ? { recoveryKey: userSecret } : {};
+  return backupLock(async () => {
+    const header = newHeader(mode, mode === 'key' ? userSecret : undefined);
+    const next: StoredE2EE = { secret: await backupSecretAsync(header, userSecret), header };
+    if (mode === 'key') next.unconfirmed = true;
+    try {
+      await switchBackupSecret(e2eeSlot, pendingMarker, next, (using) => uploadCloudBackupUsing(using).then(() => {}));
+    } catch (e) {
+      if (mode === 'key' && isBackupSwitchError(e) && e.server === 'next') e.recoveryKey = userSecret;
+      throw e;
+    }
+    return mode === 'key' ? { recoveryKey: userSecret } : {};
+  });
 }
 
 /**
  * Revert to the account-managed key and re-upload so the server copy matches.
- * All or nothing: if the re-upload (or clearing the secret) fails, the previous
- * secret and header are put back, so the device keeps writing encrypted
- * backups instead of silently switching to server-readable ones while the
- * screen still says "On". Callers should re-read getBackupMode() on failure.
+ * The same transactional switch as enableE2EEBackup (next = account key): if the
+ * upload or the clear fails, the device keeps writing encrypted backups instead
+ * of silently switching to server-readable ones while the screen says "On".
+ * Callers should re-read getBackupMode() on failure; the BackupSwitchError says
+ * what the server copy is under.
  */
-export async function disableE2EEBackup(): Promise<void> {
-  const [prevSecret, prevHeader] = await Promise.all([
-    SecureStore.getItemAsync(E2EE_SECRET_STORE),
-    SecureStore.getItemAsync(E2EE_HEADER_STORE),
-  ]);
-  try {
-    await SecureStore.deleteItemAsync(E2EE_SECRET_STORE);
-    await SecureStore.deleteItemAsync(E2EE_HEADER_STORE);
-    await uploadCloudBackup();
-  } catch (e) {
-    if (prevSecret && prevHeader) {
-      await SecureStore.setItemAsync(E2EE_SECRET_STORE, prevSecret).catch(() => {});
-      await SecureStore.setItemAsync(E2EE_HEADER_STORE, prevHeader).catch(() => {});
-    }
-    throw e;
-  }
+export function disableE2EEBackup(): Promise<void> {
+  return backupLock(() => switchBackupSecret(e2eeSlot, pendingMarker, null, (using) => uploadCloudBackupUsing(using).then(() => {})));
 }
 
 /** Thrown by a restore that needs a secret this device does not hold. */
@@ -209,7 +279,14 @@ export function isSecretRequired(e: any): e is { code: string; mode: BackupMode 
   return e?.code === 'BACKUP_SECRET_REQUIRED';
 }
 
-/** The secret to WRITE with, plus the header to stamp (null ⇒ account-managed). */
+function secretRequired(mode: BackupMode): Error {
+  const err: any = new Error('This backup is end-to-end encrypted.');
+  err.code = 'BACKUP_SECRET_REQUIRED';
+  err.mode = mode;
+  return err;
+}
+
+/** The secret to WRITE with, plus the header to stamp (null ⇒ account-managed). Throws when unreadable. */
 async function writeSecret(): Promise<{ secret: string; header: E2EEHeader | null }> {
   const e = await storedE2EE();
   if (e) return { secret: e.secret, header: e.header };
@@ -217,26 +294,33 @@ async function writeSecret(): Promise<{ secret: string; header: E2EEHeader | nul
 }
 
 /**
- * The secret to READ a specific blob with — decided by the BLOB, not by what
+ * Decrypt a blob with the secret it needs — decided by the BLOB, not by what
  * this device happens to be set to. A device restoring someone's e2ee backup
- * has no local state to consult, and a device whose password has since changed
- * holds a secret that no longer opens it.
+ * has no local state to consult, and a device whose password or key has since
+ * changed holds a secret that no longer opens it. Returns the bundle JSON.
+ *
+ * The device's own secret is tried only when the blob's header names it (same
+ * password salt, same key id). A key-mode blob from before key ids existed is
+ * tried too, and a failed decrypt then asks for the secret instead of failing
+ * as an unexplained "restore failed" — after "Make a new key", an older copy
+ * needs the OLD key, and the user is asked for it.
  */
-async function readSecret(blob: string, userSecret?: string): Promise<string> {
+async function decryptBlob(blob: string, userSecret?: string): Promise<string> {
+  const payload = JSON.parse(blob);
   const header = readE2EEHeader(blob);
-  if (!header) return accountBackupKey();          // account-managed or pre-e2ee
-  if (userSecret) return backupSecret(header, userSecret);
-  const cached = await storedE2EE();
-  // Salt match matters: a cached secret derived under a PREVIOUS password would
-  // otherwise be fed to AES-GCM and fail as an unexplained "restore failed"
-  // instead of simply asking for the current one.
-  if (cached && cached.header.mode === header.mode && cached.header.salt === header.salt) {
-    return cached.secret;
+  if (!header) return vaultDecrypt(await accountBackupKey(), payload);   // account-managed or pre-e2ee
+  if (userSecret) {
+    if (header.mode === 'key' && header.kid && recoveryKeyId(userSecret) !== header.kid) {
+      throw new Error('That key is not the one this backup was made with.');
+    }
+    return vaultDecrypt(await backupSecretAsync(header, userSecret), payload);
   }
-  const err: any = new Error('This backup is end-to-end encrypted.');
-  err.code = 'BACKUP_SECRET_REQUIRED';
-  err.mode = header.mode;
-  throw err;
+  // A read failure here only means "ask the user", which is always safe.
+  const cached = await storedE2EE().catch(() => null);
+  if (cached && heldSecretMayOpen(cached.header, header)) {
+    try { return vaultDecrypt(cached.secret, payload); } catch { /* not this device's secret: ask */ }
+  }
+  throw secretRequired(header.mode);
 }
 
 /** Back-compat for callers outside this module. */
@@ -246,8 +330,8 @@ export async function getBackupKey(): Promise<string> {
 
 /**
  * Gather everything + encrypt under the CURRENT key. Returns the opaque blob.
- * `using` overrides the key for one write (null = account key); only
- * enableE2EEBackup passes it, to upload under a secret it has not stored yet.
+ * `using` overrides the key for one write (null = account key); only the
+ * secret switch passes it, to upload under a pair the device does not hold yet.
  */
 async function buildEncryptedBackup(using?: SecretPair<E2EEHeader> | null): Promise<{ blob: string; messageCount: number; sizeBytes: number }> {
   // 1. AsyncStorage prefs, minus keys that describe THIS INSTALL rather than the
@@ -255,7 +339,7 @@ async function buildEncryptedBackup(using?: SecretPair<E2EEHeader> | null): Prom
   //    state — e.g. carrying the media-migration flag across would convince a
   //    device that still has a legacy external tree that it had already been
   //    drained, stranding those files outside the sandbox permanently.
-  const DEVICE_LOCAL_KEYS = new Set(['vc_media_migrated_v1', 'vc_restore_prompted', VISION_COMFORT_STORAGE_KEY]);
+  const DEVICE_LOCAL_KEYS = new Set(['vc_media_migrated_v1', 'vc_restore_prompted', VISION_COMFORT_STORAGE_KEY, SWITCH_PENDING_KEY]);
   // ── Key material must not ride along in the blanket sweep ──────────────
   //
   // The exclusion documented above removed the e2eeKeys FIELD, and the identity
@@ -329,9 +413,9 @@ async function buildEncryptedBackup(using?: SecretPair<E2EEHeader> | null): Prom
 }
 
 /** Decrypt + apply a backup blob to local storage. Returns messages restored. */
-async function applyEncryptedBackup(secret: string, blob: string): Promise<number> {
-  const json = vaultDecrypt(secret, JSON.parse(blob)); // throws on wrong key
-  const data = JSON.parse(json);
+async function applyEncryptedBackup(blob: string, userSecret?: string): Promise<number> {
+  // Decrypted in full before anything is written: a wrong key changes nothing.
+  const data = JSON.parse(await decryptBlob(blob, userSecret));
 
   if (data.asyncStorage) {
     // Filter on the way IN as well, not only on the way out. Bundles taken
@@ -423,8 +507,16 @@ export async function cloudBackupMeta(): Promise<BackupMeta> {
   catch { return { exists: false, unavailable: true }; }
 }
 
-export async function uploadCloudBackup(): Promise<{ messageCount: number; sizeBytes: number }> {
-  return uploadCloudBackupUsing(undefined);
+/**
+ * Upload under the device's current pair. A success also settles an unfinished
+ * secret switch: the server copy now matches what the device holds.
+ */
+export function uploadCloudBackup(): Promise<{ messageCount: number; sizeBytes: number }> {
+  return backupLock(async () => {
+    const r = await uploadCloudBackupUsing(undefined);
+    await pendingMarker.clear().catch(() => {});
+    return r;
+  });
 }
 
 async function uploadCloudBackupUsing(
@@ -460,7 +552,7 @@ export async function restoreCloudBackup(userSecret?: string): Promise<number> {
     blob = await resp.text();
   }
   if (!blob) throw new Error('No backup found');
-  return applyEncryptedBackup(await readSecret(blob, userSecret), blob);
+  return applyEncryptedBackup(blob, userSecret);
 }
 
 export async function deleteCloudBackup(): Promise<void> {
@@ -470,16 +562,18 @@ export async function deleteCloudBackup(): Promise<void> {
 // ── Google Drive (the user's own Drive — WhatsApp model) ─────────────────
 import { driveUpload, driveDownload } from './googleDrive';
 
-export async function backupToGoogleDrive(interactive = true): Promise<{ messageCount: number; sizeBytes: number }> {
-  const { blob, messageCount, sizeBytes } = await buildEncryptedBackup();
-  await driveUpload(blob, interactive);
-  return { messageCount, sizeBytes };
+export function backupToGoogleDrive(interactive = true): Promise<{ messageCount: number; sizeBytes: number }> {
+  return backupLock(async () => {
+    const { blob, messageCount, sizeBytes } = await buildEncryptedBackup();
+    await driveUpload(blob, interactive);
+    return { messageCount, sizeBytes };
+  });
 }
 
 export async function restoreFromGoogleDrive(userSecret?: string): Promise<number> {
   const blob = await driveDownload();
   if (!blob) throw new Error('No backup found');
-  return applyEncryptedBackup(await readSecret(blob, userSecret), blob);
+  return applyEncryptedBackup(blob, userSecret);
 }
 
 // ── Local file backups ("Databases" folder) ──────────────────────────────
@@ -500,13 +594,15 @@ function stamp(d: Date): string {
 }
 
 /** Write an encrypted backup file into VaultChat/Databases/ and prune old ones. */
-export async function writeLocalBackup(when: Date): Promise<{ path: string; messageCount: number; sizeBytes: number }> {
-  const { blob, messageCount, sizeBytes } = await buildEncryptedBackup();
-  await ensureDir(DB_BACKUP_DIR);
-  const path = `${DB_BACKUP_DIR}/msgstore-${stamp(when)}.vcbak`;
-  await RNFS.writeFile(path, blob, 'utf8');
-  await pruneLocalBackups();
-  return { path, messageCount, sizeBytes };
+export function writeLocalBackup(when: Date): Promise<{ path: string; messageCount: number; sizeBytes: number }> {
+  return backupLock(async () => {
+    const { blob, messageCount, sizeBytes } = await buildEncryptedBackup();
+    await ensureDir(DB_BACKUP_DIR);
+    const path = `${DB_BACKUP_DIR}/msgstore-${stamp(when)}.vcbak`;
+    await RNFS.writeFile(path, blob, 'utf8');
+    await pruneLocalBackups();
+    return { path, messageCount, sizeBytes };
+  });
 }
 
 /** Newest-first list of local backup files. */
@@ -531,7 +627,7 @@ export async function restoreLocalBackup(path?: string, userSecret?: string): Pr
   let p = path;
   if (!p) { const list = await listLocalBackups(); if (!list.length) throw new Error('No local backup found'); p = list[0].path; }
   const blob = await RNFS.readFile(p, 'utf8');
-  return applyEncryptedBackup(await readSecret(blob, userSecret), blob);
+  return applyEncryptedBackup(blob, userSecret);
 }
 
 export default {};

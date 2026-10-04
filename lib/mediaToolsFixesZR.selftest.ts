@@ -68,11 +68,11 @@ const read = (f: string) => readFileSync(f, 'utf8');
   assert.ok(/if \(chatId && inherit\) await AsyncStorage\.removeItem\(storageKey\)/.test(src), 'inherit removes the per-chat key');
 }
 
-// backup-e2ee: turning off restores the previous secret when it fails.
+// backup-e2ee: turning off goes through the transactional switch (keeps the secret on failure).
 {
   const src = read('lib/cloudBackup.ts');
-  const fn = src.slice(src.indexOf('export async function disableE2EEBackup'), src.indexOf('export function isSecretRequired'));
-  assert.ok(/catch \(e\)[^]*setItemAsync\(E2EE_SECRET_STORE, prevSecret\)[^]*throw e/.test(fn), 'disable rolls back on failure');
+  const fn = src.slice(src.indexOf('export function disableE2EEBackup'), src.indexOf('export function isSecretRequired'));
+  assert.ok(/backupLock\(\(\) => switchBackupSecret\(e2eeSlot, pendingMarker, null,/.test(fn), 'disable uses the transactional switch');
   assert.ok(read('app/backup-e2ee.tsx').includes('await getBackupMode().catch(() => null)'), 'screen re-reads the true mode');
 }
 

@@ -11,7 +11,7 @@
 import { HEADER_TOP, SCREEN_BOTTOM } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useState , useMemo} from 'react';
+import { useCallback, useEffect, useRef, useState , useMemo} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -38,6 +38,7 @@ import { setPendingJump } from '../lib/chatJump';
 import { isChatLocked } from '../lib/chatLock';
 import { AuroraBackground } from '../components/ui';
 import { AppText as Text } from '../components/ui/Text';
+import { userErrorText } from '../lib/userErrorText';
 
 /** Shown instead of the body of a bookmark from a locked chat. */
 const LOCKED_TEXT = '🔒 Locked chat';
@@ -57,13 +58,13 @@ async function withBodies(rows: BookmarkRow[]): Promise<BookmarkRow[]> {
   return Promise.all(rows.map(async (b) => {
     const id = Number(b.message?.id ?? 0);
     if (!b.message || !id) return b;
-    if (lockedIds.has(b.message.chatId)) return { ...b, message: { ...b.message, content: LOCKED_TEXT } };
     // Hidden AND purged: a view-once / ink snapshot from before Star stopped
     // taking them must not outlive the bubble. The bookmark itself stays.
-    if (isProtectedMessage(b.message.meta)) {
-      void dropBookmarkPlaintext(id).catch(() => {});
-      return { ...b, message: { ...b.message, content: PROTECTED_TEXT } };
-    }
+    // Purged before the lock check, so a locked chat's snapshot goes too.
+    const isProtected = isProtectedMessage(b.message.meta);
+    if (isProtected) void dropBookmarkPlaintext(id).catch(() => {});
+    if (lockedIds.has(b.message.chatId)) return { ...b, message: { ...b.message, content: LOCKED_TEXT } };
+    if (isProtected) return { ...b, message: { ...b.message, content: PROTECTED_TEXT } };
     const local = await getBookmarkPlaintext(id);
     return { ...b, message: { ...b.message, content: bookmarkBody(b.message.content, local, looksEncrypted) } };
   }));
@@ -84,6 +85,12 @@ export default function BookmarksScreen() {
   const [error,      setError]      = useState<string | null>(null);
   // The server could not be reached, so the rows are the saved copy.
   const [stale,      setStale]      = useState(false);
+  // load() awaits storage and the network; none of it may set state after the
+  // screen has closed.
+  const alive = useRef(true);
+  useEffect(() => () => { alive.current = false; }, []);
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
 
   const load = useCallback(async () => {
     // Local-first: paint cached bookmarks instantly, then fetch fresh.
@@ -94,7 +101,9 @@ export default function BookmarksScreen() {
     if (cached && hasCache) {
       // Older builds cached decrypted bodies here; scrub them on first read.
       if (hasBodies(cached)) writeCache('bookmarks', withoutBodies(cached));
-      setRows(await withBodies(withoutBodies(cached)));
+      const painted = await withBodies(withoutBodies(cached));
+      if (!alive.current) return;
+      setRows(painted);
       setLoading(false);
     }
     try {
@@ -105,25 +114,27 @@ export default function BookmarksScreen() {
       // bookmark time is the readable copy, and preferring it is what keeps a
       // saved message saved.
       const hydrated = await withBodies(fresh);
+      if (!alive.current) return;
       setRows(hydrated);
       writeCache('bookmarks', withoutBodies(hydrated));
       setError(null);
       setStale(false);
     } catch (e: any) {
+      if (!alive.current) return;
       // Keep cached rows for offline read, and say they are the saved copy.
       if (hasCache) setStale(true);
-      else setError(e?.message ?? 'Failed to load bookmarks');
+      else setError(userErrorText(e, 'Your bookmarks could not be loaded.'));
     }
   }, []);
 
   useEffect(() => {
-    (async () => { setLoading(true); await load(); setLoading(false); })();
+    (async () => { setLoading(true); await load(); if (alive.current) setLoading(false); })();
   }, [load]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await load();
-    setRefreshing(false);
+    if (alive.current) setRefreshing(false);
   }, [load]);
 
   const onRow = useCallback((b: BookmarkRow) => {
@@ -145,13 +156,11 @@ export default function BookmarksScreen() {
         { text: 'Remove', style: 'destructive', onPress: async () => {
             try {
               await removeBookmark(b.id, Number(b.message?.id) || null);
-              setRows(prev => {
-                const next = prev.filter(r => r.id !== b.id);
-                writeCache('bookmarks', withoutBodies(next)); // keep instant-paint cache consistent
-                return next;
-              });
+              const next = rowsRef.current.filter(r => r.id !== b.id);
+              writeCache('bookmarks', withoutBodies(next)); // keep instant-paint cache consistent
+              if (alive.current) setRows(prev => prev.filter(r => r.id !== b.id));
             } catch (e: any) {
-              Alert.alert('Failed', e?.message ?? 'Try again');
+              Alert.alert('Could not remove the bookmark', userErrorText(e, 'Please try again.'));
             }
           }
         },

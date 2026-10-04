@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../lib/theme';
 import { getSocket } from '../../lib/socket';
 import { isMissingRoute } from '../../lib/missingRoute';
+import { userErrorText } from '../../lib/userErrorText';
 import {
   deleteChannelPost, leaveChannel, listChannelPosts, postToChannel,
   type Channel, type ChannelPost,
@@ -72,7 +73,7 @@ export function BroadcastChannelView({ channel, onClose, onLeft }: {
     setPostsErr(null);
     listChannelPosts(channelId, { limit: POSTS_PAGE })
       .then(page => { if (active) { setPosts(page); setHasMore(page.length >= POSTS_PAGE); } })
-      .catch((e: any) => { if (active) setPostsErr(e?.message ?? 'Failed to load posts'); })
+      .catch((e: any) => { if (active) setPostsErr(userErrorText(e, 'The posts could not be loaded.')); })
       .finally(() => { if (active) setLoadingPosts(false); });
     return () => { active = false; };
   }, [channelId, reloadKey]);
@@ -131,7 +132,7 @@ export function BroadcastChannelView({ channel, onClose, onLeft }: {
       if (!alive.current) return;
       setPosts(prev => prev.some(x => x.id === post.id) ? prev : [post, ...prev]);
       setPostText('');
-    } catch (e: any) { Alert.alert('Could not post', e?.message ?? 'Try again.'); }
+    } catch (e: any) { Alert.alert('Could not post', userErrorText(e, 'Your post was not sent. Try again.')); }
     finally { postingRef.current = false; if (alive.current) setPosting(false); }
   };
 
@@ -146,7 +147,7 @@ export function BroadcastChannelView({ channel, onClose, onLeft }: {
           if (alive.current) setPosts(prev => prev.filter(x => x.id !== p.id));
         } catch (e: any) {
           if (isMissingRoute(e)) Alert.alert("Deleting posts isn't available yet", 'The post was not deleted.');
-          else Alert.alert('Could not delete the post', e?.message ?? 'Try again.');
+          else Alert.alert('Could not delete the post', userErrorText(e, 'The post is still there. Try again.'));
         }
       } },
     ],
@@ -164,7 +165,7 @@ export function BroadcastChannelView({ channel, onClose, onLeft }: {
           onLeft(channelId);
         } catch (e: any) {
           if (isMissingRoute(e)) Alert.alert("Leaving channels isn't available yet", 'You are still subscribed to this channel.');
-          else Alert.alert('Could not leave the channel', e?.message ?? 'Try again.');
+          else Alert.alert('Could not leave the channel', userErrorText(e, 'You are still subscribed. Try again.'));
         } finally { if (alive.current) setLeaving(false); }
       } },
     ],
@@ -179,21 +180,23 @@ export function BroadcastChannelView({ channel, onClose, onLeft }: {
       </>
     );
     if (!channel.isAdmin) return <View style={s.postCard}>{body}</View>;
-    // Admin: long-press deletes; screen readers get the same as an action.
+    // Admin: a visible Delete button on each post (it was long-press only,
+    // on a touchable that announced itself as plain text).
     return (
-      <TouchableOpacity
-        style={s.postCard}
-        activeOpacity={0.7}
-        onLongPress={() => deletePost(item)}
-        accessibilityRole="text"
-        accessibilityLabel={`${item.authorName ? item.authorName + ': ' : ''}${item.text}. ${postTime(item.createdAt)}`}
-        accessibilityActions={[{ name: 'delete', label: 'Delete post' }]}
-        onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'delete') deletePost(item); }}
-      >
+      <View style={[s.postCard, s.postCardAdmin]}>
         {body}
-      </TouchableOpacity>
+        <TouchableOpacity
+          style={s.postDelete}
+          onPress={() => deletePost(item)}
+          accessibilityRole="button"
+          accessibilityLabel="Delete post"
+          accessibilityHint="Removes this post for every subscriber"
+        >
+          <Ionicons name="trash-outline" size={18} color={colors.textDim} />
+        </TouchableOpacity>
+      </View>
     );
-  }, [s, channel.isAdmin, deletePost]);
+  }, [s, colors, channel.isAdmin, deletePost]);
 
   return (
     <View style={s.container}>

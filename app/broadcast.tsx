@@ -21,6 +21,7 @@ import { listChannels, createChannel, joinChannel, type Channel } from '../lib/c
 import { AuroraBackground } from '../components/ui';
 import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 import { BroadcastChannelView } from '../components/chattools/BroadcastChannelView';
+import { userErrorText } from '../lib/userErrorText';
 import { useBroadcastStyles } from '../components/chattools/broadcastStyles';
 
 const CACHE_KEY = 'broadcasts';
@@ -60,7 +61,7 @@ export default function BroadcastScreen() {
     }
     // Shown inline: with no cache it replaces the empty state (with a retry);
     // over cached channels it says they may be out of date.
-    catch (e: any) { setLoadErr(e?.message ?? 'Failed to load channels'); }
+    catch (e: any) { setLoadErr(userErrorText(e, 'Your channels could not be loaded.')); }
     finally { setLoading(false); }
   }, []);
 
@@ -87,7 +88,7 @@ export default function BroadcastScreen() {
       setShowCreate(false); setName(''); setDesc('');
       setChannels(prev => [ch, ...prev]);
       Alert.alert('Channel created', `Invite code: ${ch.inviteCode}\nShare it to let people subscribe.`);
-    } catch (e: any) { Alert.alert('Error', e?.message ?? 'Could not create channel'); }
+    } catch (e: any) { Alert.alert('Could not create the channel', userErrorText(e, 'Try again.')); }
     finally { busyRef.current = false; setBusy(false); }
   };
 
@@ -101,7 +102,7 @@ export default function BroadcastScreen() {
       setShowJoin(false); setJoinCode('');
       setChannels(prev => prev.some(c => c.id === ch.id) ? prev : [ch, ...prev]);
       Alert.alert('Joined', `You are now subscribed to ${ch.name}.`);
-    } catch (e: any) { Alert.alert('Error', e?.message ?? 'Could not join'); }
+    } catch (e: any) { Alert.alert('Could not join', userErrorText(e, 'Check the invite code and try again.')); }
     finally { busyRef.current = false; setBusy(false); }
   };
 

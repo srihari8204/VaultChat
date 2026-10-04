@@ -15,6 +15,7 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { createPoll } from '../lib/chatService';
 import { AppText as Text, AuroraBackground, KeyboardSafe } from '../components/ui';
+import { userErrorText } from '../lib/userErrorText';
 
 const MIN_OPTIONS = 2;
 const MAX_OPTIONS = 12;
@@ -95,7 +96,7 @@ export default function CreatePollScreen() {
       sent.current = true;
       router.back();
     } catch (e: any) {
-      Alert.alert('Could not send poll', e?.message ?? 'Try again');
+      Alert.alert('Could not send poll', userErrorText(e, 'The poll could not be sent. Please try again.'));
     } finally {
       postingRef.current = false;
       setPosting(false);
@@ -186,11 +187,12 @@ export default function CreatePollScreen() {
           />
         </View>
 
-        {/* lib/msgEnvelope: options ride inside the encrypted body; only
-            allowMultiple is on the server's public meta allow-list. */}
+        {/* lib/msgEnvelope: options ride inside the encrypted body; the public
+            meta allow-list carries only allowMultiple and optionCount. */}
         <Text style={S.privacy}>
-          🔒 The question and options are end-to-end encrypted. The server sees only whether
-          multiple answers are allowed, and stores votes by option number so it can count them.
+          🔒 The question and options are end-to-end encrypted. The server sees only how many
+          options there are and whether multiple answers are allowed, and stores votes by option
+          number so it can count them.
         </Text>
       </ScrollView>
     </KeyboardSafe>

@@ -9,7 +9,7 @@
 
 import { HEADER_TOP } from '../constants/layout';
 import React, { useEffect, useState , useMemo, useRef} from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Modal, TextInput } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Modal, TextInput, Platform } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 // BRAND_ACCENT styles the exported HTML file only (a fixed dark document), not the app UI.
@@ -25,6 +25,11 @@ import { getCurrentUserAsync } from './(constants)/authService';
 import { getLock, pinRetryAfterMs, verifyBiometric, verifyPin, type LockedChat } from '../lib/chatLock';
 import { AuroraBackground } from '../components/ui';
 import { KeyboardSafe } from '../components/ui/KeyboardSafe';
+import { userErrorText } from '../lib/userErrorText';
+
+// The export writes a cache file through react-native-fs, which has no web
+// implementation; the web app says so instead of failing on tap.
+const EXPORT_SUPPORTED = Platform.OS !== 'web';
 
 const PAGE = 200;
 const MAX_PAGES = 500;
@@ -39,13 +44,14 @@ const MAX_PAGES = 500;
 // they now hold a complete archive. The local cache still has those bodies.
 //
 // Server rows are E2EE envelopes. The union prefers our readable local copy
-// over an envelope (isCipher), and whatever is still an envelope afterwards
-// goes through hydrateMessages — the chat screen's decrypt path — so the
-// export never contains ciphertext (exportBody also refuses to print it).
+// over an envelope (isCipher). Whatever is still an envelope is decrypted later,
+// one write chunk at a time, through hydrateMessages — the chat screen's decrypt
+// path (decryptChunk) — so the export never contains ciphertext (exportBody
+// also refuses to print it) and the whole history is never held decrypted.
 // `cancelled` is checked between pages, so Cancel (or leaving) stops the walk.
 async function fetchAll(
   chatId: string,
-  on: { count: (n: number) => void; phase: (p: string) => void; cancelled: () => boolean },
+  on: { count: (n: number) => void; cancelled: () => boolean },
 ): Promise<{ msgs: Message[]; truncated: boolean }> {
   const all: Message[] = [];
   let before: number | undefined;
@@ -60,12 +66,15 @@ async function fetchAll(
   }
   if (on.cancelled()) throw new ExportCancelled();
   const merged = await unionWithLocalHistoryAsc(chatId, all, undefined, looksEncrypted);
-  on.phase('Decrypting messages…');
-  // hydrateMessages expects newest-first.
-  const hydrated = (await hydrateMessages(chatId, [...merged].reverse())).reverse();
-  on.count(hydrated.length);
-  return { msgs: hydrated, truncated };
+  on.count(merged.length);
+  return { msgs: merged, truncated };
 }
+
+// One oldest→newest chunk through the chat's decrypt funnel. hydrateMessages
+// takes newest-first and decrypts oldest-first, so chunks in order keep the
+// ratchet order the whole-list call had.
+const decryptChunk = (chatId: string) => async (chunk: Message[]) =>
+  (await hydrateMessages(chatId, [...chunk].reverse())).reverse();
 
 const fmtTime = (iso: string) => { try { return new Date(iso).toLocaleString(); } catch { return ''; } };
 const bodyOf = (m: Message): string => exportBody(m, looksEncrypted);
@@ -209,20 +218,20 @@ export default function ChatExportScreen() {
         const detail = await getChat(chatId);
         namesRef.current = new Map(detail.members.map(mm => [mm.userId, mm.name || mm.email || '']));
       } catch { namesRef.current = new Map(); }   // names are cosmetic; peerName is the fallback
-      const { msgs, truncated } = await fetchAll(chatId, {
-        count: live(setMsgCount), phase: live(setProgress), cancelled,
-      });
+      const { msgs, truncated } = await fetchAll(chatId, { count: live(setMsgCount), cancelled });
       // Say so BEFORE the file is shared, while the user can still decide.
       if (truncated && !(await confirm(
         'Export incomplete',
         `Only the newest ${MAX_PAGES * PAGE} messages from the server can be included, plus older ones saved on this device. Export anyway?`,
       ))) return;
       if (cancelled()) return;
-      live(setProgress)('Writing ' + msgs.length + ' messages…');
+      live(setProgress)('Decrypting and writing ' + msgs.length + ' messages…');
       await fn(msgs, me?.id ?? '');
       live(setProgress)('');
     } catch (e: any) {
-      if (!(e instanceof ExportCancelled) && mounted.current) Alert.alert('Export failed', e?.message ?? 'Something went wrong');
+      if (!(e instanceof ExportCancelled) && mounted.current) {
+        Alert.alert('Export failed', userErrorText(e, 'The export could not be finished. Nothing was shared.'));
+      }
     } finally {
       busyRef.current = false;
       live(setExporting)(false);
@@ -233,20 +242,18 @@ export default function ChatExportScreen() {
     const ctx = lineCtx(myId);
     const uri = await writeExportFile(
       fileName(peerName, 'txt'), exportTextHead(peerName, msgs.length, new Date().toLocaleString()),
-      msgs, (m) => exportTextLine(m, ctx), '', { cancelled },
+      msgs, (m) => exportTextLine(m, ctx), '', { cancelled, prepare: decryptChunk(chatId) },
     );
-    // ponytail: the no-Sharing fallback (web) shares only a title now that the
-    // text is never one string; Sharing is available on Android and iOS.
-    await shareExportFile(uri, 'text/plain', 'crazzychat export');
+    await shareExportFile(uri, 'text/plain');
   });
 
   const exportAsHTML = () => guard(async (msgs, myId) => {
     const ctx = lineCtx(myId);
     const uri = await writeExportFile(
       fileName(peerName, 'html'), exportHtmlHead(peerName, msgs.length, new Date().toLocaleString(), BRAND_ACCENT),
-      msgs, (m) => exportHtmlLine(m, ctx), EXPORT_HTML_TAIL, { cancelled },
+      msgs, (m) => exportHtmlLine(m, ctx), EXPORT_HTML_TAIL, { cancelled, prepare: decryptChunk(chatId) },
     );
-    await shareExportFile(uri, 'text/html', 'crazzychat export');
+    await shareExportFile(uri, 'text/html');
   });
 
   return (
@@ -271,7 +278,10 @@ export default function ChatExportScreen() {
           </View>
         </View>
 
-        <TouchableOpacity style={s.exportBtn} onPress={exportAsText} disabled={exporting} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Export as text" accessibilityState={{ disabled: exporting }}>
+        {!EXPORT_SUPPORTED && (
+          <Text style={s.webNote} accessibilityRole="alert">Exporting a chat works in the Android and iOS apps, not on the web.</Text>
+        )}
+        <TouchableOpacity style={[s.exportBtn, !EXPORT_SUPPORTED && s.btnOff]} onPress={exportAsText} disabled={exporting || !EXPORT_SUPPORTED} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Export as text" accessibilityState={{ disabled: exporting || !EXPORT_SUPPORTED }}>
           <View style={s.exportIcon}><Ionicons name="document-text-outline" size={22} color={colors.accent} /></View>
           <View style={{ flex: 1 }}>
             <Text style={s.exportTitle}>Export as Text</Text>
@@ -279,7 +289,7 @@ export default function ChatExportScreen() {
           </View>
         </TouchableOpacity>
 
-        <TouchableOpacity style={s.exportBtn} onPress={exportAsHTML} disabled={exporting} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Export as HTML" accessibilityState={{ disabled: exporting }}>
+        <TouchableOpacity style={[s.exportBtn, !EXPORT_SUPPORTED && s.btnOff]} onPress={exportAsHTML} disabled={exporting || !EXPORT_SUPPORTED} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Export as HTML" accessibilityState={{ disabled: exporting || !EXPORT_SUPPORTED }}>
           <View style={s.exportIcon}><Ionicons name="globe-outline" size={22} color={colors.accent} /></View>
           <View style={{ flex: 1 }}>
             <Text style={s.exportTitle}>Export as HTML</Text>
@@ -312,7 +322,7 @@ export default function ChatExportScreen() {
             <Text style={s.pinTitle} accessibilityRole="header">Chat locked</Text>
             <Text style={s.pinDesc}>Enter this chat&apos;s PIN to export it.</Text>
             <TextInput
-              style={[s.pinInput, !!pinErr && { borderColor: colors.danger }]}
+              style={[s.pinInput, !!pinErr && s.pinInputErr]}
               value={pin}
               onChangeText={(t) => { setPin(t.replace(/\D/g, '').slice(0, 8)); setPinErr(null); }}
               keyboardType="number-pad"
@@ -322,19 +332,19 @@ export default function ChatExportScreen() {
               accessibilityLabel="Chat lock PIN"
               onSubmitEditing={submitPin}
             />
-            {!!pinErr && <Text style={{ color: colors.danger, fontSize: 11, marginBottom: 8 }} accessibilityRole="alert" accessibilityLiveRegion="polite">{pinErr}</Text>}
-            <View style={{ flexDirection: 'row', gap: 10 }}>
+            {!!pinErr && <Text style={s.pinErrTxt} accessibilityRole="alert" accessibilityLiveRegion="polite">{pinErr}</Text>}
+            <View style={s.pinBtns}>
               <TouchableOpacity style={s.pinCancel} onPress={() => closePin(false)} accessibilityRole="button">
-                <Text style={{ color: colors.textDim, fontWeight: '700' }}>Cancel</Text>
+                <Text style={s.pinCancelTxt}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[s.pinOk, pin.length < 4 && { opacity: 0.5 }]}
+                style={[s.pinOk, pin.length < 4 && s.btnOff]}
                 onPress={submitPin}
                 disabled={pin.length < 4}
                 accessibilityRole="button"
                 accessibilityState={{ disabled: pin.length < 4 }}
               >
-                <Text style={{ color: colors.onPrimary, fontWeight: '700' }}>Unlock</Text>
+                <Text style={s.pinOkTxt}>Unlock</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -366,7 +376,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   noteBox: { marginTop: 24, backgroundColor: c.glassSoft, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: c.glassStroke },
   noteTitle: { color: c.danger, fontSize: 12, fontWeight: '800', marginBottom: 4 },
   noteDesc: { color: c.textDim, fontSize: 11, lineHeight: 18 },
-  // Fixed scrim: dims whatever is behind the dialog the same way in both themes.
+  btnOff: { opacity: 0.5 },
+  webNote: { color: c.textDim, fontSize: 13, lineHeight: 19, marginBottom: 12 },
+  // The theme's scrim dims whatever is behind the dialog.
   pinOverlay: { flex: 1, backgroundColor: c.scrim, justifyContent: 'center', padding: 28 },
   pinPanel: { backgroundColor: c.surfaceSolid, borderRadius: 16, padding: 20, borderWidth: 1, borderColor: c.glassStroke },
   pinTitle: { color: c.text, fontSize: 16, fontWeight: '800' },
@@ -374,4 +386,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   pinInput: { backgroundColor: c.glassSoft, borderRadius: 10, borderWidth: 1, borderColor: c.glassStroke, color: c.text, fontSize: 20, letterSpacing: 6, textAlign: 'center', paddingVertical: 10, marginBottom: 10 },
   pinCancel: { flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: 44, paddingVertical: 12, borderRadius: 10, borderWidth: 1, borderColor: c.glassStroke },
   pinOk: { flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: 44, paddingVertical: 12, borderRadius: 10, backgroundColor: c.primary },
+  pinInputErr: { borderColor: c.danger },
+  pinErrTxt: { color: c.danger, fontSize: 11, marginBottom: 8 },
+  pinBtns: { flexDirection: 'row', gap: 10 },
+  pinCancelTxt: { color: c.textDim, fontWeight: '700' },
+  pinOkTxt: { color: c.onPrimary, fontWeight: '700' },
 });

@@ -16,7 +16,7 @@ import { brandAlpha, type Palette } from '../constants/theme';
 import React, { useState, useEffect, useRef, useCallback , useMemo} from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator } from 'react-native';
 import { getLock, pinRetryAfterMs, verifyBiometric, verifyPin, type LockedChat } from '../lib/chatLock';
-import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
+import { useLocalSearchParams, Stack, useRouter, useNavigation } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { searchInChat, type InChatMessageHit } from '../lib/chatService';
@@ -30,11 +30,14 @@ function useS() {
 }
 
 const ResultGap = () => <View style={{ height: 8 }} />;
+// searchInChat's cap; a full page says so instead of looking like every match.
+const HIT_LIMIT = 80;
 
 export default function InChatSearchScreen() {
   const { colors } = useTheme();
   const s = useS();
   const router = useRouter();
+  const navigation = useNavigation();
   const { chatId } = useLocalSearchParams<{ chatId: string }>();
   const inputRef = useRef<TextInput>(null);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -53,6 +56,8 @@ export default function InChatSearchScreen() {
   const [lockBio, setLockBio] = useState(false);   // 'both': biometric half done
   const [lockPin, setLockPin] = useState('');
   const [lockErr, setLockErr] = useState<string | null>(null);
+  // Bumped by Try again on an unreadable lock to re-run the check.
+  const [gateKey, setGateKey] = useState(0);
 
   const tryBiometric = useCallback(async (lock: LockedChat) => {
     if (!(await verifyBiometric('Unlock this chat to search it'))) return;
@@ -75,7 +80,7 @@ export default function InChatSearchScreen() {
       if (lock.lockMethod !== 'pin') await tryBiometric(lock);
     })();
     return () => { cancel = true; };
-  }, [chatId, tryBiometric]);
+  }, [chatId, tryBiometric, gateKey]);
 
   const submitLockPin = () => {
     if (!lockInfo) return;
@@ -93,7 +98,7 @@ export default function InChatSearchScreen() {
     setLockPin(''); setLockErr(null); setGate('open');
   };
 
-  // Debounced server search. A monotonically increasing reqSeq guards
+  // Debounced on-device search (lib/localDb via searchInChat). A monotonically increasing reqSeq guards
   // against out-of-order responses overwriting a newer query's results.
   useEffect(() => {
     if (debounce.current) clearTimeout(debounce.current);
@@ -105,7 +110,7 @@ export default function InChatSearchScreen() {
     setLoading(true);
     debounce.current = setTimeout(async () => {
       try {
-        const hits = await searchInChat(chatId, term, 80);
+        const hits = await searchInChat(chatId, term, HIT_LIMIT);
         if (seq === reqSeq.current) { setResults(hits); setError(null); }
       } catch {
         // The local store failed (it is on-device, so not a network error);
@@ -158,9 +163,15 @@ export default function InChatSearchScreen() {
 
   const onTapResult = useCallback((messageId: number) => {
     // Hand the target to the chat screen, then return to it; it scrolls there.
-    if (chatId) setPendingJump(chatId, messageId);
-    router.back();
-  }, [chatId, router]);
+    if (!chatId) { router.back(); return; }
+    setPendingJump(chatId, messageId);
+    // Opened from the chat: go back to it. Opened from contact-info (Chats list
+    // avatar → contact-info → Search): back would land on contact-info, so pop
+    // to the chat if it is in the stack, or open it in place of this screen.
+    const st = navigation.getState();
+    if (st?.routes[st.index - 1]?.name === 'chat') router.back();
+    else router.dismissTo({ pathname: '/chat', params: { id: chatId } });
+  }, [chatId, router, navigation]);
 
   const term = query.trim();
   const renderItem = useCallback(({ item }: { item: InChatMessageHit }) => (
@@ -201,11 +212,16 @@ export default function InChatSearchScreen() {
               <Text style={s.emptyTitle}>{gate === 'unreadable' ? 'Can’t search this chat' : 'This chat is locked'}</Text>
               <Text style={s.emptySubtitle}>
                 {gate === 'unreadable'
-                  ? 'The chat lock settings could not be read, so this chat cannot be searched. Go back and try again.'
+                  ? 'The chat lock settings could not be read, so this chat cannot be searched.'
                   : m === 'both' ? 'Unlock it with biometrics and its PIN to search it.'
                   : m === 'biometric' ? 'Unlock it with biometrics to search it.'
                   : 'Enter its PIN to search it.'}
               </Text>
+              {gate === 'unreadable' && (
+                <TouchableOpacity style={s.unlockBtn} onPress={() => setGateKey(k => k + 1)} accessibilityRole="button">
+                  <Text style={s.unlockTxt}>Try again</Text>
+                </TouchableOpacity>
+              )}
               {gate === 'locked' && lockInfo && (
                 <>
                   {(m === 'biometric' || m === 'both') && !lockBio && (
@@ -284,7 +300,9 @@ export default function InChatSearchScreen() {
         <View style={s.badgeRow}>
           <View style={s.badge}>
             <Text style={s.badgeText}>
-              {results.length} result{results.length !== 1 ? 's' : ''}
+              {results.length >= HIT_LIMIT
+                ? `Showing the first ${HIT_LIMIT} matches — type more to narrow it`
+                : `${results.length} result${results.length !== 1 ? 's' : ''}`}
             </Text>
           </View>
         </View>

@@ -17,16 +17,26 @@
 //   3. Google Drive — silent, so it is skipped unless already signed in, and
 //                    absent entirely on no-GMS devices
 //
-// No passphrase: the bundle key is account-managed (see lib/cloudBackup's
-// header), so the server can decrypt these blobs. That is deliberate and it is
-// WhatsApp's default too — recovery works with nothing for the user to
-// remember. Locking the provider out is a separate, opt-in feature.
+// No passphrase: by default the bundle key is account-managed (see
+// lib/cloudBackup's header), so the server can decrypt these blobs. That is
+// deliberate and it is WhatsApp's default too — recovery works with nothing for
+// the user to remember. With the opt-in end-to-end backup on, the same run uses
+// the device's stored secret; when that cannot be read, every destination
+// refuses to write (lib/cloudBackup fails closed) rather than fall back to the
+// account key.
+//
+// An unfinished secret switch (lib/backupSecretSwitch) makes a run due at once,
+// whatever the schedule: until the server copy is re-uploaded under the secret
+// the device holds, it may be under one the user never saw.
 
 import NetInfo from '@react-native-community/netinfo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { writeLocalBackup, backupToGoogleDrive, uploadCloudBackup } from './cloudBackup';
 
 const SETTINGS_KEY = 'vc_backup_settings';
+// Must equal lib/cloudBackup's SWITCH_PENDING_KEY (not imported: this module's
+// selftest stubs that import line; backupSecretSwitch.selftest checks they match).
+const SWITCH_PENDING_KEY = 'vc_backup_switch_pending';
 
 export interface BackupSettings {
   frequency: 'daily' | 'weekly' | 'monthly' | 'manual';
@@ -111,10 +121,11 @@ export async function markBackupDone(): Promise<void> {
 export async function runScheduledBackupIfDue(): Promise<void> {
   try {
     const s = await getBackupSettings();
-    if (s.frequency === 'manual') return;
+    const switchPending = !!(await AsyncStorage.getItem(SWITCH_PENDING_KEY).catch(() => null));
+    if (s.frequency === 'manual' && !switchPending) return;
 
     const interval = INTERVAL_MS[s.frequency] ?? INTERVAL_MS.daily;
-    if (Date.now() - (s.lastBackupAt || 0) < interval) return;
+    if (!switchPending && Date.now() - (s.lastBackupAt || 0) < interval) return;
 
     const net = await NetInfo.fetch();
     if (!net.isConnected) return;

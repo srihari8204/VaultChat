@@ -110,6 +110,9 @@ export default function ChatWallpaperScreen() {
   const savingRef = useRef(false);
   // A pick made before the initial read resolves wins over that read.
   const touched = useRef(false);
+  // The saved choice could not be read: say so (Default is shown) and offer Try again.
+  const [loadErr, setLoadErr] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const pick = (w: WallpaperConfig | null) => { touched.current = true; setInherit(false); setSelected(w); };
   const pickInherit = () => { touched.current = true; setInherit(true); setSelected(null); };
   const choiceJson = (inh: boolean, w: WallpaperConfig | null) => (inh ? '"inherit"' : JSON.stringify(w));
@@ -125,10 +128,11 @@ export default function ChatWallpaperScreen() {
           try { setGlobalWp(JSON.parse(resolveScoped(null, globalRaw) ?? 'null')); } catch { setGlobalWp(null); }
         }
         setSavedJson(choiceJson(inh, loaded));
+        setLoadErr(false);
         if (!touched.current) { setSelected(loaded); setInherit(inh); }
-      } catch { /* keep default */ }
+      } catch { setLoadErr(true); }
     })();
-  }, [storageKey, chatId]);
+  }, [storageKey, chatId, reloadKey]);
 
   // Same model as everywhere else that edits before saving: leaving with an
   // unsaved pick (header back, hardware back, swipe) asks first.
@@ -155,6 +159,7 @@ export default function ChatWallpaperScreen() {
     setSaving(true);
     const dir = FileSystem.documentDirectory ? FileSystem.documentDirectory + 'wallpapers/' : '';
     let copied: string | null = null;
+    let step: 'copy' | 'store' = 'store';
     try {
       let toSave = selected;
       // The picker returns a cache URI the OS may evict; keep our own copy.
@@ -162,7 +167,9 @@ export default function ChatWallpaperScreen() {
           && !toSave.value.startsWith(FileSystem.documentDirectory)) {
         await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
         const dest = `${dir}${chatId || 'default'}_${Date.now()}.jpg`;
+        step = 'copy';
         await FileSystem.copyAsync({ from: toSave.value, to: dest });
+        step = 'store';
         copied = dest;
         toSave = { ...toSave, value: dest };
       }
@@ -181,7 +188,9 @@ export default function ChatWallpaperScreen() {
     } catch {
       // Not stored: the fresh copy is referenced by nothing.
       if (copied) FileSystem.deleteAsync(copied, { idempotent: true }).catch(() => {});
-      Alert.alert('Error', 'Failed to save wallpaper.');
+      Alert.alert('Could not set wallpaper', step === 'copy'
+        ? 'The photo could not be copied into the app — it may have been moved or deleted, or the phone is out of space. Pick it again.'
+        : 'Your choice could not be saved on this phone. Your wallpaper was not changed. Try again.');
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -205,8 +214,8 @@ export default function ChatWallpaperScreen() {
       if (!result.canceled && result.assets[0]) {
         pick({ type: 'image', value: result.assets[0].uri });
       }
-    } catch (e: any) {
-      Alert.alert('Could not open your photos', e?.message ?? 'Try again.');
+    } catch {
+      Alert.alert('Could not open your photos', 'Your photo library could not be opened. Try again.');
     }
   };
 
@@ -240,6 +249,17 @@ export default function ChatWallpaperScreen() {
             </View>
           </View>
         </PreviewBg>
+
+        {loadErr && (
+          <View style={s.loadErrBox}>
+            <Text style={s.loadErr} accessibilityRole="alert">
+              {"Couldn't read your saved wallpaper, so Default is shown. Setting a wallpaper replaces it."}
+            </Text>
+            <TouchableOpacity style={s.retryBtn} onPress={() => setReloadKey(k => k + 1)} accessibilityRole="button" accessibilityLabel="Try reading your saved wallpaper again">
+              <Text style={s.resetText}>Try again</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {!!chatId && (
           <TouchableOpacity
@@ -366,6 +386,9 @@ const makeStyles = (c: Palette, SW: number) => {
   inheritTxt: { color: c.text, fontSize: 14, fontWeight: '600', flex: 1 },
 
   tabs: { flexDirection: 'row', backgroundColor: c.glassSoft, borderRadius: 12, padding: 4, marginBottom: 16 },
+  loadErrBox: { marginBottom: 12 },
+  loadErr: { color: c.danger, fontSize: 13, lineHeight: 18 },
+  retryBtn: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
   tab: { flex: 1, minHeight: 44, paddingVertical: 10, alignItems: 'center', justifyContent: 'center', borderRadius: 9 },
   tabActive: { backgroundColor: c.primary },
   tabText: { color: c.textDim, fontSize: 14, fontWeight: '600' },

@@ -31,6 +31,7 @@ import { E2EE_UNDECRYPTABLE, e2eeGetCached } from '../services/crypto/e2eeSessio
 import { isChatLocked } from '../lib/chatLock';
 import { setPendingJump } from '../lib/chatJump';
 import { MESSAGE_REMINDER_BODY, isMessageReminderRequest } from '../lib/messageReminderReset';
+import { userErrorText } from '../lib/userErrorText';
 
 type Router = ReturnType<typeof useRouter>;
 
@@ -90,13 +91,16 @@ async function loadReminders(): Promise<ReminderRow[]> {
   return kept;
 }
 
+/** Shown instead of the text of a view-once / Invisible Ink message. */
+const PROTECTED_TEXT = 'View-once or Invisible Ink message — text hidden';
+
 // The message text for display, from the local message cache. Null when the
-// message is not cached or not readable.
+// message is not cached on this device or not readable.
 async function cachedText(r: Pick<ReminderRow, 'chatId' | 'messageId'>): Promise<string | null> {
   try {
     const [m] = await getCachedMessagesByIds(r.chatId, [Number(r.messageId)]);
     // View-once / Invisible Ink text is never shown outside its bubble.
-    if (m?.meta?.viewOnce || m?.meta?.invisibleInk) return null;
+    if (m?.meta?.viewOnce || m?.meta?.invisibleInk) return PROTECTED_TEXT;
     const t = m?.type === 'text' ? m.content : null;
     if (!t) return null;
     if (!looksEncrypted(t)) return t;
@@ -241,7 +245,7 @@ function Composer({
         { text: 'OK', onPress: () => router.back() },
       ]);
     } catch (e: any) {
-      Alert.alert('Could not schedule', e?.message ?? 'Try again');
+      Alert.alert('Could not schedule', userErrorText(e, 'The reminder could not be set. Please try again.'));
     } finally {
       busyRef.current = false;
       setBusy(false);
@@ -261,7 +265,9 @@ function Composer({
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }}>
         <View style={S.previewCard}>
           <Text style={S.previewLabel}>MESSAGE</Text>
-          <Text style={S.previewBody} numberOfLines={4}>{cached || '(no preview)'}</Text>
+          <Text style={[S.previewBody, !cached && S.previewMissing]} numberOfLines={4}>
+            {cached || 'This message’s text is not saved on this phone — the reminder still opens it.'}
+          </Text>
         </View>
 
         <Text style={[S.previewLabel, { marginTop: 20 }]}>WHEN</Text>
@@ -311,16 +317,21 @@ function RemindersList({ router }: { router: Router }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
+  // load() awaits storage and the message cache; none of it may set state
+  // after the screen has closed.
+  const alive = useRef(true);
+  useEffect(() => () => { alive.current = false; }, []);
 
   const load = useCallback(async () => {
     let list: ReminderRow[];
     try {
       list = await loadReminders();
-      setError(null);
     } catch {
-      setError('Your reminders could not be read from this device.');
+      if (alive.current) setError('Your reminders could not be read from this device.');
       return;
     }
+    if (!alive.current) return;
+    setError(null);
     setRows(list.sort((a, b) => new Date(a.when).getTime() - new Date(b.when).getTime()));
     // A locked chat's text is not shown here without unlocking it. An
     // unreadable lock table counts as locked (lib/chatLock fails closed).
@@ -331,17 +342,17 @@ function RemindersList({ router }: { router: Router }) {
     }));
     const pairs = await Promise.all(list.map(async r =>
       [r.id, lockedIds.has(r.chatId) ? LOCKED_TEXT : await cachedText(r)] as const));
-    setTexts(Object.fromEntries(pairs));
+    if (alive.current) setTexts(Object.fromEntries(pairs));
   }, []);
 
   const reload = useCallback(async () => {
-    setLoading(true); await load(); setLoading(false);
+    setLoading(true); await load(); if (alive.current) setLoading(false);
   }, [load]);
 
   useEffect(() => { reload(); }, [reload]);
 
   const onRefresh = useCallback(async () => {
-    setRefreshing(true); await load(); setRefreshing(false);
+    setRefreshing(true); await load(); if (alive.current) setRefreshing(false);
   }, [load]);
 
   // Open the chat at the message (chat.tsx consumes the jump on focus and
@@ -365,7 +376,7 @@ function RemindersList({ router }: { router: Router }) {
           try {
             await Notifications.cancelScheduledNotificationAsync(r.id);
           } catch (e: any) {
-            Alert.alert('Could not cancel', e?.message ?? 'The reminder is still set. Try again.');
+            Alert.alert('Could not cancel', `The reminder is still set. ${userErrorText(e, 'Please try again.')}`);
             return;
           }
           try {
@@ -374,11 +385,45 @@ function RemindersList({ router }: { router: Router }) {
           } catch {
             Alert.alert('Reminder cancelled', 'You won\'t be notified, but the list could not be updated on this device.');
           }
-          setRows(prev => prev.filter(x => x.id !== r.id));
+          if (alive.current) setRows(prev => prev.filter(x => x.id !== r.id));
         }
       },
     ]);
   }, []);
+
+  const renderItem = useCallback(({ item: r }: { item: ReminderRow }) => (
+    <View style={S.row}>
+      <TouchableOpacity
+        style={S.rowMain}
+        onPress={() => openChat(r)}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel={`Reminder for ${new Date(r.when).toLocaleString()}: ${texts[r.id] || 'Message reminder'}`}
+        accessibilityHint="Opens the chat at this message"
+        accessibilityActions={[{ name: 'cancelReminder', label: 'Cancel reminder' }]}
+        onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'cancelReminder') cancel(r); }}
+      >
+        <View style={S.iconBox} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden><Text style={S.iconTxt}>⏰</Text></View>
+        <View style={{ flex: 1 }}>
+          <Text style={S.rowWhen} numberOfLines={1}>
+            Fires {new Date(r.when).toLocaleString()}
+          </Text>
+          <Text style={S.rowPreview} numberOfLines={2}>
+            {texts[r.id] || 'Message reminder'}
+          </Text>
+          <Text style={S.rowSub}>Tap to open the chat</Text>
+        </View>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={S.cancelBtn}
+        onPress={() => cancel(r)}
+        accessibilityRole="button"
+        accessibilityLabel="Cancel reminder"
+      >
+        <Ionicons name="close-circle-outline" size={24} color={colors.textDim} />
+      </TouchableOpacity>
+    </View>
+  ), [S, colors, texts, openChat, cancel]);
 
   if (loading) {
     return <View style={[S.screen, S.center]}><AuroraBackground /><ActivityIndicator color={colors.primary} size="large" /></View>;
@@ -421,39 +466,7 @@ function RemindersList({ router }: { router: Router }) {
           keyExtractor={(r) => r.id}
           contentContainerStyle={{ paddingBottom: 32 }}
           refreshControl={<RefreshControl tintColor={colors.primary} refreshing={refreshing} onRefresh={onRefresh} />}
-          renderItem={({ item: r }) => (
-            <View style={S.row}>
-              <TouchableOpacity
-                style={S.rowMain}
-                onPress={() => openChat(r)}
-                activeOpacity={0.7}
-                accessibilityRole="button"
-                accessibilityLabel={`Reminder for ${new Date(r.when).toLocaleString()}: ${texts[r.id] || 'Message reminder'}`}
-                accessibilityHint="Opens the chat at this message"
-                accessibilityActions={[{ name: 'cancelReminder', label: 'Cancel reminder' }]}
-                onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'cancelReminder') cancel(r); }}
-              >
-                <View style={S.iconBox} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden><Text style={S.iconTxt}>⏰</Text></View>
-                <View style={{ flex: 1 }}>
-                  <Text style={S.rowWhen} numberOfLines={1}>
-                    Fires {new Date(r.when).toLocaleString()}
-                  </Text>
-                  <Text style={S.rowPreview} numberOfLines={2}>
-                    {texts[r.id] || 'Message reminder'}
-                  </Text>
-                  <Text style={S.rowSub}>Tap to open the chat</Text>
-                </View>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={S.cancelBtn}
-                onPress={() => cancel(r)}
-                accessibilityRole="button"
-                accessibilityLabel="Cancel reminder"
-              >
-                <Ionicons name="close-circle-outline" size={24} color={colors.textDim} />
-              </TouchableOpacity>
-            </View>
-          )}
+          renderItem={renderItem}
         />
       )}
     </View>
@@ -472,6 +485,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   previewCard:  { backgroundColor: c.glassSoft, borderColor: c.glassStroke, borderWidth: 1, borderRadius: 12, padding: 12 },
   previewLabel: { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 6 },
   previewBody:  { color: c.text, fontSize: 14, lineHeight: 20 },
+  previewMissing: { color: c.textDim, fontStyle: 'italic' },
 
   gridCol:      { gap: 8 },
   preset:       { backgroundColor: c.glassSoft, borderColor: c.glassStroke, borderWidth: 1, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 16 },

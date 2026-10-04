@@ -35,8 +35,15 @@ export default function ChatThemesScreen() {
   const [globalId, setGlobalId] = useState<string | null>(null);
   // A tap made before the initial read resolves wins over that read.
   const touched = useRef(false);
-  // The saved choice could not be read: the screen shows the default, and says so.
+  // The saved choice could not be read: the screen shows the default, says
+  // so, and offers Try again.
   const [loadErr, setLoadErr] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  // What is known to be in storage, for rolling back a failed save. Not the
+  // `stored` of the tap: with two quick taps that is the first tap's value.
+  const savedRef = useRef<string | null>(null);
+  // Only the latest tap's failure rolls back (an older one's must not undo it).
+  const applySeq = useRef(0);
 
   useEffect(() => {
     touched.current = false;
@@ -44,26 +51,29 @@ export default function ChatThemesScreen() {
       try {
         const [saved, global] = await Promise.all([AsyncStorage.getItem(key), AsyncStorage.getItem(GLOBAL_BUBBLE)]);
         if (touched.current) return;
+        savedRef.current = saved;
         setStored(saved);
         setGlobalId(global);
         setLoadErr(false);
       } catch { if (!touched.current) setLoadErr(true); }
     })();
-  }, [key]);
+  }, [key, reloadKey]);
 
   // Saves on tap. Per-chat "Default" is stored explicitly (see lib/scopedChoice);
   // null removes the key (global: app default, per-chat: follow all chats).
   const apply = async (id: string | null) => {
     touched.current = true;
     setLoadErr(false);
-    const prev = stored;
+    const seq = ++applySeq.current;
     const next = id === SCOPED_DEFAULT && isGlobal ? null : id;
     setStored(next);
     try {
       if (next == null) await AsyncStorage.removeItem(key);
       else await AsyncStorage.setItem(key, next);
+      savedRef.current = next;
     } catch {
-      setStored(prev);
+      if (seq !== applySeq.current) return;
+      setStored(savedRef.current);
       Alert.alert('Could not save', 'Your bubble colour was not changed. Try again.');
     }
   };
@@ -115,9 +125,14 @@ export default function ChatThemesScreen() {
         </View>
 
         {loadErr && (
-          <Text style={s.loadErr} accessibilityRole="alert">
-            {"Couldn't read your saved colour, so the default is shown. Picking a colour replaces it."}
-          </Text>
+          <View style={s.loadErrBox}>
+            <Text style={s.loadErr} accessibilityRole="alert">
+              {"Couldn't read your saved colour, so the default is shown. Picking a colour replaces it."}
+            </Text>
+            <TouchableOpacity style={s.retryBtn} onPress={() => setReloadKey(k => k + 1)} accessibilityRole="button" accessibilityLabel="Try reading your saved colour again">
+              <Text style={s.resetText}>Try again</Text>
+            </TouchableOpacity>
+          </View>
         )}
         <Text style={s.sectionTitle}>YOUR BUBBLE COLOR</Text>
         {!isGlobal && (
@@ -171,7 +186,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   txt: { fontSize: 14, lineHeight: 19 },
   time: { fontSize: 10, alignSelf: 'flex-end', marginTop: 2 },
 
-  loadErr: { color: c.danger, fontSize: 13, lineHeight: 18, marginBottom: 12 },
+  loadErrBox: { marginBottom: 12 },
+  loadErr: { color: c.danger, fontSize: 13, lineHeight: 18 },
+  retryBtn: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
   sectionTitle: { color: c.textDim, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 12 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, justifyContent: 'space-between' },
   cell: { width: '22%', alignItems: 'center', gap: 6 },

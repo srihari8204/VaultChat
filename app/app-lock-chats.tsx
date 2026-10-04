@@ -8,7 +8,6 @@
  */
 
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState , useMemo} from 'react';
 import {
@@ -30,6 +29,9 @@ import {
   getAllLocks, setChatLock, removeChatLock, verifyBiometric, verifyPin, hasBiometric, pinRetryAfterMs,
   type LockedChat, type LockMethod, type AutoLockTimer,
 } from '../lib/chatLock';
+import {
+  AUTO_LOCK_OPTIONS, LOCK_METHOD_OPTIONS, LockConfigModal, digitsOnly, useLockDialogStyles, type LockDraft,
+} from '../components/chattools/LockConfigModal';
 import { AppText as Text, AuroraBackground, KeyboardSafe } from '../components/ui';
 import { HEADER_TOP } from '../constants/layout';
 import { initialOf } from '../lib/format';
@@ -40,23 +42,6 @@ interface ChatItem {
   name: string;
 }
 
-/** Digits only, at most 8 — the chat PIN is 4–8 digits. */
-const digitsOnly = (t: string) => t.replace(/\D/g, '').slice(0, 8);
-
-const AUTO_LOCK_OPTIONS: { label: string; value: AutoLockTimer }[] = [
-  { label: 'Immediately', value: 0 },
-  { label: 'After 1 min', value: 60 },
-  { label: 'After 5 min', value: 300 },
-];
-
-type IconName = React.ComponentProps<typeof Ionicons>['name'];
-
-const LOCK_METHOD_OPTIONS: { label: string; value: LockMethod; icon: IconName }[] = [
-  { label: 'Biometric', value: 'biometric', icon: 'finger-print' },
-  { label: 'PIN', value: 'pin', icon: 'keypad' },
-  { label: 'Both', value: 'both', icon: 'shield-checkmark' },
-];
-
 function useS() {
   const { colors } = useTheme();
   return useMemo(() => makeStyles(colors), [colors]);
@@ -64,137 +49,10 @@ function useS() {
 
 const RowGap = () => <View style={{ height: 2 }} />;
 
-// The lock setup dialog for one chat. Its state lives in the screen (the
-// entry-from-a-chat effect pre-selects the method), so it is passed in.
-function LockConfigModal({
-  chatName, bioAvailable, method, setMethod, timer, setTimer,
-  pin, setPin, pinConfirm, setPinConfirm, saving, onCancel, onConfirm,
-}: {
-  chatName: string; bioAvailable: boolean;
-  method: LockMethod; setMethod: (m: LockMethod) => void;
-  timer: AutoLockTimer; setTimer: (t: AutoLockTimer) => void;
-  pin: string; setPin: (p: string) => void;
-  pinConfirm: string; setPinConfirm: (p: string) => void;
-  saving: boolean; onCancel: () => void; onConfirm: () => void;
-}) {
-  const { colors } = useTheme();
-  const s = useS();
-  return (
-    <Modal visible transparent animationType="fade" onRequestClose={onCancel}>
-    <KeyboardSafe style={{ flex: 1 }}>
-    <View style={s.overlay}>
-      <View style={s.configPanel}>
-        <Text style={s.configTitle} accessibilityRole="header">Lock &quot;{chatName}&quot;</Text>
-
-        <Text style={s.configLabel}>Lock Method</Text>
-        <View style={s.chipRow}>
-          {/* A METHOD YOU CANNOT SATISFY IS A CHAT YOU LOSE (2026-09-17).
-              Hardening the unlock gate removed the old bioAvailable ? verify : true
-              fall-through, which was the ONLY way to drop a lock you could not meet.
-              With it gone, picking "Biometric" on a device with nothing enrolled - or
-              on web, where hasBiometric() is always false - made the chat permanently
-              unreadable AND the lock permanently undeletable, in three taps.
-              The honest fix is upstream: do not offer a factor this device cannot
-              produce. PIN is always offerable, so there is always a way in. */}
-          {LOCK_METHOD_OPTIONS.filter(opt => bioAvailable || opt.value === 'pin').map(opt => (
-            <TouchableOpacity
-              key={opt.value}
-              style={[s.chip, method === opt.value && s.chipActive]}
-              onPress={() => setMethod(opt.value)}
-              accessibilityRole="radio"
-              accessibilityLabel={`Lock method: ${opt.label}`}
-              accessibilityState={{ checked: method === opt.value }}
-            >
-              <Ionicons name={opt.icon} size={16} color={method === opt.value ? colors.accent : colors.textDim} />
-              <Text style={[s.chipText, method === opt.value && s.chipTextActive]}>{opt.label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {(method === 'pin' || method === 'both') && (
-          <>
-            <Text style={s.configLabel}>Set PIN (4–8 digits)</Text>
-            <TextInput
-              style={s.pinInput}
-              value={pin}
-              onChangeText={(t) => setPin(digitsOnly(t))}
-              keyboardType="number-pad"
-              secureTextEntry
-              maxLength={8}
-              placeholderTextColor={colors.textFaint}
-              placeholder="Enter PIN"
-              accessibilityLabel="New chat PIN"
-            />
-            <TextInput
-              style={[s.pinInput, { marginTop: 8 }]}
-              value={pinConfirm}
-              onChangeText={(t) => setPinConfirm(digitsOnly(t))}
-              keyboardType="number-pad"
-              secureTextEntry
-              maxLength={8}
-              placeholderTextColor={colors.textFaint}
-              placeholder="Enter PIN again"
-              accessibilityLabel="Confirm chat PIN"
-            />
-          </>
-        )}
-
-        <Text style={s.configLabel}>Auto-Lock After</Text>
-        <View style={s.chipRow}>
-          {AUTO_LOCK_OPTIONS.map(opt => (
-            <TouchableOpacity
-              key={opt.value}
-              style={[s.chip, timer === opt.value && s.chipActive]}
-              onPress={() => setTimer(opt.value)}
-              accessibilityRole="radio"
-              accessibilityLabel={`Auto-lock: ${opt.label}`}
-              accessibilityState={{ checked: timer === opt.value }}
-            >
-              <Text style={[s.chipText, timer === opt.value && s.chipTextActive]}>{opt.label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <View style={s.configActions}>
-          <TouchableOpacity
-            style={s.cancelBtn}
-            onPress={onCancel}
-            accessibilityRole="button"
-          >
-            <Text style={s.cancelBtnText}>Cancel</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[s.confirmBtn, saving && { opacity: 0.6 }]}
-            onPress={onConfirm}
-            disabled={saving}
-            accessibilityRole="button"
-            accessibilityLabel={`Enable lock on ${chatName}`}
-            accessibilityState={{ disabled: saving, busy: saving }}
-          >
-            {/* Brand gradient CTA; its text is the white on-accent token. */}
-            <LinearGradient
-              colors={[colors.accentLight, colors.accentDeep]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={s.confirmBtnGrad}
-            >
-              {saving
-                ? <ActivityIndicator color={colors.onPrimary} size="small" />
-                : <Ionicons name="lock-closed" size={16} color={colors.onPrimary} style={{ marginRight: 6 }} />}
-              <Text style={s.confirmBtnText}>Enable Lock</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </View>
-    </KeyboardSafe>
-    </Modal>
-  );
-}
-
 export default function AppLockChatsScreen() {
   const { colors } = useTheme();
   const s = useS();
+  const d = useLockDialogStyles();
   const router = useRouter();
   // Optional: opened from a chat to lock THAT chat.
   const params = useLocalSearchParams<{ chatId?: string; chatName?: string }>();
@@ -227,14 +85,14 @@ export default function AppLockChatsScreen() {
     setUnlockErr(wait > 0 ? `Too many attempts. Try again in ${Math.ceil(wait / 1000)} s.` : 'Incorrect PIN.');
   };
   const [configChat, setConfigChat] = useState<string | null>(null);
-  const [pinInput, setPinInput] = useState('');
-  // Typed twice: a typo in the only PIN that can remove the lock would leave
-  // the chat locked behind a PIN nobody knows.
-  const [pinConfirm, setPinConfirm] = useState('');
+  // The setup dialog's fields. The PIN is typed twice: a typo in the only PIN
+  // that can remove the lock would leave the chat locked behind a PIN nobody knows.
+  const [draft, setDraft] = useState<LockDraft>({ method: 'biometric', timer: 0, pin: '', pinConfirm: '' });
+  const patchDraft = useCallback((p: Partial<LockDraft>) => setDraft(d => ({ ...d, ...p })), []);
+  const setConfigMethod = useCallback((method: LockMethod) => patchDraft({ method }), [patchDraft]);
+  const setConfigTimer = useCallback((timer: AutoLockTimer) => patchDraft({ timer }), [patchDraft]);
   const [saving, setSaving] = useState(false);
   const [bioAvailable, setBioAvailable] = useState(false);
-  const [configMethod, setConfigMethod] = useState<LockMethod>('biometric');
-  const [configTimer, setConfigTimer] = useState<AutoLockTimer>(0);
 
   const fadeIn = useRef(new Animated.Value(0)).current;
   // Async loads that finish after the screen closed must not set state.
@@ -288,7 +146,7 @@ export default function AppLockChatsScreen() {
       setConfigTimer(0);
       setConfigChat(id);
     }
-  }, [params.chatId, chatsState, loadErr, lockedChats, bioAvailable]);
+  }, [params.chatId, chatsState, loadErr, lockedChats, bioAvailable, setConfigMethod, setConfigTimer]);
 
   const reloadLocks = async () => {
     try {
@@ -297,9 +155,10 @@ export default function AppLockChatsScreen() {
     } catch { if (mounted.current) setLoadErr(true); }
   };
 
-  // In-flight lock removal (see onToggle).
+  // In-flight lock removal (see onToggle): which chat, for its row's busy cue.
   const togglingRef = useRef(false);
-  const [toggling, setToggling] = useState(false);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const toggling = togglingId !== null;
 
   const toggleLock = async (chat: ChatItem) => {
     const existing = lockedChats[chat.id];
@@ -351,12 +210,12 @@ export default function AppLockChatsScreen() {
     if (!lockedChats[chat.id]?.locked) { await toggleLock(chat); return; }
     if (togglingRef.current) return;
     togglingRef.current = true;
-    setToggling(true);
+    setTogglingId(chat.id);
     try { await toggleLock(chat); }
-    finally { togglingRef.current = false; if (mounted.current) setToggling(false); }
+    finally { togglingRef.current = false; if (mounted.current) setTogglingId(null); }
   };
 
-  const closeConfig = () => { setConfigChat(null); setPinInput(''); setPinConfirm(''); };
+  const closeConfig = () => { setConfigChat(null); patchDraft({ pin: '', pinConfirm: '' }); };
 
   const confirmLockSetup = async (chatId: string, method: LockMethod, timer: AutoLockTimer, pin?: string) => {
     if (saving) return;
@@ -365,9 +224,9 @@ export default function AppLockChatsScreen() {
       Alert.alert('Invalid PIN', 'The PIN must be 4 to 8 digits.');
       return;
     }
-    if (needsPin && pin !== pinConfirm) {
+    if (needsPin && pin !== draft.pinConfirm) {
       Alert.alert('PINs do not match', 'Type the same PIN in both boxes.');
-      setPinConfirm('');
+      patchDraft({ pinConfirm: '' });
       return;
     }
     const chat = chats.find(c => c.id === chatId);
@@ -406,7 +265,7 @@ export default function AppLockChatsScreen() {
         <View style={s.chatInfo}>
           <Text numberOfLines={1} style={s.chatName}>{item.name}</Text>
           <Text style={s.chatPreview}>
-            {isLocked ? 'Chat locked' : 'Not locked'}
+            {togglingId === item.id ? 'Removing lock…' : isLocked ? 'Chat locked' : 'Not locked'}
           </Text>
           {isLocked && config && (
             <View style={s.lockMeta}>
@@ -424,6 +283,9 @@ export default function AppLockChatsScreen() {
           )}
         </View>
 
+        {togglingId === item.id && (
+          <ActivityIndicator size="small" color={colors.primary} style={s.rowBusy} accessibilityLabel={`Removing the lock on ${item.name}`} />
+        )}
         <Switch
           value={isLocked}
           onValueChange={() => toggleRef.current(item)}
@@ -435,9 +297,19 @@ export default function AppLockChatsScreen() {
         />
       </View>
     );
-  }, [s, colors, lockedChats, toggling]);
+  }, [s, colors, lockedChats, toggling, togglingId]);
 
   const lockedCount = Object.values(lockedChats).filter(c => c.locked).length;
+
+  // A METHOD YOU CANNOT SATISFY IS A CHAT YOU LOSE (2026-09-17).
+  // Hardening the unlock gate removed the old bioAvailable ? verify : true
+  // fall-through, which was the ONLY way to drop a lock you could not meet.
+  // With it gone, picking "Biometric" on a device with nothing enrolled - or
+  // on web, where hasBiometric() is always false - made the chat permanently
+  // unreadable AND the lock permanently undeletable, in three taps.
+  // The honest fix is upstream: do not offer a factor this device cannot
+  // produce. PIN is always offerable, so there is always a way in.
+  const methodOptions = LOCK_METHOD_OPTIONS.filter(opt => bioAvailable || opt.value === 'pin');
 
   return (
     <View style={s.container}>
@@ -498,14 +370,12 @@ export default function AppLockChatsScreen() {
       {configChat && (
         <LockConfigModal
           chatName={chats.find(c => c.id === configChat)?.name ?? 'this chat'}
-          bioAvailable={bioAvailable}
-          method={configMethod} setMethod={setConfigMethod}
-          timer={configTimer} setTimer={setConfigTimer}
-          pin={pinInput} setPin={setPinInput}
-          pinConfirm={pinConfirm} setPinConfirm={setPinConfirm}
+          methods={methodOptions}
+          draft={draft}
+          onChange={patchDraft}
           saving={saving}
           onCancel={closeConfig}
-          onConfirm={() => confirmLockSetup(configChat, configMethod, configTimer, pinInput)}
+          onConfirm={() => confirmLockSetup(configChat, draft.method, draft.timer, draft.pin)}
         />
       )}
       {/* Verify the PIN before a PIN-protected lock can be REMOVED. Reuses the
@@ -513,17 +383,17 @@ export default function AppLockChatsScreen() {
           theme tokens rather than introducing a second dialog design. */}
       {unlockPrompt && (
         <Modal visible transparent animationType="fade" onRequestClose={() => closeUnlock(false)}>
-        <KeyboardSafe style={{ flex: 1 }}>
-        <View style={s.overlay}>
-          <View style={s.configPanel}>
-            <Text style={s.configTitle} accessibilityRole="header">Enter this chat&apos;s PIN</Text>
-            <Text style={s.configLabel}>
+        <KeyboardSafe style={d.fill}>
+        <View style={d.overlay}>
+          <View style={d.configPanel}>
+            <Text style={d.configTitle} accessibilityRole="header">Enter this chat&apos;s PIN</Text>
+            <Text style={d.configLabel}>
               {unlockPrompt.lockMethod === 'both'
                 ? 'Biometrics verified. The PIN is the second factor you chose.'
                 : 'Removing this lock needs the PIN that set it.'}
             </Text>
             <TextInput
-              style={s.pinInput}
+              style={d.pinInput}
               value={unlockPin}
               onChangeText={(t) => { setUnlockPin(digitsOnly(t)); setUnlockErr(null); }}
               keyboardType="number-pad"
@@ -536,16 +406,16 @@ export default function AppLockChatsScreen() {
               accessibilityLabel="Chat PIN"
             />
             {!!unlockErr && (
-              <Text style={[s.configLabel, { color: colors.danger }]} accessibilityRole="alert" accessibilityLiveRegion="polite">{unlockErr}</Text>
+              <Text style={[d.configLabel, d.errTxt]} accessibilityRole="alert" accessibilityLiveRegion="polite">{unlockErr}</Text>
             )}
-            <View style={s.configActions}>
-              <TouchableOpacity style={s.cancelBtn} onPress={() => closeUnlock(false)} accessibilityRole="button" accessibilityLabel="Cancel">
-                <Text style={s.cancelBtnText}>Cancel</Text>
+            <View style={d.configActions}>
+              <TouchableOpacity style={d.cancelBtn} onPress={() => closeUnlock(false)} accessibilityRole="button" accessibilityLabel="Cancel">
+                <Text style={d.cancelBtnText}>Cancel</Text>
               </TouchableOpacity>
               {/* Was a confirmBtn with no background and #FFF text — invisible on
                   the light glass panel. Solid danger fill: this removes a lock. */}
-              <TouchableOpacity style={s.removeBtn} onPress={submitUnlockPin} accessibilityRole="button" accessibilityLabel="Confirm PIN and remove the lock">
-                <Text style={s.removeBtnText}>Remove lock</Text>
+              <TouchableOpacity style={d.removeBtn} onPress={submitUnlockPin} accessibilityRole="button" accessibilityLabel="Confirm PIN and remove the lock">
+                <Text style={d.removeBtnText}>Remove lock</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -632,80 +502,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   chatPreview: { fontSize: 12, color: c.textDim, marginTop: 2 },
   lockMeta: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
   lockMetaText: { fontSize: 10, color: c.accent, marginLeft: 4, fontWeight: '600' },
+  rowBusy: { marginRight: 8 },
 
-  // Config overlay
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: c.scrim,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-  },
-  configPanel: {
-    width: '100%',
-    backgroundColor: c.glass,
-    borderRadius: 20,
-    padding: 24,
-    borderWidth: 1,
-    borderColor: c.glassStroke,
-  },
-  configTitle: { fontSize: 18, fontWeight: '700', color: c.text, marginBottom: 20, textAlign: 'center' },
-  configLabel: { fontSize: 13, color: c.textDim, marginTop: 16, marginBottom: 8, fontWeight: '600' },
 
-  chipRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
-  chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    minHeight: 44,
-    borderRadius: 8,
-    backgroundColor: c.surfaceSolid,
-    borderWidth: 1,
-    borderColor: c.glassStroke,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  chipActive: { backgroundColor: c.glass, borderColor: c.accent },
-  chipText: { fontSize: 13, color: c.textDim, fontWeight: '600' },
-  chipTextActive: { color: c.accent },
-
-  pinInput: {
-    backgroundColor: c.surfaceSolid,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    color: c.text,
-    fontSize: 18,
-    textAlign: 'center',
-    letterSpacing: 8,
-    borderWidth: 1,
-    borderColor: c.glassStroke,
-  },
-
-  configActions: { flexDirection: 'row', marginTop: 24, gap: 12 },
-  cancelBtn: {
-    flex: 1,
-    minHeight: 44,
-    paddingVertical: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: c.glassStroke,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  cancelBtnText: { fontSize: 14, color: c.textDim, fontWeight: '600' },
-  confirmBtn: { flex: 2, borderRadius: 10, overflow: 'hidden' },
-  removeBtn: { flex: 2, minHeight: 44, borderRadius: 10, backgroundColor: c.danger, justifyContent: 'center', alignItems: 'center', paddingVertical: 12 },
-  confirmBtnGrad: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    minHeight: 44,
-    paddingVertical: 12,
-  },
-  // White on the accent gradient and on the danger fill, in both themes.
-  confirmBtnText: { fontSize: 14, fontWeight: '700', color: c.onPrimary },
-  removeBtnText: { fontSize: 14, fontWeight: '700', color: c.onDanger },
   loadErrTxt: { color: c.danger, textAlign: 'center', marginHorizontal: 20, marginBottom: 12 },
   chatsErrBtn: { marginHorizontal: 20, marginBottom: 12, minHeight: 44, justifyContent: 'center' },
   chatsErrTxt: { color: c.danger, textAlign: 'center' },

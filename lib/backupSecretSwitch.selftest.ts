@@ -1,24 +1,57 @@
 // lib/backupSecretSwitch.selftest.ts — run: npx tsx lib/backupSecretSwitch.selftest.ts
 //
-// State transitions of switching the e2ee backup secret (enableE2EEBackup):
-// turn on, change password, switch password ↔ key — and what the device holds
-// when the upload or the store write fails.
+// Every path of switching the e2ee backup secret (lib/cloudBackup's
+// enableE2EEBackup / disableE2EEBackup): turn on, change password, password ↔
+// key, a new key, turn off — and what the device and the server copy hold when
+// the upload, the store write, the read-back or the rollback upload fails, when
+// the app dies mid-switch, and when a scheduled backup races the switch.
+// Plus the key id that lets a restore tell an older key's copy from the current
+// one (lib/backupCrypto), and the wiring in cloudBackup / backupScheduler.
 import assert from 'node:assert/strict';
-import { switchBackupSecret, type SecretPair, type SecretSlot } from './backupSecretSwitch';
+import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import {
+  switchBackupSecret, createLock, isBackupSwitchError, backupErrorText,
+  type SecretPair, type SecretSlot, type PendingMarker, type BackupSwitchError,
+} from './backupSecretSwitch';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 type H = { mode: 'password' | 'key'; salt: string };
 const pw1: SecretPair<H> = { secret: 'S-pw1', header: { mode: 'password', salt: 'a' } };
 const pw2: SecretPair<H> = { secret: 'S-pw2', header: { mode: 'password', salt: 'b' } };
 const key: SecretPair<H> = { secret: 'S-key', header: { mode: 'key', salt: '' } };
+const key2: SecretPair<H> = { secret: 'S-key2', header: { mode: 'key', salt: '' } };
 
-function world(start: SecretPair<H> | null, opts: { failUploads?: number; failPut?: boolean; failGet?: boolean } = {}) {
-  const st = { stored: start, server: start?.secret ?? 'ACCOUNT', uploads: [] as string[] };
-  let uploadFailures = opts.failUploads ?? 0;
-  let putFailures = opts.failPut ? 1 : 0;
+interface Opts {
+  failUploads?: number;          // the first N uploads throw
+  /** 'before': the write never lands; 'after': it lands, then the call throws. */
+  failPut?: 'before' | 'after';
+  failGetAt?: number[];          // 1-based get() calls that throw
+  failMarker?: boolean;
+  hangPut?: boolean;             // the app dies while storing
+}
+
+function world(start: SecretPair<H> | null, o: Opts = {}) {
+  const st = { stored: start, server: start?.secret ?? 'ACCOUNT', uploads: [] as string[], marker: false };
+  let uploadFailures = o.failUploads ?? 0;
+  let gets = 0;
+  const write = (p: SecretPair<H> | null) => { st.stored = p ? { ...p } : null; };
+  const store = (p: SecretPair<H> | null) => {
+    if (o.hangPut) return new Promise<void>(() => {});
+    if (o.failPut === 'before') return Promise.reject(new Error('store'));
+    write(p);
+    return o.failPut === 'after' ? Promise.reject(new Error('store')) : Promise.resolve();
+  };
   const slot: SecretSlot<H> = {
-    get: async () => { if (opts.failGet) throw new Error('read'); return st.stored; },
-    put: async (p) => { if (putFailures > 0) { putFailures--; throw new Error('store'); } st.stored = p; },
-    clear: async () => { st.stored = null; },
+    get: async () => { gets++; if (o.failGetAt?.includes(gets)) throw new Error('read'); return st.stored; },
+    put: (p) => store(p),
+    clear: () => store(null),
+  };
+  const pending: PendingMarker = {
+    set: async () => { if (o.failMarker) throw new Error('marker'); st.marker = true; },
+    clear: async () => { st.marker = false; },
   };
   const upload = async (u: SecretPair<H> | null) => {
     const k = u?.secret ?? 'ACCOUNT';
@@ -26,65 +59,270 @@ function world(start: SecretPair<H> | null, opts: { failUploads?: number; failPu
     if (uploadFailures > 0) { uploadFailures--; throw new Error('network'); }
     st.server = k;
   };
-  return { st, slot, upload };
+  // What lib/cloudBackup's uploadCloudBackup does on the next run: upload under
+  // the pair the device holds, then clear the marker.
+  const backupRun = async () => { await upload(await slot.get()); st.marker = false; };
+  return { st, slot, pending, upload, backupRun };
 }
 
+async function switchErr(p: Promise<void>): Promise<BackupSwitchError> {
+  try { await p; } catch (e) { assert.ok(isBackupSwitchError(e), `expected a BackupSwitchError, got ${e}`); return e as BackupSwitchError; }
+  throw new Error('expected the switch to fail');
+}
+
+const tick = () => new Promise((r) => setTimeout(r, 5));
+
 (async () => {
-  // Turn on from account mode: upload first, then store.
+  // ── Successful switches ────────────────────────────────────────────────
   {
     const w = world(null);
-    await switchBackupSecret(w.slot, pw1, w.upload);
-    assert.deepEqual(w.st.stored, pw1);
+    await switchBackupSecret(w.slot, w.pending, pw1, w.upload);
+    assert.deepEqual(w.st.stored, pw1, 'turn on: stored');
     assert.equal(w.st.server, 'S-pw1');
+    assert.equal(w.st.marker, false, 'a finished switch clears the marker');
   }
-  // Change password while on: old secret kept until the new upload lands.
   {
     const w = world(pw1);
-    await switchBackupSecret(w.slot, pw2, w.upload);
-    assert.deepEqual(w.st.stored, pw2);
+    await switchBackupSecret(w.slot, w.pending, pw2, w.upload);
+    assert.deepEqual(w.st.stored, pw2, 'change password');
     assert.equal(w.st.server, 'S-pw2');
   }
-  // Switch password → key while on.
   {
     const w = world(pw1);
-    await switchBackupSecret(w.slot, key, w.upload);
-    assert.equal(w.st.stored?.header.mode, 'key');
+    await switchBackupSecret(w.slot, w.pending, key, w.upload);
+    assert.equal(w.st.stored?.header.mode, 'key', 'password → key');
     assert.equal(w.st.server, 'S-key');
   }
-  // Upload fails while on: still on, same password, server copy untouched.
-  // (The old enableE2EEBackup deleted the secret here — "on" became "account".)
+  {
+    const w = world(key);
+    await switchBackupSecret(w.slot, w.pending, key2, w.upload);
+    assert.equal(w.st.stored?.secret, 'S-key2', 'make a new key');
+    assert.equal(w.st.server, 'S-key2');
+  }
+  {
+    const w = world(pw1);
+    await switchBackupSecret(w.slot, w.pending, null, w.upload);
+    assert.equal(w.st.stored, null, 'turn off');
+    assert.equal(w.st.server, 'ACCOUNT');
+    assert.equal(w.st.marker, false);
+  }
+
+  // ── Nothing starts when the first steps fail ───────────────────────────
+  {
+    const w = world(pw1, { failGetAt: [1] });
+    await assert.rejects(switchBackupSecret(w.slot, w.pending, pw2, w.upload), /read/);
+    assert.deepEqual(w.st.uploads, [], 'a failed read aborts before any upload');
+    assert.equal(w.st.marker, false);
+  }
+  {
+    const w = world(pw1, { failMarker: true });
+    await assert.rejects(switchBackupSecret(w.slot, w.pending, pw2, w.upload), /marker/);
+    assert.deepEqual(w.st.uploads, [], 'no marker, no upload');
+    assert.deepEqual(w.st.stored, pw1);
+  }
+
+  // ── The upload fails: device unchanged, marker left for the next run ───
   {
     const w = world(pw1, { failUploads: 1 });
-    await assert.rejects(switchBackupSecret(w.slot, pw2, w.upload), /network/);
-    assert.deepEqual(w.st.stored, pw1, 'old secret kept');
+    const e = await switchErr(switchBackupSecret(w.slot, w.pending, pw2, w.upload));
+    assert.equal(e.device, 'prev');
+    assert.equal(e.server, 'unknown');
+    assert.deepEqual(w.st.stored, pw1, 'old secret kept (the pre-round-4 code deleted it here)');
+    assert.equal(w.st.marker, true, 'next run re-uploads under the old secret, in case the upload landed');
+    await w.backupRun();
     assert.equal(w.st.server, 'S-pw1');
+    assert.equal(w.st.marker, false);
   }
-  // Upload fails from account mode: stays account mode.
   {
     const w = world(null, { failUploads: 1 });
-    await assert.rejects(switchBackupSecret(w.slot, key, w.upload), /network/);
-    assert.equal(w.st.stored, null);
+    const e = await switchErr(switchBackupSecret(w.slot, w.pending, key, w.upload));
+    assert.equal(e.device, 'prev');
+    assert.equal(w.st.stored, null, 'still account mode');
     assert.equal(w.st.server, 'ACCOUNT');
   }
-  // Store write fails after the upload: old pair restored, server re-uploaded under it.
   {
-    const w = world(pw1, { failPut: true });
-    await assert.rejects(switchBackupSecret(w.slot, key, w.upload), /store/);
+    const w = world(pw1, { failUploads: 1 });
+    const e = await switchErr(switchBackupSecret(w.slot, w.pending, null, w.upload));
+    assert.equal(e.device, 'prev', 'turn off with a failed upload: still on');
     assert.deepEqual(w.st.stored, pw1);
-    assert.equal(w.st.server, 'S-pw1', 'server copy readable with the secret the device holds');
+  }
+
+  // ── The store write fails ──────────────────────────────────────────────
+  // (a) It throws but the record landed (read-back says so): that IS the switch.
+  {
+    const w = world(pw1, { failPut: 'after' });
+    await switchBackupSecret(w.slot, w.pending, key, w.upload);
+    assert.deepEqual(w.st.stored, key, 'a write that threw after landing counts');
+    assert.equal(w.st.server, 'S-key', 'server and device agree');
+    assert.deepEqual(w.st.uploads, ['S-key'], 'no needless rollback upload');
+  }
+  // (b) It never landed: the device kept the old pair; re-upload under it.
+  {
+    const w = world(pw1, { failPut: 'before' });
+    const e = await switchErr(switchBackupSecret(w.slot, w.pending, key, w.upload));
+    assert.equal(e.device, 'prev');
+    assert.equal(e.server, 'prev', '"Nothing was changed" is true only here');
+    assert.deepEqual(w.st.stored, pw1);
+    assert.equal(w.st.server, 'S-pw1');
     assert.deepEqual(w.st.uploads, ['S-key', 'S-pw1']);
+    assert.equal(w.st.marker, false);
   }
   {
-    const w = world(null, { failPut: true });
-    await assert.rejects(switchBackupSecret(w.slot, pw1, w.upload), /store/);
+    const w = world(null, { failPut: 'before' });
+    const e = await switchErr(switchBackupSecret(w.slot, w.pending, pw1, w.upload));
+    assert.equal(e.server, 'prev');
     assert.equal(w.st.stored, null);
     assert.equal(w.st.server, 'ACCOUNT');
   }
-  // A failed read aborts before any upload.
+  // (c) Double failure: the store and the rollback upload both fail. The
+  //     server copy is under the NEW secret and the error says so (the screen
+  //     then shows the new key); the marker stays so the next run fixes it.
   {
-    const w = world(pw1, { failGet: true });
-    await assert.rejects(switchBackupSecret(w.slot, pw2, w.upload), /read/);
-    assert.deepEqual(w.st.uploads, []);
+    const w = world(key, { failPut: 'before' });
+    let uploads = 0;
+    const upload = async (u: SecretPair<H> | null) => { uploads++; if (uploads === 2) throw new Error('network'); await w.upload(u); };
+    const e = await switchErr(switchBackupSecret(w.slot, w.pending, key2, upload));
+    assert.equal(e.device, 'prev');
+    assert.equal(e.server, 'next', 'not "Nothing was changed"');
+    assert.match(e.message, /store/, 'reports the store failure');
+    assert.deepEqual(w.st.stored, key);
+    assert.equal(w.st.server, 'S-key2');
+    assert.equal(w.st.marker, true);
+    await w.backupRun();
+    assert.equal(w.st.server, 'S-key', 'the next run puts the server back under the key the device holds');
   }
+  // (d) The store fails and the device cannot even be read back: backups stay
+  //     blocked (reads fail closed) and the server copy is reported as new.
+  {
+    const w = world(pw1, { failPut: 'before', failGetAt: [2] });
+    const e = await switchErr(switchBackupSecret(w.slot, w.pending, key, w.upload));
+    assert.equal(e.device, 'unknown');
+    assert.equal(e.server, 'next');
+    assert.deepEqual(w.st.uploads, ['S-key'], 'no upload under a guess');
+    assert.equal(w.st.marker, true);
+  }
+  // Turning off: the clear fails and so does the rollback upload — the server
+  // copy is account-readable while the device is still on. Reported as such.
+  {
+    const w = world(pw1, { failPut: 'before' });
+    let uploads = 0;
+    const upload = async (u: SecretPair<H> | null) => { uploads++; if (uploads === 2) throw new Error('network'); await w.upload(u); };
+    const e = await switchErr(switchBackupSecret(w.slot, w.pending, null, upload));
+    assert.equal(e.device, 'prev');
+    assert.equal(e.server, 'next');
+    assert.equal(w.st.server, 'ACCOUNT');
+  }
+
+  // ── The app dies mid-switch ────────────────────────────────────────────
+  // After the upload under the new key, before it is stored: the marker makes
+  // the next start re-upload under the key the device (and the user) still has.
+  {
+    const w = world(key, { hangPut: true });
+    void switchBackupSecret(w.slot, w.pending, key2, w.upload);
+    await tick();
+    assert.equal(w.st.server, 'S-key2', 'server under a key never shown');
+    assert.deepEqual(w.st.stored, key);
+    assert.equal(w.st.marker, true, 'the crash leaves the marker');
+    await w.backupRun();                               // next start (scheduler bypasses its timer)
+    assert.equal(w.st.server, 'S-key');
+    assert.equal(w.st.marker, false);
+  }
+
+  // ── A scheduled backup racing the switch ───────────────────────────────
+  // The scheduled run resolves the secret, waits on the network, then uploads.
+  // Without the lock its upload lands last, under the OLD secret.
+  {
+    const raceWith = async (lock: <T>(fn: () => Promise<T>) => Promise<T>) => {
+      const w = world(pw1);
+      const scheduled = lock(async () => { const using = await w.slot.get(); await tick(); await w.upload(using); });
+      const sw = lock(() => switchBackupSecret(w.slot, w.pending, key, w.upload));
+      await Promise.all([scheduled, sw]);
+      return w.st;
+    };
+    const unlocked = await raceWith((fn) => fn());
+    assert.equal(unlocked.server, 'S-pw1', 'the race is real without the lock');
+    assert.equal(unlocked.stored?.secret, 'S-key');
+    const locked = await raceWith(createLock());
+    assert.equal(locked.server, 'S-key', 'with the lock the server copy matches the device');
+    assert.equal(locked.stored?.secret, 'S-key');
+  }
+  // The lock keeps going after a failure.
+  {
+    const lock = createLock();
+    await assert.rejects(lock(async () => { throw new Error('x'); }));
+    assert.equal(await lock(async () => 7), 7);
+  }
+
+  // ── User copy for failures ─────────────────────────────────────────────
+  assert.equal(backupErrorText(new TypeError('Network request failed')), 'Check your connection and try again.');
+  assert.match(backupErrorText(new Error('backup upload failed (503)')), /storage server/);
+  assert.equal(backupErrorText(Object.assign(new Error('Your session has expired. Please sign in again.'), { status: 401 })),
+    'Your session has expired. Please sign in again.', 'lib/api copy passes through');
+  assert.match(backupErrorText({ code: 'BACKUP_SETTINGS_UNREADABLE', message: 'x' }), /couldn't read your backup encryption settings/);
+  assert.equal(backupErrorText(new Error('aes/gcm: invalid ghash tag'), 'F'), 'F', 'no raw crypto text');
+
+  // ── Wiring that cannot run under Node (react-native imports) ───────────
+  {
+    const cb = readFileSync(join(HERE, 'cloudBackup.ts'), 'utf8');
+    const sched = readFileSync(join(HERE, 'backupScheduler.ts'), 'utf8');
+    const keyOf = (src: string) => /const SWITCH_PENDING_KEY = '([^']+)'/.exec(src)?.[1];
+    assert.ok(keyOf(cb) && keyOf(cb) === keyOf(sched), 'scheduler reads the same pending marker');
+    assert.match(sched, /if \(s\.frequency === 'manual' && !switchPending\) return;/, 'a pending switch runs even on manual');
+    assert.match(sched, /if \(!switchPending && Date\.now\(\)/, 'and without waiting for the interval');
+    const slotSrc = cb.slice(cb.indexOf('const e2eeSlot'), cb.indexOf('const pendingMarker'));
+    assert.match(slotSrc, /async put\(pair\) \{\s*await SecureStore\.setItemAsync\(E2EE_STORE, JSON\.stringify\(pair\)\);/, 'secret and header are ONE write');
+    const stored = cb.slice(cb.indexOf('async function storedE2EE'), cb.indexOf('const e2eeSlot'));
+    assert.match(stored, /catch \(e\) \{ throw unreadable\(e\); \}/, 'a failed read is an error, never "account mode"');
+    assert.ok(!/catch\s*\{\s*return null;?\s*\}/.test(stored), 'no read failure returns null');
+    const upload = cb.slice(cb.indexOf('export function uploadCloudBackup'), cb.indexOf('async function uploadCloudBackupUsing'));
+    assert.match(upload, /backupLock\(/, 'uploads share the switch lock');
+    assert.match(upload, /pendingMarker\.clear\(\)/, 'a successful upload settles an unfinished switch');
+    for (const fn of ['export function backupToGoogleDrive', 'export function writeLocalBackup', 'export function enableE2EEBackup', 'export function disableE2EEBackup']) {
+      const body = cb.slice(cb.indexOf(fn), cb.indexOf(fn) + 900);
+      assert.ok(cb.includes(fn) && body.includes('backupLock('), `${fn} runs under the lock`);
+    }
+    assert.ok(cb.includes('SWITCH_PENDING_KEY]);'), 'the marker never rides along in a bundle');
+  }
+
+  // ── Key ids (the real lib/backupCrypto + lib/vaultCrypto) ──────────────
+  // Copied in-repo with only the RN random-values polyfill stripped, as
+  // backupCrypto.selftest does.
+  const WORK = join(HERE, '..', `.selftest-backupswitch-${process.pid}`);
+  mkdirSync(WORK, { recursive: true });
+  try {
+    writeFileSync(join(WORK, 'package.json'), '{"type":"module"}');
+    for (const f of ['vaultCrypto.ts', 'backupCrypto.ts']) {
+      const src = readFileSync(join(HERE, f), 'utf8').replace(/^import 'react-native-get-random-values';$/m, '');
+      writeFileSync(join(WORK, f), src);
+    }
+    const BC = await import(pathToFileURL(join(WORK, 'backupCrypto.ts')).href);
+    const VC = await import(pathToFileURL(join(WORK, 'vaultCrypto.ts')).href);
+    const k1 = BC.generateRecoveryKey(), k2 = BC.generateRecoveryKey();
+    const h1 = BC.newHeader('key', k1), h2 = BC.newHeader('key', k2);
+    assert.equal(h1.salt, '');
+    assert.match(h1.kid, /^[0-9a-f]{16}$/, 'key headers carry a 16-hex key id');
+    assert.notEqual(h1.kid, h2.kid, 'a new key gets a new id');
+    assert.equal(BC.recoveryKeyId(BC.formatRecoveryKey(k1).toUpperCase()), h1.kid, 'id ignores display spacing and case');
+    assert.ok(!k1.includes(h1.kid), 'the id is not a slice of the key');
+    assert.equal(BC.newHeader('password').kid, undefined);
+
+    // "Make a new key", then restore an older copy: the device's new key is
+    // NOT offered to it — the user is asked for the old one.
+    assert.equal(BC.heldSecretMayOpen(h2, h1), false, 'old copy, new key: ask');
+    assert.equal(BC.heldSecretMayOpen(h1, h1), true);
+    const legacy = { ...h1 }; delete legacy.kid;
+    assert.equal(BC.heldSecretMayOpen(h2, legacy), true, 'a pre-id copy is tried…');
+    const blob = BC.stampE2EEHeader(VC.vaultEncrypt(BC.backupSecret(legacy, k1), 'bundle'), legacy);
+    assert.throws(() => VC.vaultDecrypt(BC.backupSecret(h2, k2), JSON.parse(blob)), '…and the wrong key fails to decrypt (cloudBackup then asks)');
+    assert.equal(VC.vaultDecrypt(BC.backupSecret(legacy, k1), JSON.parse(blob)), 'bundle', 'the old key still opens it');
+    // Passwords: the salt decides.
+    const p1 = BC.newHeader('password'), p2 = BC.newHeader('password');
+    assert.equal(BC.heldSecretMayOpen(p1, p2), false);
+    assert.equal(BC.heldSecretMayOpen(p1, p1), true);
+    assert.equal(BC.heldSecretMayOpen(p1, h1), false, 'mode mismatch: ask');
+  } finally {
+    rmSync(WORK, { recursive: true, force: true });
+  }
+
   console.log('backupSecretSwitch selftest: all passed');
 })().catch((e) => { console.error(e); process.exit(1); });

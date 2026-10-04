@@ -16,7 +16,7 @@
 import { useAuthHeader } from '../hooks/useAuthHeader';
 import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useNavigation, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useRef, useState , useMemo} from 'react';
 import { ActivityIndicator, Alert, AppState, FlatList, Image, Platform, RefreshControl, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -34,6 +34,7 @@ import { AuroraBackground, KeyboardSafe } from '../components/ui';
 import { isOfflineError, retryAfterSec } from '../lib/onboarding';
 import { initialOf } from '../lib/format';
 import { createPinAttemptTracker } from '../services/security/pinAttempts';
+import { tint } from '../lib/tintColor';
 
 const MAX_ATTEMPTS = 5;
 type Router = ReturnType<typeof useRouter>;
@@ -58,17 +59,23 @@ function useS() {
 
 export default function HiddenChatsScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const [stage, setStage] = useState<'pin' | 'list'>('pin');
 
   // Re-lock when the app is backgrounded, so the list is never left open in
-  // the app switcher or for whoever picks the phone up next.
+  // the app switcher or for whoever picks the phone up next. A hidden chat
+  // opened from the list (or anything pushed above it) is closed too: re-locking
+  // only this screen left that chat on top, visible on return and in the switcher.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (st) => {
       // iOS takes the app-switcher snapshot at 'inactive', before 'background'.
-      if (st === 'background' || (Platform.OS === 'ios' && st === 'inactive')) setStage('pin');
+      if (st === 'background' || (Platform.OS === 'ios' && st === 'inactive')) {
+        setStage('pin');
+        if (!navigation.isFocused()) router.dismissTo('/hidden-chats');
+      }
     });
     return () => sub.remove();
-  }, []);
+  }, [navigation, router]);
 
   if (stage === 'pin') {
     return <PinGate router={router} onPass={() => setStage('list')} />;
@@ -160,7 +167,7 @@ function PinGate({
     <KeyboardSafe style={[S.screen, S.center, { paddingHorizontal: 32 }]}>
       <AuroraBackground />
       <Text style={S.gateIcon} accessible={false}>🔒</Text>
-      <Text style={S.gateTitle}>Enter your PIN</Text>
+      <Text style={S.gateTitle} accessibilityRole="header">Enter your PIN</Text>
       <Text style={S.gateSub}>Hidden chats are protected by your app PIN (the same MPIN you use to sign in).</Text>
 
       <TextInput
@@ -291,7 +298,7 @@ function HiddenList({ router }: { router: Router }) {
               style={S.avatarImg}
             />
           ) : (
-            <Text style={S.avatarTxt}>{initialOf(title, '#')}</Text>
+            <Text style={[S.avatarTxt, c.type === 'group' && S.avatarTxtGroup]}>{initialOf(title, '#')}</Text>
           )}
         </View>
         <View style={{ flex: 1 }}>
@@ -393,9 +400,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   row:          { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   avatar:       { width: 52, height: 52, borderRadius: 26, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  avatarGroup:  { backgroundColor: c.success },
+  // onPrimary is specified against primary only; white on the dark theme's
+  // bright green was ~2.3:1. Groups get the success ink on a success tint.
+  avatarGroup:  { backgroundColor: tint(c.success, 0.2) },
   avatarImg:    { width: '100%', height: '100%' },
   avatarTxt:    { color: c.onPrimary, fontSize: 20, fontWeight: '700' },
+  avatarTxtGroup: { color: c.success },
   rowName:      { color: c.text, fontSize: 16, fontWeight: '600' },
   rowSub:       { color: c.textDim, fontSize: 12, marginTop: 4 },
 });
