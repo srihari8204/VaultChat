@@ -121,4 +121,42 @@ export function tooLargeToOpen(entries: ArchiveEntry[]): boolean {
   return totalUncompressed(entries) > MAX_UNCOMPRESSED_BYTES;
 }
 
+/** Entry-count ceiling. Each entry costs a JS object and a buffer even when
+ *  empty, so a million zero-byte entries is a bomb of its own. */
+export const MAX_ENTRIES = 20_000;
+
+export type ArchiveRefusal =
+  | { reason: 'size'; bytes: number }
+  | { reason: 'count'; count: number };
+
+/**
+ * Zip-bomb guard, run on the CENTRAL DIRECTORY before anything is inflated
+ * (fflate's unzip `filter` reports each entry's declared originalSize without
+ * decompressing it). tooLargeToOpen above ran only after unzip had already
+ * inflated everything into memory, so a bomb crashed the app before the check.
+ *
+ * Trusting the declared size is sound here: fflate inflates each entry into a
+ * buffer pre-allocated at originalSize and does not grow it, so a lying header
+ * yields a truncated entry, not unbounded memory.
+ */
+export function refuseDeclared(infos: { originalSize: number }[]): ArchiveRefusal | null {
+  if (infos.length > MAX_ENTRIES) return { reason: 'count', count: infos.length };
+  let bytes = 0;
+  for (const i of infos) {
+    const n = Number(i.originalSize);
+    bytes += Number.isFinite(n) && n > 0 ? n : 0;
+  }
+  return bytes > MAX_UNCOMPRESSED_BYTES ? { reason: 'size', bytes } : null;
+}
+
+/** Archive formats lib/docOpen routes to the archive viewer but fflate cannot
+ *  read (it reads ZIP only). Returns a display name, or null for ZIP/unknown. */
+const UNSUPPORTED: Record<string, string> = {
+  rar: 'RAR', '7z': '7-Zip', tar: 'TAR', gz: 'GZip', tgz: 'GZip', bz2: 'BZip2', xz: 'XZ',
+};
+export function unsupportedArchiveFormat(filename: string): string | null {
+  const m = /\.([A-Za-z0-9]+)$/.exec(filename || '');
+  return m ? UNSUPPORTED[m[1].toLowerCase()] ?? null : null;
+}
+
 export default {};

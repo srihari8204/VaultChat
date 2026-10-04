@@ -9,7 +9,7 @@
 // is a rendering surface over a string, which is what keeps it out of the E2EE
 // story entirely.
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import {
   Modal, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text,
@@ -52,6 +52,10 @@ function ReaderScreen() {
   const pages = useMemo(() => (cfg.layout === 'pages' ? paginate(blocks) : [blocks]), [blocks, cfg.layout]);
 
   useEffect(() => { setPage(p => Math.min(p, Math.max(0, pages.length - 1))); }, [pages.length]);
+
+  // A new page opens at its top, not at the previous page's scroll offset.
+  const scrollRef = useRef<ScrollView>(null);
+  useEffect(() => { scrollRef.current?.scrollTo({ y: 0, animated: false }); }, [page]);
 
   const apply = useCallback(async (patch: Partial<ReaderSettings>) => {
     setCfg(await setReaderSettings(patch));
@@ -98,18 +102,28 @@ function ReaderScreen() {
 
       {/* Header */}
       <View style={[st.head, { paddingTop: insets.top + 8, borderBottomColor: theme.dim + '22' }]}>
-        <TouchableOpacity onPress={() => router.back()} accessibilityLabel="Close the reader" hitSlop={12}>
+        <TouchableOpacity onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Close the reader" hitSlop={12}>
           <Ionicons name="chevron-down" size={26} color={theme.text} />
         </TouchableOpacity>
         <Text style={[st.headTitle, { color: theme.dim }]} numberOfLines={1}>
           {title || 'Reader'}
         </Text>
-        <TouchableOpacity onPress={() => setShowSettings(true)} accessibilityLabel="Reading settings" hitSlop={12}>
+        <TouchableOpacity onPress={() => setShowSettings(true)} accessibilityRole="button" accessibilityLabel="Reading settings" hitSlop={12}>
           <Ionicons name="text" size={22} color={theme.text} />
         </TouchableOpacity>
       </View>
 
+      {!body.trim() ? (
+        // Reached without a message (bare deep link): say so rather than
+        // render "Long message · 0 words".
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 }}>
+          <Ionicons name="document-text-outline" size={44} color={theme.dim} />
+          <Text style={{ color: theme.text, fontSize: 17, fontWeight: '700', textAlign: 'center' }}>Nothing to read</Text>
+          <Text style={{ color: theme.dim, fontSize: 14, textAlign: 'center' }}>This message is no longer available.</Text>
+        </View>
+      ) : (
       <ScrollView
+        ref={scrollRef}
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingHorizontal: pad, paddingBottom: insets.bottom + 48 }}
         showsVerticalScrollIndicator={false}
@@ -127,20 +141,21 @@ function ReaderScreen() {
 
         {cfg.layout === 'pages' && pages.length > 1 && (
           <View style={st.pager}>
-            <TouchableOpacity disabled={page === 0} onPress={() => setPage(p => p - 1)} accessibilityLabel="Previous page" hitSlop={10}>
+            <TouchableOpacity disabled={page === 0} onPress={() => setPage(p => p - 1)} accessibilityRole="button" accessibilityLabel="Previous page" accessibilityState={{ disabled: page === 0 }} hitSlop={10}>
               <Ionicons name="chevron-back" size={22} color={page === 0 ? theme.dim + '55' : theme.text} />
             </TouchableOpacity>
             <Text style={{ color: theme.dim, fontSize: 13 }}>{page + 1} / {pages.length}</Text>
-            <TouchableOpacity disabled={page >= pages.length - 1} onPress={() => setPage(p => p + 1)} accessibilityLabel="Next page" hitSlop={10}>
+            <TouchableOpacity disabled={page >= pages.length - 1} onPress={() => setPage(p => p + 1)} accessibilityRole="button" accessibilityLabel="Next page" accessibilityState={{ disabled: page >= pages.length - 1 }} hitSlop={10}>
               <Ionicons name="chevron-forward" size={22} color={page >= pages.length - 1 ? theme.dim + '55' : theme.text} />
             </TouchableOpacity>
           </View>
         )}
       </ScrollView>
+      )}
 
       {/* ── Settings sheet ─────────────────────────────────────────── */}
       <Modal visible={showSettings} transparent animationType="slide" onRequestClose={() => setShowSettings(false)}>
-        <Pressable style={st.scrim} onPress={() => setShowSettings(false)} />
+        <Pressable style={st.scrim} onPress={() => setShowSettings(false)} accessibilityRole="button" accessibilityLabel="Close reading settings" />
         <View style={[st.sheet, { backgroundColor: theme.bg, borderColor: theme.dim + '33', paddingBottom: insets.bottom + 16, maxHeight: '80%' }]}>
           <ScrollView showsVerticalScrollIndicator={false}>
             <Text style={[st.sheetTitle, { color: theme.text }]}>Reader settings</Text>
@@ -170,10 +185,10 @@ function ReaderScreen() {
               value={cfg.layout} onChange={v => apply({ layout: v as ReaderSettings['layout'] })} />
 
             <View style={st.sheetActions}>
-              <TouchableOpacity onPress={async () => setCfg(await resetReaderSettings())}>
+              <TouchableOpacity onPress={async () => setCfg(await resetReaderSettings())} accessibilityRole="button" accessibilityLabel="Reset reading settings">
                 <Text style={{ color: theme.dim, fontSize: 15, fontWeight: '600' }}>Reset</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => setShowSettings(false)}>
+              <TouchableOpacity onPress={() => setShowSettings(false)} accessibilityRole="button" accessibilityLabel="Done">
                 <Text style={{ color: theme.text, fontSize: 15, fontWeight: '700' }}>Done</Text>
               </TouchableOpacity>
             </View>
@@ -198,6 +213,7 @@ function Seg({ label, options, value, onChange, theme }: {
           const on = v === value;
           return (
             <TouchableOpacity key={v} onPress={() => onChange(v)} activeOpacity={0.8}
+              accessibilityRole="radio" accessibilityLabel={`${label}: ${lbl}`} accessibilityState={{ selected: on }}
               style={{
                 paddingVertical: 9, paddingHorizontal: 16, borderRadius: 10, borderWidth: 1,
                 borderColor: on ? theme.text : theme.dim + '44',

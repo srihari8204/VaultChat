@@ -11,7 +11,8 @@
 // Entry paths inside an archive are untrusted (lib/archive.safeEntryPath); an
 // entry that tries to escape the destination is refused rather than repaired.
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Buffer } from 'buffer';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import {
   ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View,
@@ -20,13 +21,14 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as FileSystem from 'expo-file-system/legacy';
-import { unzip, type Unzipped } from 'fflate';
+import { unzip, type Unzipped, type UnzipFileInfo } from 'fflate';
 import { useTheme } from '../lib/theme';
 import { type Palette, brandAlpha } from '../constants/theme';
 import {
-  listDir, parentDir, safeEntryPath, toEntries, tooLargeToOpen,
-  totalUncompressed, type ArchiveEntry,
+  listDir, parentDir, refuseDeclared, safeEntryPath, toEntries, tooLargeToOpen,
+  totalUncompressed, unsupportedArchiveFormat, type ArchiveEntry,
 } from '../lib/archive';
+import { VIEWER_TEMP_PREFIX } from '../lib/mediaCacheGC';
 import { formatSize } from '../lib/shelf';
 import { getAccessToken } from '../lib/api';
 import { AuroraBackground } from '../components/ui';
@@ -47,9 +49,24 @@ function ArchiveViewerScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busyPath, setBusyPath] = useState<string | null>(null);
+  const [entryError, setEntryError] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
+  const unsupported = unsupportedArchiveFormat(archiveName);
+
+  // Everything this screen writes (the downloaded archive, extracted entries)
+  // is plaintext in one per-visit cache folder, removed when the screen
+  // closes. lib/mediaCacheGC sweeps VIEWER_TEMP_PREFIX at boot/logout for the
+  // crash case. The file viewer opened from here is popped before this unmounts.
+  const workDir = useRef(`${FileSystem.cacheDirectory || ''}${VIEWER_TEMP_PREFIX}arc_${Date.now()}/`).current;
+  useEffect(() => () => {
+    FileSystem.deleteAsync(workDir, { idempotent: true }).catch(() => {});
+  }, [workDir]);
 
   useEffect(() => {
     let alive = true;
+    if (unsupported) { setLoading(false); return; }
+    setLoading(true);
+    setError('');
     (async () => {
       try {
         let local = fileUri;
@@ -59,9 +76,10 @@ function ArchiveViewerScreen() {
           // archive rather than at the missing credential.
           const token = await getAccessToken();
           const safeName = (archiveName || 'archive.zip').replace(/[/\\:*?"<>|]/g, '_');
+          await FileSystem.makeDirectoryAsync(workDir, { intermediates: true }).catch(() => {});
           const dl = await FileSystem.downloadAsync(
             fileUri,
-            (FileSystem.cacheDirectory || '') + safeName,
+            workDir + safeName,
             token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
           );
           if (dl.status >= 400) throw new Error(`Could not download the archive (${dl.status})`);
@@ -69,6 +87,23 @@ function ArchiveViewerScreen() {
         }
         const b64 = await FileSystem.readAsStringAsync(local, { encoding: FileSystem.EncodingType.Base64 });
         const bytes = Uint8Array.from(Buffer.from(b64, 'base64'));
+
+        // ZIP-BOMB GUARD: read the central directory only (the filter refuses
+        // every entry, so nothing is inflated) and check the DECLARED sizes and
+        // entry count before decompressing anything. The old check ran after
+        // unzip had already inflated the whole archive into memory.
+        const declared: UnzipFileInfo[] = [];
+        await new Promise<void>((resolve, reject) => {
+          unzip(bytes, { filter: (f) => { declared.push(f); return false; } }, (err) => (err ? reject(err) : resolve()));
+        });
+        if (!alive) return;
+        const refusal = refuseDeclared(declared);
+        if (refusal) {
+          setError(refusal.reason === 'size'
+            ? `This archive expands to ${formatSize(refusal.bytes)}, which is too large to open on the device.`
+            : `This archive holds ${refusal.count.toLocaleString()} entries, which is too many to open on the device.`);
+          return;
+        }
 
         const files = await new Promise<Unzipped>((resolve, reject) => {
           unzip(bytes, (err, out) => (err ? reject(err) : resolve(out)));
@@ -103,7 +138,7 @@ function ArchiveViewerScreen() {
       }
     })();
     return () => { alive = false; };
-  }, [fileUri, archiveName]);
+  }, [fileUri, archiveName, unsupported, workDir, reloadKey]);
 
   const rows = useMemo(() => listDir(entries, dir), [entries, dir]);
 
@@ -111,17 +146,19 @@ function ArchiveViewerScreen() {
   const openEntry = useCallback(async (e: ArchiveEntry) => {
     if (!raw || busyPath) return;
     const safe = safeEntryPath(e.path);
+    // Entry-level problems are shown above the list; they used to replace it.
     if (!safe) {
-      setError(`"${e.path}" tries to write outside the archive and was refused.`);
+      setEntryError(`"${e.path}" tries to write outside the archive and was refused.`);
       return;
     }
+    setEntryError('');
     setBusyPath(e.path);
     try {
       const bytes = raw[e.path];
       if (!bytes) throw new Error('entry missing from the archive');
       // Flatten into one cache folder per archive: the entry's own directories
       // are not recreated, so a deep path cannot become a deep write.
-      const outDir = `${FileSystem.cacheDirectory}archive/${encodeURIComponent(archiveName)}/`;
+      const outDir = `${workDir}x/`;
       await FileSystem.makeDirectoryAsync(outDir, { intermediates: true }).catch(() => {});
       const outPath = outDir + safe.split('/').pop();
       await FileSystem.writeAsStringAsync(
@@ -131,11 +168,12 @@ function ArchiveViewerScreen() {
       );
       router.push({ pathname: '/file-viewer', params: { uri: outPath, filename: e.name } } as any);
     } catch (err: any) {
-      setError(err?.message ?? 'Could not extract that file.');
+      console.warn('[archive-viewer] extract failed:', err?.message ?? err);
+      setEntryError(`Could not extract "${e.name}".`);
     } finally {
       setBusyPath(null);
     }
-  }, [raw, busyPath, archiveName, router]);
+  }, [raw, busyPath, workDir, router]);
 
   const up = parentDir(dir);
 
@@ -156,14 +194,43 @@ function ArchiveViewerScreen() {
         </View>
       </View>
 
-      {loading ? (
+      {unsupported ? (
+        // lib/docOpen routes every archive here, but fflate reads ZIP only.
+        <View style={S.empty}>
+          <Ionicons name="file-tray-full-outline" size={44} color={colors.textDim} />
+          <Text style={S.emptyTitle}>{`${unsupported} archives can't be opened here`}</Text>
+          <Text style={S.emptyBody}>VaultChat can browse ZIP archives only. Open this file in another app on your device.</Text>
+          <TouchableOpacity
+            style={S.action}
+            accessibilityRole="button"
+            accessibilityLabel="Open in another app"
+            onPress={() => router.replace({ pathname: '/file-viewer', params: { uri: fileUri, filename: archiveName } } as any)}
+          >
+            <Text style={S.actionTxt}>Open in another app</Text>
+          </TouchableOpacity>
+        </View>
+      ) : loading ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
       ) : error ? (
         <View style={S.empty}>
           <Ionicons name="alert-circle-outline" size={44} color={colors.danger} />
           <Text style={S.emptyBody}>{error}</Text>
+          <TouchableOpacity style={S.action} accessibilityRole="button" accessibilityLabel="Retry opening the archive"
+            onPress={() => setReloadKey(k => k + 1)}>
+            <Text style={S.actionTxt}>Retry</Text>
+          </TouchableOpacity>
         </View>
       ) : (
+        <>
+        {!!entryError && (
+          <View style={S.banner} accessibilityRole="alert">
+            <Ionicons name="alert-circle-outline" size={16} color={colors.danger} />
+            <Text style={S.bannerTxt}>{entryError}</Text>
+            <TouchableOpacity onPress={() => setEntryError('')} hitSlop={10} accessibilityRole="button" accessibilityLabel="Dismiss">
+              <Ionicons name="close" size={16} color={colors.textDim} />
+            </TouchableOpacity>
+          </View>
+        )}
         <FlatList
           data={rows}
           keyExtractor={e => e.path}
@@ -178,6 +245,11 @@ function ArchiveViewerScreen() {
             <TouchableOpacity
               style={S.row}
               activeOpacity={0.75}
+              accessibilityRole="button"
+              accessibilityLabel={item.isDirectory
+                ? `Folder ${item.name}, ${item.size} item${item.size === 1 ? '' : 's'}`
+                : `File ${item.name}, ${formatSize(item.size)}`}
+              accessibilityState={{ busy: busyPath === item.path }}
               onPress={() => (item.isDirectory ? setDir(item.path.replace(/\/$/, '')) : openEntry(item))}
             >
               <View style={S.rowIcon}>
@@ -199,6 +271,7 @@ function ArchiveViewerScreen() {
             </TouchableOpacity>
           )}
         />
+        </>
       )}
     </View>
   );
@@ -222,6 +295,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   rowMeta: { color: c.textDim, fontSize: 12, marginTop: 2 },
   empty: { alignItems: 'center', padding: 40, gap: 12 },
   emptyBody: { color: c.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20 },
+  emptyTitle: { color: c.text, fontSize: 16, fontWeight: '700', textAlign: 'center' },
+  action: { marginTop: 4, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20, backgroundColor: brandAlpha(0.16) },
+  actionTxt: { color: c.primary, fontSize: 14, fontWeight: '700' },
+  banner: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginBottom: 8,
+    padding: 10, borderRadius: 10, backgroundColor: c.glassSoft,
+  },
+  bannerTxt: { flex: 1, color: c.text, fontSize: 13 },
 });
 
 // A render fault in a viewer used to take the WHOLE app down: these screens

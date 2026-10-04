@@ -6,7 +6,7 @@ import { BRAND_ACCENT, type Palette } from '../constants/theme';
 import React, { useState, useRef , useMemo, useEffect} from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, PanResponder, Alert } from 'react-native';
 import { useTheme } from '../lib/theme';
-import { Stack } from 'expo-router';
+import { Stack, useNavigation } from 'expo-router';
 import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
 import { AuroraBackground } from '../components/ui';
@@ -15,6 +15,10 @@ import { CANVAS_BG, DEFAULT_INK, commitWhiteboardPath, type Tool } from '../lib/
 
 const COLORS = [DEFAULT_INK, '#FF3C6E', '#4A9FFF', BRAND_ACCENT, '#F59E0B', '#A78BFA', '#FFFFFF', '#EC4899', '#8B5CF6'];
 const BRUSH_SIZES = [2, 4, 8, 14, 22];
+const COLOR_NAMES: Record<string, string> = {
+  [DEFAULT_INK]: 'black', '#FF3C6E': 'red', '#4A9FFF': 'blue', [BRAND_ACCENT]: 'brand blue', '#F59E0B': 'amber',
+  '#A78BFA': 'lavender', '#FFFFFF': 'white', '#EC4899': 'pink', '#8B5CF6': 'purple',
+};
 
 function useS() {
   const { colors } = useTheme();
@@ -75,15 +79,33 @@ export default function WhiteboardScreen() {
     ]);
   };
 
+  // Strokes drawn since the last share. Leaving with unshared strokes asks
+  // first: the drawing lives only in memory, and back used to drop it silently.
+  const sharedCount = useRef(0);
+  const pathsRef = useRef(paths);
+  pathsRef.current = paths;
+  const navigation = useNavigation();
+  useEffect(() => navigation.addListener('beforeRemove', (e: any) => {
+    if (pathsRef.current.length === 0 || pathsRef.current.length === sharedCount.current) return;
+    e.preventDefault();
+    Alert.alert('Discard drawing?', 'Your drawing has not been shared and will be lost.', [
+      { text: 'Keep drawing', style: 'cancel' },
+      { text: 'Discard', style: 'destructive', onPress: () => navigation.dispatch(e.data.action) },
+    ]);
+  }), [navigation]);
+
   const saveAndShare = async () => {
     try {
       if (!canvasRef.current) return;
       const uri = await captureRef(canvasRef.current, { format: 'png', quality: 1 });
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(uri, { mimeType: 'image/png' });
+        sharedCount.current = pathsRef.current.length;
+      } else {
+        Alert.alert('Sharing unavailable', 'No app on this device can receive the drawing.');
       }
     } catch {
-      Alert.alert('Error', 'Could not save drawing. Make sure react-native-view-shot is installed.');
+      Alert.alert('Could not share', 'The drawing could not be saved as an image. Please try again.');
     }
   };
 
@@ -115,8 +137,8 @@ export default function WhiteboardScreen() {
         headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */  title: 'Whiteboard', headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text,
         headerRight: () => (
           <View style={{ flexDirection: 'row', gap: 14, marginRight: 8 }}>
-            <TouchableOpacity accessibilityRole="button" style={{ minHeight: 44, justifyContent: 'center' }} onPress={undo}><Text style={{ color: colors.accentOn, fontSize: 13, fontWeight: '700' }}>Undo</Text></TouchableOpacity>
-            <TouchableOpacity accessibilityRole="button" style={{ minHeight: 44, justifyContent: 'center' }} onPress={saveAndShare}><Text style={{ color: colors.accentOn, fontSize: 13, fontWeight: '700' }}>Share</Text></TouchableOpacity>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Undo last stroke" style={{ minHeight: 44, justifyContent: 'center' }} onPress={undo}><Text style={{ color: colors.accentOn, fontSize: 13, fontWeight: '700' }}>Undo</Text></TouchableOpacity>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Share drawing" style={{ minHeight: 44, justifyContent: 'center' }} onPress={saveAndShare}><Text style={{ color: colors.accentOn, fontSize: 13, fontWeight: '700' }}>Share</Text></TouchableOpacity>
           </View>
         ),
       }} />
@@ -133,14 +155,16 @@ export default function WhiteboardScreen() {
         <View style={s.toolbar}>
           {/* Tools */}
           <View style={s.toolRow}>
-            <TouchableOpacity style={[s.toolBtn, tool === 'pen' && s.toolActive]} onPress={() => setTool('pen')}>
-              <Text style={s.toolTxt}>{"\u270F\uFE0F"}</Text>
+            <TouchableOpacity style={[s.toolBtn, tool === 'pen' && s.toolActive]} onPress={() => setTool('pen')}
+              accessibilityRole="radio" accessibilityLabel="Pen" accessibilityState={{ selected: tool === 'pen' }}>
+              <Text style={s.toolTxt} importantForAccessibility="no" accessibilityElementsHidden>{"\u270F\uFE0F"}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[s.toolBtn, tool === 'eraser' && s.toolActive]} onPress={() => setTool('eraser')}>
-              <Text style={s.toolTxt}>{"\uD83E\uDDF9"}</Text>
+            <TouchableOpacity style={[s.toolBtn, tool === 'eraser' && s.toolActive]} onPress={() => setTool('eraser')}
+              accessibilityRole="radio" accessibilityLabel="Eraser" accessibilityState={{ selected: tool === 'eraser' }}>
+              <Text style={s.toolTxt} importantForAccessibility="no" accessibilityElementsHidden>{"\uD83E\uDDF9"}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={s.toolBtn} onPress={clear}>
-              <Text style={s.toolTxt}>{"\uD83D\uDDD1\uFE0F"}</Text>
+            <TouchableOpacity style={s.toolBtn} onPress={clear} accessibilityRole="button" accessibilityLabel="Clear canvas">
+              <Text style={s.toolTxt} importantForAccessibility="no" accessibilityElementsHidden>{"\uD83D\uDDD1\uFE0F"}</Text>
             </TouchableOpacity>
           </View>
 
@@ -148,6 +172,8 @@ export default function WhiteboardScreen() {
           <View style={s.colorRow}>
             {COLORS.map(c => (
               <TouchableOpacity hitSlop={8} key={c} style={[s.colorDot, { backgroundColor: c }, color === c && s.colorActive]}
+                accessibilityRole="radio" accessibilityLabel={`Colour ${COLOR_NAMES[c] ?? c}`}
+                accessibilityState={{ selected: color === c }}
                 onPress={() => { setColor(c); setTool('pen'); }} />
             ))}
           </View>
@@ -155,7 +181,8 @@ export default function WhiteboardScreen() {
           {/* Brush sizes */}
           <View style={s.brushRow}>
             {BRUSH_SIZES.map(sz => (
-              <TouchableOpacity hitSlop={4} key={sz} style={[s.brushBtn, brushSize === sz && s.brushActive]} onPress={() => setBrushSize(sz)}>
+              <TouchableOpacity hitSlop={4} key={sz} style={[s.brushBtn, brushSize === sz && s.brushActive]} onPress={() => setBrushSize(sz)}
+                accessibilityRole="radio" accessibilityLabel={`Brush size ${sz}`} accessibilityState={{ selected: brushSize === sz }}>
                 <View style={[s.brushDot, { width: sz, height: sz, borderRadius: sz / 2 }]} />
               </TouchableOpacity>
             ))}

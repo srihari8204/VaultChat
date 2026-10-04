@@ -14,10 +14,14 @@ import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import * as Sharing from 'expo-sharing';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { seekFraction, seekTargetMs, resumeKey } from '../lib/videoSeek';
 
 const ACCENT = '#4A9FFF';
 const BG = '#000000';
 const OVERLAY = 'rgba(0,0,0,0.55)';
+// Controls sit on the fixed black stage + OVERLAY in BOTH themes, so they use
+// a fixed light foreground. c.text is #1B1526 in light theme — invisible here.
+const FG = '#FFFFFF';
 const SPEEDS = [0.5, 1, 1.25, 1.5, 2];
 
 const formatTime = (ms: number) => {
@@ -68,11 +72,17 @@ export default function VideoPlayerScreen() {
   const [showControls, setShowControls] = useState(true);
   const [isSeeking, setIsSeeking] = useState(false);
   const [seekPosition, setSeekPosition] = useState(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  // Live values for callbacks that are created once (the seek PanResponder):
+  // reading state there would capture the first render, where duration is 0.
+  const durationRef = useRef(0);
+  const positionRef = useRef(0);
 
   // Resume from last position
   useEffect(() => {
     if (!videoUri) return;
-    const key = `vc_video_pos_${btoa(videoUri).substring(0, 40)}`;
+    const key = resumeKey(videoUri);
     AsyncStorage.getItem(key).then(saved => {
       if (saved) {
         const pos = parseInt(saved, 10);
@@ -83,15 +93,24 @@ export default function VideoPlayerScreen() {
     }).catch(() => {});
   }, [videoUri]);
 
-  // Save position on unmount or pause
+  // Save the resume position on pause and on unmount only. Keying the cleanup
+  // on positionMs re-ran it on every 250 ms progress tick (~4 writes/s).
+  const saveResume = useCallback(() => {
+    if (videoUri && positionRef.current > 1000) {
+      AsyncStorage.setItem(resumeKey(videoUri), String(positionRef.current)).catch(() => {});
+    }
+  }, [videoUri]);
+  useEffect(() => () => saveResume(), [saveResume]);
+  const wasPlaying = useRef(false);
   useEffect(() => {
-    return () => {
-      if (videoUri && positionMs > 1000) {
-        const key = `vc_video_pos_${btoa(videoUri).substring(0, 40)}`;
-        AsyncStorage.setItem(key, String(positionMs)).catch(() => {});
-      }
-    };
-  }, [videoUri, positionMs]);
+    if (wasPlaying.current && !isPlaying) saveResume();
+    wasPlaying.current = isPlaying;
+  }, [isPlaying, saveResume]);
+
+  // Never leave the app locked in landscape: hardware back skips handleClose.
+  useEffect(() => () => {
+    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+  }, []);
 
   // PiP state
   const [pipActive, setPipActive] = useState(false);
@@ -203,9 +222,12 @@ export default function VideoPlayerScreen() {
   // --- Playback handlers ---
   const onPlaybackStatusUpdate = useCallback((s: AVPlaybackStatus) => {
     if (!s.isLoaded) {
+      if ('error' in s && s.error) { setLoadError(String(s.error)); setIsBuffering(false); return; }
       setIsBuffering(true);
       return;
     }
+    positionRef.current = s.positionMillis || 0;
+    durationRef.current = s.durationMillis || 0;
     setStatus(s);
     setIsPlaying(s.isPlaying);
     setPositionMs(s.positionMillis || 0);
@@ -234,11 +256,13 @@ export default function VideoPlayerScreen() {
     await videoRef.current.setPositionAsync(newPos);
   }, [positionMs, durationMs]);
 
+  // Reads the live duration from a ref, so it is stable and safe to call from
+  // the once-created seek PanResponder below.
   const seekToPosition = useCallback(async (fraction: number) => {
-    if (!videoRef.current || !durationMs) return;
-    const newPos = Math.max(0, Math.min(fraction * durationMs, durationMs));
-    await videoRef.current.setPositionAsync(newPos);
-  }, [durationMs]);
+    const target = seekTargetMs(fraction, durationRef.current);
+    if (!videoRef.current || target === null) return;
+    await videoRef.current.setPositionAsync(target).catch(() => {});
+  }, []);
 
   const cycleSpeed = useCallback(async () => {
     const nextIdx = (speedIndex + 1) % SPEEDS.length;
@@ -324,25 +348,26 @@ export default function VideoPlayerScreen() {
 
   // --- Seek bar pan responder ---
   const seekBarWidth = useRef(SCREEN_W - 120);
+  // Created once, so it calls the latest scheduleHideControls through a ref.
+  const scheduleHideRef = useRef(scheduleHideControls);
+  scheduleHideRef.current = scheduleHideControls;
   const seekPanResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: (e) => {
         setIsSeeking(true);
-        const frac = Math.max(0, Math.min(e.nativeEvent.locationX / seekBarWidth.current, 1));
-        setSeekPosition(frac);
+        setSeekPosition(seekFraction(e.nativeEvent.locationX, seekBarWidth.current));
       },
       onPanResponderMove: (e) => {
-        const frac = Math.max(0, Math.min(e.nativeEvent.locationX / seekBarWidth.current, 1));
-        setSeekPosition(frac);
+        setSeekPosition(seekFraction(e.nativeEvent.locationX, seekBarWidth.current));
       },
       onPanResponderRelease: (e) => {
-        const frac = Math.max(0, Math.min(e.nativeEvent.locationX / seekBarWidth.current, 1));
-        seekToPosition(frac);
+        seekToPosition(seekFraction(e.nativeEvent.locationX, seekBarWidth.current));
         setIsSeeking(false);
-        scheduleHideControls();
+        scheduleHideRef.current();
       },
+      onPanResponderTerminate: () => { setIsSeeking(false); },
     })
   ).current;
 
@@ -368,14 +393,16 @@ export default function VideoPlayerScreen() {
         />
         {/* Mini controls */}
         <View style={styles.pipOverlay}>
-          <TouchableOpacity hitSlop={6} onPress={togglePlay} style={styles.pipPlayBtn}>
+          <TouchableOpacity hitSlop={6} onPress={togglePlay} style={styles.pipPlayBtn}
+            accessibilityRole="button" accessibilityLabel={isPlaying ? 'Pause' : 'Play'}>
             <Text style={styles.pipPlayIcon}>{isPlaying ? '\u275A\u275A' : '\u25B6'}</Text>
           </TouchableOpacity>
-          <TouchableOpacity hitSlop={8} onPress={() => { deactivatePip(); }} style={styles.pipExpandBtn}>
+          <TouchableOpacity hitSlop={8} onPress={() => { deactivatePip(); }} style={styles.pipExpandBtn}
+            accessibilityRole="button" accessibilityLabel="Expand player">
             <Text style={styles.pipExpandIcon}>{'\u2922'}</Text>
           </TouchableOpacity>
           <TouchableOpacity hitSlop={11} onPress={() => { videoRef.current?.stopAsync(); setPipActive(false); }}
-            style={styles.pipCloseBtn}>
+            style={styles.pipCloseBtn} accessibilityRole="button" accessibilityLabel="Stop mini player">
             <Text style={styles.pipCloseIcon}>{'\u2715'}</Text>
           </TouchableOpacity>
         </View>
@@ -426,6 +453,7 @@ export default function VideoPlayerScreen() {
       >
         {/* Video */}
         <Video
+          key={reloadKey}
           ref={videoRef}
           source={{ uri: videoUri }}
           style={styles.video}
@@ -435,12 +463,42 @@ export default function VideoPlayerScreen() {
           rate={currentSpeed}
           progressUpdateIntervalMillis={250}
           onPlaybackStatusUpdate={onPlaybackStatusUpdate}
+          onError={(e) => { setLoadError(String(e || 'unknown')); setIsBuffering(false); }}
         />
 
         {/* Buffering spinner */}
-        {isBuffering && (
+        {isBuffering && !loadError && (
           <View style={styles.bufferingOverlay}>
             <ActivityIndicator size="large" color={ACCENT} />
+          </View>
+        )}
+
+        {/* Load failure: a bad or expired file used to spin forever. */}
+        {loadError && (
+          <View style={[styles.bufferingOverlay, { padding: 24, gap: 12 }]}>
+            <Ionicons name="alert-circle-outline" size={44} color={FG} />
+            <Text style={{ color: FG, fontSize: 17, fontWeight: '700', textAlign: 'center' }}>
+              {"Can't play this video"}
+            </Text>
+            <Text style={{ color: 'rgba(255,255,255,0.75)', fontSize: 14, textAlign: 'center' }}>
+              The file may be damaged, in an unsupported format, or no longer available.
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 8 }}>
+              <TouchableOpacity
+                onPress={() => { setLoadError(null); setIsBuffering(true); setReloadKey(k => k + 1); }}
+                accessibilityRole="button" accessibilityLabel="Retry loading the video"
+                style={{ paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, backgroundColor: '#1D4ED8' }}
+              >
+                <Text style={{ color: FG, fontWeight: '700' }}>Retry</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleClose}
+                accessibilityRole="button" accessibilityLabel="Close video player"
+                style={{ paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, borderWidth: 1, borderColor: 'rgba(255,255,255,0.4)' }}
+              >
+                <Text style={{ color: FG, fontWeight: '700' }}>Close</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
 
@@ -475,12 +533,14 @@ export default function VideoPlayerScreen() {
           <Animated.View style={[styles.controlsOverlay, { opacity: controlsOpacity }]}>
             {/* Top bar */}
             <View style={styles.topBar}>
-              <TouchableOpacity onPress={handleClose} style={styles.topBtn}>
+              <TouchableOpacity onPress={handleClose} style={styles.topBtn}
+                accessibilityRole="button" accessibilityLabel="Close video player">
                 <Text style={styles.topBtnIcon}>{'\u2190'}</Text>
               </TouchableOpacity>
               <Text style={styles.titleText} numberOfLines={1}>{videoName}</Text>
               <View style={styles.topRight}>
-                <TouchableOpacity onPress={handleShare} style={styles.topBtn}>
+                <TouchableOpacity onPress={handleShare} style={styles.topBtn}
+                  accessibilityRole="button" accessibilityLabel="Share video">
                   <Text style={styles.topBtnIcon}>{'\u2B06'}</Text>
                 </TouchableOpacity>
               </View>
@@ -488,18 +548,21 @@ export default function VideoPlayerScreen() {
 
             {/* Center controls */}
             <View style={styles.centerControls}>
-              <TouchableOpacity onPress={() => seekRelative(-10000)} style={styles.sideBtn}>
+              <TouchableOpacity onPress={() => seekRelative(-10000)} style={styles.sideBtn}
+                accessibilityRole="button" accessibilityLabel="Back 10 seconds">
                 <Text style={styles.sideBtnIcon}>{'\u25C0\u25C0'}</Text>
                 <Text style={styles.sideBtnLabel}>10</Text>
               </TouchableOpacity>
 
               <Animated.View style={{ transform: [{ scale: playBtnScale }] }}>
-                <TouchableOpacity onPress={togglePlay} style={styles.playBtn}>
+                <TouchableOpacity onPress={togglePlay} style={styles.playBtn}
+                  accessibilityRole="button" accessibilityLabel={isPlaying ? 'Pause' : 'Play'}>
                   <Text style={styles.playBtnIcon}>{isPlaying ? '\u275A\u275A' : '\u25B6'}</Text>
                 </TouchableOpacity>
               </Animated.View>
 
-              <TouchableOpacity onPress={() => seekRelative(10000)} style={styles.sideBtn}>
+              <TouchableOpacity onPress={() => seekRelative(10000)} style={styles.sideBtn}
+                accessibilityRole="button" accessibilityLabel="Forward 10 seconds">
                 <Text style={styles.sideBtnIcon}>{'\u25B6\u25B6'}</Text>
                 <Text style={styles.sideBtnLabel}>10</Text>
               </TouchableOpacity>
@@ -511,6 +574,12 @@ export default function VideoPlayerScreen() {
               <View style={styles.timeRow}>
                 <Text style={styles.timeText}>{formatTime(displayPosition)}</Text>
                 <View style={styles.seekBarOuter}
+                  accessible
+                  accessibilityRole="adjustable"
+                  accessibilityLabel="Seek"
+                  accessibilityValue={{ text: `${formatTime(displayPosition)} of ${formatTime(durationMs)}` }}
+                  accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+                  onAccessibilityAction={(e) => seekRelative(e.nativeEvent.actionName === 'increment' ? 10000 : -10000)}
                   onLayout={(e) => { seekBarWidth.current = e.nativeEvent.layout.width; }}
                   {...seekPanResponder.panHandlers}
                 >
@@ -526,13 +595,15 @@ export default function VideoPlayerScreen() {
 
               {/* Bottom buttons row */}
               <View style={styles.bottomBtns}>
-                <TouchableOpacity onPress={toggleMute} style={styles.bottomActionBtn}>
+                <TouchableOpacity onPress={toggleMute} style={styles.bottomActionBtn}
+                  accessibilityRole="button" accessibilityLabel={isMuted ? 'Unmute' : 'Mute'}>
                   <Text style={[styles.bottomActionIcon, isMuted && styles.activeIcon]}>
                     {isMuted ? '\uD83D\uDD07' : '\uD83D\uDD0A'}
                   </Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity onPress={cycleSpeed} style={styles.speedBtn}>
+                <TouchableOpacity onPress={cycleSpeed} style={styles.speedBtn}
+                  accessibilityRole="button" accessibilityLabel={`Playback speed ${currentSpeed}x, change speed`}>
                   <Text style={[styles.speedText, currentSpeed !== 1 && styles.activeText]}>
                     {currentSpeed}x
                   </Text>
@@ -544,11 +615,13 @@ export default function VideoPlayerScreen() {
                   </View>
                 )}
 
-                <TouchableOpacity onPress={activatePip} style={styles.bottomActionBtn}>
+                <TouchableOpacity onPress={activatePip} style={styles.bottomActionBtn}
+                  accessibilityRole="button" accessibilityLabel="Mini player">
                   <Text style={styles.bottomActionText}>PiP</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity onPress={toggleFullscreen} style={styles.bottomActionBtn}>
+                <TouchableOpacity onPress={toggleFullscreen} style={styles.bottomActionBtn}
+                  accessibilityRole="button" accessibilityLabel={isFullscreen ? 'Exit full screen' : 'Full screen'}>
                   <Text style={[styles.bottomActionIcon, isFullscreen && styles.activeIcon]}>
                     {isFullscreen ? '\u2922' : '\u26F6'}
                   </Text>
@@ -606,7 +679,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     top: '40%',
   },
   rippleText: {
-    color: c.text,
+    color: FG,
     fontSize: 14,
     fontWeight: '700',
   },
@@ -646,13 +719,13 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     alignItems: 'center',
   },
   topBtnIcon: {
-    color: c.text,
+    color: FG,
     fontSize: 24,
     fontWeight: '700',
   },
   titleText: {
     flex: 1,
-    color: c.text,
+    color: FG,
     fontSize: 16,
     fontWeight: '600',
     marginHorizontal: 8,
@@ -681,7 +754,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     alignItems: 'center',
   },
   playBtnIcon: {
-    color: c.text,
+    color: FG,
     fontSize: 28,
     fontWeight: '800',
   },
@@ -694,12 +767,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     alignItems: 'center',
   },
   sideBtnIcon: {
-    color: c.text,
+    color: FG,
     fontSize: 14,
     fontWeight: '700',
   },
   sideBtnLabel: {
-    color: c.text,
+    color: FG,
     fontSize: 11,
     fontWeight: '600',
     marginTop: -2,
@@ -771,11 +844,11 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     paddingVertical: 8,
   },
   bottomActionIcon: {
-    color: c.text,
+    color: FG,
     fontSize: 20,
   },
   bottomActionText: {
-    color: c.text,
+    color: FG,
     fontSize: 14,
     fontWeight: '700',
     letterSpacing: 0.5,
@@ -794,7 +867,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.3)',
   },
   speedText: {
-    color: c.text,
+    color: FG,
     fontSize: 14,
     fontWeight: '700',
   },
@@ -851,7 +924,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     alignItems: 'center',
   },
   pipPlayIcon: {
-    color: c.text,
+    color: FG,
     fontSize: 12,
     fontWeight: '800',
   },
@@ -864,7 +937,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     alignItems: 'center',
   },
   pipExpandIcon: {
-    color: c.text,
+    color: FG,
     fontSize: 16,
   },
   pipCloseBtn: {
@@ -879,7 +952,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     alignItems: 'center',
   },
   pipCloseIcon: {
-    color: c.text,
+    color: FG,
     fontSize: 12,
     fontWeight: '800',
   },

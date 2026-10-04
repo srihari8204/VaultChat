@@ -28,6 +28,7 @@ import * as Sharing from 'expo-sharing';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { getAccessToken } from '../lib/api';
+import { VIEWER_TEMP_PREFIX } from '../lib/mediaCacheGC';
 import { Buffer } from 'buffer';
 import { docKind, MAX_DOC_BYTES } from '../lib/docText';
 import { decodeWindow, WINDOW_BYTES } from '../lib/textWindow';
@@ -395,6 +396,27 @@ function FileViewerScreen() {
     return dl.uri;
   }, []);
 
+  // Plaintext this screen downloads only for itself (text/doc reading) is
+  // deleted when it closes. Hand-off copies are not — another app may still be
+  // reading them — and are caught by lib/mediaCacheGC's VIEWER_TEMP_PREFIX
+  // sweep at boot and logout instead.
+  const ownTemps = useRef<string[]>([]);
+  const ownTemp = (tag: string) => {
+    const p = (FileSystem.cacheDirectory || '') + VIEWER_TEMP_PREFIX + tag + '_' + Date.now();
+    ownTemps.current.push(p);
+    return p;
+  };
+  useEffect(() => () => {
+    for (const p of ownTemps.current) FileSystem.deleteAsync(p, { idempotent: true }).catch(() => {});
+    ownTemps.current = [];
+  }, []);
+  /** A cache path for an external hand-off that keeps the real filename. */
+  const handoffPath = async () => {
+    const dir = (FileSystem.cacheDirectory || '') + VIEWER_TEMP_PREFIX + 'share_' + Date.now() + '/';
+    await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+    return dir + (fileName || 'file').replace(/[/\\:*?"<>|]/g, '_');
+  };
+
   // Read the NEXT window of a plain-text file and append it.
   //
   // readAsStringAsync only honours `position`/`length` under base64 encoding
@@ -581,7 +603,7 @@ function FileViewerScreen() {
       try {
         let local = fileUri;
         if (fileUri.startsWith('http')) {
-          local = await downloadAuthed(fileUri, FileSystem.cacheDirectory + 'temp_view_' + Date.now());
+          local = await downloadAuthed(fileUri, ownTemp('view'));
         }
         // WINDOWED, not whole-file. readAsStringAsync materialises everything it
         // reads as one JS string, so reading a multi-hundred-MB .log in one call
@@ -611,7 +633,7 @@ function FileViewerScreen() {
       try {
         let local = fileUri;
         if (fileUri.startsWith('http')) {
-          local = await downloadAuthed(fileUri, FileSystem.cacheDirectory + 'temp_doc_' + Date.now());
+          local = await downloadAuthed(fileUri, ownTemp('doc'));
         }
         setDocLocalUri(local);
         // SIZE CHECK BEFORE READING, not after.
@@ -746,10 +768,9 @@ function FileViewerScreen() {
         // Attachment endpoints are authenticated: without the Bearer token this
         // downloads a 401 body and then "opens" it as a PDF.
         const token = await getAccessToken();
-        const safeName = (fileName || 'file').replace(/[/\\:*?"<>|]/g, '_');
         const dl = await FileSystem.downloadAsync(
           fileUri,
-          (FileSystem.cacheDirectory || '') + safeName,
+          await handoffPath(),
           token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
         );
         if (dl.status >= 400) throw new Error(`Download failed (${dl.status})`);
@@ -796,8 +817,7 @@ function FileViewerScreen() {
     try {
       let localUri = fileUri;
       if (fileUri.startsWith('http')) {
-        const safeName = (fileName || 'file').replace(/[/\:*?"<>|]/g, '_');
-        localUri = await downloadAuthed(fileUri, (FileSystem.cacheDirectory || '') + safeName);
+        localUri = await downloadAuthed(fileUri, await handoffPath());
       }
       const available = await Sharing.isAvailableAsync();
       if (available) {

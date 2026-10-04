@@ -9,7 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useRef , useMemo} from 'react';
 import {
   View, TouchableOpacity, StyleSheet, Image, ScrollView,
-  PanResponder, TextInput, Alert, ActivityIndicator,
+  PanResponder, type PanResponderInstance, TextInput, Alert, ActivityIndicator,
   Platform, useWindowDimensions } from 'react-native';
 import { useTheme } from '../lib/theme';
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
@@ -18,6 +18,9 @@ import ViewShot from 'react-native-view-shot';
 
 
 const DRAW_COLORS = ['#FFFFFF', '#FF3C3C', '#4A9FFF', BRAND_ACCENT, '#FBBF24'];
+const COLOR_NAMES: Record<string, string> = {
+  '#FFFFFF': 'white', '#FF3C3C': 'red', '#4A9FFF': 'blue', [BRAND_ACCENT]: 'brand blue', '#FBBF24': 'yellow',
+};
 const FILTER_LIST = ['Original', 'B&W', 'Warm', 'Cool', 'Vivid'];
 const CROP_RATIOS = [
   { label: 'Free', value: null },
@@ -84,6 +87,16 @@ export default function ImageEditorScreen() {
   const [brightness, setBrightness] = useState(0);
   const [contrast, setContrast] = useState(0);
 
+  // The PanResponders below are created once, so they read live values from
+  // refs. Reading state there captured the first render: every stroke came
+  // out white at size 3 whatever was picked.
+  const drawColorRef = useRef(drawColor);
+  drawColorRef.current = drawColor;
+  const brushSizeRef = useRef(brushSize);
+  brushSizeRef.current = brushSize;
+  const overlaysRef = useRef(textOverlays);
+  overlaysRef.current = textOverlays;
+
   // ── Drawing PanResponder ──
   const drawPan = useRef(
     PanResponder.create({
@@ -91,7 +104,7 @@ export default function ImageEditorScreen() {
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: (e) => {
         const { locationX, locationY } = e.nativeEvent;
-        setCurrentLine({ points: [{ x: locationX, y: locationY }], color: drawColor, width: brushSize });
+        setCurrentLine({ points: [{ x: locationX, y: locationY }], color: drawColorRef.current, width: brushSizeRef.current });
       },
       onPanResponderMove: (e) => {
         const { locationX, locationY } = e.nativeEvent;
@@ -108,6 +121,7 @@ export default function ImageEditorScreen() {
 
   // ── Rotate ──
   const handleRotate = async () => {
+    if (processing) return;   // a second tap would rotate the stale uri again
     setProcessing(true);
     try {
       const result = await ImageManipulator.manipulateAsync(
@@ -190,42 +204,56 @@ export default function ImageEditorScreen() {
   // ── Remove text overlay ──
   const removeTextOverlay = (id: string) => {
     setTextOverlays(prev => prev.filter(t => t.id !== id));
+    textPans.current.delete(id);
   };
 
   // ── Text drag handler ──
-  const createTextPanResponder = (id: string) =>
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderMove: (_, g) => {
-        setTextOverlays(prev => prev.map(t =>
-          t.id === id ? { ...t, x: t.x + g.dx, y: t.y + g.dy } : t
-        ));
-      },
-    });
+  // g.dx/g.dy are CUMULATIVE since the touch began, so they are added to the
+  // position at grant — adding them to the current position on every move made
+  // the text accelerate away from the finger. One responder per overlay, kept
+  // across renders.
+  const textPans = useRef(new Map<string, PanResponderInstance>());
+  const dragStart = useRef<{ x: number; y: number } | null>(null);
+  const textPanFor = (id: string) => {
+    let pan = textPans.current.get(id);
+    if (!pan) {
+      pan = PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderGrant: () => {
+          const t = overlaysRef.current.find(o => o.id === id);
+          dragStart.current = t ? { x: t.x, y: t.y } : null;
+        },
+        onPanResponderMove: (_, g) => {
+          const start = dragStart.current;
+          if (!start) return;
+          setTextOverlays(prev => prev.map(t =>
+            t.id === id ? { ...t, x: start.x + g.dx, y: start.y + g.dy } : t
+          ));
+        },
+        onPanResponderRelease: () => { dragStart.current = null; },
+        onPanResponderTerminate: () => { dragStart.current = null; },
+      });
+      textPans.current.set(id, pan);
+    }
+    return pan;
+  };
 
   // ── Done — capture final image ──
   const handleDone = async () => {
+    if (processing) return;
     setProcessing(true);
     try {
       let finalUri = imageUri;
 
-      // If there are overlays (draw/text/filter), capture via ViewShot
-      if (lines.length > 0 || textOverlays.length > 0 || activeFilter !== 'Original') {
-        if (viewShotRef.current) {
-          finalUri = await viewShotRef.current.capture();
-        }
-      }
-
-      // Apply brightness/contrast via manipulator
-      if (brightness !== 0 || contrast !== 0) {
-        // Approximate brightness via lightness adjustment
-        const result = await ImageManipulator.manipulateAsync(
-          finalUri,
-          [{ resize: { width: SW * 2 } }],
-          { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG }
-        );
-        finalUri = result.uri;
+      // Every visual edit lives in the ViewShot (drawing, text, filter tint and
+      // the brightness/contrast washes), so capturing it is what puts them in
+      // the sent image. Brightness/contrast used to be skipped here and then
+      // "applied" as a plain resize, so they never reached the output.
+      if (lines.length > 0 || textOverlays.length > 0 || activeFilter !== 'Original'
+          || brightness !== 0 || contrast !== 0) {
+        if (!viewShotRef.current) throw new Error('canvas not ready');
+        finalUri = await viewShotRef.current.capture();
       }
 
       // Hand the edited image back to the chat via the shared capturedUri
@@ -301,11 +329,12 @@ export default function ImageEditorScreen() {
 
       {/* Top bar */}
       <View style={styles.topBar}>
-        <TouchableOpacity onPress={handleCancel} style={styles.topBtn}>
+        <TouchableOpacity onPress={handleCancel} style={styles.topBtn} accessibilityRole="button" accessibilityLabel="Cancel editing">
           <Text style={styles.topBtnText}>Cancel</Text>
         </TouchableOpacity>
         <Text style={styles.topTitle}>Edit Image</Text>
-        <TouchableOpacity onPress={handleDone} style={[styles.topBtn, styles.doneBtn]}>
+        <TouchableOpacity onPress={handleDone} disabled={processing} style={[styles.topBtn, styles.doneBtn]}
+          accessibilityRole="button" accessibilityLabel="Done, send edited image" accessibilityState={{ disabled: processing, busy: processing }}>
           {processing ? <ActivityIndicator size="small" color="#FFF" /> : <Text style={styles.doneBtnText}>Done</Text>}
         </TouchableOpacity>
       </View>
@@ -325,11 +354,15 @@ export default function ImageEditorScreen() {
             }]} pointerEvents="none" />
           )}
 
-          {/* Contrast overlay */}
-          {contrast > 0 && (
+          {/* Contrast overlay. ponytail: brightness/contrast/filters are
+              translucent washes captured with the canvas, not a colour matrix
+              (no filter library is installed). What you see is what is sent,
+              but it is an approximation; replace with a real colour-matrix
+              filter if one (e.g. Skia) is adopted. Lower contrast = a grey wash. */}
+          {contrast !== 0 && (
             <View style={[StyleSheet.absoluteFill, {
-              backgroundColor: `rgba(0,0,0,${contrast / 400})`,
-              opacity: 0.5,
+              backgroundColor: contrast > 0 ? `rgba(0,0,0,${contrast / 400})` : `rgba(128,128,128,${Math.abs(contrast) / 125})`,
+              opacity: contrast > 0 ? 0.5 : 1,
             }]} pointerEvents="none" />
           )}
 
@@ -342,7 +375,7 @@ export default function ImageEditorScreen() {
             <View
               key={t.id}
               style={{ position: 'absolute', left: t.x, top: t.y }}
-              {...createTextPanResponder(t.id).panHandlers}
+              {...textPanFor(t.id).panHandlers}
             >
               <Text style={{ color: t.color, fontSize: t.fontSize, fontWeight: '700', textShadowColor: '#000', textShadowRadius: 3 }}>
                 {t.text}
@@ -364,6 +397,9 @@ export default function ImageEditorScreen() {
             <TouchableOpacity
               key={tb.mode}
               style={[styles.toolBtn, activeMode === tb.mode && styles.toolBtnActive]}
+              accessibilityRole="button"
+              accessibilityLabel={tb.label}
+              accessibilityState={tb.mode === 'rotate' ? { disabled: processing } : { selected: activeMode === tb.mode }}
               onPress={() => {
                 if (tb.mode === 'rotate') {
                   handleRotate();
@@ -372,7 +408,7 @@ export default function ImageEditorScreen() {
                 }
               }}
             >
-              <Text style={[styles.toolIcon, activeMode === tb.mode && styles.toolIconActive]}>{tb.icon}</Text>
+              <Text importantForAccessibility="no" accessibilityElementsHidden style={[styles.toolIcon, activeMode === tb.mode && styles.toolIconActive]}>{tb.icon}</Text>
               <Text style={[styles.toolLabel, activeMode === tb.mode && styles.toolLabelActive]}>{tb.label}</Text>
             </TouchableOpacity>
           ))}
@@ -387,12 +423,14 @@ export default function ImageEditorScreen() {
               <TouchableOpacity
                 key={r.label}
                 style={[styles.chipBtn, cropRatio === r.value && styles.chipActive]}
+                accessibilityRole="radio" accessibilityLabel={`Crop ratio ${r.label}`}
+                accessibilityState={{ selected: cropRatio === r.value }}
                 onPress={() => setCropRatio(r.value)}
               >
                 <Text style={[styles.chipText, cropRatio === r.value && styles.chipTextActive]}>{r.label}</Text>
               </TouchableOpacity>
             ))}
-            <TouchableOpacity style={[styles.chipBtn, { backgroundColor: colors.accent }]} onPress={handleCrop}>
+            <TouchableOpacity style={[styles.chipBtn, { backgroundColor: colors.accent }]} onPress={handleCrop} accessibilityRole="button" accessibilityLabel="Apply crop">
               <Text style={[styles.chipText, { color: '#FFF' }]}>Apply Crop</Text>
             </TouchableOpacity>
           </ScrollView>
@@ -406,6 +444,8 @@ export default function ImageEditorScreen() {
               <TouchableOpacity hitSlop={8}
                 key={c}
                 style={[styles.colorDot, { backgroundColor: c }, drawColor === c && styles.colorDotActive]}
+                accessibilityRole="radio" accessibilityLabel={`Brush colour ${COLOR_NAMES[c] ?? c}`}
+                accessibilityState={{ selected: drawColor === c }}
                 onPress={() => setDrawColor(c)}
               />
             ))}
@@ -415,13 +455,15 @@ export default function ImageEditorScreen() {
                 <TouchableOpacity hitSlop={7}
                   key={s}
                   style={[styles.sizeBtn, brushSize === s && styles.sizeBtnActive]}
+                  accessibilityRole="radio" accessibilityLabel={`Brush size ${s}`}
+                  accessibilityState={{ selected: brushSize === s }}
                   onPress={() => setBrushSize(s)}
                 >
                   <View style={{ width: s * 2, height: s * 2, borderRadius: s, backgroundColor: drawColor }} />
                 </TouchableOpacity>
               ))}
             </View>
-            <TouchableOpacity onPress={undoLastLine} style={styles.undoBtn}>
+            <TouchableOpacity onPress={undoLastLine} style={styles.undoBtn} accessibilityRole="button" accessibilityLabel="Undo last stroke">
               <Text style={styles.undoBtnText}>Undo</Text>
             </TouchableOpacity>
           </View>
@@ -439,7 +481,7 @@ export default function ImageEditorScreen() {
               onChangeText={setEditingText}
               onSubmitEditing={addTextOverlay}
             />
-            <TouchableOpacity onPress={addTextOverlay} style={styles.addTextBtn}>
+            <TouchableOpacity onPress={addTextOverlay} style={styles.addTextBtn} accessibilityRole="button" accessibilityLabel="Add text">
               <Text style={styles.addTextBtnText}>Add</Text>
             </TouchableOpacity>
           </View>
@@ -448,6 +490,8 @@ export default function ImageEditorScreen() {
               <TouchableOpacity hitSlop={8}
                 key={c}
                 style={[styles.colorDot, { backgroundColor: c }, textColor === c && styles.colorDotActive]}
+                accessibilityRole="radio" accessibilityLabel={`Text colour ${COLOR_NAMES[c] ?? c}`}
+                accessibilityState={{ selected: textColor === c }}
                 onPress={() => setTextColor(c)}
               />
             ))}
@@ -457,6 +501,8 @@ export default function ImageEditorScreen() {
                 <TouchableOpacity hitSlop={7}
                   key={s}
                   style={[styles.sizeBtn, textFontSize === s && styles.sizeBtnActive]}
+                  accessibilityRole="radio" accessibilityLabel={`Text size ${s}`}
+                  accessibilityState={{ selected: textFontSize === s }}
                   onPress={() => setTextFontSize(s)}
                 >
                   <Text style={{ color: colors.text, fontSize: 12 }}>{s}</Text>
@@ -467,7 +513,7 @@ export default function ImageEditorScreen() {
           {textOverlays.length > 0 && (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 6 }}>
               {textOverlays.map(t => (
-                <TouchableOpacity key={t.id} onPress={() => removeTextOverlay(t.id)} style={styles.textTag}>
+                <TouchableOpacity key={t.id} onPress={() => removeTextOverlay(t.id)} style={styles.textTag} accessibilityRole="button" accessibilityLabel={`Remove text ${t.text}`}>
                   <Text style={{ color: t.color, fontSize: 12 }}>{t.text}</Text>
                   <Ionicons name="close" size={12} color={colors.danger} style={{ marginLeft: 4 }} />
                 </TouchableOpacity>
@@ -484,6 +530,8 @@ export default function ImageEditorScreen() {
               <TouchableOpacity
                 key={f}
                 style={[styles.filterBtn, activeFilter === f && styles.filterBtnActive]}
+                accessibilityRole="radio" accessibilityLabel={`Filter ${f}`}
+                accessibilityState={{ selected: activeFilter === f }}
                 onPress={() => applyFilter(f)}
               >
                 <View style={[styles.filterPreview, f === 'B&W' && { backgroundColor: '#6B7280' }, f === 'Warm' && { backgroundColor: '#FF8C32' }, f === 'Cool' && { backgroundColor: '#3264FF' }, f === 'Vivid' && { backgroundColor: '#FF32C8' }]} />
@@ -503,6 +551,8 @@ export default function ImageEditorScreen() {
                 <TouchableOpacity
                   key={v}
                   style={[styles.adjustStep, brightness === v && styles.adjustStepActive]}
+                  accessibilityRole="radio" accessibilityLabel={`Brightness ${v}`}
+                  accessibilityState={{ selected: brightness === v }}
                   onPress={() => setBrightness(v)}
                 >
                   <Text style={[styles.adjustStepText, brightness === v && { color: colors.accent }]}>{v > 0 ? '+' + v : v}</Text>
@@ -517,6 +567,8 @@ export default function ImageEditorScreen() {
                 <TouchableOpacity
                   key={v}
                   style={[styles.adjustStep, contrast === v && styles.adjustStepActive]}
+                  accessibilityRole="radio" accessibilityLabel={`Contrast ${v}`}
+                  accessibilityState={{ selected: contrast === v }}
                   onPress={() => setContrast(v)}
                 >
                   <Text style={[styles.adjustStepText, contrast === v && { color: colors.accent }]}>{v > 0 ? '+' + v : v}</Text>

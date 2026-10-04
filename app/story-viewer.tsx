@@ -333,20 +333,25 @@ function StoryViewerScreen() {
   const isMyStory = entry?.isMine && current;
   const [viewers,     setViewers]     = useState<StoryViewer[] | null>(null);
   const [viewersOpen, setViewersOpen] = useState(false);
+  const [viewersFailed, setViewersFailed] = useState(false);
   const openViewers = useCallback(async () => {
     if (!current) return;
     setPaused(true);
     setViewersOpen(true);
+    setViewers(null);
+    setViewersFailed(false);
     try {
       const v = await listStoryViews(current.id);
       setViewers(v);
-    } catch (e: any) {
-      Alert.alert('Could not load viewers', e?.message ?? 'Try again');
+    } catch {
+      // Inline, with Retry: the sheet used to spin on "Loading…" forever.
+      setViewersFailed(true);
     }
   }, [current]);
   const closeViewers = useCallback(() => {
     setViewersOpen(false);
     setViewers(null);
+    setViewersFailed(false);
     setPaused(false);
   }, []);
 
@@ -384,7 +389,7 @@ function StoryViewerScreen() {
         {/* statusbar-exempt: a story is full-bleed media on #000 at every theme, so light glyphs are correct here regardless of the palette. */}
         <StatusBar barStyle="light-content" />
         <Text style={S.errorTxt}>{error}</Text>
-        <TouchableOpacity onPress={close} style={S.closeBtn}>
+        <TouchableOpacity onPress={close} style={S.closeBtn} accessibilityRole="button" accessibilityLabel="Close">
           <Text style={S.closeBtnTxt}>Close</Text>
         </TouchableOpacity>
       </View>
@@ -489,12 +494,16 @@ function StoryViewerScreen() {
         <>
           <Pressable
             style={[S.tapZone, S.tapLeft]}
+            accessibilityRole="button"
+            accessibilityLabel="Previous story"
             onPress={() => onTapZone('left')}
             onLongPress={() => setPaused(true)}
             onPressOut={() => setPaused(false)}
           />
           <Pressable
             style={[S.tapZone, S.tapRight]}
+            accessibilityRole="button"
+            accessibilityLabel="Next story"
             onPress={() => onTapZone('right')}
             onLongPress={() => setPaused(true)}
             onPressOut={() => setPaused(false)}
@@ -513,6 +522,9 @@ function StoryViewerScreen() {
             <Pressable
               key={s.id}
               style={S.progressTrack}
+              accessibilityRole="button"
+              accessibilityLabel={`Story ${i + 1} of ${entry.stories.length}`}
+              accessibilityState={{ selected: i === index }}
               onPress={() => setIndex(i)}
               hitSlop={{ top: 12, bottom: 12, left: 2, right: 2 }}
             >
@@ -534,16 +546,16 @@ function StoryViewerScreen() {
           <Text style={S.authorTime}>{formatAgo(current.createdAt)}</Text>
           <View style={{ flex: 1 }} />
           {isMyStory && (
-            <TouchableOpacity onPress={openViewers} hitSlop={8} style={S.iconBtn} accessibilityLabel="Who has seen this">
+            <TouchableOpacity onPress={openViewers} hitSlop={8} style={S.iconBtn} accessibilityRole="button" accessibilityLabel="Who has seen this">
               <Ionicons name="eye-outline" size={20} color="#FFFFFF" />
             </TouchableOpacity>
           )}
           {isMyStory && (
-            <TouchableOpacity onPress={onDelete} hitSlop={8} style={S.iconBtn} accessibilityLabel="Delete status">
+            <TouchableOpacity onPress={onDelete} hitSlop={8} style={S.iconBtn} accessibilityRole="button" accessibilityLabel="Delete status">
               <Ionicons name="trash-outline" size={20} color="#FCA5A5" />
             </TouchableOpacity>
           )}
-          <TouchableOpacity onPress={close} hitSlop={8} style={S.iconBtn} accessibilityLabel="Close">
+          <TouchableOpacity onPress={close} hitSlop={8} style={S.iconBtn} accessibilityRole="button" accessibilityLabel="Close">
             <Ionicons name="close" size={22} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
@@ -558,12 +570,19 @@ function StoryViewerScreen() {
 
       {/* Viewers sheet */}
       {viewersOpen && (
-        <Pressable style={S.viewersBackdrop} onPress={closeViewers}>
-          <Pressable style={S.viewersSheet} onPress={(e) => e.stopPropagation()}>
+        <Pressable style={S.viewersBackdrop} onPress={closeViewers} accessibilityRole="button" accessibilityLabel="Close viewers list">
+          <Pressable style={S.viewersSheet} onPress={(e) => e.stopPropagation()} accessible={false}>
             <Text style={S.viewersTitle}>
-              {viewers ? `${viewers.length} ${viewers.length === 1 ? 'viewer' : 'viewers'}` : 'Loading…'}
+              {viewers ? `${viewers.length} ${viewers.length === 1 ? 'viewer' : 'viewers'}` : viewersFailed ? 'Viewers' : 'Loading…'}
             </Text>
-            {viewers === null ? (
+            {viewersFailed ? (
+              <View style={{ alignItems: 'center', gap: 12, paddingVertical: 16 }}>
+                <Text style={S.viewersEmpty}>{"Couldn't load who viewed this."}</Text>
+                <TouchableOpacity onPress={openViewers} style={S.closeBtn} accessibilityRole="button" accessibilityLabel="Retry loading viewers">
+                  <Text style={S.closeBtnTxt}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            ) : viewers === null ? (
               <ActivityIndicator color="#fff" style={{ marginTop: 24 }} />
             ) : viewers.length === 0 ? (
               <Text style={S.viewersEmpty}>No one has viewed this yet.</Text>
@@ -605,7 +624,9 @@ function formatAgo(iso: string): string {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen:        { flex: 1, backgroundColor: c.bg },
+  // Full-bleed media surface: black in every theme (the white spinner, light
+  // status bar and white chrome all assume it; c.bg made them vanish in light).
+  screen:        { flex: 1, backgroundColor: '#000' },
   center:        { justifyContent: 'center', alignItems: 'center' },
 
   media:         { ...StyleSheet.absoluteFillObject },
@@ -630,7 +651,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   captionBar:    { position: 'absolute', left: 16, right: 16, bottom: 40, backgroundColor: 'rgba(0,0,0,0.55)', padding: 12, borderRadius: 12 },
   captionTxt:    { color: '#FFFFFF', fontSize: 14, lineHeight: 20 },
 
-  errorTxt:      { color: c.text, fontSize: 14, marginBottom: 16 },
+  errorTxt:      { color: '#FFFFFF', fontSize: 14, marginBottom: 16, textAlign: 'center', paddingHorizontal: 24 },
   closeBtn:      { backgroundColor: '#fff', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20 },
   closeBtnTxt:   { color: '#000', fontWeight: '700' },
 

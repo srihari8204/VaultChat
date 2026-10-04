@@ -74,6 +74,11 @@ function DocScannerContent() {
   const [chatsLoading, setChatsLoading] = useState(false);
 
   const fadeIn = useRef(new Animated.Value(0)).current;
+  // Conversion run id. Back (resetScanner) and unmount bump it, so a
+  // conversion still in flight stops at its next step instead of forcing the
+  // screen back to 'preview' and saving a document the user walked away from.
+  const runRef = useRef(0);
+  useEffect(() => () => { runRef.current++; }, []);
 
   useEffect(() => {
     Animated.timing(fadeIn, { toValue: 1, duration: 400, useNativeDriver: true }).start();
@@ -128,12 +133,16 @@ function DocScannerContent() {
     const docType = DOC_TYPES.find(d => d.id === selectedType);
     const title = customTitle.trim() || `${docType?.label} ${new Date().toLocaleDateString()}`;
 
+    const run = ++runRef.current;
+    const stale = () => run !== runRef.current;
     setStep('processing');
     setProcessingProgress(4);
     setProcessingPhase('Preparing pages…');
+    let produced: string | null = null;
     try {
       const pages: string[] = [];
       for (let i = 0; i < imageUris.length; i++) {
+        if (stale()) return;
         setProcessingPhase(`Processing page ${i + 1} of ${imageUris.length}…`);
         const m = await ImageManipulator.manipulateAsync(
           imageUris[i],
@@ -146,7 +155,10 @@ function DocScannerContent() {
       setProcessingPhase('Building PDF…');
       setProcessingProgress(90);
       const html = `<html><head><meta name="viewport" content="width=device-width"/></head><body style="margin:0;padding:0;">${pages.join('')}</body></html>`;
+      if (stale()) return;
       const { uri } = await Print.printToFileAsync({ html });
+      produced = uri;
+      if (stale()) { FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {}); return; }
 
       // Print writes into the CACHE directory, which Android is free to evict
       // under storage pressure — and the uri is what "Recent documents" keeps
@@ -174,7 +186,9 @@ function DocScannerContent() {
         }
         await FileSystem.moveAsync({ from: uri, to: dest });
         pdfUri = dest;
+        produced = dest;
       } catch { /* keep the cache copy */ }
+      if (stale()) { FileSystem.deleteAsync(pdfUri, { idempotent: true }).catch(() => {}); return; }
 
       const info = await FileSystem.getInfoAsync(pdfUri);
       const sizeKb = info.exists && (info as any).size ? Math.max(1, Math.round((info as any).size / 1024)) : 0;
@@ -188,6 +202,10 @@ function DocScannerContent() {
       setProcessingProgress(100);
       setStep('preview');
     } catch (e: any) {
+      if (stale()) {
+        if (produced) FileSystem.deleteAsync(produced, { idempotent: true }).catch(() => {});
+        return;
+      }
       Alert.alert('Error', e?.message ?? 'Could not build the PDF.');
       setStep('type');
     }
@@ -260,6 +278,7 @@ function DocScannerContent() {
   };
 
   const resetScanner = () => {
+    runRef.current++;   // abandon any conversion in flight
     setStep('pick'); setSelectedType(''); setCustomTitle('');
     setProcessingProgress(0); setCurrentDoc(null); setImageUris([]);
   };
@@ -292,14 +311,14 @@ function DocScannerContent() {
           {step === 'pick' && (
             <View style={{ gap: 16 }}>
               <View style={{ flexDirection: 'row', gap: 12 }}>
-                <TouchableOpacity onPress={scanDoc} style={{ flex: 1 }}>
+                <TouchableOpacity onPress={scanDoc} style={{ flex: 1 }} accessibilityRole="button" accessibilityLabel="Scan document">
                   <LinearGradient colors={['#4338CA', '#312E81']} style={S.sourceBtn}>
                     <Text style={{ fontSize: 40 }}>📄</Text>
                     <Text style={{ color: '#fff', fontSize: 14, fontWeight: '900', marginTop: 8 }}>Scan Document</Text>
                     <Text style={{ color: '#FFFFFF', fontSize: 12, marginTop: 4, textAlign: 'center' }}>Auto edge-detect, crop & multi-page</Text>
                   </LinearGradient>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => pickPhoto('gallery')} style={{ flex: 1 }}>
+                <TouchableOpacity onPress={() => pickPhoto('gallery')} style={{ flex: 1 }} accessibilityRole="button" accessibilityLabel="Pick photos from gallery">
                   <LinearGradient colors={['#1D4ED8', '#1E40AF']} style={S.sourceBtn}>
                     <Text style={{ fontSize: 40 }}>🖼️</Text>
                     <Text style={{ color: '#fff', fontSize: 14, fontWeight: '900', marginTop: 8 }}>From Gallery</Text>
@@ -324,7 +343,10 @@ function DocScannerContent() {
                 <View style={{ gap: 10 }}>
                   <Text style={S.sectionLabel}>RECENT DOCUMENTS</Text>
                   {recentDocs.map((doc) => (
-                    <TouchableOpacity key={doc.id} style={S.docRow} onPress={() => sharePdf(doc)} onLongPress={() => deleteRecent(doc)}>
+                    <TouchableOpacity key={doc.id} style={S.docRow} onPress={() => sharePdf(doc)} onLongPress={() => deleteRecent(doc)}
+                      accessibilityRole="button" accessibilityLabel={`${doc.title}, ${doc.pages} page${doc.pages > 1 ? 's' : ''}. Share`}
+                      accessibilityActions={[{ name: 'delete', label: 'Delete' }]}
+                      onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'delete') deleteRecent(doc); }}>
                       <Text style={{ fontSize: 26 }}>{DOC_TYPES.find(d => d.id === doc.type)?.icon || '📄'}</Text>
                       <View style={{ flex: 1, minWidth: 120 }}>
                         <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }} numberOfLines={1}>{doc.title}</Text>
@@ -337,16 +359,18 @@ function DocScannerContent() {
                         </View>
                       </View>
                       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 14, alignItems: 'center', marginLeft: 'auto' }}>
-                        <Pressable onPress={() => sendOrPick(doc)} hitSlop={8}>
+                        <Pressable onPress={() => sendOrPick(doc)} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Send ${doc.title}`}>
                           <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '800' }}>Send</Text>
                         </Pressable>
-                        <Pressable onPress={() => sharePdf(doc)} hitSlop={8}>
+                        <Pressable onPress={() => sharePdf(doc)} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Share ${doc.title}`}>
                           <Text style={{ color: colors.textDim, fontSize: 12, fontWeight: '800' }}>Share</Text>
+                        </Pressable>
+                        <Pressable onPress={() => deleteRecent(doc)} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Delete ${doc.title}`}>
+                          <Ionicons name="trash-outline" size={16} color={colors.danger} />
                         </Pressable>
                       </View>
                     </TouchableOpacity>
                   ))}
-                  <Text style={{ color: colors.textFaint, fontSize: 12, textAlign: 'center' }}>Long-press a document to delete it</Text>
                 </View>
               )}
             </View>
@@ -358,8 +382,9 @@ function DocScannerContent() {
               <Text style={S.sectionLabel}>{imageUris.length} PAGE{imageUris.length > 1 ? 'S' : ''} SELECTED · WHAT IS THIS?</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
                 {DOC_TYPES.map(type => (
-                  <TouchableOpacity key={type.id} onPress={() => setSelectedType(type.id)} style={[S.typeCard, selectedType === type.id && { borderColor: colors.primary, backgroundColor: colors.primary + '15' }]}>
-                    <Text style={{ fontSize: 28 }}>{type.icon}</Text>
+                  <TouchableOpacity key={type.id} onPress={() => setSelectedType(type.id)} style={[S.typeCard, selectedType === type.id && { borderColor: colors.primary, backgroundColor: colors.primary + '15' }]}
+                    accessibilityRole="radio" accessibilityLabel={type.label} accessibilityState={{ selected: selectedType === type.id }}>
+                    <Text style={{ fontSize: 28 }} importantForAccessibility="no" accessibilityElementsHidden>{type.icon}</Text>
                     <Text style={{ color: selectedType === type.id ? colors.primary : colors.text, fontSize: 12, fontWeight: '700', marginTop: 6 }}>{type.label}</Text>
                   </TouchableOpacity>
                 ))}
@@ -368,7 +393,7 @@ function DocScannerContent() {
                 <Text style={S.sectionLabel}>DOCUMENT TITLE (OPTIONAL)</Text>
                 <TextInput value={customTitle} onChangeText={setCustomTitle} placeholder="e.g. Invoice #2024-041" placeholderTextColor={colors.textFaint} style={S.input} />
               </View>
-              <TouchableOpacity onPress={processToPdf}>
+              <TouchableOpacity onPress={processToPdf} accessibilityRole="button" accessibilityLabel="Convert to PDF">
                 <LinearGradient colors={[colors.accentDeep, colors.accentDeep]} style={{ borderRadius: 18, paddingVertical: 18, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 10 }}>
                   <Text style={{ fontSize: 20 }}>⚡</Text>
                   <Text style={{ color: '#fff', fontSize: 16, fontWeight: '900' }}>Convert to PDF</Text>

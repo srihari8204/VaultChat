@@ -25,8 +25,13 @@ import {
   type ShelfFile, type ShelfKind, type ShelfSort,
 } from '../lib/shelf';
 import { AuroraBackground } from '../components/ui';
+import { shelfListable, shelfOpenParams, type ShelfOpenRow } from '../lib/shelfOpen';
+import { getCurrentUserAsync } from './(constants)/authService';
 
 const PINS_KEY = 'vc_shelf_pins_v1';
+
+/** A shelf row plus the protection flags the viewer needs. */
+type ShelfRow = ShelfFile & Pick<ShelfOpenRow, 'encrypted' | 'viewOnce'>;
 
 const KIND_ICON: Record<ShelfKind, any> = {
   document: 'document-text-outline',
@@ -60,7 +65,9 @@ export default function ShelfScreen() {
   const { colors } = useTheme();
   const S = useMemo(() => makeStyles(colors), [colors]);
 
-  const [files, setFiles] = useState<ShelfFile[]>([]);
+  const [files, setFiles] = useState<ShelfRow[]>([]);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [myId, setMyId] = useState<string | null>(null);
   const [pins, setPins] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [kind, setKind] = useState<ShelfKind | 'all'>('all');
@@ -69,15 +76,24 @@ export default function ShelfScreen() {
 
   const load = useCallback(async () => {
     try {
-      const [rows, pinRaw] = await Promise.all([listAllAttachments(), getMeta(PINS_KEY)]);
-      const pinned = new Set<string>(pinRaw ? JSON.parse(pinRaw) : []);
+      const [rows, pinRaw, me] = await Promise.all([
+        listAllAttachments(), getMeta(PINS_KEY), getCurrentUserAsync().catch(() => null),
+      ]);
+      let pinList: string[] = [];
+      try { pinList = pinRaw ? JSON.parse(pinRaw) : []; } catch { /* corrupt pins: start empty */ }
+      const pinned = new Set<string>(pinList);
       setPins(pinned);
-      setFiles(rows.map(r => ({
+      setMyId(me?.id != null ? String(me.id) : null);
+      setFiles(rows.filter(shelfListable).map(r => ({
         ...r,
         kind: classify(r.filename, r.mime),
         pinned: pinned.has(r.attachmentId),
       })));
-    } catch { /* an unreadable cache shows the empty state, not a crash */ }
+      setLoadFailed(false);
+    } catch {
+      // Say so: an unreadable cache used to look exactly like "no files".
+      setLoadFailed(true);
+    }
     finally { setLoading(false); }
   }, []);
 
@@ -96,16 +112,10 @@ export default function ShelfScreen() {
 
   const open = useCallback((f: ShelfFile) => {
     // Reuse the viewers that already exist rather than adding a third one.
-    // media-viewer routes archives on to app/archive-viewer itself.
-    router.push({
-      pathname: '/media-viewer',
-      params: {
-        attachmentId: f.attachmentId, filename: f.filename, mime: f.mime ?? '',
-        msgType: f.kind === 'image' ? 'image' : f.kind === 'video' ? 'video' : f.kind === 'audio' ? 'audio' : 'file',
-        chatId: f.chatId,
-      },
-    } as any);
-  }, [router]);
+    // media-viewer routes archives on to app/archive-viewer itself. queryShelf
+    // returns the same row objects, so the protection flags are still on them.
+    router.push({ pathname: '/media-viewer', params: shelfOpenParams(f as ShelfRow, myId) } as any);
+  }, [router, myId]);
 
   return (
     <View style={[S.screen, { paddingTop: insets.top }]}>
@@ -113,7 +123,7 @@ export default function ShelfScreen() {
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={S.head}>
-        <TouchableOpacity onPress={() => router.back()} accessibilityLabel="Go back" hitSlop={12}>
+        <TouchableOpacity onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" hitSlop={12}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title}>Shelf</Text>
@@ -131,7 +141,7 @@ export default function ShelfScreen() {
           autoCorrect={false}
         />
         {search.length > 0 && (
-          <TouchableOpacity onPress={() => setSearch('')} accessibilityLabel="Clear the filter" hitSlop={10}>
+          <TouchableOpacity onPress={() => setSearch('')} accessibilityRole="button" accessibilityLabel="Clear the filter" hitSlop={10}>
             <Ionicons name="close-circle" size={16} color={colors.textDim} />
           </TouchableOpacity>
         )}
@@ -147,7 +157,9 @@ export default function ShelfScreen() {
           const n = counts[item.id];
           const on = kind === item.id;
           return (
-            <TouchableOpacity onPress={() => setKind(item.id)} style={[S.chip, on && S.chipOn]} activeOpacity={0.8}>
+            <TouchableOpacity onPress={() => setKind(item.id)} style={[S.chip, on && S.chipOn]} activeOpacity={0.8}
+              accessibilityRole="tab" accessibilityLabel={`${item.label}, ${n} file${n === 1 ? '' : 's'}`}
+              accessibilityState={{ selected: on }}>
               <Text style={[S.chipTxt, on && S.chipTxtOn]}>{item.label}</Text>
               <Text style={[S.chipCount, on && S.chipTxtOn]}>{n}</Text>
             </TouchableOpacity>
@@ -157,7 +169,9 @@ export default function ShelfScreen() {
 
       <View style={S.sortRow}>
         {SORTS.map(s => (
-          <TouchableOpacity key={s.id} onPress={() => setSort(s.id)} hitSlop={6}>
+          <TouchableOpacity key={s.id} onPress={() => setSort(s.id)} hitSlop={6}
+            accessibilityRole="radio" accessibilityLabel={`Sort by ${s.label}`}
+            accessibilityState={{ selected: sort === s.id }}>
             <Text style={[S.sortTxt, sort === s.id && S.sortTxtOn]}>{s.label}</Text>
           </TouchableOpacity>
         ))}
@@ -165,6 +179,16 @@ export default function ShelfScreen() {
 
       {loading ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
+      ) : loadFailed && files.length === 0 ? (
+        <View style={S.empty}>
+          <Ionicons name="alert-circle-outline" size={44} color={colors.textDim} />
+          <Text style={S.emptyTitle}>{"Couldn't read the shelf"}</Text>
+          <Text style={S.emptyBody}>The file index on this device could not be read.</Text>
+          <TouchableOpacity onPress={() => { setLoading(true); load(); }} style={S.retry}
+            accessibilityRole="button" accessibilityLabel="Retry loading the shelf">
+            <Text style={S.retryTxt}>Retry</Text>
+          </TouchableOpacity>
+        </View>
       ) : (
         <FlatList
           data={shown}
@@ -184,7 +208,9 @@ export default function ShelfScreen() {
             </View>
           }
           renderItem={({ item }) => (
-            <TouchableOpacity style={S.row} activeOpacity={0.75} onPress={() => open(item)}>
+            <TouchableOpacity style={S.row} activeOpacity={0.75} onPress={() => open(item)}
+              accessibilityRole="button"
+              accessibilityLabel={`Open ${item.filename}, ${formatSize(item.size)}`}>
               <View style={S.rowIcon}>
                 <Ionicons name={KIND_ICON[item.kind]} size={20} color={colors.primary} />
               </View>
@@ -195,7 +221,7 @@ export default function ShelfScreen() {
                     .filter(Boolean).join(' · ')}
                 </Text>
               </View>
-              <TouchableOpacity accessibilityLabel={item.pinned ? `Unpin ${item.filename}` : `Pin ${item.filename}`} onPress={() => togglePin(item.attachmentId)} hitSlop={12}>
+              <TouchableOpacity accessibilityRole="button" accessibilityState={{ selected: !!item.pinned }} accessibilityLabel={item.pinned ? `Unpin ${item.filename}` : `Pin ${item.filename}`} onPress={() => togglePin(item.attachmentId)} hitSlop={12}>
                 <Ionicons
                   name={item.pinned ? 'pin' : 'pin-outline'}
                   size={18}
@@ -249,4 +275,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   empty: { alignItems: 'center', padding: 40, gap: 10 },
   emptyTitle: { color: c.text, fontSize: 16, fontWeight: '700' },
   emptyBody: { color: c.textDim, fontSize: 13, textAlign: 'center', lineHeight: 19 },
+  retry: { marginTop: 6, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20, backgroundColor: brandAlpha(0.16) },
+  retryTxt: { color: c.primary, fontSize: 14, fontWeight: '700' },
 });

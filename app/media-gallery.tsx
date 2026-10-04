@@ -44,6 +44,10 @@ function bucket(msgs: Message[]) {
   const photos: Message[] = [], videos: Message[] = [], files: Message[] = [], links: LinkItem[] = [];
   for (const m of msgs) {
     if (m.deletedAt) continue;
+    // View-once media is shown once, in the protected viewer, from the chat
+    // bubble only. Listed here it became a grid thumbnail that opened in the
+    // unprotected photo Modal (and could be viewed again and again).
+    if (m.meta?.viewOnce) continue;
     if (m.type === 'image' && m.meta?.attachmentId) photos.push(m);
     else if (m.type === 'video' && m.meta?.attachmentId) videos.push(m);
     else if (m.type === 'file' && m.meta?.attachmentId) files.push(m);
@@ -163,8 +167,10 @@ export default function MediaGalleryScreen() {
       if (cid) {
         const cached = await readCache<GalleryCache>(cacheKey);
         if (active && cached) {
-          setPhotos(cached.photos); setVideos(cached.videos);
-          setFiles(cached.files); setLinks(cached.links);
+          // Re-bucket: a cache written before the view-once filter may hold some.
+          const c = bucket([...cached.photos, ...cached.videos, ...cached.files]);
+          setPhotos(c.photos); setVideos(c.videos);
+          setFiles(c.files); setLinks(cached.links);
           setLoading(false);
           painted = true;
         }

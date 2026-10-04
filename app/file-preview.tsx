@@ -4,12 +4,18 @@
 // Dark theme with line numbers
 
 import React, { useState, useEffect , useMemo} from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Share, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, FlatList, ActivityIndicator, Share, Alert } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
-import { useLocalSearchParams, Stack } from 'expo-router';
+import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import * as FileSystem from 'expo-file-system/legacy';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
+import { getAccessToken } from '../lib/api';
+import { SERVER_URL } from '../constants/server';
+import { VIEWER_TEMP_PREFIX } from '../lib/mediaCacheGC';
+
+/** Whole-file read + tokenised lines: past this, the windowed file-viewer reads it. */
+const MAX_PREVIEW_BYTES = 2 * 1024 * 1024;
 
 
 // Syntax color themes per token type
@@ -135,36 +141,58 @@ function useS() {
 export default function FilePreviewScreen() {
   const { colors } = useTheme();
   const s = useS();
+  const router = useRouter();
   const { uri, filename, mediaUrl } = useLocalSearchParams();
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(true);
   const [lang, setLang] = useState('text');
   const [wordWrap, setWordWrap] = useState(true);
+  // 'error' and 'too-large' replace the old "error message as file content".
+  const [failure, setFailure] = useState<null | 'error' | 'too-large'>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const fileUri = (uri || mediaUrl || '') + '';
 
   useEffect(() => {
+    let dead = false;
     const loadFile = async () => {
+      let tmp: string | null = null;
+      setLoading(true);
+      setFailure(null);
       try {
         const ext = ((filename || uri || '') + '').split('.').pop()?.toLowerCase() || 'txt';
         setLang(LANG_MAP[ext] || 'text');
 
-        const fileUri = (uri || mediaUrl || '') + '';
+        let local = fileUri;
         if (fileUri.startsWith('http')) {
-          // Download from URL first
-          const localPath = FileSystem.cacheDirectory + 'preview_' + Date.now() + '.' + ext;
-          await FileSystem.downloadAsync(fileUri, localPath);
-          const text = await FileSystem.readAsStringAsync(localPath);
-          setContent(text);
-        } else if (fileUri) {
-          const text = await FileSystem.readAsStringAsync(fileUri);
-          setContent(text);
+          // Our attachment endpoints need the bearer token; never send it to
+          // any other host.
+          tmp = FileSystem.cacheDirectory + VIEWER_TEMP_PREFIX + 'preview_' + Date.now() + '.' + ext;
+          const token = fileUri.startsWith(SERVER_URL) ? await getAccessToken() : null;
+          const res = await FileSystem.downloadAsync(fileUri, tmp,
+            token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
+          if (res.status >= 400) throw new Error('GET ' + res.status);
+          local = tmp;
         }
-      } catch (e) {
-        setContent('// Error loading file: ' + (e.message || 'Unknown error'));
+        if (!local) throw new Error('no file');
+        const info: any = await FileSystem.getInfoAsync(local);
+        if (info?.exists && Number(info.size ?? 0) > MAX_PREVIEW_BYTES) {
+          if (!dead) setFailure('too-large');
+          return;
+        }
+        const text = await FileSystem.readAsStringAsync(local);
+        if (!dead) setContent(text);
+      } catch (e: any) {
+        console.warn('[file-preview] load failed:', e?.message ?? e);
+        if (!dead) setFailure('error');
+      } finally {
+        // The downloaded copy is plaintext and already in memory: don't keep it.
+        if (tmp) FileSystem.deleteAsync(tmp, { idempotent: true }).catch(() => {});
+        if (!dead) setLoading(false);
       }
-      setLoading(false);
     };
     loadFile();
-  }, [filename, uri, mediaUrl]);
+    return () => { dead = true; };
+  }, [filename, uri, fileUri, reloadKey]);
 
   const copyAll = async () => {
     await copyAndAutoClear(content);
@@ -175,8 +203,29 @@ export default function FilePreviewScreen() {
     await Share.share({ message: content, title: (filename || 'file') + '' });
   };
 
-  const lines = content.split('\n');
+  const lines = useMemo(() => content.split('\n'), [content]);
   const lineNumWidth = String(lines.length).length * 9 + 16;
+
+  const codeList = (
+    <FlatList
+      style={s.codeScroll}
+      data={lines}
+      keyExtractor={(_, idx) => String(idx)}
+      initialNumToRender={60}
+      windowSize={11}
+      ListFooterComponent={<View style={{ height: 100 }} />}
+      renderItem={({ item: line, index: idx }) => (
+        <View style={s.lineRow}>
+          <Text style={[s.lineNum, { width: lineNumWidth }]}>{idx + 1}</Text>
+          <Text style={[s.codeLine, wordWrap && { flexWrap: 'wrap', flex: 1 }]}>
+            {tokenize(line, lang).map((t, ti) => (
+              <Text key={ti} style={{ color: TOKEN_COLORS[t.type] || TOKEN_COLORS.default }}>{t.text}</Text>
+            ))}
+          </Text>
+        </View>
+      )}
+    />
+  );
 
   return (
     <>
@@ -187,13 +236,16 @@ export default function FilePreviewScreen() {
         headerTintColor: colors.text,
         headerRight: () => (
           <View style={{ flexDirection: 'row', gap: 12, marginRight: 8 }}>
-            <TouchableOpacity style={{ minHeight: 44, justifyContent: 'center' }} onPress={() => setWordWrap(!wordWrap)}>
+            <TouchableOpacity style={{ minHeight: 44, justifyContent: 'center' }} onPress={() => setWordWrap(!wordWrap)}
+              accessibilityRole="switch" accessibilityLabel="Wrap lines" accessibilityState={{ checked: wordWrap }}>
               <Text style={{ color: wordWrap ? colors.accent : colors.textDim, fontSize: 12, fontWeight: '700' }}>Wrap</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={{ minHeight: 44, justifyContent: 'center' }} onPress={copyAll}>
+            <TouchableOpacity style={{ minHeight: 44, justifyContent: 'center' }} onPress={copyAll} disabled={!!failure || loading}
+              accessibilityRole="button" accessibilityLabel="Copy file contents">
               <Text style={{ color: colors.accent, fontSize: 12, fontWeight: '700' }}>Copy</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={{ minHeight: 44, justifyContent: 'center' }} onPress={shareFile}>
+            <TouchableOpacity style={{ minHeight: 44, justifyContent: 'center' }} onPress={shareFile} disabled={!!failure || loading}
+              accessibilityRole="button" accessibilityLabel="Share file contents">
               <Text style={{ color: colors.accent, fontSize: 12, fontWeight: '700' }}>Share</Text>
             </TouchableOpacity>
           </View>
@@ -210,25 +262,35 @@ export default function FilePreviewScreen() {
 
         {loading ? (
           <ActivityIndicator color={colors.accent} style={{ marginTop: 40 }} />
+        ) : failure ? (
+          <View style={s.failure}>
+            <Text style={s.failureTitle}>
+              {failure === 'too-large' ? 'Too large to preview here' : "Couldn't load this file"}
+            </Text>
+            <Text style={s.failureBody}>
+              {failure === 'too-large'
+                ? 'Open it in the file viewer, which reads large files a page at a time.'
+                : 'Check your connection and try again.'}
+            </Text>
+            <TouchableOpacity
+              style={s.failureBtn}
+              accessibilityRole="button"
+              accessibilityLabel={failure === 'too-large' ? 'Open in file viewer' : 'Retry'}
+              onPress={() => (failure === 'too-large'
+                ? router.replace({ pathname: '/file-viewer', params: { uri: fileUri, filename: (filename || '') + '' } } as any)
+                : setReloadKey(k => k + 1))}
+            >
+              <Text style={s.failureBtnTxt}>{failure === 'too-large' ? 'Open in file viewer' : 'Retry'}</Text>
+            </TouchableOpacity>
+          </View>
         ) : (
-          <ScrollView style={s.codeScroll} horizontal={!wordWrap}>
-            <ScrollView nestedScrollEnabled>
-              {lines.map((line, idx) => {
-                const tokens = tokenize(line, lang);
-                return (
-                  <View key={idx} style={s.lineRow}>
-                    <Text style={[s.lineNum, { width: lineNumWidth }]}>{idx + 1}</Text>
-                    <Text style={[s.codeLine, wordWrap && { flexWrap: 'wrap', flex: 1 }]}>
-                      {tokens.map((t, ti) => (
-                        <Text key={ti} style={{ color: TOKEN_COLORS[t.type] || TOKEN_COLORS.default }}>{t.text}</Text>
-                      ))}
-                    </Text>
-                  </View>
-                );
-              })}
-              <View style={{ height: 100 }} />
-            </ScrollView>
-          </ScrollView>
+          // Virtualised: every line used to be tokenised and mounted at once.
+          // Wrapped text scrolls vertically only, so the list is the scroller;
+          // unwrapped lines get a horizontal ScrollView around it (a vertical
+          // list inside a vertical ScrollView would not virtualise).
+          wordWrap ? codeList : (
+            <ScrollView style={s.codeScroll} horizontal>{codeList}</ScrollView>
+          )
         )}
       </View>
     </>
@@ -246,4 +308,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   lineRow: { flexDirection: 'row', minHeight: 22 },
   lineNum: { color: '#8B949E', fontSize: 12, fontFamily: 'monospace', textAlign: 'right', paddingRight: 12, paddingTop: 2, backgroundColor: '#161B22', borderRightWidth: 1, borderRightColor: '#21262D' },
   codeLine: { fontSize: 12, fontFamily: 'monospace', paddingLeft: 12, paddingTop: 2, color: '#C9D1D9' },
+  failure: { alignItems: 'center', padding: 32, gap: 10 },
+  failureTitle: { color: c.text, fontSize: 16, fontWeight: '700', textAlign: 'center' },
+  failureBody: { color: c.textDim, fontSize: 13, textAlign: 'center', lineHeight: 19 },
+  failureBtn: { marginTop: 6, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20, backgroundColor: c.accent },
+  failureBtnTxt: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
 });

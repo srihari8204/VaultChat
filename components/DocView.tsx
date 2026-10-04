@@ -130,6 +130,7 @@ function Grid({
       onPress={() => setShown(n => n + ROW_CHUNK)}
       style={s.moreRow}
       accessibilityRole="button"
+      accessibilityLabel={`Show ${Math.min(ROW_CHUNK, remaining)} more rows, ${remaining.toLocaleString()} remaining`}
     >
       <Text style={s.moreTxt}>
         Show {Math.min(ROW_CHUNK, remaining)} more rows ({remaining.toLocaleString()} remaining)

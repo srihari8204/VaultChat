@@ -4,7 +4,7 @@
 import { BRAND_ACCENT } from '../constants/theme';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, StatusBar,
   ActivityIndicator, Dimensions, ScrollView, Animated,
@@ -22,6 +22,7 @@ import { getCurrentUserAsync } from './(constants)/authService';
 import ProtectedMediaView from '../components/ProtectedMediaView';
 import { onScreenshot } from '../lib/screenGuard';
 import { permissionDenied } from '../lib/permissionDenied';
+import { VIEWER_TEMP_PREFIX } from '../lib/mediaCacheGC';
 
 // Playback status is a union (loaded | error); every read below wants the loaded
 // shape. Partial<> keeps the `{}` initial state honest — the fields genuinely
@@ -43,6 +44,185 @@ const getFileType = (name) => {
 
 const formatSize = (b) => { if (!b) return ''; if (b<1024) return b+' B'; if (b<1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; };
 const formatDur = (ms) => { if (!ms) return '0:00'; const s=Math.floor(ms/1000); return Math.floor(s/60)+':'+(s%60<10?'0':'')+(s%60); };
+
+// The players live at MODULE scope. Defined inside MediaViewerScreen they were
+// a new component type on every render, so any parent state change (the HEAD
+// request's setFileSize, setMe, setAuthHeaders) unmounted and remounted them:
+// video restarted, audio reloaded, zoom reset.
+type Src = { uri: string; headers?: { Authorization: string } };
+type PlayerProps = {
+  source: Src;
+  waitingForAuth: boolean;
+  onLoaded: () => void;
+  onFail: (msg: string) => void;
+  /** Video streams: hide the screen spinner once mounted (it has its own). */
+  onStreaming: () => void;
+};
+
+// IMAGE
+function ImageViewer({ source, onLoaded, onFail }: PlayerProps) {
+  const scale = useRef(new Animated.Value(1)).current;
+  const [imgLoaded, setImgLoaded] = useState(false);
+  const lastScale = useRef(1);
+  const panResponder = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onPanResponderRelease: (_, g) => {
+      if (Math.abs(g.dx) < 5 && Math.abs(g.dy) < 5) {
+        const ns = lastScale.current > 1 ? 1 : 2.5; lastScale.current = ns;
+        Animated.spring(scale, { toValue: ns, useNativeDriver: true }).start();
+      }
+    },
+  })).current;
+  return (
+    <View style={s.full} {...panResponder.panHandlers}>
+      {!imgLoaded && <ActivityIndicator color={C.accent} style={s.center} />}
+      <Animated.Image source={source} style={[s.fullImg, { transform: [{ scale }] }]} resizeMode="contain"
+        onLoad={() => { setImgLoaded(true); onLoaded(); }} onError={() => onFail('Failed to load image')} />
+    </View>
+  );
+}
+
+// VIDEO — streams while loading
+function VideoPlayer({ source, waitingForAuth, onLoaded, onFail, onStreaming }: PlayerProps) {
+  const videoRef = useRef<Video>(null);
+  const [st, setSt] = useState<PlaybackState>({});
+  const [ctrl, setCtrl] = useState(true);
+  const [shouldPlay, setShouldPlay] = useState(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- once auth is settled
+  useEffect(() => { if (!waitingForAuth) onStreaming(); }, [waitingForAuth]);
+  // expo-av loads a source once and never retries, so mounting before the
+  // token is ready would fail permanently rather than briefly.
+  if (waitingForAuth) return <View style={s.full}><ActivityIndicator color={C.accent} style={s.center} /></View>;
+  return (
+    <TouchableOpacity style={s.full} activeOpacity={1} onPress={() => setCtrl(!ctrl)}
+      accessibilityRole="button" accessibilityLabel={ctrl ? 'Hide video controls' : 'Show video controls'}>
+      <Video ref={videoRef} source={source} style={s.fullVid} resizeMode={ResizeMode.CONTAIN}
+        shouldPlay={shouldPlay} isLooping={false} useNativeControls={false} progressUpdateIntervalMillis={250}
+        onPlaybackStatusUpdate={(status) => { if (!status.isLoaded) return; setSt(status); if (status.didJustFinish) setShouldPlay(false); }}
+        onLoad={onLoaded} onError={() => onFail('Failed to load video')} />
+      {st.isBuffering && !st.isPlaying && <View style={s.bufOverlay}><ActivityIndicator color={C.accent} size="large" /><Text style={s.bufTxt}>Streaming...</Text></View>}
+      {ctrl && (
+        <View style={s.vidCtrl}>
+          <TouchableOpacity style={s.playBtn} accessibilityRole="button" accessibilityLabel={st.isPlaying ? 'Pause video' : 'Play video'} onPress={async () => {
+            const v = videoRef.current; if (!v) return;
+            if (st.isPlaying) { await v.pauseAsync(); setShouldPlay(false); }
+            else {
+              // Replay from the start if it had reached the end.
+              if (st.didJustFinish || (st.durationMillis && (st.positionMillis ?? 0) >= st.durationMillis)) { await v.setPositionAsync(0); }
+              await v.playAsync(); setShouldPlay(true);
+            }
+          }}>
+            <Ionicons name={st.isPlaying ? 'pause' : 'play'} size={40} color="#fff" />
+          </TouchableOpacity>
+          <View style={s.progRow}>
+            <Text style={s.timeTxt}>{formatDur(st.positionMillis)}</Text>
+            <View style={s.seekBg}>
+              <View style={[s.seekBuf, { width: `${(st.playableDurationMillis||0) / (st.durationMillis||1) * 100}%` }]} />
+              <View style={[s.seekFill, { width: `${(st.positionMillis||0) / (st.durationMillis||1) * 100}%` }]} />
+            </View>
+            <Text style={s.timeTxt}>{formatDur(st.durationMillis)}</Text>
+          </View>
+        </View>
+      )}
+    </TouchableOpacity>
+  );
+}
+
+// Stable bar heights: Math.random() in render made the waveform flicker on
+// every 200 ms status update.
+const WAVE = Array.from({ length: 40 }, (_, i) => 8 + ((i * 37) % 29));
+
+// AUDIO
+function AudioPlayer({ source, waitingForAuth, onLoaded, onFail, fileName, fileSize }: PlayerProps & { fileName: string; fileSize: number }) {
+  const soundRef = useRef<Audio.Sound | null>(null);
+  const [ast, setAst] = useState<PlaybackState>({});
+  useEffect(() => {
+    if (waitingForAuth) return;                 // createAsync would 401, and it does not retry
+    let dead = false;
+    (async () => {
+      try {
+        await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
+        const { sound } = await Audio.Sound.createAsync(source, { shouldPlay: false, progressUpdateIntervalMillis: 200 }, (st) => { if (st.isLoaded) setAst(st); });
+        // The screen can close while createAsync is in flight; without this the
+        // sound is created after unmount and never unloaded — it keeps playing
+        // with no controls left to stop it.
+        if (dead) { sound.unloadAsync().catch(() => {}); return; }
+        soundRef.current = sound; onLoaded();
+      } catch { if (!dead) onFail('Failed to load audio'); }
+    })();
+    return () => { dead = true; soundRef.current?.unloadAsync(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load once per source
+  }, [waitingForAuth, source]);
+  const prog = (ast.positionMillis||0) / (ast.durationMillis||1);
+  return (
+    <View style={s.audioWrap}>
+      <View style={s.audioCard}>
+        <Ionicons name="musical-notes" size={48} color="#1F2937" />
+        <Text style={s.audioName}>{fileName}</Text>
+        <Text style={s.audioMeta}>{formatSize(fileSize)}{ast.durationMillis ? ' | ' + formatDur(ast.durationMillis) : ''}</Text>
+        <View style={s.waveform}>{WAVE.map((h,i) => <View key={i} style={[s.waveBar,{height:h,backgroundColor:i/40<prog?C.accent:'#D1D5DB'}]}/>)}</View>
+        <View style={s.audioTimeRow}><Text style={s.audioTime}>{formatDur(ast.positionMillis)}</Text><Text style={s.audioTime}>{formatDur(ast.durationMillis)}</Text></View>
+        <View style={s.audioCtrlRow}>
+          <TouchableOpacity onPress={async()=>{if(!soundRef.current)return;const p=Math.max(0,prog-0.1);await soundRef.current.setPositionAsync(p*(ast.durationMillis||0));}} accessibilityRole="button" accessibilityLabel="Back ten per cent"><Ionicons name="play-back" size={26} color="#1F2937" /></TouchableOpacity>
+          <TouchableOpacity style={s.audioPlayBtn} onPress={async()=>{if(!soundRef.current)return;if(ast.isPlaying){await soundRef.current.pauseAsync();}else{await soundRef.current.playAsync();}}} accessibilityRole="button" accessibilityLabel={ast.isPlaying ? 'Pause audio' : 'Play audio'}>
+            <Ionicons name={ast.isPlaying?'pause':'play'} size={30} color="#000" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={async()=>{if(!soundRef.current)return;const p=Math.min(1,prog+0.1);await soundRef.current.setPositionAsync(p*(ast.durationMillis||0));}} accessibilityRole="button" accessibilityLabel="Forward ten per cent"><Ionicons name="play-forward" size={26} color="#1F2937" /></TouchableOpacity>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+// CODE/TEXT — a dark code canvas in BOTH themes (it was light text on #FFFFFF).
+const CODE = { bg: '#0D1117', head: '#161B22', border: '#21262D', text: '#E6EDF3', dim: '#8B949E', gutter: '#6E7681' };
+function CodeViewer({ fileUri, fileName, needsAuth, onLoaded, onOpenHighlighted }: {
+  fileUri: string; fileName: string; needsAuth: boolean; onLoaded: () => void; onOpenHighlighted: () => void;
+}) {
+  const [content, setContent] = useState('');
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let dead = false;
+    (async () => {
+      let lp: string | null = null;
+      try {
+        let text: string;
+        if (fileUri.startsWith('http')) {
+          lp = FileSystem.cacheDirectory + VIEWER_TEMP_PREFIX + 'prev_' + Date.now();
+          const token = needsAuth ? await getAccessToken() : null;
+          const res = await FileSystem.downloadAsync(fileUri, lp,
+            token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
+          if (res.status >= 400) throw new Error('GET ' + res.status);
+          text = await FileSystem.readAsStringAsync(lp);
+        } else text = await FileSystem.readAsStringAsync(fileUri);
+        if (!dead) setContent(text);
+      } catch { if (!dead) setFailed(true); }
+      // The preview copy is plaintext; it is read into memory and not kept.
+      if (lp) FileSystem.deleteAsync(lp, { idempotent: true }).catch(() => {});
+      if (!dead) onLoaded();
+    })();
+    return () => { dead = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load once per file
+  }, [fileUri]);
+  const lines = content.split('\n');
+  return (
+    <ScrollView style={{flex:1,backgroundColor:CODE.bg}}>
+      <View style={{padding:12,backgroundColor:CODE.head,borderBottomWidth:1,borderBottomColor:CODE.border}}>
+        <Text style={{color:CODE.text,fontSize:14,fontWeight:'800'}}>{fileName}</Text>
+        <Text style={{color:CODE.dim,fontSize:11,marginTop:4}}>{lines.length} lines | {formatSize(content.length)}</Text>
+        <TouchableOpacity style={{marginTop:10,backgroundColor:'#4A9FFF22',borderRadius:10,paddingVertical:10,flexDirection:'row',gap:6,justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:'#4A9FFF44'}}
+          onPress={onOpenHighlighted} accessibilityRole="button" accessibilityLabel="Open with syntax highlighting">
+          <Ionicons name="code-slash-outline" size={14} color="#4A9FFF" />
+          <Text style={{color:'#4A9FFF',fontSize:12,fontWeight:'700'}}>Open with Syntax Highlighting</Text>
+        </TouchableOpacity>
+      </View>
+      {failed && <Text style={{color:'#FF7B72',fontSize:13,textAlign:'center',padding:20}}>{"Couldn't read this file."}</Text>}
+      {lines.slice(0,500).map((l,i)=><View key={i} style={{flexDirection:'row',minHeight:22}}><Text style={{color:CODE.gutter,fontSize:12,fontFamily:'monospace',width:40,textAlign:'right',paddingRight:12,paddingTop:2}}>{i+1}</Text><Text style={{color:CODE.text,fontSize:12,fontFamily:'monospace',flex:1,paddingTop:2}}>{l}</Text></View>)}
+      {lines.length>500&&<Text style={{color:CODE.gutter,fontSize:12,textAlign:'center',padding:20}}>...{lines.length-500} more lines</Text>}
+      <View style={{height:100}}/>
+    </ScrollView>
+  );
+}
 
 function MediaViewerScreen() {
   // Reactive size. The module-level Dimensions.get above is captured ONCE at
@@ -125,8 +305,11 @@ function MediaViewerScreen() {
   // header. Images kept working, which is exactly what makes this read as "the
   // video player is broken" rather than "the request was unauthenticated".
   const remoteNeedsAuth = !!needsAuth && /^https?:\/\//i.test(fileUri);
-  const mediaSource = () =>
-    remoteNeedsAuth && authHeaders ? { uri: fileUri, headers: authHeaders } : { uri: fileUri };
+  // Memoised: a new source object on every render would make expo-av reload.
+  const source = useMemo(
+    () => (remoteNeedsAuth && authHeaders ? { uri: fileUri, headers: authHeaders } : { uri: fileUri }),
+    [remoteNeedsAuth, authHeaders, fileUri],
+  );
 
   // Mounting a player before the token resolves is the same 401 with extra
   // steps: getAccessToken is async, expo-av loads a source once and does NOT
@@ -263,141 +446,12 @@ function MediaViewerScreen() {
     } catch (e) { Alert.alert('Error', e.message); }
   };
 
-  // IMAGE
-  const ImageViewer = () => {
-    const scale = useRef(new Animated.Value(1)).current;
-    const [imgLoaded, setImgLoaded] = useState(false);
-    const lastScale = useRef(1);
-    const panResponder = useRef(PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onPanResponderRelease: (_, g) => {
-        if (Math.abs(g.dx) < 5 && Math.abs(g.dy) < 5) {
-          const ns = lastScale.current > 1 ? 1 : 2.5; lastScale.current = ns;
-          Animated.spring(scale, { toValue: ns, useNativeDriver: true }).start();
-        }
-      },
-    })).current;
-    return (
-      <View style={s.full} {...panResponder.panHandlers}>
-        {!imgLoaded && <ActivityIndicator color={C.accent} style={s.center} />}
-        <Animated.Image source={mediaSource()} style={[s.fullImg, { transform: [{ scale }] }]} resizeMode="contain"
-          onLoad={() => { setImgLoaded(true); setLoading(false); markViewedAfterLoad(); }} onError={() => { setError('Failed to load image'); setLoading(false); }} />
-      </View>
-    );
-  };
-
-  // VIDEO — streams while loading
-  const VideoPlayer = () => {
-    const videoRef = useRef(null);
-    const [st, setSt] = useState<PlaybackState>({});
-    const [ctrl, setCtrl] = useState(true);
-    const [shouldPlay, setShouldPlay] = useState(true);
-    useEffect(() => { if (!waitingForAuth) setLoading(false); }, []);
-    // expo-av loads a source once and never retries, so mounting before the
-    // token is ready would fail permanently rather than briefly.
-    if (waitingForAuth) return <View style={s.full}><ActivityIndicator color={C.accent} style={s.center} /></View>;
-    return (
-      <TouchableOpacity style={s.full} activeOpacity={1} onPress={() => setCtrl(!ctrl)}>
-        <Video ref={videoRef} source={mediaSource()} style={s.fullVid} resizeMode={ResizeMode.CONTAIN}
-          shouldPlay={shouldPlay} isLooping={false} useNativeControls={false} progressUpdateIntervalMillis={250}
-          onPlaybackStatusUpdate={(status) => { if (!status.isLoaded) return; setSt(status); if (status.didJustFinish) setShouldPlay(false); }}
-          onLoad={() => { setLoading(false); markViewedAfterLoad(); }} onError={() => { setError('Failed to load video'); setLoading(false); }} />
-        {st.isBuffering && !st.isPlaying && <View style={s.bufOverlay}><ActivityIndicator color={C.accent} size="large" /><Text style={s.bufTxt}>Streaming...</Text></View>}
-        {ctrl && (
-          <View style={s.vidCtrl}>
-            <TouchableOpacity style={s.playBtn} accessibilityLabel="Play or pause video" onPress={async () => {
-              const v = videoRef.current; if (!v) return;
-              if (st.isPlaying) { await v.pauseAsync(); setShouldPlay(false); }
-              else {
-                // Replay from the start if it had reached the end.
-                if (st.didJustFinish || (st.durationMillis && st.positionMillis >= st.durationMillis)) { await v.setPositionAsync(0); }
-                await v.playAsync(); setShouldPlay(true);
-              }
-            }}>
-              <Ionicons name={st.isPlaying ? 'pause' : 'play'} size={40} color="#fff" />
-            </TouchableOpacity>
-            <View style={s.progRow}>
-              <Text style={s.timeTxt}>{formatDur(st.positionMillis)}</Text>
-              <View style={s.seekBg}>
-                <View style={[s.seekBuf, { width: `${(st.playableDurationMillis||0) / (st.durationMillis||1) * 100}%` }]} />
-                <View style={[s.seekFill, { width: `${(st.positionMillis||0) / (st.durationMillis||1) * 100}%` }]} />
-              </View>
-              <Text style={s.timeTxt}>{formatDur(st.durationMillis)}</Text>
-            </View>
-          </View>
-        )}
-      </TouchableOpacity>
-    );
-  };
-
-  // AUDIO
-  const AudioPlayer = () => {
-    const soundRef = useRef(null);
-    const [ast, setAst] = useState<PlaybackState>({});
-    useEffect(() => {
-      if (waitingForAuth) return;                 // createAsync would 401, and it does not retry
-      let dead = false;
-      (async () => {
-        await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
-        const { sound } = await Audio.Sound.createAsync(mediaSource(), { shouldPlay: false, progressUpdateIntervalMillis: 200 }, (st) => { if (st.isLoaded) setAst(st); });
-        // The screen can close while createAsync is in flight; without this the
-        // sound is created after unmount and never unloaded — it keeps playing
-        // with no controls left to stop it.
-        if (dead) { sound.unloadAsync().catch(() => {}); return; }
-        soundRef.current = sound; setLoading(false);
-      })();
-      return () => { dead = true; soundRef.current?.unloadAsync(); };
-    }, [waitingForAuth]);
-    const prog = (ast.positionMillis||0) / (ast.durationMillis||1);
-    return (
-      <View style={s.audioWrap}>
-        <View style={s.audioCard}>
-          <Ionicons name="musical-notes" size={48} color="#1F2937" />
-          <Text style={s.audioName}>{fileName}</Text>
-          <Text style={s.audioMeta}>{formatSize(fileSize)}{ast.durationMillis ? ' | ' + formatDur(ast.durationMillis) : ''}</Text>
-          <View style={s.waveform}>{Array.from({length:40}).map((_,i) => <View key={i} style={[s.waveBar,{height:8+Math.random()*28,backgroundColor:i/40<prog?C.accent:'#D1D5DB'}]}/>)}</View>
-          <View style={s.audioTimeRow}><Text style={s.audioTime}>{formatDur(ast.positionMillis)}</Text><Text style={s.audioTime}>{formatDur(ast.durationMillis)}</Text></View>
-          <View style={s.audioCtrlRow}>
-            <TouchableOpacity onPress={async()=>{if(!soundRef.current)return;const p=Math.max(0,prog-0.1);await soundRef.current.setPositionAsync(p*(ast.durationMillis||0));}} accessibilityLabel="Back ten per cent"><Ionicons name="play-back" size={26} color="#1F2937" /></TouchableOpacity>
-            <TouchableOpacity style={s.audioPlayBtn} onPress={async()=>{if(!soundRef.current)return;if(ast.isPlaying){await soundRef.current.pauseAsync();}else{await soundRef.current.playAsync();}}} accessibilityLabel="Play or pause audio">
-              <Ionicons name={ast.isPlaying?'pause':'play'} size={30} color="#000" />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={async()=>{if(!soundRef.current)return;const p=Math.min(1,prog+0.1);await soundRef.current.setPositionAsync(p*(ast.durationMillis||0));}} accessibilityLabel="Forward ten per cent"><Ionicons name="play-forward" size={26} color="#1F2937" /></TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    );
-  };
-
-  // CODE/TEXT
-  const CodeViewer = () => {
-    const [content, setContent] = useState('');
-    useEffect(() => {
-      (async () => {
-        try {
-          if (fileUri.startsWith('http')) { const lp = FileSystem.cacheDirectory+'prev_'+Date.now(); await FileSystem.downloadAsync(fileUri,lp); setContent(await FileSystem.readAsStringAsync(lp)); }
-          else setContent(await FileSystem.readAsStringAsync(fileUri));
-        } catch(e) { setContent('Error: '+e.message); }
-        setLoading(false);
-      })();
-    }, []);
-    const lines = content.split('\n');
-    return (
-      <ScrollView style={{flex:1,backgroundColor:'#FFFFFF'}}>
-        <View style={{padding:12,backgroundColor:'#161B22',borderBottomWidth:1,borderBottomColor:'#21262D'}}>
-          <Text style={{color:'#1F2937',fontSize:14,fontWeight:800}}>{fileName}</Text>
-          <Text style={{color:'#8B949E',fontSize:11,marginTop:4}}>{lines.length} lines | {formatSize(content.length)}</Text>
-          <TouchableOpacity style={{marginTop:10,backgroundColor:'#4A9FFF22',borderRadius:10,paddingVertical:10,flexDirection:'row',gap:6,justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:'#4A9FFF44'}}
-            onPress={()=>router.push({pathname:'/file-preview',params:{uri:fileUri,filename:fileName,mediaUrl:fileUri}})}>
-            <Ionicons name="code-slash-outline" size={14} color="#4A9FFF" />
-            <Text style={{color:'#4A9FFF',fontSize:12,fontWeight:'700'}}>Open with Syntax Highlighting</Text>
-          </TouchableOpacity>
-        </View>
-        {lines.slice(0,500).map((l,i)=><View key={i} style={{flexDirection:'row',minHeight:22}}><Text style={{color:'#484F58',fontSize:12,fontFamily:'monospace',width:40,textAlign:'right',paddingRight:12,paddingTop:2}}>{i+1}</Text><Text style={{color:'#C9D1D9',fontSize:12,fontFamily:'monospace',flex:1,paddingTop:2}}>{l}</Text></View>)}
-        {lines.length>500&&<Text style={{color:'#484F58',fontSize:12,textAlign:'center',padding:20}}>...{lines.length-500} more lines</Text>}
-        <View style={{height:100}}/>
-      </ScrollView>
-    );
+  const playerProps: PlayerProps = {
+    source,
+    waitingForAuth,
+    onLoaded: () => { setLoading(false); markViewedAfterLoad(); },
+    onFail: (msg) => { setError(msg); setLoading(false); },
+    onStreaming: () => setLoading(false),
   };
 
   // PDF / UNKNOWN
@@ -407,10 +461,10 @@ function MediaViewerScreen() {
   const ArchiveCard = () => { useEffect(()=>{setLoading(false);},[]);
     return (<View style={s.audioWrap}><View style={s.audioCard}><Ionicons name="file-tray-full-outline" size={48} color="#1F2937" /><Text style={s.audioName}>{fileName}</Text><Text style={s.audioMeta}>{formatSize(fileSize)}</Text>
       <TouchableOpacity style={{marginTop:20,backgroundColor:C.accent,borderRadius:14,flexDirection:'row',gap:8,alignItems:'center',paddingVertical:14,paddingHorizontal:32}}
-        onPress={()=>router.push({pathname:'/archive-viewer',params:{uri:fileUri,filename:fileName}} as any)}>
+        onPress={()=>router.push({pathname:'/archive-viewer',params:{uri:fileUri,filename:fileName}} as any)} accessibilityRole="button" accessibilityLabel="Browse archive contents">
         <Ionicons name="folder-open-outline" size={16} color="#000" /><Text style={{color:'#000',fontSize:14,fontWeight:'800'}}>Browse contents</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={{marginTop:12,borderRadius:14,borderWidth:1,borderColor:'#4A9FFF55',paddingVertical:12,paddingHorizontal:28}} onPress={saveToDevice}>
+      <TouchableOpacity style={{marginTop:12,borderRadius:14,borderWidth:1,borderColor:'#4A9FFF55',paddingVertical:12,paddingHorizontal:28}} onPress={saveToDevice} accessibilityRole="button" accessibilityLabel="Save to device">
         <Text style={{color:'#4A9FFF',fontSize:13,fontWeight:'700'}}>Save to device</Text>
       </TouchableOpacity>
     </View></View>);
@@ -418,7 +472,7 @@ function MediaViewerScreen() {
 
   const GenericViewer = () => { useEffect(()=>{setLoading(false);},[]);
     return (<View style={s.audioWrap}><View style={s.audioCard}><Ionicons name="document-outline" size={48} color="#1F2937" /><Text style={s.audioName}>{fileName}</Text><Text style={s.audioMeta}>{formatSize(fileSize)}</Text>
-      <TouchableOpacity style={{marginTop:20,backgroundColor:C.accent,borderRadius:14,flexDirection:'row',gap:8,alignItems:'center',paddingVertical:14,paddingHorizontal:32}} onPress={saveToDevice}><Ionicons name="download-outline" size={16} color="#000" /><Text style={{color:'#000',fontSize:14,fontWeight:'800'}}>Download & Open</Text></TouchableOpacity>
+      <TouchableOpacity style={{marginTop:20,backgroundColor:C.accent,borderRadius:14,flexDirection:'row',gap:8,alignItems:'center',paddingVertical:14,paddingHorizontal:32}} onPress={saveToDevice} accessibilityRole="button" accessibilityLabel="Download and open"><Ionicons name="download-outline" size={16} color="#000" /><Text style={{color:'#000',fontSize:14,fontWeight:'800'}}>Download & Open</Text></TouchableOpacity>
       {/* The universal viewer (app/file-viewer.tsx) was unreachable — registered
           as a route but never navigated to. It shows file metadata and hands
           documents to the device's own PDF/Office app WITHOUT saving a copy to
@@ -427,6 +481,7 @@ function MediaViewerScreen() {
         style={{marginTop:12,borderRadius:14,borderWidth:1,borderColor:'#4A9FFF55',flexDirection:'row',gap:8,alignItems:'center',paddingVertical:12,paddingHorizontal:28}}
         onPress={()=>router.push({pathname:'/file-viewer',params:{uri:fileUri,filename:fileName,mimeType:(mime||'')+''}})}
         activeOpacity={0.8}
+        accessibilityRole="button" accessibilityLabel="Open without saving"
       >
         <Ionicons name="eye-outline" size={16} color="#4A9FFF" />
         <Text style={{color:'#4A9FFF',fontSize:13,fontWeight:'700'}}>Open without saving</Text>
@@ -476,8 +531,8 @@ function MediaViewerScreen() {
         // recipient a permanent copy through the app's own UI — the protection
         // has to hold in the viewer, not only on the server.
         headerRight: () => isViewOnce ? null : <View style={{flexDirection:'row',gap:20,marginRight:8}}>
-          <TouchableOpacity onPress={shareFile} hitSlop={8} accessibilityLabel="Share"><Ionicons name="share-social-outline" size={22} color="#fff" /></TouchableOpacity>
-          <TouchableOpacity onPress={saveToDevice} hitSlop={8} accessibilityLabel="Save to device"><Ionicons name="download-outline" size={22} color="#fff" /></TouchableOpacity>
+          <TouchableOpacity onPress={shareFile} hitSlop={8} accessibilityRole="button" accessibilityLabel="Share"><Ionicons name="share-social-outline" size={22} color="#fff" /></TouchableOpacity>
+          <TouchableOpacity onPress={saveToDevice} hitSlop={8} accessibilityRole="button" accessibilityLabel="Save to device"><Ionicons name="download-outline" size={22} color="#fff" /></TouchableOpacity>
         </View>,
       }} />
       <View style={s.container}>
@@ -496,14 +551,18 @@ function MediaViewerScreen() {
               watermarkPhone={me?.phone}
               onBlocked={() => { if (chatId) reportScreenshotCaptured(String(chatId)).catch(() => {}); }}
             >
-              {fileType === 'image' ? <ImageViewer /> : <VideoPlayer />}
+              {fileType === 'image' ? <ImageViewer {...playerProps} /> : <VideoPlayer {...playerProps} />}
             </ProtectedMediaView>
           ) : (
             <>
-              {fileType === 'image' && <ImageViewer />}
-              {fileType === 'video' && <VideoPlayer />}
-              {fileType === 'audio' && <AudioPlayer />}
-              {fileType === 'code' && <CodeViewer />}
+              {fileType === 'image' && <ImageViewer {...playerProps} />}
+              {fileType === 'video' && <VideoPlayer {...playerProps} />}
+              {fileType === 'audio' && <AudioPlayer {...playerProps} fileName={fileName} fileSize={fileSize} />}
+              {fileType === 'code' && (
+                <CodeViewer fileUri={fileUri} fileName={fileName} needsAuth={!!needsAuth}
+                  onLoaded={() => setLoading(false)}
+                  onOpenHighlighted={() => router.push({ pathname: '/file-preview', params: { uri: fileUri, filename: fileName, mediaUrl: fileUri } })} />
+              )}
               {fileType === 'archive' && <ArchiveCard />}
               {(fileType === 'pdf' || fileType === 'unknown') && <GenericViewer />}
             </>

@@ -7,8 +7,9 @@
 
 import {
   listDir, parentDir, safeEntryPath, toEntries, tooLargeToOpen, totalUncompressed,
-  MAX_UNCOMPRESSED_BYTES,
+  MAX_UNCOMPRESSED_BYTES, MAX_ENTRIES, refuseDeclared, unsupportedArchiveFormat,
 } from './archive';
+import { unzip, zipSync, type Unzipped, type UnzipFileInfo } from 'fflate';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail?: string) {
@@ -96,5 +97,47 @@ check('a normal archive opens', !tooLargeToOpen(entries));
 check('an oversized archive is refused',
   tooLargeToOpen(toEntries({ 'big.bin': { size: MAX_UNCOMPRESSED_BYTES + 1 } })));
 
-console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all archive checks passed\n');
-process.exit(failures ? 1 : 0);
+// Declared-size guard: runs on the central directory BEFORE inflating.
+eq('a small archive is not refused', refuseDeclared([{ originalSize: 10 }, { originalSize: 20 }]), null);
+eq('declared bytes over the cap are refused',
+  refuseDeclared([{ originalSize: MAX_UNCOMPRESSED_BYTES }, { originalSize: 1 }]),
+  { reason: 'size', bytes: MAX_UNCOMPRESSED_BYTES + 1 });
+eq('too many entries are refused',
+  refuseDeclared(Array.from({ length: MAX_ENTRIES + 1 }, () => ({ originalSize: 0 }))),
+  { reason: 'count', count: MAX_ENTRIES + 1 });
+eq('junk sizes count as 0, not NaN', refuseDeclared([{ originalSize: NaN }, { originalSize: -5 }]), null);
+
+console.log('\nFormats:');
+eq('rar is named, not attempted', unsupportedArchiveFormat('photos.RAR'), 'RAR');
+eq('7z is named', unsupportedArchiveFormat('a.7z'), '7-Zip');
+eq('tar.gz is named by its last extension', unsupportedArchiveFormat('src.tar.gz'), 'GZip');
+eq('zip is supported', unsupportedArchiveFormat('a.zip'), null);
+eq('no extension is not refused here', unsupportedArchiveFormat('archive'), null);
+
+// The screen relies on two fflate behaviours; pin them so an upgrade that
+// changes either fails here rather than on a user's phone.
+async function fflateContract() {
+  console.log('\nfflate contract:');
+  const zip = zipSync({ 'z.bin': new Uint8Array(100_000) }, { level: 9 });
+  const seen: UnzipFileInfo[] = [];
+  const none = await new Promise<Unzipped>((res, rej) =>
+    unzip(zip, { filter: f => { seen.push(f); return false; } }, (e, o) => (e ? rej(e) : res(o))));
+  eq('filter reports the declared size without inflating', seen.map(f => f.originalSize), [100_000]);
+  eq('a filtered-out entry is never inflated', Object.keys(none), []);
+
+  // Lie in the central directory: claim 10 bytes for a 100 kB entry.
+  const lying = zip.slice();
+  const dv = new DataView(lying.buffer);
+  for (let i = lying.length - 22; i >= 0; i--) {
+    if (dv.getUint32(i, true) === 0x02014b50) { dv.setUint32(i + 24, 10, true); break; }
+  }
+  const out = await new Promise<Unzipped | null>(res =>
+    unzip(lying, (e, o) => res(e ? null : o)));
+  check('a lying header cannot inflate past its declared size',
+    out === null || (out['z.bin']?.length ?? 0) <= 10, `got ${out?.['z.bin']?.length}`);
+}
+
+fflateContract().catch(e => { failures++; console.log('  ✗ fflate contract threw', e); }).finally(() => {
+  console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all archive checks passed\n');
+  process.exit(failures ? 1 : 0);
+});

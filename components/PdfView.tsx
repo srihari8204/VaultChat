@@ -97,6 +97,7 @@ function Page({
         // briefly shows the PREVIOUS page's bitmap while the new one decodes.
         <ExpoImage
           source={{ uri: img }} style={{ width, height }}
+          accessible accessibilityRole="image" accessibilityLabel={`Page ${index + 1}`}
           contentFit="contain" cachePolicy="disk" recyclingKey={`${docKey}_${index}`}
         />
       ) : (
@@ -236,7 +237,7 @@ const makeS = (c: Palette) => StyleSheet.create({
     ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center',
     backgroundColor: c.surfaceSolid, gap: 12,
   },
-  coverTxt: { color: 'rgba(255,255,255,0.65)', fontSize: 13 },
+  coverTxt: { color: c.textDim, fontSize: 13 },   // the cover is c.surfaceSolid (light in light theme): white text vanished on it
   pill: {
     position: 'absolute', bottom: 16, alignSelf: 'center',
     paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999,

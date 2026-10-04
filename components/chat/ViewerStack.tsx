@@ -50,10 +50,15 @@ export function ViewerStack({ viewers, resolve }: { viewers: Viewer[]; resolve: 
       </TouchableOpacity>
 
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-        <Pressable style={S.backdrop} onPress={() => setOpen(false)}>
-          <Pressable style={S.sheet} onPress={() => {}}>
+        <Pressable style={S.backdrop} onPress={() => setOpen(false)} accessibilityRole="button" accessibilityLabel="Close viewing now">
+          <Pressable style={S.sheet} onPress={() => {}} accessible={false}>
             <View style={S.handle} />
-            <Text style={S.sheetTitle}>Viewing now · {viewers.length}</Text>
+            <View style={S.titleRow}>
+              <Text style={[S.sheetTitle, { flex: 1 }]}>Viewing now · {viewers.length}</Text>
+              <TouchableOpacity onPress={() => setOpen(false)} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close">
+                <Ionicons name="close" size={22} color={colors.textDim} />
+              </TouchableOpacity>
+            </View>
             <ScrollView style={{ maxHeight: 340 }}>
               {viewers.map(v => {
                 const r = resolve(v.userId);
@@ -89,6 +94,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   sheet: { backgroundColor: c.glassSoft, borderTopLeftRadius: 18, borderTopRightRadius: 18, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 28 },
   handle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: c.border, marginBottom: 12 },
   sheetTitle: { color: c.text, fontSize: 16, fontWeight: '700', marginBottom: 8 },
+  titleRow: { flexDirection: 'row', alignItems: 'center' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8 },
   name: { color: c.text, fontSize: 15, fontWeight: '600', flex: 1 },
   activity: { flexDirection: 'row', alignItems: 'center', gap: 4 },

@@ -19,6 +19,29 @@ const PREFIXES = ['dec_', 'enc_', 'mp_'];
 // size-capped sweep below.
 const EPHEMERAL_PREFIXES = ['vo_', 'vv_'];
 
+/**
+ * Plaintext the file viewers stage in the cache root: file-viewer's text/doc
+ * downloads and external hand-off copies, file-preview's download, the
+ * archive-viewer's downloaded archive and single-entry extractions, and
+ * media-viewer's code preview. Each screen deletes its own on exit where no
+ * other app may still be reading it; this prefix is how boot and logout catch
+ * the rest (hand-offs, crashes, force-stops). Use it for any new viewer temp.
+ */
+export const VIEWER_TEMP_PREFIX = 'vt_';
+/** Names those screens used before VIEWER_TEMP_PREFIX existed. Left behind by
+ *  older builds; purged by the same sweep. (Hand-off copies saved under their
+ *  bare original filename cannot be told apart from other files and are not.) */
+const LEGACY_VIEWER_TEMP_PREFIXES = ['temp_view_', 'temp_doc_', 'preview_', 'prev_'];
+const LEGACY_VIEWER_TEMP_DIRS = ['archive'];
+
+/** True for a cache-root entry that is viewer/protected-media plaintext. */
+function isEphemeralName(name: string): boolean {
+  return EPHEMERAL_PREFIXES.some((p) => name.startsWith(p))
+    || name.startsWith(VIEWER_TEMP_PREFIX)
+    || LEGACY_VIEWER_TEMP_PREFIXES.some((p) => name.startsWith(p))
+    || LEGACY_VIEWER_TEMP_DIRS.includes(name.replace(/\/$/, ''));
+}
+
 /** Mirrors mediaStore.DOC_CACHE_PREFIX; duplicated to keep this module import-free of it. */
 const DOC_DIR_PREFIX = 'dc_';
 
@@ -68,7 +91,7 @@ export async function purgeEphemeralMedia(): Promise<number> {
     if (!dir) return 0;
     const names = await FileSystem.readDirectoryAsync(dir);
     for (const name of names) {
-      if (!EPHEMERAL_PREFIXES.some((p) => name.startsWith(p))) continue;
+      if (!isEphemeralName(name)) continue;
       await FileSystem.deleteAsync(dir + name, { idempotent: true }).catch(() => {});
       n++;
     }
@@ -82,7 +105,7 @@ export async function sweepMediaCache(): Promise<void> {
   // would leave it on disk whenever the cache happens to be under the ceiling.
   try {
     const purged = await purgeEphemeralMedia();
-    if (purged > 0) console.log(`[cacheGC] purged ${purged} ephemeral protected-media file(s)`);
+    if (purged > 0) console.log(`[cacheGC] purged ${purged} ephemeral protected-media/viewer temp file(s)`);
   } catch { /* best-effort */ }
 
   // P4.2: the message cache is bounded on the same boot sweep as media. It

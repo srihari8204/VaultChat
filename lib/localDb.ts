@@ -1072,6 +1072,10 @@ export async function getAttachmentChatMap(): Promise<Record<string, string>> {
 export async function listAllAttachments(limit = 2000): Promise<Array<{
   attachmentId: string; chatId: string; messageId: number; senderId: string | null;
   filename: string; mime: string | null; size: number; createdAt: string;
+  /** meta.encrypted — the viewer needs it to tell "no key" from plaintext. */
+  encrypted: boolean;
+  /** meta.viewOnce — callers must not list or open these unprotected. */
+  viewOnce: boolean;
 }>> {
   const db = await getLocalDb();
   const rows = await db.getAllAsync(
@@ -1096,6 +1100,8 @@ export async function listAllAttachments(limit = 2000): Promise<Array<{
       mime: meta.mime ?? null,
       size: Number(meta.size ?? 0),
       createdAt: r.created_at ?? '',
+      encrypted: !!meta.encrypted,
+      viewOnce: !!meta.viewOnce,
     });
   }
   return out;

@@ -118,7 +118,7 @@ export default function GateChallenge({
             // No preview means nothing to cut up. Letting the viewer through is
             // correct: the puzzle was never protection, and trapping them behind
             // a board that cannot render would deny access it never guarded.
-            <TouchableOpacity style={[S.btn, { backgroundColor: accent }]} onPress={onSolved}>
+            <TouchableOpacity style={[S.btn, { backgroundColor: accent }]} onPress={onSolved} accessibilityRole="button" accessibilityLabel="Open">
               <Text style={S.btnText}>Open</Text>
             </TouchableOpacity>
           )}
@@ -131,6 +131,7 @@ export default function GateChallenge({
             value={answer}
             onChangeText={(t) => { setAnswer(t); setWrong(false); }}
             placeholder="Your answer"
+            accessibilityLabel={prompt || 'Answer to unlock'}
             placeholderTextColor="rgba(255,255,255,0.45)"
             style={S.input}
             autoCapitalize="none"
@@ -144,6 +145,9 @@ export default function GateChallenge({
             style={[S.btn, { backgroundColor: accent, opacity: busy || !answer.trim() ? 0.5 : 1 }]}
             onPress={submit}
             disabled={busy || !answer.trim()}
+            accessibilityRole="button"
+            accessibilityLabel="Unlock"
+            accessibilityState={{ disabled: busy || !answer.trim(), busy }}
           >
             {busy ? <ActivityIndicator color="#fff" /> : <Text style={S.btnText}>Unlock</Text>}
           </TouchableOpacity>
@@ -155,8 +159,12 @@ export default function GateChallenge({
 }
 
 const makeS = (c: Palette) => StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: c.bg, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  close: { position: 'absolute', top: 48, left: 20, zIndex: 2 },
+  // The gate sits on the story viewer's always-black stage and every glyph
+  // here is white, so the surface is black in both themes (c.bg was white in
+  // light theme: white title and input on white).
+  wrap: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center', padding: 24 }, // theme-exempt: dark media stage
+  // Bottom: at the top it sat underneath the story viewer's own top bar.
+  close: { position: 'absolute', bottom: 40, left: 20, zIndex: 2 },
   title: { color: '#fff', fontSize: 19, fontWeight: '600', marginTop: 14, textAlign: 'center', lineHeight: 26 },
   input: {
     width: '100%', marginTop: 20, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14,

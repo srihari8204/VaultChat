@@ -24,8 +24,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AccessibilityInfo, ActivityIndicator, Animated, AppState, Image,
-  KeyboardAvoidingView, Platform, Pressable, StatusBar, StyleSheet, TextInput, View,
+  KeyboardAvoidingView, Linking, Platform, Pressable, StatusBar, StyleSheet, TextInput, View,
 } from 'react-native';
+import { permissionDenied } from '../lib/permissionDenied';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import * as MediaLibrary from 'expo-media-library';
@@ -61,7 +62,7 @@ export default function CameraScreen() {
   // The composer's slide-up gesture opens straight into a round video note.
   const noteStart = startMode === 'note';
 
-  const [camPerm, requestCam] = useCameraPermissions();
+  const [camPerm, requestCam, getCam] = useCameraPermissions();
   const [micPerm, requestMic] = useMicrophonePermissions();
 
   const [mode, setMode] = useState<CameraMode>(
@@ -112,10 +113,15 @@ export default function CameraScreen() {
   // it ever resolved — so the scan guard lifts here and SCAN can never wedge.
   useEffect(() => {
     const sub = AppState.addEventListener('change', st => {
-      if (st === 'active') scanningRef.current = false;
+      if (st === 'active') {
+        scanningRef.current = false;
+        // Back from the Settings app: re-read the camera grant, or the gate
+        // would keep showing "Open settings" after the user turned it on.
+        getCam().catch(() => {});
+      }
     });
     return () => sub.remove();
-  }, []);
+  }, [getCam]);
 
   // Inline notices replace the system Alert this screen used to throw.
   useEffect(() => {
@@ -158,7 +164,11 @@ export default function CameraScreen() {
   const ensureMic = useCallback(async () => {
     if (micPerm?.granted) return true;
     const r = await requestMic();
-    if (!r.granted) setNotice('Microphone access is needed to record video.');
+    if (!r.granted) {
+      // Once Android stops asking, only Settings can grant it — say so.
+      if (r.canAskAgain) setNotice('Microphone access is needed to record video.');
+      else permissionDenied('Microphone access needed', 'Allow microphone access to record video.', false);
+    }
     return r.granted;
   }, [micPerm, requestMic]);
 
@@ -294,9 +304,20 @@ export default function CameraScreen() {
           crazzychat needs the camera to take photos, record video and scan documents.
           Nothing leaves your device until you send it.
         </Text>
-        <Pressable onPress={requestCam} style={s.gateBtn} accessibilityRole="button">
-          <Text variant="bodyStrong" color={BRAND_ACCENT}>Allow camera</Text>
-        </Pressable>
+        {/* Once the OS stops asking (canAskAgain false), requestCam returns
+            denied with no dialog, so the button would repeat a silent refusal.
+            Settings is then the only route. */}
+        {camPerm.canAskAgain ? (
+          <Pressable onPress={requestCam} style={s.gateBtn} accessibilityRole="button" accessibilityLabel="Allow camera">
+            <Text variant="bodyStrong" color={BRAND_ACCENT}>Allow camera</Text>
+          </Pressable>
+        ) : (
+          <Pressable onPress={() => { Linking.openSettings().catch(() => {}); }} style={s.gateBtn}
+            accessibilityRole="button" accessibilityLabel="Open settings to allow camera"
+            accessibilityHint="Turn on Camera in this app's permissions, then come back">
+            <Text variant="bodyStrong" color={BRAND_ACCENT}>Open settings</Text>
+          </Pressable>
+        )}
         <Pressable onPress={() => leave()} style={s.gateSkip} accessibilityRole="button">
           <Text variant="callout" color={AuroraDark.textDim}>Not now</Text>
         </Pressable>
