@@ -4,6 +4,9 @@
 
 import * as Notifications from 'expo-notifications';
 import type { ReminderFreq } from '../../db/reminders';
+import { splitNotifIds } from './notifyIds';
+
+export { snoozedNotifIds } from './notifyIds';
 
 let _asked = false;
 
@@ -49,7 +52,9 @@ export async function scheduleAt(title: string, body: string, at: number): Promi
   return scheduleReminder(title, body, 'once', at);
 }
 
+/** Cancel every notification a reminder row owns (see notifyIds.ts). */
 export async function cancel(notifId: string | null): Promise<void> {
-  if (!notifId) return;
-  try { await Notifications.cancelScheduledNotificationAsync(notifId); } catch {}
+  for (const id of splitNotifIds(notifId)) {
+    try { await Notifications.cancelScheduledNotificationAsync(id); } catch {}
+  }
 }

@@ -116,17 +116,21 @@ export async function restoreBackup(userId: string, data: FinanceBackup): Promis
     return n;
   };
 
-  // Parents before children so a partial failure never orphans a child row.
-  const ledgers = await put('ledger_entries', data.ledgers, { user_id: userId });
-  const groups = await put('chitti_groups', data.groups, { user_id: userId });
-  const reminders = await put('reminders', data.reminders, { user_id: userId });
-  const ledgerUpdates = await put('ledger_updates', data.ledgerUpdates);
-  const members = await put('chitti_members', data.members);
-  const collections = await put('chitti_collections', data.collections);
-  const auctions = await put('chitti_auctions', data.auctions);
-  const timeline = await put('finance_timeline', data.timeline);
-
-  return { ledgers, ledgerUpdates, groups, members, collections, auctions, reminders, timeline };
+  // One transaction: a restore that fails part-way rolls back instead of
+  // leaving a half-merged book. Parents before children inside it.
+  let counts!: RestoreCounts;
+  await d.withTransactionAsync(async () => {
+    const ledgers = await put('ledger_entries', data.ledgers, { user_id: userId });
+    const groups = await put('chitti_groups', data.groups, { user_id: userId });
+    const reminders = await put('reminders', data.reminders, { user_id: userId });
+    const ledgerUpdates = await put('ledger_updates', data.ledgerUpdates);
+    const members = await put('chitti_members', data.members);
+    const collections = await put('chitti_collections', data.collections);
+    const auctions = await put('chitti_auctions', data.auctions);
+    const timeline = await put('finance_timeline', data.timeline);
+    counts = { ledgers, ledgerUpdates, groups, members, collections, auctions, reminders, timeline };
+  });
+  return counts;
 }
 
 export default { BACKUP_VERSION, buildBackup, restoreBackup, isRestorable };

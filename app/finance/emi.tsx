@@ -14,6 +14,8 @@ import { sharePdf, pdfDocument, kvTable, htmlTable } from '../../utils/financeIO
 
 const LOAN_TYPES = ['Home', 'Car', 'Bike', 'Personal', 'Education', 'Business'];
 
+const MAX_MONTHS = 600; // 50 years
+
 export default function EmiCalc() {
   const FIN = useFinanceTheme();
   const s = React.useMemo(() => makeStyles(FIN), [FIN]);
@@ -42,6 +44,8 @@ export default function EmiCalc() {
     // screen was the only thing refusing to pass 0 through. A rate must be a
     // real number and not negative; it does NOT have to be positive.
     if (!(P > 0) || !Number.isFinite(R) || R < 0 || !(n > 0)) return Alert.alert('EMI', 'Enter a valid amount, rate and tenure.');
+    // The schedule (and the PDF) holds one row per month, so the tenure is bounded.
+    if (n > MAX_MONTHS) return Alert.alert('Tenure', `Enter a tenure of at most ${MAX_MONTHS / 12} years.`);
     const r = emi(P, R, n);
     setRes({ ...r, months: n, P, R });
     setShowSchedule(false);
@@ -62,9 +66,9 @@ export default function EmiCalc() {
       { k: 'Monthly EMI', v: formatINR(res.emi), tot: true },
       { k: 'Total interest', v: formatINR(res.totalInterest) },
       { k: 'Total payment', v: formatINR(res.totalPayment) },
-    ]) + '<h3 style="margin-top:20px;font-size:14px;color:#6D3FA8">Amortization (first 12 months)</h3>' +
+    ]) + '<h3 style="margin-top:20px;font-size:14px;color:#6D3FA8">Amortization schedule</h3>' +
     htmlTable(['Month', 'EMI', 'Principal', 'Interest', 'Balance'],
-      schedule.slice(0, 12).map(r => [r.month, formatINR(r.emi), formatINR(r.principal), formatINR(r.interest), formatINR(r.balance)]));
+      schedule.map(r => [r.month, formatINR(r.emi), formatINR(r.principal), formatINR(r.interest), formatINR(r.balance)]));
     try { await sharePdf(pdfDocument('EMI Report', body), 'emi'); } catch (e: any) { Alert.alert('Share failed', e?.message ?? 'Try again'); }
   };
 
@@ -81,17 +85,17 @@ export default function EmiCalc() {
           </View>
 
           <Label>Loan Amount</Label>
-          <Field value={amount} onChangeText={setAmount} placeholder="₹ 0" keyboardType="numeric" />
+          <Field label="Loan amount" value={amount} onChangeText={setAmount} placeholder="₹ 0" keyboardType="numeric" />
 
           <Label>Interest Rate (% p.a.)</Label>
-          <Field value={rate} onChangeText={setRate} placeholder="e.g. 8.5" keyboardType="numeric" />
+          <Field label="Interest rate, percent per year" value={rate} onChangeText={setRate} placeholder="e.g. 8.5" keyboardType="numeric" />
 
           <Label>Tenure</Label>
           {/* Wraps rather than crushing: on a narrow phone the unit selector
               drops to its own line instead of squeezing the tenure field. */}
           <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
             <View style={{ flexGrow: 1, flexBasis: 140, minWidth: 0 }}>
-              <Field value={tenure} onChangeText={setTenure} placeholder="Enter tenure" keyboardType="numeric" />
+              <Field label="Tenure" value={tenure} onChangeText={setTenure} placeholder="Enter tenure" keyboardType="numeric" />
             </View>
             <View style={{ flexGrow: 1, flexBasis: 132 }}>
               <Segment<'yr' | 'mo'> options={[{ k: 'yr', label: 'Years' }, { k: 'mo', label: 'Months' }]} value={unit} onChange={setUnit} small />

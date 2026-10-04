@@ -331,6 +331,21 @@ export function cartTotal(items: CartItem[]): number {
   return items.reduce((sum, it) => sum + (it.price || 0) * (it.qty || 0), 0);
 }
 
+/** Carts keyed by shop id. One shared cart let items picked at shop A be
+ *  posted to shop B; each shop now keeps its own. */
+export type CartsByShop = Readonly<Record<string, CartItem[]>>;
+
+export function cartFor(carts: CartsByShop, shopId: string): CartItem[] {
+  return carts[shopId] ?? [];
+}
+
+/** Replace one shop's cart; an empty cart drops the key. Never touches other shops. */
+export function withShopCart(carts: CartsByShop, shopId: string, items: CartItem[]): CartsByShop {
+  const next = { ...carts };
+  if (items.length === 0) delete next[shopId]; else next[shopId] = items;
+  return next;
+}
+
 export function clientKey(): string {
   return `${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
 }

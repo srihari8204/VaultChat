@@ -108,7 +108,7 @@ ok('an unreadable commission is refused rather than recorded as none',
 ok('the preview still mirrors the recorded auction',
   chitti.includes('if (!(b > 0) || !(c >= 0)) return { each: 0'));
 
-const io = fs.readFileSync('app/finance/io.tsx', 'utf8');
+const io = fs.readFileSync('components/finance/ledgerCsv.ts', 'utf8');
 ok('a settled ledger is no longer resurrected by `|| principal`',
   !/remaining: num\(c\[8\]\) \|\| principal/.test(io));
 ok('an empty Remaining cell is distinguished from a zero one',
@@ -119,8 +119,8 @@ ok('an empty Remaining cell is distinguished from a zero one',
 ok('an UNPARSEABLE Remaining cell no longer falls back to the principal',
   !/remaining: remCell === '' \|\| !Number\.isFinite\(rem\)/.test(io));
 ok('an unreadable Remaining cell skips the row instead of inventing a number',
-  /if \(remCell !== '' && !Number\.isFinite\(rem\)\) \{ skipped\+\+; continue; \}/.test(io));
-ok('skipped rows are reported rather than silently dropped', /skipped \?/.test(io));
+  /if \(remCell !== '' && !Number\.isFinite\(rem\)\) \{ plan\.badRemaining\+\+; continue; \}/.test(io));
+ok('skipped rows are reported rather than silently dropped', /plan\.badRemaining \?/.test(fs.readFileSync('app/finance/io.tsx', 'utf8')));
 
 // 0% is a real loan — money lent to a relative at no interest — and finance.ts
 // prices it deliberately. `!(R > 0)` refused to record one at all.

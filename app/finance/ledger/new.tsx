@@ -3,9 +3,9 @@
 import React, { useState } from 'react';
 import { useFinanceTheme } from '../../../components/finance/useFinanceTheme';
 import { KeyboardSafe } from '../../../components/ui';
-import { View, ScrollView, StyleSheet, Alert, Platform } from 'react-native';
+import { View, ScrollView, StyleSheet, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
-import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
+import { useDatePicker } from '../../../components/finance/useDatePicker';
 import { type FinancePalette } from '../../../constants/financeTheme';
 import { FinHeader, Label, Field, Segment, Radio, Btn, DateField } from '../../../components/finance/ui';
 import { useMe } from '../../../components/finance/useMe';
@@ -18,6 +18,7 @@ export default function NewLedger() {
   const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   const router = useRouter();
   const me = useMe();
+  const picker = useDatePicker();
 
   const [direction, setDirection] = useState<'lend' | 'borrow'>('lend');
   const [name, setName] = useState('');
@@ -33,10 +34,7 @@ export default function NewLedger() {
 
   const pickDate = (which: 'start' | 'end') => {
     const cur = which === 'start' ? start : (end ?? Date.now());
-    DateTimePickerAndroid.open({
-      value: new Date(cur), mode: 'date',
-      onChange: (_e, d) => { if (d) which === 'start' ? setStart(d.getTime()) : setEnd(d.getTime()); },
-    });
+    picker.open(new Date(cur), (d) => { if (which === 'start') setStart(d.getTime()); else setEnd(d.getTime()); });
   };
 
   const onSave = async () => {
@@ -66,6 +64,7 @@ export default function NewLedger() {
   return (
     <View style={s.screen}>
       <FinHeader title="Add Ledger" />
+      {picker.element}
       <KeyboardSafe style={{ flex: 1 }} >
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <View style={s.radioRow}>
@@ -74,13 +73,13 @@ export default function NewLedger() {
           </View>
 
           <Label>{direction === 'lend' ? 'Borrower Name' : 'Lender Name'}</Label>
-          <Field value={name} onChangeText={setName} placeholder="Enter name" />
+          <Field label={direction === 'lend' ? 'Borrower name' : 'Lender name'} value={name} onChangeText={setName} placeholder="Enter name" />
 
           <Label hint="(optional)">Mobile Number</Label>
-          <Field value={mobile} onChangeText={setMobile} placeholder="Enter mobile number" keyboardType="phone-pad" />
+          <Field label="Mobile number, optional" value={mobile} onChangeText={setMobile} placeholder="Enter mobile number" keyboardType="phone-pad" />
 
           <Label>Principal Amount</Label>
-          <Field value={principal} onChangeText={setPrincipal} placeholder="₹ 0" keyboardType="numeric" />
+          <Field label="Principal amount" value={principal} onChangeText={setPrincipal} placeholder="₹ 0" keyboardType="numeric" />
 
           <Label>Interest Type</Label>
           <Segment<'simple' | 'compound'> options={[{ k: 'simple', label: 'Simple' }, { k: 'compound', label: 'Compound' }]} value={itype} onChange={setItype} />
@@ -89,7 +88,7 @@ export default function NewLedger() {
           <Segment<'percent' | 'rupees'> options={[{ k: 'percent', label: '% (percentage)' }, { k: 'rupees', label: '₹ per ₹100' }]} value={rateMode} onChange={setRateMode} />
 
           <Label>{rateMode === 'rupees' ? 'Interest Rate (₹ per ₹100)' : 'Interest Rate (%)'}</Label>
-          <Field value={rate} onChangeText={setRate} placeholder="Enter rate" keyboardType="numeric" />
+          <Field label={rateMode === 'rupees' ? 'Interest rate, rupees per 100' : 'Interest rate, percent'} value={rate} onChangeText={setRate} placeholder="Enter rate" keyboardType="numeric" />
 
           <Label>Interest Period</Label>
           <Segment<LedgerPeriod>
@@ -103,7 +102,7 @@ export default function NewLedger() {
           <DateField value={end ? fmtDate(end) : ''} onPress={() => pickDate('end')} />
 
           <Label hint="(optional)">Notes</Label>
-          <Field value={notes} onChangeText={setNotes} placeholder="Add a note" multiline />
+          <Field label="Notes, optional" value={notes} onChangeText={setNotes} placeholder="Add a note" multiline />
 
           <View style={{ marginTop: 20 }}>
             <Btn label="Save Ledger" icon="checkmark" onPress={onSave} wide />

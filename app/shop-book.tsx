@@ -23,6 +23,7 @@ import Voice, { type SpeechResultsEvent } from '@react-native-voice/voice';
 import QRCode from 'react-native-qrcode-svg';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import * as DocumentPicker from 'expo-document-picker';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { navigateTo } from '../lib/nav/openNavigation';
 import { SHOP_CATEGORIES, categoryIcon, categoryLabel } from '../constants/shopCategories';
@@ -32,7 +33,7 @@ import {
   canCustomerCancel, canOwnerCancel, REJECT_REASONS,
   canCustomerCollect, notCollectedGate, isTerminalFailure,
   couponDiscount, couponLabel, starText, loyaltyTier, parseBulkProducts,
-  type CartItem, type OrderStatus, type ItemAvailability,
+  type CartItem, type CartsByShop, cartFor, withShopCart, type OrderStatus, type ItemAvailability,
   UNIT_PRESETS, normalizeUnit, isStalePrice, dateLocale, orderStamp, isNum, isBlankOrNum, isBlankOrNonNegative, num } from '../utils/shopbook';
 import * as SB from '../services/shopBookService';
 // ONE canonical document. Screen and PDF read the same model, so the two can
@@ -47,7 +48,7 @@ import { FIN, FIN_DARK, FIN_RADIUS, TABULAR } from '../constants/financeTheme';
 // Book joins it rather than inventing a second switch.
 import { useTheme } from '../lib/theme';
 import {
-  StatTile, TileGrid, ActionGrid, QuickAction, EmptyState, LoadingState,
+  StatTile, TileGrid, ActionGrid, QuickAction, EmptyState, LoadingState, ErrorState,
 } from '../components/finance/ui';
 import { FIN_GUTTER } from '../lib/finance/grid';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -158,6 +159,10 @@ type OwnerTab = 'dashboard' | 'orders' | 'products' | 'khata';
 
 // num() now lives in utils/shopbook.ts beside isNum, where it can be tested.
 
+/** What to say when a load fails. Shown in ErrorState with a retry, so a
+ *  failure never reads as "nothing here". */
+const loadErrText = (e: any): string => e?.message || 'Check your connection and try again.';
+
 export default function ShopBookScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ shop?: string }>();
@@ -212,7 +217,8 @@ export default function ShopBookScreen() {
           <Text style={s.headerTitle}>🛍️ Shop Book</Text>
           <Text style={s.headerSub}>Find shops • Order • Digital Khata</Text>
         </View>
-        <TouchableOpacity onPress={() => setInbox(true)} hitSlop={10} style={s.hBtn}>
+        <TouchableOpacity onPress={() => setInbox(true)} hitSlop={10} style={s.hBtn} accessibilityRole="button"
+          accessibilityLabel={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}>
           <Ionicons name="notifications-outline" size={22} color="#fff" />
           {unread > 0 && <View style={s.cartBadge}><Text style={s.cartBadgeText}>{unread > 9 ? '9+' : unread}</Text></View>}
         </TouchableOpacity>
@@ -267,7 +273,8 @@ function CustomerApp({ me, initialShopId }: { me: { id: string; name: string } |
   const [tab, setTab] = useState<CustTab>('shops');
   // drill-down within the Shops tab
   const [selShop, setSelShop] = useState<SB.Shop | null>(null);
-  const [cart, setCart] = useState<CartItem[]>([]);
+  // One cart per shop, so lines picked at shop A can never be posted to shop B.
+  const [carts, setCarts] = useState<CartsByShop>({});
   const [trackId, setTrackId] = useState<string | null>(null);
   const [ledgerShop, setLedgerShop] = useState<SB.Shop | null>(null);
   const [productSearch, setProductSearch] = useState(false);
@@ -282,7 +289,8 @@ function CustomerApp({ me, initialShopId }: { me: { id: string; name: string } |
   // Deep link / QR: open a specific shop on first mount.
   useEffect(() => { (async () => {
     if (!initialShopId) return;
-    try { const sh = await SB.shopDetails(initialShopId); setTab('shops'); setSelShop(sh); } catch {}
+    try { const sh = await SB.shopDetails(initialShopId); setTab('shops'); setSelShop(sh); }
+    catch (e: any) { Alert.alert('Couldn’t open that shop', e?.message ?? 'Check your connection and try again.'); }
   })(); }, [initialShopId]);
 
   const toggleFav = useCallback(async (shopId: string) => {
@@ -309,9 +317,14 @@ function CustomerApp({ me, initialShopId }: { me: { id: string; name: string } |
         )}
         {tab === 'shops' && selShop && !ledgerShop && (
           <ShopFlow
-            shop={selShop} cart={cart} setCart={setCart}
+            shop={selShop} cart={cartFor(carts, selShop.id)}
+            setCart={(c) => setCarts((prev) => withShopCart(prev, selShop.id, c))}
             onBack={() => setSelShop(null)}
-            onPlaced={(id) => { setSelShop(null); setCart([]); setTab('orders'); openTrack(id); }}
+            onPlaced={(id) => {
+              const placedAt = selShop.id;
+              setCarts((prev) => withShopCart(prev, placedAt, []));
+              setSelShop(null); setTab('orders'); openTrack(id);
+            }}
             onLedger={() => setLedgerShop(selShop)}
             isFav={favIds.has(selShop.id)} onToggleFav={() => toggleFav(selShop.id)}
           />
@@ -563,14 +576,15 @@ function ProductSearch({ onBack, onOpenShop }: { onBack: () => void; onOpenShop:
   })(); }, []);
 
   const [sort, setSort] = useState<'price' | 'nearest' | 'open'>('price');
+  const [err, setErr] = useState('');
 
   const run = async () => {
     if (q.trim().length < 2) return;
-    setLoading(true); setSearched(true);
+    setLoading(true); setSearched(true); setErr('');
     try {
       setResults(await SB.searchProducts(
         q.trim(), coords?.lat, coords?.lng, sort === 'nearest' ? 'nearest' : 'price'));
-    } catch {} finally { setLoading(false); }
+    } catch (e: any) { setResults([]); setErr(loadErrText(e)); } finally { setLoading(false); }
   };
   // Re-run when the sort changes after a search.
   useEffect(() => { if (searched) run(); /* eslint-disable-line react-hooks/exhaustive-deps */ }, [sort]);
@@ -610,7 +624,8 @@ function ProductSearch({ onBack, onOpenShop }: { onBack: () => void; onOpenShop:
         )}
 
         {loading && <LoadingState />}
-        {searched && !loading && results.length === 0 && (
+        {!!err && !loading && <ErrorState title="Search failed" sub={err} onRetry={run} />}
+        {searched && !loading && !err && results.length === 0 && (
           <Empty icon="search-outline" text="No shop nearby lists that yet." />
         )}
     </>
@@ -673,7 +688,7 @@ function ShopFlow({ shop, cart, setCart, onBack, onPlaced, onLedger, isFav, onTo
     <>
       <SubHeader title={shop.name}
         onBack={() => (view === 'details' ? onBack() : setView('details'))}
-        right={cart.length > 0 ? { icon: 'cart', badge: cart.length, onPress: () => setView('cart') } : undefined}
+        right={cart.length > 0 ? { icon: 'cart', label: `Cart, ${cart.length} item${cart.length === 1 ? '' : 's'}`, badge: cart.length, onPress: () => setView('cart') } : undefined}
       />
       {view === 'details' && (
         <ScrollView contentContainerStyle={s.body}>
@@ -788,10 +803,13 @@ function Catalog({ shop, cart, setCart, onCart }: {
   const [tNote, setTNote] = useState('');
   const [listening, setListening] = useState(false);
 
-  useEffect(() => { (async () => {
+  const [err, setErr] = useState('');
+  const loadProducts = useCallback(async () => {
+    setLoading(true); setErr('');
     try { setProducts(await SB.shopProducts(shop.id)); }
-    catch {} finally { setLoading(false); }
-  })(); }, [shop.id]);
+    catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
+  }, [shop.id]);
+  useEffect(() => { loadProducts(); }, [loadProducts]);
 
   // Voice ordering — speak a product name into "Type any product".
   useEffect(() => {
@@ -899,7 +917,8 @@ function Catalog({ shop, cart, setCart, onCart }: {
 
       <Text style={s.sectionLabel}>Catalog</Text>
       {loading && <LoadingState />}
-      {!loading && filtered.length === 0 && <Empty icon="pricetags-outline" text="No listed products. Use “Type any product” below." />}
+      {!!err && !loading && <ErrorState title="Couldn’t load the catalog" sub={err} onRetry={loadProducts} />}
+      {!loading && !err && filtered.length === 0 && <Empty icon="pricetags-outline" text="No listed products. Use “Type any product” below." />}
     </>
   );
 
@@ -1161,9 +1180,10 @@ function Row({ label, value, tone, bold }: { label: string; value: string; tone?
 function MyOrders({ onOpen }: { onOpen: (id: string) => void }) {
   const [loading, setLoading] = useState(true);
   const [orders, setOrders] = useState<SB.OrderSummary[]>([]);
+  const [err, setErr] = useState('');
   const load = useCallback(async () => {
-    setLoading(true);
-    try { setOrders(await SB.myOrders()); } catch {} finally { setLoading(false); }
+    setLoading(true); setErr('');
+    try { setOrders(await SB.myOrders()); } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -1193,7 +1213,8 @@ function MyOrders({ onOpen }: { onOpen: (id: string) => void }) {
         <>
           <Text style={s.sectionLabel}>My Orders</Text>
           {loading && <LoadingState />}
-          {!loading && orders.length === 0 && <Empty icon="receipt-outline" text="No orders yet." />}
+          {!!err && !loading && <ErrorState title="Couldn’t load your orders" sub={err} onRetry={load} />}
+          {!loading && !err && orders.length === 0 && <Empty icon="receipt-outline" text="No orders yet." />}
         </>
       )}
       contentContainerStyle={s.body}
@@ -1254,9 +1275,10 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
   const [taxNo, setTaxNo] = useState('');
   const [bizAddr, setBizAddr] = useState('');
 
+  const [err, setErr] = useState('');
   const load = useCallback(async () => {
-    setLoading(true);
-    try { setOrder(await SB.orderDetails(orderId)); } catch {} finally { setLoading(false); }
+    setLoading(true); setErr('');
+    try { setOrder(await SB.orderDetails(orderId)); } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
   }, [orderId]);
   useEffect(() => { load(); }, [load]);
 
@@ -1370,12 +1392,13 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
   return (
     <>
       <SubHeader title={t('orders.track')} onBack={onBack}
-        right={order ? { icon: 'share-social-outline', onPress: share } : undefined} />
+        right={order ? { icon: 'share-social-outline', label: 'Share this order', onPress: share } : undefined} />
       <ReasonModal visible={cancelAsk} title={t('orders.cancelReason')}
         onSubmit={(reason) => cancelOrder(reason)} onClose={() => setCancelAsk(false)} />
       <ScrollView contentContainerStyle={s.body}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
         {loading && !order && <LoadingState />}
+        {!loading && !order && !!err && <ErrorState title="Couldn’t load this order" sub={err} onRetry={load} />}
         {order && (
           <>
             <StatusPill status={order.status} big />
@@ -1587,11 +1610,14 @@ function CustomerLedgerView({ shop, onBack }: { shop: SB.Shop; onBack: () => voi
   const money = (n: number) => formatMoney(n, shop.currency || '₹');
   const [loading, setLoading] = useState(true);
   const [ledger, setLedger] = useState<SB.Ledger | null>(null);
-  useEffect(() => { (async () => {
-    try { setLedger(await SB.customerLedger(shop.id)); } catch {} finally { setLoading(false); }
-  })(); }, [shop.id]);
+  const [err, setErr] = useState('');
+  const load = useCallback(async () => {
+    setLoading(true); setErr('');
+    try { setLedger(await SB.customerLedger(shop.id)); } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
+  }, [shop.id]);
+  useEffect(() => { load(); }, [load]);
 
-  const renderEntry = ({ item: e }: { item: SB.LedgerEntry }) => <LedgerRow entry={e} />;
+  const renderEntry = ({ item: e }: { item: SB.LedgerEntry }) => <LedgerRow entry={e} currency={shop.currency} />;
 
   return (
     <>
@@ -1605,6 +1631,7 @@ function CustomerLedgerView({ shop, onBack }: { shop: SB.Shop; onBack: () => voi
         ListHeaderComponent={(
           <>
             {loading && <LoadingState />}
+            {!!err && !loading && <ErrorState title="Couldn’t load the ledger" sub={err} onRetry={load} />}
             {ledger && (
               <>
                 <View style={{ flexDirection: 'row', gap: 10 }}>
@@ -1764,7 +1791,14 @@ function OwnerApp({ me }: { me: { id: string; name: string } | null }) {
   const [loadErr, setLoadErr] = useState('');
   const load = useCallback(async () => {
     setLoading(true);
-    try { setLoadErr(''); setShop(await SB.myShop()); }
+    try {
+      setLoadErr('');
+      const sh = await SB.myShop();
+      // Shop.plan is a display column; show PRO only for what the server's
+      // entitlement says. An unconfirmed plan reads as Free, and every Pro
+      // feature is still gated server-side either way.
+      setShop(sh && { ...sh, plan: await SB.entitledPlan().catch(() => 'free' as const) });
+    }
     catch (e: any) { setLoadErr(e?.message || 'Could not reach your shop'); }
     finally { setLoading(false); }
   }, []);
@@ -1789,7 +1823,7 @@ function OwnerApp({ me }: { me: { id: string; name: string } | null }) {
   if (!shop || settings) {
     return (
       <ShopSettings shop={shop} me={me}
-        onSaved={(sh) => { setShop(sh); setSettings(false); }}
+        onSaved={(sh) => { setShop((prev) => ({ ...sh, plan: prev?.plan ?? 'free' })); setSettings(false); }}
         onCancel={shop ? () => setSettings(false) : undefined}
       />
     );
@@ -1846,9 +1880,10 @@ function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPlans, onR
   const [d, setD] = useState<SB.Dashboard | null>(null);
   const [qr, setQr] = useState(false);
   const deepLink = `vaultchat://shop-book?shop=${shop.id}`;
+  const [err, setErr] = useState('');
   const load = useCallback(async () => {
-    setLoading(true);
-    try { setD(await SB.dashboard()); } catch {} finally { setLoading(false); }
+    setLoading(true); setErr('');
+    try { setD(await SB.dashboard()); } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
   const st = shopOpenState(shop);
@@ -1915,12 +1950,14 @@ function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPlans, onR
           percentage clothing, which stayed two-up on an 800dp tablet. TileGrid
           derives the column count from the measured window: 2 on a phone, 4
           once there is room. Same four figures, same sources. */}
-      <TileGrid>
+      {/* A failed load must not read as a quiet day of zeros. */}
+      {!!err && !loading && !d && <ErrorState title="Couldn’t load today’s figures" sub={err} onRetry={load} />}
+      {(d || !err) && <TileGrid>
         <StatTile label="Today's Orders" value={String(d?.todayOrders ?? 0)} tone="info" />
         <StatTile label="Today's Sales" value={formatMoney(d?.todaySales ?? 0, shop.currency)} tone="good" />
         <StatTile label="Pending Orders" value={String(d?.pendingOrders ?? 0)} tone="warn" />
         <StatTile label="Total Pending" value={formatMoney(d?.totalPending ?? 0, shop.currency)} tone="bad" />
-      </TileGrid>
+      </TileGrid>}
       {(d?.lowStock ?? 0) > 0 && (
         <Banner tone="warn" icon="alert-circle-outline"
           text={`${d?.lowStock} product(s) need restocking`} />
@@ -1995,12 +2032,22 @@ function OwnerPlans({ plan, onBack, onChanged }: {
   plan: 'free' | 'pro'; onBack: () => void; onChanged: () => void;
 }) {
   const [busy, setBusy] = useState(false);
-  const change = async (next: 'free' | 'pro') => {
-    setBusy(true);
-    try { await SB.setPlan(next); onChanged(); }
-    catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
-    finally { setBusy(false); }
-  };
+  // Only a downgrade is the owner's to make. Upgrading used to POST 'pro' here,
+  // which set a display column the server never gated on (and is now refused):
+  // the app showed ★ PRO for an unpaid shop and Pro screens then failed.
+  const downgrade = () => Alert.alert(
+    'Move to the Free plan?',
+    'Pro features such as advanced reports and stock tracking stop working. No data is deleted, and upgrading again restores them.',
+    [
+      { text: 'Keep Pro', style: 'cancel' },
+      { text: 'Move to Free', style: 'destructive', onPress: async () => {
+        setBusy(true);
+        try { await SB.setPlan('free'); onChanged(); }
+        catch (e: any) { Alert.alert('Could not change the plan', e?.message ?? 'Try again'); }
+        finally { setBusy(false); }
+      } },
+    ],
+  );
   const FREE = ['1 shop', 'Up to 300 customers', 'Basic ledger (khata)', 'Order management', 'Pending tracking', 'Push notifications'];
   const PRO = ['Unlimited customers', 'Product & inventory management', 'Daily reports & analytics', 'Coupons & offers', 'Payment tracking & reminders', 'Priority support'];
   return (
@@ -2012,16 +2059,19 @@ function OwnerPlans({ plan, onBack, onChanged }: {
           {FREE.map((f) => <Text key={f} style={s.planFeat}>✓ {f}</Text>)}
           {plan === 'free'
             ? <View style={[s.btn2Tag]}><Text style={s.btn2TagText}>Current plan</Text></View>
-            : <TouchableOpacity style={[s.outlineBtn, busy && { opacity: .6 }]} disabled={busy} onPress={() => change('free')}><Text style={s.outlineBtnText}>Downgrade</Text></TouchableOpacity>}
+            : <TouchableOpacity style={[s.outlineBtn, busy && { opacity: .6 }]} disabled={busy} onPress={downgrade}
+                accessibilityRole="button" accessibilityLabel="Downgrade to the Free plan" accessibilityState={{ disabled: busy }}>
+                <Text style={s.outlineBtnText}>Downgrade</Text>
+              </TouchableOpacity>}
         </View>
         <View style={[s.planCard, s.planCardPro, plan === 'pro' && s.planCardActive]}>
           <View style={s.row}><Text style={[s.planName, { color: C.navy }]}>Pro ⭐</Text><Text style={[s.planPrice, { color: C.navy }]}>₹499<Text style={s.planPer}>/mo</Text></Text></View>
           {PRO.map((f) => <Text key={f} style={s.planFeat}>✓ {f}</Text>)}
           {plan === 'pro'
             ? <View style={[s.btn2Tag]}><Text style={s.btn2TagText}>Current plan</Text></View>
-            : <TouchableOpacity style={[s.primaryBtn, busy && { opacity: .6 }]} disabled={busy} onPress={() => change('pro')}><Text style={s.primaryBtnText}>Upgrade to Pro</Text></TouchableOpacity>}
+            : <Text style={[s.hint, { marginTop: 8 }]}>To upgrade, contact VaultChat support. Pro is switched on by our team once your subscription is paid, and this screen then shows it as your current plan.</Text>}
         </View>
-        <Text style={s.hint}>Payment is handled offline with the shop — activate Pro here once you’ve upgraded. No card details are collected in the app.</Text>
+        <Text style={s.hint}>No card details are collected in the app.</Text>
       </ScrollView>
     </>
   );
@@ -2036,13 +2086,21 @@ function OwnerReports({ plan, currency, onBack, onUpgrade }: {
   const [scope, setScope] = useState<'basic' | 'advanced'>('basic');
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<SB.Reports | null>(null);
+  // The server decides what is Pro: the lock shows when IT refuses, never on
+  // the client's guess of the plan.
+  const [locked, setLocked] = useState(false);
+  const [err, setErr] = useState('');
   const money = (n: number) => formatMoney(n, currency || '₹');
 
-  useEffect(() => { (async () => {
-    if (scope === 'advanced' && plan !== 'pro') { setData(null); return; }
-    setLoading(true);
-    try { setData(await SB.reports(scope)); } catch {} finally { setLoading(false); }
-  })(); }, [scope, plan]);
+  const load = useCallback(async () => {
+    setLoading(true); setErr(''); setLocked(false); setData(null);
+    try { setData(await SB.reports(scope)); }
+    catch (e: any) {
+      if (SB.needsUpgrade(e)) setLocked(true);
+      else setErr(e?.message ?? 'Could not load the reports');
+    } finally { setLoading(false); }
+  }, [scope]);
+  useEffect(() => { load(); }, [load]);
 
   const Bars = ({ title, rows }: { title: string; rows: SB.ReportDay[] }) => {
     const max = Math.max(1, ...rows.map((d) => d.sales));
@@ -2075,15 +2133,16 @@ function OwnerReports({ plan, currency, onBack, onUpgrade }: {
           </TouchableOpacity>
         ))}
       </View>
-      {scope === 'advanced' && plan !== 'pro' ? (
+      {scope === 'advanced' && locked ? (
         <View style={[s.body, { alignItems: 'center', justifyContent: 'center', flex: 1 }]}>
           <Text style={{ fontSize: 44 }}>🔒</Text>
           <Text style={[s.sectionLabel, { marginTop: 12 }]}>{t('owner.reports.upgrade')}</Text>
-          <TouchableOpacity style={[s.primaryBtn, { alignSelf: 'stretch' }]} onPress={onUpgrade}><Text style={s.primaryBtnText}>Upgrade to Pro</Text></TouchableOpacity>
+          <TouchableOpacity style={[s.primaryBtn, { alignSelf: 'stretch' }]} onPress={onUpgrade} accessibilityRole="button"><Text style={s.primaryBtnText}>See plans</Text></TouchableOpacity>
         </View>
       ) : (
         <ScrollView contentContainerStyle={s.body}>
           {loading && <LoadingState />}
+          {!!err && <ErrorState title="Could not load the reports" sub={err} onRetry={load} />}
           {data && scope === 'basic' && (
             <>
               <View style={{ flexDirection: 'row', gap: 10 }}>
@@ -2158,9 +2217,10 @@ function OwnerCoupons({ onBack }: { onBack: () => void }) {
   const [minOrder, setMinOrder] = useState('');
   const [busy, setBusy] = useState(false);
 
+  const [err, setErr] = useState('');
   const load = useCallback(async () => {
-    setLoading(true);
-    try { setCoupons(await SB.ownerCoupons()); } catch {} finally { setLoading(false); }
+    setLoading(true); setErr('');
+    try { setCoupons(await SB.ownerCoupons()); } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -2184,7 +2244,11 @@ function OwnerCoupons({ onBack }: { onBack: () => void }) {
     finally { setBusy(false); }
   };
 
-  const remove = async (id?: string) => { if (!id) return; await SB.deleteCoupon(id); load(); };
+  const remove = async (id?: string) => {
+    if (!id) return;
+    try { await SB.deleteCoupon(id); load(); }
+    catch (e: any) { Alert.alert('Could not delete the coupon', e?.message ?? 'Try again'); }
+  };
 
   return (
     <>
@@ -2216,7 +2280,8 @@ function OwnerCoupons({ onBack }: { onBack: () => void }) {
 
         <Text style={s.sectionLabel}>Active coupons</Text>
         {loading && <LoadingState />}
-        {!loading && coupons.length === 0 && <Empty icon="pricetag-outline" text="No coupons yet." />}
+        {!!err && !loading && <ErrorState title="Couldn’t load your coupons" sub={err} onRetry={load} />}
+        {!loading && !err && coupons.length === 0 && <Empty icon="pricetag-outline" text="No coupons yet." />}
         {coupons.map((c2) => (
           <View key={c2.id} style={s.card}>
             <View style={s.couponCode}><Text style={s.couponCodeText}>{c2.code}</Text></View>
@@ -2243,9 +2308,10 @@ function OwnerSuppliers({ onBack }: { onBack: () => void }) {
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
 
+  const [err, setErr] = useState('');
   const load = useCallback(async () => {
-    setLoading(true);
-    try { setSuppliers(await SB.suppliers()); } catch {} finally { setLoading(false); }
+    setLoading(true); setErr('');
+    try { setSuppliers(await SB.suppliers()); } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -2259,7 +2325,11 @@ function OwnerSuppliers({ onBack }: { onBack: () => void }) {
     finally { setBusy(false); }
   };
 
-  const remove = async (id?: string) => { if (!id) return; await SB.deleteSupplier(id); load(); };
+  const remove = async (id?: string) => {
+    if (!id) return;
+    try { await SB.deleteSupplier(id); load(); }
+    catch (e: any) { Alert.alert('Could not delete the supplier', e?.message ?? 'Try again'); }
+  };
 
   return (
     <>
@@ -2283,7 +2353,8 @@ function OwnerSuppliers({ onBack }: { onBack: () => void }) {
 
         <Text style={s.sectionLabel}>My suppliers</Text>
         {loading && <LoadingState />}
-        {!loading && suppliers.length === 0 && <Empty icon="cube-outline" text="No suppliers yet." />}
+        {!!err && !loading && <ErrorState title="Couldn’t load your suppliers" sub={err} onRetry={load} />}
+        {!loading && !err && suppliers.length === 0 && <Empty icon="cube-outline" text="No suppliers yet." />}
         {suppliers.map((sup) => (
           <View key={sup.id} style={s.card}>
             <View style={s.shopIcon}><Ionicons name="cube" size={20} color={C.green} /></View>
@@ -2315,9 +2386,10 @@ function OwnerOrders() {
   const [orders, setOrders] = useState<SB.OrderSummary[]>([]);
   const [open, setOpen] = useState<string | null>(null);
 
+  const [err, setErr] = useState('');
   const load = useCallback(async (f: string) => {
-    setLoading(true);
-    try { setOrders(await SB.ownerOrders(f)); } catch {} finally { setLoading(false); }
+    setLoading(true); setErr('');
+    try { setOrders(await SB.ownerOrders(f)); } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(filter); }, [filter, load]);
 
@@ -2366,7 +2438,8 @@ function OwnerOrders() {
         ListHeaderComponent={(
           <>
             {loading && <LoadingState />}
-            {!loading && orders.length === 0 && <Empty icon="receipt-outline" text={`No ${filter} orders.`} />}
+            {!!err && !loading && <ErrorState title="Couldn’t load orders" sub={err} onRetry={() => load(filter)} />}
+            {!loading && !err && orders.length === 0 && <Empty icon="receipt-outline" text={`No ${filter} orders.`} />}
           </>
         )}
         contentContainerStyle={s.body}
@@ -2387,10 +2460,11 @@ function OwnerOrderDetail({ orderId, onBack }: { orderId: string; onBack: () => 
   const [altFor, setAltFor] = useState<string | null>(null);
   const [altName, setAltName] = useState('');
   const [altPrice, setAltPrice] = useState('');
+  const [err, setErr] = useState('');
 
   const load = useCallback(async () => {
-    setLoading(true);
-    try { setOrder(await SB.orderDetails(orderId)); } catch {} finally { setLoading(false); }
+    setLoading(true); setErr('');
+    try { setOrder(await SB.orderDetails(orderId)); } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
   }, [orderId]);
   useEffect(() => { load(); }, [load]);
 
@@ -2483,6 +2557,8 @@ function OwnerOrderDetail({ orderId, onBack }: { orderId: string; onBack: () => 
       </Modal>
       <ScrollView contentContainerStyle={s.body}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
+        {loading && !order && <LoadingState />}
+        {!loading && !order && !!err && <ErrorState title="Couldn’t load this order" sub={err} onRetry={load} />}
         {order && (
           <>
             <StatusPill status={order.status} big />
@@ -2595,15 +2671,19 @@ function OwnerProducts({ shop }: { shop: SB.Shop }) {
   const [edit, setEdit] = useState<SB.Product | 'new' | 'bulk' | 'stock' | null>(null);
   const [seeding, setSeeding] = useState(false);
 
+  const [err, setErr] = useState('');
   const load = useCallback(async () => {
-    setLoading(true);
-    try { setProducts(await SB.ownerProducts()); } catch {} finally { setLoading(false); }
+    setLoading(true); setErr('');
+    try { setProducts(await SB.ownerProducts()); } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
 
   // One-tap category starter catalog (server-managed; spec: product-catalog).
   // Items land with price 0 + disabled — the owner prices and activates them.
   const seedStarter = async () => {
+    // The de-duplication below compares against the loaded catalog; with no
+    // catalog loaded every starter item would be added a second time.
+    if (err) { Alert.alert(t('owner.starterCatalog'), 'Your catalog could not be loaded. Try again first.'); return; }
     setSeeding(true);
     try {
       const items = await SB.starterCatalog(shop.category);
@@ -2658,7 +2738,8 @@ function OwnerProducts({ shop }: { shop: SB.Shop }) {
         </TouchableOpacity>
       )}
       {loading && <LoadingState />}
-      {!loading && products.length === 0 && <Empty icon="pricetags-outline" text="No products yet." />}
+      {!!err && !loading && <ErrorState title="Couldn’t load your products" sub={err} onRetry={load} />}
+      {!loading && !err && products.length === 0 && <Empty icon="pricetags-outline" text="No products yet." />}
     </>
   );
 
@@ -2728,12 +2809,17 @@ function ProductEditor({ product, currency, onDone }: {
     finally { setBusy(false); }
   };
 
-  const del = async () => {
+  const del = () => {
     if (!product) return;
-    setBusy(true);
-    try { await SB.deleteProduct(product.id); onDone(); }
-    catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
-    finally { setBusy(false); }
+    Alert.alert('Delete product?', `${product.name} will be removed from your catalog.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+        setBusy(true);
+        try { await SB.deleteProduct(product.id); onDone(); }
+        catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
+        finally { setBusy(false); }
+      } },
+    ]);
   };
 
   return (
@@ -2775,7 +2861,7 @@ function ProductEditor({ product, currency, onDone }: {
           <Text style={s.primaryBtnText}>{product ? 'Save Changes' : 'Add Product'}</Text>
         </TouchableOpacity>
         {product && (
-          <TouchableOpacity style={s.dangerBtn} disabled={busy} onPress={del}>
+          <TouchableOpacity style={s.dangerBtn} disabled={busy} onPress={del} accessibilityRole="button">
             <Text style={s.dangerBtnText}>Delete Product</Text>
           </TouchableOpacity>
         )}
@@ -2887,13 +2973,14 @@ function PurchasesScreen({ currency, onBack }: { currency?: string; onBack: () =
   const [busy, setBusy] = useState(false);
   const key = useRef(clientKey());
 
+  const [err, setErr] = useState('');
   const load = useCallback(async () => {
-    setLoading(true);
+    setLoading(true); setErr('');
     try {
       const r = await SB.purchases();
       setRows(r.purchases); setSpend(r.totalSpend);
       setProducts(await SB.ownerProducts());
-    } catch {} finally { setLoading(false); }
+    } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -3023,7 +3110,8 @@ function PurchasesScreen({ currency, onBack }: { currency?: string; onBack: () =
                 <Row label="Total spend" value={money(spend)} bold />
               </View>
             )}
-            {!loading && rows.length === 0 && (
+            {!!err && !loading && <ErrorState title="Couldn’t load purchases" sub={err} onRetry={load} />}
+            {!loading && !err && rows.length === 0 && (
               <Empty icon="cart-outline" text="No purchases yet. Recording what stock costs is what makes profit reporting possible." />
             )}
           </>
@@ -3044,9 +3132,10 @@ function ReturnsScreen({ currency, onBack }: { currency?: string; onBack: () => 
   const [refuse, setRefuse] = useState<SB.ShopReturn | null>(null);
   const [note, setNote] = useState('');
 
+  const [err, setErr] = useState('');
   const load = useCallback(async () => {
-    setLoading(true);
-    try { setRows(await SB.shopReturns()); } catch {} finally { setLoading(false); }
+    setLoading(true); setErr('');
+    try { setRows(await SB.shopReturns()); } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -3137,7 +3226,9 @@ function ReturnsScreen({ currency, onBack }: { currency?: string; onBack: () => 
         keyExtractor={(rt) => rt.id}
         renderItem={renderReturn}
         ListHeaderComponent={
-          !loading && rows.length === 0 ? <Empty icon="arrow-undo-outline" text="No returns." /> : null
+          loading ? null
+            : err ? <ErrorState title="Couldn’t load returns" sub={err} onRetry={load} />
+            : rows.length === 0 ? <Empty icon="arrow-undo-outline" text="No returns." /> : null
         }
         contentContainerStyle={s.body}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}
@@ -3150,9 +3241,10 @@ function ReturnsScreen({ currency, onBack }: { currency?: string; onBack: () => 
 function AuditScreen({ onBack }: { onBack: () => void }) {
   const [rows, setRows] = useState<SB.AuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState('');
   const load = useCallback(async () => {
-    setLoading(true);
-    try { setRows(await SB.auditLog()); } catch {} finally { setLoading(false); }
+    setLoading(true); setErr('');
+    try { setRows(await SB.auditLog()); } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -3199,7 +3291,8 @@ function AuditScreen({ onBack }: { onBack: () => void }) {
             <Text style={s.hint}>
               Every price change, stock correction, purchase and refund. This record cannot be edited or deleted — including by you.
             </Text>
-            {!loading && rows.length === 0 && <Empty icon="document-text-outline" text="Nothing recorded yet." />}
+            {!!err && !loading && <ErrorState title="Couldn’t load the activity log" sub={err} onRetry={load} />}
+            {!loading && !err && rows.length === 0 && <Empty icon="document-text-outline" text="Nothing recorded yet." />}
           </>
         )}
         contentContainerStyle={s.body}
@@ -3217,16 +3310,40 @@ function VerificationScreen({ onBack }: { onBack: () => void }) {
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [loadErr, setLoadErr] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const r = await SB.shopDocuments();
       setDocs(r.documents); setAccepted(r.accepted ?? []);
-      setState(r.verifyState); setNote(r.verifyNote);
-    } catch {} finally { setLoading(false); }
+      setState(r.verifyState); setNote(r.verifyNote); setLoadErr('');
+    } catch (e: any) { setLoadErr(e?.message ?? 'Could not load your documents'); }
+    finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  // Upload one document for `kind`: pick → presigned PUT → record. A second
+  // upload of the same kind replaces the first server-side.
+  const [uploading, setUploading] = useState<string | null>(null);
+  const upload = async (kind: string) => {
+    if (uploading) return;
+    try {
+      const res = await DocumentPicker.getDocumentAsync({ type: SB.DOC_MIMES, copyToCacheDirectory: true });
+      const file = res.canceled ? null : res.assets?.[0];
+      if (!file) return;
+      if (file.mimeType && !SB.DOC_MIMES.includes(file.mimeType)) {
+        Alert.alert('Unsupported file', 'Upload a photo (JPEG, PNG, WebP) or a PDF.'); return;
+      }
+      if ((file.size ?? 0) > SB.DOC_MAX_BYTES) {
+        Alert.alert('File too large', 'Documents must be 10 MB or smaller.'); return;
+      }
+      setUploading(kind);
+      await SB.uploadDocument(kind, file);
+      await load();
+    } catch (e: any) { Alert.alert('Could not upload', e?.message ?? 'Try again'); }
+    finally { setUploading(null); }
+  };
 
   const submit = async () => {
     setBusy(true);
@@ -3262,6 +3379,7 @@ function VerificationScreen({ onBack }: { onBack: () => void }) {
       <SubHeader title="Verification" onBack={onBack} />
       <ScrollView contentContainerStyle={s.body}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
+        {!!loadErr && <ErrorState title="Could not load your documents" sub={loadErr} onRetry={load} />}
         <View style={s.panel}>
           <Text style={[s.panelTitle, { color: copy.tone }]}>{copy.label}</Text>
           <Text style={s.hint}>{copy.hint}</Text>
@@ -3289,15 +3407,23 @@ function VerificationScreen({ onBack }: { onBack: () => void }) {
                 {!!have?.reviewNote && <Text style={[s.cardSub, { color: C.danger }]}>{have.reviewNote}</Text>}
               </View>
               {have && (
-                <TouchableOpacity accessibilityLabel={`View the uploaded ${kind}`} onPress={() => view(have)}>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel={`View the uploaded ${kind}`} onPress={() => view(have)}
+                  hitSlop={10} style={{ padding: 6 }}>
                   <Ionicons name="eye-outline" size={20} color={C.green} />
+                </TouchableOpacity>
+              )}
+              {uploading === kind ? <ActivityIndicator color={C.green} style={{ marginLeft: 10 }} /> : (
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel={`${have ? 'Replace' : 'Upload'} ${kind}`}
+                  accessibilityState={{ disabled: !!uploading }} disabled={!!uploading} onPress={() => upload(kind)}
+                  hitSlop={10} style={{ padding: 6, marginLeft: 4 }}>
+                  <Ionicons name={have ? 'refresh-outline' : 'cloud-upload-outline'} size={20} color={C.green} />
                 </TouchableOpacity>
               )}
             </View>
           );
         })}
         <Text style={s.hint}>
-          Documents are uploaded from Shop Settings and are visible only to you and the review team.
+          Upload a photo or PDF (up to 10 MB) for each document that applies. Documents are visible only to you and the review team.
         </Text>
 
         {(state === 'unverified' || state === 'rejected') && (
@@ -3328,13 +3454,14 @@ function BillScreen({ orderId, onBack }: { orderId: string; onBack: () => void }
   const [addQty, setAddQty] = useState('1');
   const [addPrice, setAddPrice] = useState('');
 
+  const [loadErr, setLoadErr] = useState('');
   const load = useCallback(async () => {
-    setLoading(true);
+    setLoading(true); setLoadErr('');
     try {
       const b = await SB.getBill(orderId);
       setBill(b);
       setDiscount(b.billDiscount > 0 ? String(b.billDiscount) : '');
-    } catch (e: any) { Alert.alert('Bill', e?.message ?? 'Could not load'); }
+    } catch (e: any) { setLoadErr(e?.message ?? 'Could not load the bill'); }
     finally { setLoading(false); }
   }, [orderId]);
   useEffect(() => { load(); }, [load]);
@@ -3350,10 +3477,13 @@ function BillScreen({ orderId, onBack }: { orderId: string; onBack: () => void }
   const money = (n: number) => formatMoney(n, bill?.currency ?? '₹');
 
   if (loading || !bill) {
+    // A failed load used to fall into the spinner forever: show it, and retry.
     return (
       <>
         <SubHeader title="Bill" onBack={onBack} />
-        <LoadingState />
+        {loading || !loadErr
+          ? <LoadingState />
+          : <ErrorState title="Could not load the bill" sub={loadErr} onRetry={load} />}
       </>
     );
   }
@@ -3545,12 +3675,13 @@ function StockScreen({ currency, onBack }: { currency?: string; onBack: () => vo
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState<SB.StockMovement[]>([]);
 
+  const [err, setErr] = useState('');
   const load = useCallback(async () => {
-    setLoading(true);
+    setLoading(true); setErr('');
     try {
       const r = await SB.stockList();
       setRows(r.stock); setLowCount(r.lowCount);
-    } catch {} finally { setLoading(false); }
+    } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -3683,7 +3814,8 @@ function StockScreen({ currency, onBack }: { currency?: string; onBack: () => vo
               </Text>
             )}
             {loading && <LoadingState />}
-            {!loading && rows.length === 0 && (
+            {!!err && !loading && <ErrorState title="Couldn’t load stock" sub={err} onRetry={load} />}
+            {!loading && !err && rows.length === 0 && (
               <Empty icon="cube-outline" text="No counted products. Turn on “Count stock” on a product to start." />
             )}
           </>
@@ -3761,9 +3893,10 @@ function OwnerKhata({ currency }: { currency?: string }) {
   const [newMobile, setNewMobile] = useState('');
   const [saving, setSaving] = useState(false);
 
+  const [err, setErr] = useState('');
   const load = useCallback(async () => {
-    setLoading(true);
-    try { setCustomers(await SB.ownerLedgerSummary()); } catch {} finally { setLoading(false); }
+    setLoading(true); setErr('');
+    try { setCustomers(await SB.ownerLedgerSummary()); } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -3847,7 +3980,8 @@ function OwnerKhata({ currency }: { currency?: string }) {
         </View>
       ) : null}
       {loading && <LoadingState />}
-      {!loading && customers.length === 0 && <Empty icon="people-outline" text="No customer ledgers yet." />}
+      {!!err && !loading && <ErrorState title="Couldn’t load the khata book" sub={err} onRetry={load} />}
+      {!loading && !err && customers.length === 0 && <Empty icon="people-outline" text="No customer ledgers yet." />}
 
       {/* What the owner cannot see from a list sorted by amount: who has gone
           quiet. A ₹400 debt untouched for four months is a worse sign than a
@@ -4030,9 +4164,11 @@ function KhataDetail({ customer, currency, onBack }: { customer: SB.CustomerPend
     setItems((prev) => prev.map((it, j) => (j === i ? { ...it, ...patch } : it)));
   const itemsTotal = items.reduce((n, it) => n + num(it.qty) * num(it.price), 0);
 
+  const [err, setErr] = useState('');
   const load = useCallback(async () => {
-    setLoading(true);
-    try { setLedger(await SB.ownerCustomerLedger(customer.customerId, !!customer.isKhata)); } catch {} finally { setLoading(false); }
+    setLoading(true); setErr('');
+    try { setLedger(await SB.ownerCustomerLedger(customer.customerId, !!customer.isKhata)); }
+    catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
   }, [customer.customerId, customer.isKhata]);
   useEffect(() => { load(); }, [load]);
 
@@ -4200,7 +4336,7 @@ function KhataDetail({ customer, currency, onBack }: { customer: SB.CustomerPend
   };
 
   const renderEntry = ({ item: e }: { item: SB.LedgerEntry }) => (
-          <LedgerRow entry={e} onShare={busy ? undefined : () => shareDoc(e)} />
+          <LedgerRow entry={e} currency={currency} onShare={busy ? undefined : () => shareDoc(e)} />
   );
 
   return (
@@ -4219,6 +4355,7 @@ function KhataDetail({ customer, currency, onBack }: { customer: SB.CustomerPend
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}
         ListHeaderComponent={(
         <>
+        {!!err && !loading && !ledger && <ErrorState title="Couldn’t load this khata" sub={err} onRetry={load} />}
         {ledger && (
           <View style={{ flexDirection: 'row', gap: 10 }}>
             <StatCard label="Pending" value={money(ledger.pending)} tone="danger" />
@@ -4607,23 +4744,26 @@ function ShopSettings({ shop, me, onSaved, onCancel }: {
 function NotificationCenter({ onBack, onRead }: { onBack: () => void; onRead: () => void }) {
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<SB.Notification[]>([]);
+  const [err, setErr] = useState('');
   const load = useCallback(async () => {
-    setLoading(true);
-    try { setItems((await SB.notifications()).notifications); } catch {} finally { setLoading(false); }
+    setLoading(true); setErr('');
+    try { setItems((await SB.notifications()).notifications); } catch (e: any) { setErr(loadErrText(e)); } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
 
   const markAll = async () => {
-    try { await SB.markNotificationsRead(); onRead(); load(); } catch {}
+    try { await SB.markNotificationsRead(); onRead(); load(); }
+    catch (e: any) { Alert.alert('Could not mark as read', e?.message ?? 'Try again'); }
   };
 
   return (
     <>
       <SubHeader title={t('notif.title')} onBack={onBack}
-        right={{ icon: 'checkmark-done-outline', onPress: markAll }} />
+        right={{ icon: 'checkmark-done-outline', label: t('notif.markAllRead'), onPress: markAll }} />
       <ScrollView contentContainerStyle={s.body}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
-        {!loading && items.length === 0 && <Empty icon="notifications-off-outline" text={t('notif.empty')} />}
+        {!!err && !loading && <ErrorState title="Couldn’t load notifications" sub={err} onRetry={load} />}
+        {!loading && !err && items.length === 0 && <Empty icon="notifications-off-outline" text={t('notif.empty')} />}
         {items.map((n) => (
           <View key={n.id} style={[s.card, !n.read && { borderColor: C.green }]}>
             <View style={{ flex: 1 }}>
@@ -4703,11 +4843,14 @@ function ReasonModal({ visible, title, codes, placeholder, onSubmit, onClose }: 
 function InvoiceView({ orderId, onBack }: { orderId: string; onBack: () => void }) {
   const [inv, setInv] = useState<SB.Invoice | null>(null);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { (async () => {
+  const [err, setErr] = useState('');
+  const load = useCallback(async () => {
+    setLoading(true); setErr('');
     try { setInv(await SB.orderInvoice(orderId)); }
-    catch (e: any) { Alert.alert('Invoice', e?.message ?? 'Not available yet'); }
+    catch (e: any) { setErr(e?.message ?? 'Not available yet'); }
     finally { setLoading(false); }
-  })(); }, [orderId]);
+  }, [orderId]);
+  useEffect(() => { load(); }, [load]);
 
   const sharePdf = async () => {
     if (!inv) return;
@@ -4721,9 +4864,10 @@ function InvoiceView({ orderId, onBack }: { orderId: string; onBack: () => void 
   return (
     <>
       <SubHeader title={t('orders.invoice')} onBack={onBack}
-        right={inv ? { icon: 'share-social-outline', onPress: sharePdf } : undefined} />
+        right={inv ? { icon: 'share-social-outline', label: 'Share the invoice PDF', onPress: sharePdf } : undefined} />
       <ScrollView contentContainerStyle={s.body}>
         {loading && <LoadingState />}
+        {!!err && !loading && <ErrorState title="Couldn’t load the invoice" sub={err} onRetry={load} />}
         {inv && (
           <>
             <View style={s.panel}>
@@ -4812,7 +4956,7 @@ function TabBar({ tabs, active, onChange }: {
 
 function SubHeader({ title, onBack, right }: {
   title: string; onBack?: () => void;
-  right?: { icon: keyof typeof Ionicons.glyphMap; badge?: number; onPress: () => void };
+  right?: { icon: keyof typeof Ionicons.glyphMap; label: string; badge?: number; onPress: () => void };
 }) {
   return (
     <View style={s.subHeader}>
@@ -4823,7 +4967,8 @@ function SubHeader({ title, onBack, right }: {
       ) : <View style={{ width: 38 }} />}
       <Text style={s.subHeaderTitle} numberOfLines={1}>{title}</Text>
       {right ? (
-        <TouchableOpacity onPress={right.onPress} hitSlop={10} style={s.hBtn}>
+        <TouchableOpacity onPress={right.onPress} hitSlop={10} style={s.hBtn}
+          accessibilityRole="button" accessibilityLabel={right.label}>
           <Ionicons name={right.icon} size={22} color={C.text} />
           {!!right.badge && <View style={s.cartBadge}><Text style={s.cartBadgeText}>{right.badge}</Text></View>}
         </TouchableOpacity>

@@ -7,7 +7,7 @@ import { View, Text, ScrollView, StyleSheet, TextInput, TouchableOpacity } from 
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { financeStatusColors, TABULAR, type FinancePalette } from '../../constants/financeTheme';
-import { FinHeader, Pill, EmptyState } from '../../components/finance/ui';
+import { FinHeader, Pill, EmptyState, ErrorState } from '../../components/finance/ui';
 import { useMe } from '../../components/finance/useMe';
 import { formatINR, inrShort, num } from '../../utils/financeFormat';
 import { listLedger, type LedgerEntry } from '../../db/ledger';
@@ -23,10 +23,13 @@ export default function FinanceSearch() {
   const [ledgers, setLedgers] = useState<LedgerEntry[]>([]);
   const [groups, setGroups] = useState<ChittiGroup[]>([]);
 
+  // A failed read must not show "No matches": that claims the data is not there.
+  const [loadFailed, setLoadFailed] = useState(false);
   const reload = useCallback(() => {
     if (!me) return;
-    listLedger(me.id).then(setLedgers).catch(() => {});
-    listGroups(me.id).then(setGroups).catch(() => {});
+    Promise.all([listLedger(me.id), listGroups(me.id)])
+      .then(([l, g]) => { setLedgers(l); setGroups(g); setLoadFailed(false); })
+      .catch(() => setLoadFailed(true));
   }, [me]);
   useFocusEffect(reload);
 
@@ -67,13 +70,17 @@ export default function FinanceSearch() {
         <TextInput
           style={s.input} value={q} onChangeText={setQ} autoFocus
           placeholder="Name, mobile or amount" placeholderTextColor={FIN.faint} returnKeyType="search"
+          accessibilityLabel="Search ledgers and Lucky Draw groups"
         />
         {q.length > 0 && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Clear search" onPress={() => setQ('')} hitSlop={8}><Ionicons name="close-circle" size={18} color={FIN.faint} /></TouchableOpacity>}
       </View>
 
       <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         {query.length === 0 && <EmptyState icon="search-outline" title="Search your finances" sub="Find ledgers and Lucky Draw groups by name, mobile number or amount." />}
-        {empty && <EmptyState icon="sad-outline" title="No matches" sub={`Nothing found for “${q}”.`} />}
+        {loadFailed && (
+          <ErrorState title="Could not read your finance data" sub="Search results may be missing. Nothing has been lost." onRetry={reload} />
+        )}
+        {empty && !loadFailed && <EmptyState icon="sad-outline" title="No matches" sub={`Nothing found for “${q}”.`} />}
 
         {matchedLedgers.length > 0 && <Text style={s.section}>Ledgers · {matchedLedgers.length}</Text>}
         {matchedLedgers.map(e => {

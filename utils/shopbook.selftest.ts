@@ -12,6 +12,7 @@ import {
   formatMoney, shopOpenState, cartTotal, isNum, isBlankOrNum, isBlankOrNonNegative, num,
   canCustomerCollect, notCollectedGate, NOT_COLLECTED_AFTER_HOURS,
   isStalePrice, PRICE_STALE_DAYS, dateLocale, orderStamp,
+  cartFor, withShopCart, type CartsByShop, type CartItem,
   type OrderStatus, type TimelineEvent,
 } from './shopbook';
 // financeFormat is where the comma rule came from. Assert the two screens
@@ -361,6 +362,27 @@ check('the helper is named for what it actually accepts',
     screen.includes("Alert.alert('Check the amount',"), true);
   check('a garbage cart quantity is refused out loud, not silently',
     /if \(raw\.trim\(\)\) \{\s*Alert\.alert\('Check the quantity',/.test(screen), true);
+}
+
+// ── carts are per shop (cross-shop cart bug) ─────────────────────
+{
+  const line = (key: string, name: string): CartItem => ({ key, name, brand: '', qty: 1, price: 10, note: '' });
+  let carts: CartsByShop = {};
+  carts = withShopCart(carts, 'A', [line('a1', 'Atta')]);
+  check('an unseen shop starts with an empty cart', cartFor(carts, 'B'), []);
+  carts = withShopCart(carts, 'B', [line('b1', 'Milk')]);
+  check('shop A keeps only its own lines', cartFor(carts, 'A').map((l) => l.name), ['Atta']);
+  check('shop B keeps only its own lines', cartFor(carts, 'B').map((l) => l.name), ['Milk']);
+  const before = carts;
+  carts = withShopCart(carts, 'A', []);
+  check('placing at A empties A', cartFor(carts, 'A'), []);
+  check('… and drops its key', Object.keys(carts), ['B']);
+  check('… and leaves B untouched', cartFor(carts, 'B').map((l) => l.name), ['Milk']);
+  check('the previous state is not mutated', cartFor(before, 'A').map((l) => l.name), ['Atta']);
+  // the screen must read the cart through the shop id, never one shared array
+  const screen = readFileSync(join(__dirname, '..', 'app', 'shop-book.tsx'), 'utf8');
+  check('the screen keys its cart by the open shop', /cart=\{cartFor\(carts, selShop\.id\)\}/.test(screen), true);
+  check('no single shared cart state is left', /useState<CartItem\[\]>\(\[\]\)/.test(screen), false);
 }
 
 // This line used to print unconditionally, with no process.exit - so a failed

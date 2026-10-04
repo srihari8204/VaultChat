@@ -8,7 +8,8 @@ import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-nati
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { financeStatusColors, TABULAR, type FinancePalette } from '../../constants/financeTheme';
-import { FinHeader, HeroCard, StatTile, TileGrid, Pill, EmptyState } from '../../components/finance/ui';
+import { FinHeader, HeroCard, StatTile, TileGrid, Pill, EmptyState, LoadingState, ErrorState } from '../../components/finance/ui';
+import { useLoadStatus } from '../../components/finance/useLoad';
 import { useMe } from '../../components/finance/useMe';
 import { sumRupees } from '../../utils/money';
 import { formatINR, fmtDate, inrShort, PERIOD_LABEL } from '../../utils/financeFormat';
@@ -24,10 +25,14 @@ export default function CustomerProfile() {
   const me = useMe();
   const [rows, setRows] = useState<LedgerEntry[]>([]);
 
+  const { status, begin, done, fail } = useLoadStatus();
   const reload = useCallback(() => {
     if (!me || !name) return;
-    listLedger(me.id).then(all => setRows(all.filter(l => l.name.trim().toLowerCase() === String(name).trim().toLowerCase()))).catch(() => {});
-  }, [me, name]);
+    begin();
+    listLedger(me.id)
+      .then(all => { setRows(all.filter(l => l.name.trim().toLowerCase() === String(name).trim().toLowerCase())); done(); })
+      .catch(fail);
+  }, [me, name, begin, done, fail]);
   useFocusEffect(reload);
 
   // Paise-exact, same rule as the dashboard and reports — a customer's total
@@ -71,9 +76,14 @@ export default function CustomerProfile() {
         </View>
 
         <Text style={s.section}>Ledgers</Text>
-        {rows.length === 0 ? (
+        {status === 'loading' && <LoadingState label="Loading ledgers" />}
+        {status === 'error' && (
+          <ErrorState title="Could not load ledgers" sub="The totals above may be incomplete. Nothing has been lost." onRetry={reload} />
+        )}
+        {status === 'ready' && rows.length === 0 && (
           <EmptyState icon="person-outline" title="No ledgers" sub="This customer has no ledger entries." />
-        ) : rows.map(e => {
+        )}
+        {rows.map(e => {
           const sc = STATUS_COLORS[e.status];
           const lent = e.direction === 'lend';
           return (

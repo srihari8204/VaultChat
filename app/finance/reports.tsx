@@ -5,7 +5,8 @@ import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
 import { View, Text, ScrollView, StyleSheet, Alert } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { type FinancePalette } from '../../constants/financeTheme';
-import { FinHeader, Segment, StatTile, Card, RowLine, Btn } from '../../components/finance/ui';
+import { FinHeader, Segment, StatTile, Card, RowLine, Btn, LoadingState, ErrorState } from '../../components/finance/ui';
+import { useLoadStatus } from '../../components/finance/useLoad';
 import { useMe } from '../../components/finance/useMe';
 import { inrShort, fmtDate } from '../../utils/financeFormat';
 import { formatINR, round2, simpleInterest } from '../../utils/interest';
@@ -37,9 +38,11 @@ export default function Reports() {
   const me = useMe();
   const [period, setPeriod] = useState<Period>('month');
   const [r, setR] = useState<Report>(ZERO);
+  const { status, begin, done, fail } = useLoadStatus();
 
   const reload = useCallback(() => {
     if (!me) return;
+    begin();
     (async () => {
       const from = periodStart(period);
       const [all, groups] = await Promise.all([listLedger(me.id), listGroups(me.id)]);
@@ -63,19 +66,21 @@ export default function Reports() {
       }
       acc.chitti = groups.filter(g => g.status === 'active').length;
       setR(acc);
-    })();
-  }, [me, period]);
+      done();
+    })().catch(fail);
+  }, [me, period, begin, done, fail]);
   useFocusEffect(reload);
 
   const label = period === 'month' ? 'This Month' : period === 'year' ? 'This Year' : 'All Time';
 
+  const outstanding = sumRupees([r.lent, -r.collections]);
   const rows = () => [
     { k: 'Total lent', v: formatINR(r.lent) },
     { k: 'Total borrowed', v: formatINR(r.borrowed) },
     { k: 'Interest earned', v: formatINR(r.earned) },
     { k: 'Interest pending', v: formatINR(r.pending) },
     { k: 'Collections received', v: formatINR(r.collections) },
-    { k: 'Outstanding', v: formatINR(r.lent - r.collections), tot: true },
+    { k: 'Outstanding', v: formatINR(outstanding), tot: true },
     { k: 'Active loans', v: String(r.active) },
     { k: 'Overdue loans', v: String(r.overdue) },
     { k: 'Completed loans', v: String(r.completed) },
@@ -87,6 +92,7 @@ export default function Reports() {
     catch (e: any) { Alert.alert('Export failed', e?.message ?? 'Try again'); }
   };
   const onExcel = async () => {
+    if (r.ledgers.length === 0) return Alert.alert('Nothing to export', `No ledgers were created ${label.toLowerCase()}.`);
     const headers = ['Name', 'Direction', 'Principal', 'Remaining', 'Status', 'Rate', 'Period', 'Created'];
     const data = r.ledgers.map(l => [l.name, l.direction, l.principal, l.remaining, l.status, l.rate, l.period, fmtDate(l.created_at)]);
     try { await exportExcel(`vault-finance-${period}`, headers, data); }
@@ -99,6 +105,11 @@ export default function Reports() {
       <ScrollView contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
         <Segment<Period> options={[{ k: 'month', label: 'Month' }, { k: 'year', label: 'Year' }, { k: 'all', label: 'All Time' }]} value={period} onChange={setPeriod} />
 
+        {status === 'loading' && <LoadingState label="Loading report" />}
+        {status === 'error' && (
+          <ErrorState title="Could not build the report" sub="Your ledgers could not be read. Nothing has been lost." onRetry={reload} />
+        )}
+        {status === 'ready' && (<>
         <Text style={s.heading}>{label}</Text>
         <View style={s.tileRow}>
           <StatTile value={inrShort(r.lent)} label="Total lent" tone="good" />
@@ -111,7 +122,7 @@ export default function Reports() {
 
         <Card style={{ marginTop: 16 }}>
           <RowLine k="Collections received" v={formatINR(r.collections)} />
-          <RowLine k="Outstanding" v={formatINR(r.lent - r.collections)} bold tone="warn" />
+          <RowLine k="Outstanding" v={formatINR(outstanding)} bold tone="warn" />
           <RowLine k="Active loans" v={String(r.active)} />
           <RowLine k="Overdue loans" v={String(r.overdue)} tone="bad" />
           <RowLine k="Completed loans" v={String(r.completed)} />
@@ -122,6 +133,7 @@ export default function Reports() {
           <Btn label="Export PDF" kind="ghost" icon="document-text-outline" onPress={onPdf} wide />
           <Btn label="Export Excel" kind="ghost" icon="grid-outline" onPress={onExcel} wide />
         </View>
+        </>)}
         <View style={{ height: 30 }} />
       </ScrollView>
     </View>

@@ -10,19 +10,33 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { type FinancePalette } from '../../constants/financeTheme';
 import { FinHeader, Segment, Btn, Card } from '../../components/finance/ui';
 import { useMe } from '../../components/finance/useMe';
-import { fmtDate, num as parseAmount } from '../../utils/financeFormat';
 import { listLedger, insertLedger } from '../../db/ledger';
 import { listGroups, listMembers, listCollections, listAuctions } from '../../db/chitti';
-import { exportCsv, exportExcel, shareTextFile } from '../../utils/financeIO';
-import { buildBackup, restoreBackup } from '../../db/financeBackup';
-import type { LedgerPeriod } from '../../utils/finance';
+import { exportExcel, shareTextFile } from '../../utils/financeIO';
+import { buildBackup, restoreBackup, isRestorable } from '../../db/financeBackup';
+import { LEDGER_HEADERS, ledgerCsvRow, planLedgerImport, toCsv } from '../../components/finance/ledgerCsv';
 
 type Dataset = 'ledger' | 'chitti' | 'backup';
 type Format = 'excel' | 'csv';
 
 const LD_HEADERS = ['Group', 'MemberNo', 'Name', 'Mobile', 'Address', 'Paid', 'Pending', 'Overdue', 'Won'];
 
-const LEDGER_HEADERS = ['Name', 'Mobile', 'Direction', 'InterestType', 'Principal', 'Rate', 'RateMode', 'Period', 'Remaining', 'Status', 'Notes', 'Created'];
+/** Larger than any real finance book; refuses a wrong pick before reading it. */
+const MAX_IMPORT_BYTES = 20 * 1024 * 1024;
+
+/** Exports carry names, phones and addresses in plain text. Once the share
+ *  sheet has handed the file on, the copy in the app cache is deleted. */
+async function dropExport(uri: string | null) {
+  if (uri) await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+}
+
+const ask = (title: string, message: string, action: string) => new Promise<boolean>((resolve) =>
+  Alert.alert(title, message, [
+    { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+    { text: action, onPress: () => resolve(true) },
+  ], { cancelable: true, onDismiss: () => resolve(false) }));
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 export default function FinanceIO() {
   const FIN = useFinanceTheme();
@@ -37,8 +51,10 @@ export default function FinanceIO() {
       if (dataset === 'ledger') {
         const rows = await listLedger(me.id);
         if (rows.length === 0) return Alert.alert('Nothing to export', 'No ledgers yet.');
-        const data = rows.map(l => [l.name, l.mobile ?? '', l.direction, l.interest_type, l.principal, l.rate, l.rate_mode, l.period, l.remaining, l.status, l.notes ?? '', fmtDate(l.created_at)]);
-        format === 'excel' ? await exportExcel('vault-ledger', LEDGER_HEADERS, data) : await exportCsv('vault-ledger', LEDGER_HEADERS, data);
+        const data = rows.map(ledgerCsvRow);
+        await dropExport(format === 'excel'
+          ? await exportExcel('vault-ledger', LEDGER_HEADERS, data)
+          : await shareTextFile('vault-ledger.csv', toCsv(LEDGER_HEADERS, data), 'text/csv'));
       } else if (dataset === 'backup') {
         // Full round-trippable backup — the only export that can be restored.
         const snap = await buildBackup(me.id);
@@ -47,13 +63,13 @@ export default function FinanceIO() {
         }
         const stamp = new Date().toISOString().slice(0, 10);
         const n = snap.groups.length + snap.ledgers.length;
-        await shareTextFile(`vault-finance-backup-${stamp}.json`, JSON.stringify(snap), 'application/json');
+        await dropExport(await shareTextFile(`vault-finance-backup-${stamp}.json`, JSON.stringify(snap), 'application/json'));
         // Explicit confirmation: this file is the only restore path, and the
         // share sheet is easy to dismiss by accident. Without this the user
         // cannot tell "backed up" from "nothing happened".
         Alert.alert('Backup created',
           `${n} record${n === 1 ? '' : 's'} saved to vault-finance-backup-${stamp}.json.\n\n` +
-          'Save it to Drive or Files — it stays only on this device otherwise.');
+          'Only the copy you saved or sent exists — none is kept on this device. Save it to Drive or Files.');
       } else {
         // Member-level sheet: one row per member with their dues tally. Far more
         // useful to an organizer than the old group-only sheet, which omitted
@@ -78,7 +94,9 @@ export default function FinanceIO() {
           }
         }
         if (data.length === 0) return Alert.alert('Nothing to export', 'Your Lucky Draw groups have no members yet.');
-        format === 'excel' ? await exportExcel('vault-lucky-draw', LD_HEADERS, data) : await exportCsv('vault-lucky-draw', LD_HEADERS, data);
+        await dropExport(format === 'excel'
+          ? await exportExcel('vault-lucky-draw', LD_HEADERS, data)
+          : await shareTextFile('vault-lucky-draw.csv', toCsv(LD_HEADERS, data), 'text/csv'));
       }
     } catch (e: any) { Alert.alert('Export failed', e?.message ?? 'Try again'); }
   };
@@ -91,10 +109,28 @@ export default function FinanceIO() {
     try {
       const res = await DocumentPicker.getDocumentAsync({ type: ['*/*'], copyToCacheDirectory: true });
       if (res.canceled || !res.assets?.[0]) return;
-      const content = await FileSystem.readAsStringAsync(res.assets[0].uri);
+      const asset = res.assets[0];
+      if ((asset.size ?? 0) > MAX_IMPORT_BYTES) {
+        return Alert.alert('File too large', 'That file is bigger than any finance export. Pick the file this screen exported.');
+      }
+      const content = await FileSystem.readAsStringAsync(asset.uri);
+      await FileSystem.deleteAsync(asset.uri, { idempotent: true }).catch(() => {});
 
       if (dataset === 'backup') {
-        const parsed = JSON.parse(content);
+        let parsed: any;
+        try { parsed = JSON.parse(content); } catch { parsed = null; }
+        if (!isRestorable(parsed)) {
+          return Alert.alert('Not a backup file', 'This is not a Vault Finance backup, or it was made by a newer version of the app. Nothing was changed.');
+        }
+        const n = (a: unknown) => (Array.isArray(a) ? a.length : 0);
+        const go = await ask('Restore this backup?',
+          `It holds ${plural(n(parsed.ledgers), 'ledger')}, ${plural(n(parsed.groups), 'Lucky Draw group')} and ` +
+          `${plural(n(parsed.reminders), 'reminder')}` +
+          (parsed.exportedAt ? `, saved ${new Date(parsed.exportedAt).toLocaleString()}` : '') + '.\n\n' +
+          'Any record you already have that is also in the backup will be REPLACED by the backup copy, ' +
+          'including changes you made after the backup was taken. Nothing else is deleted.',
+          'Restore');
+        if (!go) return;
         const c = await restoreBackup(me.id, parsed);
         return Alert.alert('Restore complete',
           `${c.groups} Lucky Draw group${c.groups === 1 ? '' : 's'}, ${c.members} member${c.members === 1 ? '' : 's'}, ` +
@@ -102,10 +138,21 @@ export default function FinanceIO() {
           `${c.ledgers} ledger${c.ledgers === 1 ? '' : 's'} restored.`);
       }
 
-      const { count, skipped } = await importLedgerCsv(me.id, content);
-      Alert.alert('Import complete',
-        `${count} ledger${count === 1 ? '' : 's'} imported.`
-        + (skipped ? ` ${skipped} row${skipped === 1 ? '' : 's'} skipped — the Remaining cell was not a plain number, and guessing it would have resurrected a settled debt.` : ''));
+      const plan = planLedgerImport(content, await listLedger(me.id), Date.now());
+      const notes = [
+        plan.duplicates ? `${plural(plan.duplicates, 'row')} already in your ledger book — skipped.` : '',
+        plan.badPrincipal ? `${plural(plan.badPrincipal, 'row')} without a readable Principal — skipped.` : '',
+        // guessing a Remaining it cannot read would resurrect a settled debt
+        plan.badRemaining ? `${plural(plan.badRemaining, 'row')} whose Remaining is not a plain number — skipped.` : '',
+        plan.badDate ? `${plural(plan.badDate, 'row')} with an unreadable start or end date — skipped.` : '',
+      ].filter(Boolean).join('\n');
+      if (plan.rows.length === 0) {
+        return Alert.alert('Nothing to import', notes || 'The file has no ledger rows.');
+      }
+      if (!await ask('Import ledgers?', `${plural(plan.rows.length, 'new ledger')} will be added.${notes ? `\n\n${notes}` : ''}`, 'Import')) return;
+      let count = 0;
+      for (const row of plan.rows) { await insertLedger({ ...row, user_id: me.id }); count++; }
+      Alert.alert('Import complete', `${plural(count, 'ledger')} imported.${notes ? `\n\n${notes}` : ''}`);
     } catch (e: any) {
       Alert.alert('Import failed', e?.message ?? 'Could not read the file.');
     }
@@ -154,7 +201,7 @@ export default function FinanceIO() {
 
         <Text style={s.hint}>
           {dataset === 'backup'
-            ? 'Restoring merges the file into your data — rows you already have are updated, nothing is deleted. Importing the same file twice is safe.'
+            ? 'Restoring merges the file into your data: records that are also in the backup are replaced by the backup copy, and nothing else is deleted. You see what the file holds and confirm before anything changes.'
             : dataset === 'chitti'
               ? `Spreadsheet columns:\n${LD_HEADERS.join(', ')}\n\nTo restore Lucky Draw data, use Full Backup.`
               : `CSV import expects the same columns as the export:\n${LEDGER_HEADERS.join(', ')}`}
@@ -163,66 +210,6 @@ export default function FinanceIO() {
       </ScrollView>
     </View>
   );
-}
-
-/**
- * Parse an exported ledger CSV and insert rows.
- *
- * Returns how many were imported AND how many were skipped: a skipped row is a
- * ledger the user expected to see, and silently dropping it just moves the
- * surprise to the day they go looking for it (2026-09-17).
- */
-async function importLedgerCsv(userId: string, content: string): Promise<{ count: number; skipped: number }> {
-  const lines = content.split(/\r?\n/).filter(l => l.trim().length > 0);
-  if (lines.length < 2) return { count: 0, skipped: 0 };
-  const parseRow = (line: string): string[] => {
-    const out: string[] = []; let cur = ''; let q = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (q) { if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; } else if (ch === '"') q = false; else cur += ch; }
-      else if (ch === '"') q = true; else if (ch === ',') { out.push(cur); cur = ''; } else cur += ch;
-    }
-    out.push(cur); return out;
-  };
-  // A THIRD copy of the amount parser used to live here, with the same bare
-  // comma strip that turns 12,5 into 125. CSV rows come from a file the user
-  // did not type, so a wrong number here is not even visible to them at the
-  // moment it is made. Share the hardened one; NaN is coerced to 0 only where
-  // a zero default is genuinely right, and the principal guard below rejects
-  // the row outright (2026-09-17).
-  const num = (v: string) => { const n = parseAmount(v); return Number.isFinite(n) ? n : 0; };
-  let count = 0, skipped = 0;
-  for (let i = 1; i < lines.length; i++) {
-    const c = parseRow(lines[i]);
-    const name = (c[0] ?? '').trim();
-    if (!name) continue;
-    const principal = num(c[4]);
-    if (!(principal > 0)) continue;
-    // Remaining = 0 is a SETTLED ledger, not a missing cell. `num(c[8]) ||
-    // principal` could not tell them apart, so every fully repaid ledger came
-    // back from its own export owing the full principal again while its status
-    // still said "completed". A cell that really says 0 stays 0 (2026-09-17).
-    //
-    // BLANK AND UNPARSEABLE ARE NOT THE SAME ANSWER EITHER. They still shared
-    // the `principal` fallback, so a Remaining cell of "₹1,00,000.00" — which
-    // this parser refuses, correctly — restored the FULL PRINCIPAL on a ledger
-    // that was settled, while its status column still said "completed". A blank
-    // cell means the exporter had no column and the principal is the honest
-    // default; a cell we cannot read is a number we must not invent, so the row
-    // is skipped exactly as a row with an unreadable principal already is.
-    const remCell = (c[8] ?? '').trim();
-    const rem = parseAmount(remCell);
-    if (remCell !== '' && !Number.isFinite(rem)) { skipped++; continue; }
-    await insertLedger({
-      user_id: userId, direction: c[2] === 'borrow' ? 'borrow' : 'lend', name, mobile: (c[1] || '').trim() || null,
-      interest_type: c[3] === 'compound' ? 'compound' : 'simple', principal, rate: num(c[5]),
-      rate_mode: c[6] === 'rupees' ? 'rupees' : 'percent', period: (['daily', 'weekly', 'monthly', 'yearly'].includes(c[7]) ? c[7] : 'monthly') as LedgerPeriod,
-      start_date: Date.now(), end_date: null, notes: (c[10] || '').trim() || null,
-      remaining: remCell === '' ? principal : rem, status: (['running', 'overdue', 'completed'].includes(c[9]) ? c[9] : 'running') as any,
-    });
-    count++;
-  }
-  return { count, skipped };
 }
 
 const makeStyles = (FIN: FinancePalette) => StyleSheet.create({

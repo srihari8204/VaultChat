@@ -18,8 +18,9 @@ import { Stack, useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TABULAR, type FinancePalette } from '../../constants/financeTheme';
 import {
-  HeroCard, HeroSplit, StatTile, QuickAction, TileGrid, ActionGrid, FinBody, IconBtn,
+  HeroCard, HeroSplit, StatTile, QuickAction, TileGrid, ActionGrid, FinBody, IconBtn, LoadingState, ErrorState,
 } from '../../components/finance/ui';
+import { useLoadStatus } from '../../components/finance/useLoad';
 import { useMe } from '../../components/finance/useMe';
 import { inrShort } from '../../utils/financeFormat';
 import { listLedger } from '../../db/ledger';
@@ -45,9 +46,11 @@ export default function FinanceDashboard() {
   const me = useMe();
   const insets = useSafeAreaInsets();
   const [t, setT] = useState<Totals>(ZERO);
+  const { status, begin, done, fail } = useLoadStatus();
 
   const reload = useCallback(() => {
     if (!me) return;
+    begin();
     (async () => {
       const [ledgers, groups, reminders] = await Promise.all([
         listLedger(me.id), listGroups(me.id), listReminders(me.id),
@@ -72,8 +75,9 @@ export default function FinanceDashboard() {
       acc.chitti = groups.filter(g => g.status === 'active').length;
       acc.today = reminders.filter(r => r.status === 'active' && r.next_at >= todayStart && r.next_at < todayEnd).length;
       setT(acc);
-    })();
-  }, [me]);
+      done();
+    })().catch(fail);
+  }, [me, begin, done, fail]);
 
   useFocusEffect(reload);
 
@@ -110,9 +114,15 @@ export default function FinanceDashboard() {
             </View>
           </View>
 
-          {/* Overview hero */}
+          {status === 'loading' && <LoadingState label="Loading your totals" />}
+          {status === 'error' && (
+            <ErrorState title="Could not load your totals" sub="Your finance data could not be read. Nothing has been lost." onRetry={reload} />
+          )}
+          {/* Overview hero. Every ledger is summed, whenever it started, so the
+              label says ALL TIME; it used to claim THIS MONTH. */}
+          {status === 'ready' && (<>
           <HeroCard>
-            <Text style={s.heroLabel}>TOTAL OVERVIEW · THIS MONTH</Text>
+            <Text style={s.heroLabel}>TOTAL OVERVIEW · ALL TIME</Text>
             <View style={{ marginTop: 12 }}>
               <HeroSplit>
                 <View>
@@ -144,6 +154,7 @@ export default function FinanceDashboard() {
               <StatTile value={String(t.chitti)} label="Lucky Draw groups" tone="brand" />
             </TileGrid>
           </View>
+          </>)}
 
           {/* Quick actions */}
           <Text style={s.section}>Quick Actions</Text>

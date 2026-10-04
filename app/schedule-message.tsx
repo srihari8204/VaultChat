@@ -1,6 +1,6 @@
 // app/schedule-message.tsx — Schedule a text message to a specific chat.
 //
-// Reachable from the chat composer (long-press Send). The list of all
+// Reachable from the chat's ⋮ menu → "Schedule a message". The list of all
 // scheduled messages lives at /scheduled (separate screen).
 //
 // Backend route: POST /user/scheduled-messages
@@ -12,12 +12,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useState , useMemo} from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { scheduleEncryptedMessage } from '../lib/chatService';
 import { putScheduledCopy } from '../lib/scheduledLocalCopy';
-import { AuroraBackground } from '../components/ui';
+import { AuroraBackground, KeyboardSafe } from '../components/ui';
+// Cross-platform picker (Android dialogs, iOS inline sheet); shared, not finance-specific in behaviour.
+import { useDatePicker } from '../components/finance/useDatePicker';
 
 const QUICK_TIMES: { label: string; mins: number }[] = [
   { label: 'In 30 min',      mins: 30 },
@@ -85,28 +86,16 @@ export default function ScheduleMessageScreen() {
 
   const sendIn = useCallback((mins: number) => doSchedule(scheduleTimeFor(mins)), [doSchedule]);
 
-  // Custom date → then time → set as the chosen datetime (Android sequential pickers).
+  // Custom date + time. Android chains its date and time dialogs; iOS (which
+  // has no DateTimePickerAndroid) gets an inline picker sheet. A past pick is
+  // rejected by doSchedule.
+  const picker = useDatePicker();
   const pickCustom = useCallback(() => {
-    const base = customWhen ?? new Date(Date.now() + 60 * 60 * 1000);
-    DateTimePickerAndroid.open({
-      value: base, mode: 'date', minimumDate: new Date(),
-      onChange: (_e, date) => {
-        if (!date) return;
-        DateTimePickerAndroid.open({
-          value: base, mode: 'time', is24Hour: false,
-          onChange: (_e2, time) => {
-            if (!time) return;
-            const when = new Date(date);
-            when.setHours(time.getHours(), time.getMinutes(), 0, 0);
-            setCustomWhen(when);
-          },
-        });
-      },
-    });
-  }, [customWhen]);
+    picker.open(customWhen ?? new Date(Date.now() + 60 * 60 * 1000), setCustomWhen, 'datetime');
+  }, [customWhen, picker]);
 
   return (
-    <View style={S.screen}>
+    <KeyboardSafe style={S.screen}>
       <AuroraBackground />
       <View style={S.header}>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
@@ -126,6 +115,7 @@ export default function ScheduleMessageScreen() {
           onChangeText={setMessage}
           placeholder="What should we send?"
           placeholderTextColor={colors.textDim}
+          accessibilityLabel="Message to schedule"
           multiline
           maxLength={4000}
         />
@@ -141,6 +131,9 @@ export default function ScheduleMessageScreen() {
                 onPress={() => sendIn(t.mins)}
                 disabled={scheduling}
                 activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel={`Schedule ${t.label.toLowerCase()}`}
+                accessibilityState={{ disabled: scheduling }}
               >
                 <Text style={S.quickLabel}>{t.label}</Text>
                 <Text style={S.quickSub}>{when.toLocaleString([], {
@@ -154,7 +147,7 @@ export default function ScheduleMessageScreen() {
 
         {/* Custom date + time */}
         <Text style={[S.label, { marginTop: 20 }]}>CUSTOM DATE & TIME</Text>
-        <TouchableOpacity style={S.customBtn} onPress={pickCustom} disabled={scheduling} activeOpacity={0.85}>
+        <TouchableOpacity style={S.customBtn} onPress={pickCustom} disabled={scheduling} activeOpacity={0.85} accessibilityRole="button" accessibilityState={{ disabled: scheduling }}>
           <Ionicons name="calendar-outline" size={20} color={colors.primary} />
           <Text style={S.customTxt}>
             {customWhen
@@ -169,6 +162,8 @@ export default function ScheduleMessageScreen() {
             onPress={() => doSchedule(customWhen)}
             disabled={scheduling}
             activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: scheduling }}
           >
             <Text style={S.scheduleBtnTxt}>Schedule for this time</Text>
           </TouchableOpacity>
@@ -187,7 +182,8 @@ export default function ScheduleMessageScreen() {
           Cancel any pending one from <Text style={{ color: colors.primary }}>Scheduled</Text>.
         </Text>
       </ScrollView>
-    </View>
+      {picker.element}
+    </KeyboardSafe>
   );
 }
 
@@ -212,7 +208,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   customBtn:     { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: c.glassSoft, borderColor: c.glassStroke, borderWidth: 1, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 16 },
   customTxt:     { flex: 1, color: c.text, fontSize: 15, fontWeight: '600' },
   scheduleBtn:   { backgroundColor: c.primary, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 10 },
-  scheduleBtnTxt:{ color: '#fff', fontSize: 15, fontWeight: '800' },
+  scheduleBtnTxt:{ color: c.bubbleOutText, fontSize: 15, fontWeight: '800' },
 
   busy:          { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 16, justifyContent: 'center' },
   busyTxt:       { color: c.textDim, fontSize: 12 },

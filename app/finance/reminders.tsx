@@ -6,7 +6,7 @@ import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useFocusEffect } from 'expo-router';
-import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
+import { useDatePicker } from '../../components/finance/useDatePicker';
 import { type FinancePalette } from '../../constants/financeTheme';
 import { FinHeader, Label, Field, Segment, Btn, Pill, EmptyState, Card, LoadingState, ErrorState } from '../../components/finance/ui';
 import { useLoadStatus } from '../../components/finance/useLoad';
@@ -16,7 +16,7 @@ import {
   insertReminder, listReminders, setReminderStatus, snoozeReminder, deleteReminder,
   type Reminder, type ReminderFreq,
 } from '../../db/reminders';
-import { scheduleReminder, scheduleAt, cancel } from '../../components/finance/notify';
+import { scheduleReminder, scheduleAt, cancel, snoozedNotifIds } from '../../components/finance/notify';
 
 const FREQ_LABEL: Record<ReminderFreq, string> = { once: 'Once', daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', yearly: 'Yearly' };
 
@@ -40,51 +40,65 @@ export default function Reminders() {
   }, [me, beginLoad, loadOk, loadFail]);
   useFocusEffect(reload);
 
-  const pickWhen = () => {
-    DateTimePickerAndroid.open({
-      value: new Date(when), mode: 'date',
-      onChange: (_e, d) => {
-        if (!d) return;
-        const base = d.getTime();
-        DateTimePickerAndroid.open({
-          value: new Date(when), mode: 'time',
-          onChange: (_e2, t) => {
-            const day = new Date(base);
-            if (t) { day.setHours(t.getHours(), t.getMinutes(), 0, 0); }
-            setWhen(day.getTime());
-          },
-        });
-      },
-    });
-  };
+  const picker = useDatePicker();
+  const pickWhen = () => picker.open(new Date(when), (d) => setWhen(d.getTime()), 'datetime');
+
+  // A reminder whose notification could not be scheduled (permission denied,
+  // or the OS refused) is still worth keeping as a note, but it must not look
+  // like it will alert anyone.
+  const warnUnscheduled = () => Alert.alert(
+    'Notifications are off',
+    'The reminder is saved, but it will not alert you. Allow notifications for this app in your phone settings, then add it again.',
+  );
 
   const onAdd = async () => {
     if (!me) return;
     if (!title.trim()) return Alert.alert('Title', 'Enter a reminder title.');
-    const notifId = await scheduleReminder('Vault Finance', title.trim(), freq, when);
-    await insertReminder({
-      user_id: me.id,
-      ref_type: (params.refType as any) ?? null,
-      ref_id: params.refId ?? null,
-      title: title.trim(), freq, next_at: when, notif_id: notifId,
-    });
-    setShowAdd(false); setTitle(''); reload();
+    try {
+      const notifId = await scheduleReminder('Vault Finance', title.trim(), freq, when);
+      await insertReminder({
+        user_id: me.id,
+        ref_type: (params.refType as any) ?? null,
+        ref_id: params.refId ?? null,
+        title: title.trim(), freq, next_at: when, notif_id: notifId,
+      });
+      if (!notifId) warnUnscheduled();
+      setShowAdd(false); setTitle(''); reload();
+    } catch (e: any) { Alert.alert('Could not add the reminder', e?.message ?? 'Try again.'); }
   };
 
-  const onDone = async (r: Reminder) => { await cancel(r.notif_id); await setReminderStatus(r.id, 'done'); reload(); };
-  const onSnooze = async (r: Reminder) => {
-    await cancel(r.notif_id);
-    const next = Date.now() + 86400000;
-    const notifId = await scheduleAt('Vault Finance', r.title, next);
-    await snoozeReminder(r.id, next, notifId); reload();
+  const onDone = async (r: Reminder) => {
+    try { await cancel(r.notif_id); await setReminderStatus(r.id, 'done'); reload(); }
+    catch (e: any) { Alert.alert('Could not update the reminder', e?.message ?? 'Try again.'); }
   };
-  const onDelete = async (r: Reminder) => { await cancel(r.notif_id); await deleteReminder(r.id); reload(); };
+  const onSnooze = async (r: Reminder) => {
+    try {
+      const next = Date.now() + 86400000;
+      const snoozeId = await scheduleAt('Vault Finance', r.title, next);
+      // A recurring reminder keeps its own schedule; the snooze is one extra
+      // alert tomorrow. Cancelling the recurrence here used to turn a monthly
+      // reminder into a one-off without saying so.
+      const ids = snoozedNotifIds(r.freq, r.notif_id, snoozeId);
+      await cancel(ids.cancel);
+      await snoozeReminder(r.id, next, ids.keep);
+      if (!snoozeId) warnUnscheduled();
+      reload();
+    } catch (e: any) { Alert.alert('Could not snooze the reminder', e?.message ?? 'Try again.'); }
+  };
+  const onDelete = (r: Reminder) => Alert.alert('Delete reminder?', r.title, [
+    { text: 'Cancel', style: 'cancel' },
+    { text: 'Delete', style: 'destructive', onPress: async () => {
+      try { await cancel(r.notif_id); await deleteReminder(r.id); reload(); }
+      catch (e: any) { Alert.alert('Could not delete the reminder', e?.message ?? 'Try again.'); }
+    } },
+  ]);
 
   const active = rows.filter(r => r.status === 'active');
   const done = rows.filter(r => r.status === 'done');
 
   return (
     <View style={s.screen}>
+      {picker.element}
       <FinHeader title="Reminders" right={
         <TouchableOpacity accessibilityLabel={showAdd ? "Close the new reminder form" : "Add a reminder"} onPress={() => setShowAdd(v => !v)} hitSlop={8}>
           <Ionicons name={showAdd ? 'close' : 'add-circle'} size={26} color={FIN.brandDeep} />
@@ -94,14 +108,15 @@ export default function Reminders() {
         {showAdd && (
           <Card style={{ marginBottom: 8 }}>
             <Label>Title</Label>
-            <Field value={title} onChangeText={setTitle} placeholder="e.g. Ramesh — interest due" />
+            <Field label="Reminder title" value={title} onChangeText={setTitle} placeholder="e.g. Ramesh — interest due" />
             <Label>Repeat</Label>
             <Segment<ReminderFreq>
               options={[{ k: 'once', label: 'Once' }, { k: 'daily', label: 'Daily' }, { k: 'weekly', label: 'Weekly' }, { k: 'monthly', label: 'Monthly' }]}
               value={freq} onChange={setFreq} small
             />
             <Label>When</Label>
-            <TouchableOpacity style={s.whenBtn} onPress={pickWhen}>
+            <TouchableOpacity style={s.whenBtn} onPress={pickWhen} accessibilityRole="button"
+              accessibilityLabel={`When: ${fmtDateTime(when)}. Change date and time`}>
               <Ionicons name="time-outline" size={18} color={FIN.brandDeep} />
               <Text style={s.whenTxt}>{fmtDateTime(when)}</Text>
             </TouchableOpacity>
@@ -125,6 +140,7 @@ export default function Reminders() {
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={s.title} numberOfLines={2}>{r.title}</Text>
                 <Text style={s.sub}>{fmtDateTime(r.next_at)}</Text>
+                {!r.notif_id && <Text style={[s.sub, { color: FIN.bad }]}>Not scheduled: notifications are off</Text>}
               </View>
             </View>
             <View style={s.actions}>

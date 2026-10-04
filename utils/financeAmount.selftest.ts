@@ -60,9 +60,9 @@ for (const v of ['12,5', '0x10', '', 'abc', '1,200']) {
 
 // The CSV importer must not have grown its own copy back. It parses rows from a
 // FILE, so a wrong number there is never even seen being typed.
-const io = fs.readFileSync('app/finance/io.tsx', 'utf8');
+const io = fs.readFileSync('components/finance/ledgerCsv.ts', 'utf8');
 ok('the CSV importer shares the hardened parser', io.includes('parseAmount'));
 ok('the CSV importer has no bare comma strip of its own', !/Number\(\(v \?\? ''\)\.replace\(\/,\/g/.test(io));
-ok('a row whose principal will not parse is skipped, not imported as zero', io.includes('if (!(principal > 0)) continue;'));
+ok('a row whose principal will not parse is skipped, not imported as zero', io.includes('if (!(Number.isFinite(principal) && principal > 0)) { plan.badPrincipal++; continue; }'));
 
 console.log(`\nfinanceAmount.selftest: ${n} assertions passed`);

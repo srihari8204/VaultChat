@@ -2,6 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<!-- Content-Security-Policy: script-src allows ONLY this page's one inline script, pinned by its SHA-256.
+     After editing that script, recompute the hash, e.g.
+     python3 -c "import re,hashlib,base64,sys;s=open(sys.argv[1]).read();print(base64.b64encode(hashlib.sha256(re.findall(r'<script>(.*?)</script>',s,re.S)[-1].encode()).digest()).decode())" FILE
+     The page refuses to run its script until the hash matches. frame-ancestors cannot be set from a meta tag: send it as a header. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-y5kZuqCwL4lyK4K3unfSpZ7TVAnZnV84gr0ili4uUN4='; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'" />
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>crazzychat Server Logs</title>
 <style>
@@ -51,6 +56,16 @@
   #setup code { background:var(--panel2); border:1px solid var(--border); border-radius:6px; padding:2px 6px; font-family:var(--mono); font-size:12px; color:#9fd0ff; }
 
   footer { display:flex; gap:14px; padding:5px 16px; background:var(--panel); border-top:1px solid var(--border); font-size:11.5px; color:var(--dim); }
+
+  /* Phones and narrow windows: the fixed 210px source list beside the log left
+     the log a sliver. Stack it above the log as a short scrolling strip. */
+  @media (max-width: 700px) {
+    main { flex-direction:column; }
+    nav { width:auto; max-height:28vh; border-right:none; border-bottom:1px solid var(--border); }
+    nav button { display:inline-block; width:auto; }
+    nav .grp { margin:8px 6px 2px; }
+    #token, #filter { width:100%; }
+  }
 </style>
 </head>
 <body>
@@ -58,20 +73,21 @@
 <header>
   <h1><a href="/" title="back to dashboard">←</a> crazzychat <span>server logs</span></h1>
   <div id="status"><div id="dot"></div><span id="statustxt">connecting…</span></div>
-  <input id="token" type="password" placeholder="admin log token" spellcheck="false" title="LOG_TOKEN from the server (stored only in this browser)">
+  <input id="token" type="password" placeholder="admin log token" spellcheck="false" aria-label="Log token" title="LOG_TOKEN from the server (kept only in this tab)">
+  <button class="btn" id="forgetBtn" title="forget the token in this tab">forget token</button>
   <div class="spacer"></div>
   <div class="controls">
-    <select id="lines" title="tail lines">
+    <select id="lines" title="tail lines" aria-label="Lines to show">
       <option>100</option><option selected>200</option><option>500</option><option>1000</option><option>2000</option>
     </select>
-    <select id="since" title="time window">
+    <select id="since" title="time window" aria-label="Time window">
       <option value="">all</option><option value="5m">5 min</option><option value="15m">15 min</option>
       <option value="1h">1 h</option><option value="6h">6 h</option><option value="24h">24 h</option>
     </select>
-    <select id="auto" title="auto refresh">
+    <select id="auto" title="auto refresh" aria-label="Auto refresh">
       <option value="0">manual</option><option value="2000">2 s</option><option value="5000" selected>5 s</option><option value="10000">10 s</option>
     </select>
-    <input id="filter" placeholder="filter (e.g. error, 502)…">
+    <input id="filter" placeholder="filter (e.g. error, 502)…" aria-label="Filter lines">
     <button class="btn" id="wrapBtn" title="toggle line wrap">wrap</button>
     <button class="btn" id="refreshBtn" title="refresh now">⟳ refresh</button>
     <button class="btn" id="downloadBtn" title="save current view to a file">⬇ save</button>
@@ -79,7 +95,7 @@
 </header>
 
 <main>
-  <nav id="nav"></nav>
+  <nav id="nav" aria-label="Log sources"></nav>
   <div id="logwrap">
     <div id="log"></div>
     <div id="empty">
@@ -87,7 +103,7 @@
         <h2>Enter the log token</h2>
         <p>Paste the server's <code>LOG_TOKEN</code> into the field in the header
            (it lives in <code>/etc/vaultchat-logs.env</code> on the box). The token is
-           kept only in this browser and sent over HTTPS with each request.</p>
+           kept only in this tab, cleared when the tab closes, and sent over HTTPS with each request.</p>
         <p>If the token is right and this still shows: check the log service —
            <code>systemctl status vaultchat-logs</code>.</p>
       </div>
@@ -114,7 +130,11 @@
   };
   // Same-origin API (nginx proxies /logapi/ → 127.0.0.1:9999).
   const EP = '/logapi';
-  $('token').value = localStorage.getItem('lv_tok') || '';
+  // The token lives in sessionStorage: it dies with the tab. Logs carry IPs and
+  // ids, so a token left in persistent localStorage on a shared machine was a
+  // standing read grant. Any copy an older version left there is removed.
+  try { localStorage.removeItem('lv_tok'); } catch {}
+  $('token').value = sessionStorage.getItem('lv_tok') || '';
 
   const GROUPS = [
     { label: 'Docker services', type: 'compose' },
@@ -138,7 +158,7 @@
       for (const s of items) {
         const b = document.createElement('button');
         b.textContent = s.id;
-        if (s.id === state.src) b.classList.add('sel');
+        if (s.id === state.src) { b.classList.add('sel'); b.setAttribute('aria-current', 'true'); }
         b.onclick = () => { state.src = s.id; localStorage.setItem('lv_src', s.id); renderNav(); load(); };
         nav.appendChild(b);
       }
@@ -228,7 +248,12 @@
   $('lines').onchange = load;
   $('since').onchange = load;
   $('auto').onchange = schedule;
-  $('token').onchange = () => { localStorage.setItem('lv_tok', $('token').value.trim()); state.sources = []; load(); };
+  $('token').onchange = () => { sessionStorage.setItem('lv_tok', $('token').value.trim()); state.sources = []; load(); };
+  $('forgetBtn').onclick = () => {
+    sessionStorage.removeItem('lv_tok'); $('token').value = '';
+    state.sources = []; state.lastLines = []; $('log').innerHTML = ''; $('nav').innerHTML = '';
+    setConnected(false, 'token cleared');
+  };
   $('wrapBtn').onclick = () => { $('log').classList.toggle('wrap'); $('wrapBtn').classList.toggle('active'); };
   $('downloadBtn').onclick = () => {
     const blob = new Blob([state.lastLines.join('\n')], { type: 'text/plain' });

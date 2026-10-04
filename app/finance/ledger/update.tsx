@@ -4,10 +4,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useFinanceTheme } from '../../../components/finance/useFinanceTheme';
 import { KeyboardSafe } from '../../../components/ui';
-import { View, Text, ScrollView, StyleSheet, Alert, Platform } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Alert } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { type FinancePalette } from '../../../constants/financeTheme';
-import { FinHeader, Label, Field, Btn, Card, RowLine } from '../../../components/finance/ui';
+import { FinHeader, Label, Field, Btn, Card, RowLine, LoadingState, ErrorState } from '../../../components/finance/ui';
+import { useLoadStatus } from '../../../components/finance/useLoad';
 import { formatINR, fmtDateTime, num } from '../../../utils/financeFormat';
 import { getLedger, addLedgerUpdate, type LedgerEntry } from '../../../db/ledger';
 import { round2 } from '../../../utils/interest';
@@ -23,7 +24,12 @@ export default function UpdateAmount() {
   const [note, setNote] = useState('');
   const [touchedRemaining, setTouchedRemaining] = useState(false);
 
-  const load = useCallback(() => { if (id) getLedger(id).then(setE); }, [id]);
+  const { status, begin, done, fail } = useLoadStatus();
+  const load = useCallback(() => {
+    if (!id) { fail(); return; }
+    begin();
+    getLedger(id).then((row) => { setE(row); done(); }).catch(fail);
+  }, [id, begin, done, fail]);
   useEffect(load, [load]);
 
   // auto-fill remaining = current remaining − received (until the user edits it)
@@ -34,7 +40,16 @@ export default function UpdateAmount() {
     setRemaining(String(next));
   }, [received, e, touchedRemaining]);
 
-  if (!e) return <View style={s.screen}><FinHeader title="Update Amount" /></View>;
+  if (!e) {
+    return (
+      <View style={s.screen}>
+        <FinHeader title="Update Amount" />
+        {status === 'loading' && <LoadingState label="Loading ledger" />}
+        {status === 'error' && <ErrorState title="Could not load this ledger" sub="Nothing has been changed." onRetry={load} />}
+        {status === 'ready' && <ErrorState title="Ledger not found" sub="It may have been deleted." />}
+      </View>
+    );
+  }
 
   const onSave = async () => {
     const rec = num(received), rem = num(remaining);
@@ -59,13 +74,13 @@ export default function UpdateAmount() {
           </Card>
 
           <Label>Amount Received Now</Label>
-          <Field value={received} onChangeText={setReceived} placeholder="₹ 0" keyboardType="numeric" />
+          <Field label="Amount received now" value={received} onChangeText={setReceived} placeholder="₹ 0" keyboardType="numeric" />
 
           <Label hint="(auto — edit if needed)">New Remaining Amount</Label>
-          <Field value={remaining} onChangeText={(t) => { setTouchedRemaining(true); setRemaining(t); }} placeholder="₹ 0" keyboardType="numeric" />
+          <Field label="New remaining amount" value={remaining} onChangeText={(t) => { setTouchedRemaining(true); setRemaining(t); }} placeholder="₹ 0" keyboardType="numeric" />
 
           <Label hint="(optional)">Notes</Label>
-          <Field value={note} onChangeText={setNote} placeholder="e.g. paid via UPI" multiline />
+          <Field label="Notes, optional" value={note} onChangeText={setNote} placeholder="e.g. paid via UPI" multiline />
 
           <Text style={s.hint}>This update is timestamped and added to the ledger timeline automatically.</Text>
 

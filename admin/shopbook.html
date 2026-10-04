@@ -2,6 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
+<!-- Content-Security-Policy: script-src allows ONLY this page's one inline script, pinned by its SHA-256.
+     After editing that script, recompute the hash, e.g.
+     python3 -c "import re,hashlib,base64,sys;s=open(sys.argv[1]).read();print(base64.b64encode(hashlib.sha256(re.findall(r'<script>(.*?)</script>',s,re.S)[-1].encode()).digest()).decode())" FILE
+     The page refuses to run its script until the hash matches. frame-ancestors cannot be set from a meta tag: send it as a header. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-9cWK+CU9tx7jxDlzzHUki83uxEno8mlNuFWyygUkzJs='; style-src 'unsafe-inline'; connect-src https: http://localhost:* http://127.0.0.1:*; img-src data:; base-uri 'none'; form-action 'none'" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="dark" />
 <title>Shop Book · Admin</title>
@@ -33,6 +38,10 @@
   .muted{color:var(--sub);font-size:12px}
   textarea{width:100%;min-height:120px;font-family:ui-monospace,monospace;font-size:12px}
   .hide{display:none!important}
+  .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  .err{color:var(--err);font-size:13px}
+  a.button{display:inline-block;text-decoration:none;border-radius:9px;padding:9px 14px;font-weight:700;font-size:13px}
+  a.button.ghost{background:var(--panel2);color:var(--txt);border:1px solid var(--line2)}
   #msg{position:fixed;bottom:16px;right:16px;background:var(--panel2);border:1px solid var(--line);padding:10px 16px;border-radius:10px;opacity:0;transition:opacity .3s}
 </style>
 </head>
@@ -43,9 +52,11 @@ and read-only windows onto orders, returns and the shop audit trail. Every actio
 An admin can decide a shop's standing here; a shop's money has no endpoint and never will.</p>
 
 <div class="bar">
+  <label class="sr" for="base">API base URL</label>
   <input id="base" placeholder="API base (e.g. https://api.example.com)" />
-  <input id="key" type="password" placeholder="x-admin-key" />
-  <button onclick="loadAll()">Connect</button>
+  <label class="sr" for="key">Admin key</label>
+  <input id="key" type="password" placeholder="x-admin-key" autocomplete="off" />
+  <button data-act="connect">Connect</button>
 </div>
 
 <div id="app" class="hide">
@@ -54,17 +65,17 @@ An admin can decide a shop's standing here; a shop's money has no endpoint and n
 
   <h2>Shop approvals</h2>
   <div class="bar">
-    <button class="ghost" onclick="loadShops('pending')">Pending only</button>
-    <button class="ghost" onclick="loadShops('all')">All shops</button>
+    <button class="ghost" data-act="shops" data-filter="pending">Pending only</button>
+    <button class="ghost" data-act="shops" data-filter="all">All shops</button>
   </div>
   <div id="shops"></div>
 
   <h2>Verification queue</h2>
   <p class="muted">Documents open in a link that expires in fifteen minutes — the reviewer gets access, not a copy.</p>
   <div class="bar">
-    <button class="ghost" onclick="loadVerifications('pending_review')">Pending review</button>
-    <button class="ghost" onclick="loadVerifications('verified')">Verified</button>
-    <button class="ghost" onclick="loadVerifications('all')">All</button>
+    <button class="ghost" data-act="verifications" data-filter="pending_review">Pending review</button>
+    <button class="ghost" data-act="verifications" data-filter="verified">Verified</button>
+    <button class="ghost" data-act="verifications" data-filter="all">All</button>
   </div>
   <div id="verifications"></div>
 
@@ -72,8 +83,8 @@ An admin can decide a shop's standing here; a shop's money has no endpoint and n
   <p class="muted">A verified shop's pin is fixed because customers walk to it. Compare the two addresses before approving —
     an approval moves the pin customers are given.</p>
   <div class="bar">
-    <button class="ghost" onclick="loadLocations('pending')">Pending</button>
-    <button class="ghost" onclick="loadLocations('all')">All</button>
+    <button class="ghost" data-act="locations" data-filter="pending">Pending</button>
+    <button class="ghost" data-act="locations" data-filter="all">All</button>
   </div>
   <div id="locations"></div>
 
@@ -85,7 +96,7 @@ An admin can decide a shop's standing here; a shop's money has no endpoint and n
   <h2>Country tax engine</h2>
   <p class="muted">Edit the JSON of a country and save — changes apply to shops with no app release. Tax fields are always optional for shops.</p>
   <div id="countries"></div>
-  <button class="ghost" onclick="newCountry()">+ Add country</button>
+  <button class="ghost" data-act="new-country">+ Add country</button>
 
   <h2>Categories &amp; starter catalogs</h2>
   <div id="categories"></div>
@@ -93,20 +104,32 @@ An admin can decide a shop's standing here; a shop's money has no endpoint and n
   <h2>Support windows</h2>
   <p class="muted">Read-only. Nothing here changes a shop's money.</p>
   <div class="bar">
+    <label class="sr" for="auditShop">Shop id filter</label>
     <input id="auditShop" placeholder="shop id (optional — blank = every shop)" />
-    <button class="ghost" onclick="loadOrders()">Orders</button>
-    <button class="ghost" onclick="loadReturns()">Returns</button>
-    <button class="ghost" onclick="loadAudit()">Shop audit trail</button>
+    <button class="ghost" data-act="orders">Orders</button>
+    <button class="ghost" data-act="returns">Returns</button>
+    <button class="ghost" data-act="audit">Shop audit trail</button>
   </div>
   <div id="support"></div>
 </div>
 
-<div id="msg"></div>
+<div id="msg" role="status" aria-live="polite"></div>
 
 <script>
+"use strict";
+// No inline handlers anywhere: every control carries data-act (+ data-*) and one
+// delegated listener below dispatches it. Ids never pass through a JS string,
+// and the page can run under a CSP with no 'unsafe-inline' script.
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function toast(t){ const m=$('msg'); m.textContent=t; m.style.opacity=1; setTimeout(()=>m.style.opacity=0, 2500); }
+// Numbers from the API are escaped too: a field that "is always a number" is
+// only as true as the server that sent it.
+const num = (v, digits) => { const n = Number(v); return Number.isFinite(n) ? (digits == null ? String(n) : n.toFixed(digits)) : '—'; };
+let toastTimer = null;
+function toast(t){ const m=$('msg'); m.textContent=t; m.style.opacity=1; clearTimeout(toastTimer); toastTimer=setTimeout(()=>m.style.opacity=0, 5000); }
+
+// The filter each section last showed, so a reload after an action keeps it.
+const view = { shops: 'pending', verifications: 'pending_review', locations: 'pending' };
 
 async function api(path, opts={}) {
   const res = await fetch($('base').value.replace(/\/+$/,'') + path, {
@@ -118,32 +141,54 @@ async function api(path, opts={}) {
   return body;
 }
 
+// Every section loader goes through this: a failure is shown IN the section
+// (and toasted), never an unhandled rejection that leaves the old list standing.
+async function section(target, fn){
+  const el = $(target);
+  el.setAttribute('aria-busy', 'true');
+  if (!el.innerHTML.trim()) el.innerHTML = '<p class="muted">Loading…</p>';
+  try { await fn(); }
+  catch (e) { el.innerHTML = `<p class="err">Could not load: ${esc(e.message)}</p>`; toast('❌ ' + e.message); }
+  finally { el.removeAttribute('aria-busy'); }
+}
+
 async function loadAll(){
+  const base = $('base').value.trim();
+  // The admin key goes to this URL in a header: https only (localhost for dev).
+  if (!/^https:\/\//i.test(base) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(base)) {
+    toast('❌ The API base must start with https://'); return;
+  }
   try {
     await loadStats();
-    $('app').classList.remove('hide');
-    await Promise.all([
-      loadShops('pending'), loadCountries(), loadCategories(),
-      loadVerifications('pending_review'), loadLocations('pending'), loadSubscriptions(),
-    ]);
-    localStorage.setItem('sb_admin_base', $('base').value);
-    toast('Connected');
-  } catch (e) { toast('❌ ' + e.message); }
+  } catch (e) { toast('❌ ' + e.message); return; }
+  $('app').classList.remove('hide');
+  localStorage.setItem('sb_admin_base', base);
+  // allSettled: one failing section must not hide the others.
+  await Promise.allSettled([
+    loadShops(view.shops), loadCountries(), loadCategories(),
+    loadVerifications(view.verifications), loadLocations(view.locations), loadSubscriptions(),
+  ]);
+  toast('Connected');
 }
 
 async function loadStats(){
   const s = await api('/api/admin/shopbook/stats');
   $('stats').innerHTML = `
-    <div class="stat"><b>${s.shops}</b>Shops</div>
-    <div class="stat"><b>${s.pendingApproval}</b>Pending approval</div>
-    <div class="stat"><b>${s.orders}</b>Orders</div>
-    <div class="stat"><b>${Math.round(s.gmv).toLocaleString()}</b>GMV (completed)</div>
-    <div class="stat"><b>${s.customers}</b>Customers</div>`;
+    <div class="stat"><b>${num(s.shops)}</b>Shops</div>
+    <div class="stat"><b>${num(s.pendingApproval)}</b>Pending approval</div>
+    <div class="stat"><b>${num(s.orders)}</b>Orders</div>
+    <div class="stat"><b>${esc(Number.isFinite(Number(s.gmv)) ? Math.round(Number(s.gmv)).toLocaleString() : '—')}</b>GMV (completed)</div>
+    <div class="stat"><b>${num(s.customers)}</b>Customers</div>`;
 }
 
-async function loadShops(filter){
-  const { shops } = await api('/api/admin/shopbook/shops?filter=' + filter);
-  $('shops').innerHTML = shops.length ? shops.map((sh) => `
+const shopNames = new Map();   // id → name, for confirmation prompts
+
+function loadShops(filter){
+  view.shops = filter;
+  return section('shops', async () => {
+    const { shops } = await api('/api/admin/shopbook/shops?filter=' + encodeURIComponent(filter));
+    shops.forEach((sh) => shopNames.set(sh.id, sh.name));
+    $('shops').innerHTML = shops.length ? shops.map((sh) => `
     <div class="card">
       <div class="row">
         <b>${esc(sh.name)}</b>
@@ -153,134 +198,146 @@ async function loadShops(filter){
       </div>
       <div class="muted">${esc(sh.address)} · Owner: ${esc(sh.ownerName)} ${esc(sh.ownerPhone)}</div>
       <div class="row" style="margin-top:8px">
-        ${sh.approved ? '' : `<button onclick="approve('${sh.id}', true, false)">Approve</button>
-        <button onclick="approve('${sh.id}', true, true)">Approve + Verified ✓</button>
-        <button class="danger" onclick="rejectShop('${sh.id}')">Reject…</button>`}
-        ${sh.approved ? `<button class="ghost" onclick="approve('${sh.id}', true, ${!sh.verified})">${sh.verified ? 'Remove verified badge' : 'Grant verified badge'}</button>` : ''}
+        ${sh.approved ? '' : `<button data-act="approve" data-id="${esc(sh.id)}" data-verified="false">Approve</button>
+        <button data-act="approve" data-id="${esc(sh.id)}" data-verified="true">Approve + Verified ✓</button>
+        <button class="danger" data-act="reject-shop" data-id="${esc(sh.id)}">Reject…</button>`}
+        ${sh.approved ? `<button class="ghost" data-act="approve" data-mode="badge" data-id="${esc(sh.id)}" data-verified="${!sh.verified}">${sh.verified ? 'Remove verified badge' : 'Grant verified badge'}</button>` : ''}
       </div>
     </div>`).join('') : '<p class="muted">Nothing here.</p>';
+  });
 }
 
-async function approve(id, approved, verified){
-  try { await api(`/api/admin/shopbook/shops/${id}/approve`, { method:'POST', body: JSON.stringify({ approved, verified }) });
-    toast('Saved'); loadShops('pending'); loadStats(); } catch(e){ toast('❌ ' + e.message); }
+async function approve(id, verified, badgeOnly){
+  const name = shopNames.get(id) || id;
+  const question = badgeOnly
+    ? (verified ? `Grant the verified badge to "${name}"? Customers will see it.` : `Remove the verified badge from "${name}"?`)
+    : `${verified ? 'Approve and mark VERIFIED' : 'Approve'} "${name}"? The shop becomes visible to customers` +
+      (verified ? ' with the verified badge.' : '.');
+  if (!confirm(question)) return;
+  try { await api(`/api/admin/shopbook/shops/${encodeURIComponent(id)}/approve`, { method:'POST', body: JSON.stringify({ approved: true, verified }) });
+    toast('Saved'); loadShops(view.shops); loadStats().catch(() => {}); } catch(e){ toast('❌ ' + e.message); }
 }
 async function rejectShop(id){
   const reason = prompt('Rejection reason (sent to the owner):');
   if (!reason) return;
-  try { await api(`/api/admin/shopbook/shops/${id}/approve`, { method:'POST', body: JSON.stringify({ approved:false, verified:false, reason }) });
-    toast('Rejected'); loadShops('pending'); } catch(e){ toast('❌ ' + e.message); }
+  try { await api(`/api/admin/shopbook/shops/${encodeURIComponent(id)}/approve`, { method:'POST', body: JSON.stringify({ approved:false, verified:false, reason }) });
+    toast('Rejected'); loadShops(view.shops); } catch(e){ toast('❌ ' + e.message); }
 }
 
-async function loadCountries(){
-  const { countries } = await api('/api/admin/shopbook/countries');
-  $('countries').innerHTML = countries.map((c, i) => `
+function loadCountries(){
+  return section('countries', async () => {
+    const { countries } = await api('/api/admin/shopbook/countries');
+    $('countries').innerHTML = countries.map((c, i) => `
     <div class="card">
       <div class="row"><b>${esc(c.name)} (${esc(c.code)})</b>
         <span class="muted">${esc(c.currencySymbol)} ${esc(c.currencyCode)} · ${esc(c.taxType)}</span>
         <span class="tag ${c.enabled ? 'ok':'pend'}">${c.enabled ? 'ENABLED':'DISABLED'}</span></div>
-      <textarea id="country-${i}">${esc(JSON.stringify(c, null, 2))}</textarea>
-      <div class="row" style="margin-top:8px"><button onclick="saveCountry(${i})">Save</button></div>
+      <textarea id="country-${i}" aria-label="${esc(c.name)} tax configuration JSON">${esc(JSON.stringify(c, null, 2))}</textarea>
+      <div class="row" style="margin-top:8px"><button data-act="save-json" data-src="country-${i}" data-kind="countries">Save</button></div>
     </div>`).join('');
-}
-async function saveCountry(i){
-  try {
-    const body = JSON.parse($('country-' + i).value);
-    await api('/api/admin/shopbook/countries', { method:'POST', body: JSON.stringify(body) });
-    toast('Country saved'); loadCountries();
-  } catch(e){ toast('❌ ' + e.message); }
+  });
 }
 function newCountry(){
+  if ($('country-new')) { $('country-new').focus(); return; }
   const tpl = { code:'XX', name:'New Country', currencySymbol:'$', currencyCode:'USD', taxType:'VAT',
     taxSplit:[], taxFields:[{id:'tax_number',label:'Tax Number'}], documents:[], dateFormat:'DD/MM/YYYY', sort:100, enabled:true };
   const div = document.createElement('div');
   div.className = 'card';
-  div.innerHTML = `<textarea id="country-new">${esc(JSON.stringify(tpl, null, 2))}</textarea>
-    <div class="row" style="margin-top:8px"><button onclick="saveNewCountry()">Create</button></div>`;
+  div.innerHTML = `<textarea id="country-new" aria-label="New country JSON">${esc(JSON.stringify(tpl, null, 2))}</textarea>
+    <div class="row" style="margin-top:8px"><button data-act="save-json" data-src="country-new" data-kind="countries">Create</button></div>`;
   $('countries').appendChild(div);
 }
-async function saveNewCountry(){
-  try {
-    const body = JSON.parse($('country-new').value);
-    await api('/api/admin/shopbook/countries', { method:'POST', body: JSON.stringify(body) });
-    toast('Country created'); loadCountries();
-  } catch(e){ toast('❌ ' + e.message); }
+
+function loadCategories(){
+  return section('categories', async () => {
+    const { categories } = await api('/api/admin/shopbook/categories');
+    $('categories').innerHTML = categories.map((c, i) => `
+    <div class="card">
+      <div class="row"><b>${esc(c.icon)} ${esc(c.label)}</b><span class="muted">${esc(c.id)} · ${num((c.items || []).length)} starter item(s)</span></div>
+      <textarea id="cat-${i}" aria-label="${esc(c.label)} category JSON">${esc(JSON.stringify(c, null, 2))}</textarea>
+      <div class="row" style="margin-top:8px"><button data-act="save-json" data-src="cat-${i}" data-kind="categories">Save</button></div>
+    </div>`).join('');
+  });
 }
 
-async function loadCategories(){
-  const { categories } = await api('/api/admin/shopbook/categories');
-  $('categories').innerHTML = categories.map((c, i) => `
-    <div class="card">
-      <div class="row"><b>${esc(c.icon)} ${esc(c.label)}</b><span class="muted">${esc(c.id)} · ${c.items.length} starter item(s)</span></div>
-      <textarea id="cat-${i}">${esc(JSON.stringify(c, null, 2))}</textarea>
-      <div class="row" style="margin-top:8px"><button onclick="saveCategory(${i})">Save</button></div>
-    </div>`).join('');
-}
-async function saveCategory(i){
+async function saveJson(srcId, kind){
   try {
-    const body = JSON.parse($('cat-' + i).value);
-    await api('/api/admin/shopbook/categories', { method:'POST', body: JSON.stringify(body) });
-    toast('Category saved'); loadCategories();
+    const body = JSON.parse($(srcId).value);
+    await api('/api/admin/shopbook/' + kind, { method:'POST', body: JSON.stringify(body) });
+    toast('Saved');
+    kind === 'countries' ? loadCountries() : loadCategories();
   } catch(e){ toast('❌ ' + e.message); }
 }
 
 // ── verification ────────────────────────────────────────────────
 const VERIFY_STATES = ['unverified','pending_review','verified','suspended','rejected'];
 
-async function loadVerifications(state){
-  const { shops } = await api('/api/admin/shopbook/verifications?state=' + state);
-  $('verifications').innerHTML = shops.length ? shops.map((sh) => `
+function loadVerifications(state){
+  view.verifications = state;
+  return section('verifications', async () => {
+    const { shops } = await api('/api/admin/shopbook/verifications?state=' + encodeURIComponent(state));
+    shops.forEach((sh) => shopNames.set(sh.id, sh.name));
+    $('verifications').innerHTML = shops.length ? shops.map((sh) => `
     <div class="card">
       <div class="row">
         <b>${esc(sh.name)}</b>
         <span class="tag ${sh.verifyState === 'verified' ? 'ok':'pend'}">${esc(sh.verifyState).toUpperCase()}</span>
-        <span class="muted">${esc(sh.category)} · ${esc(sh.country)} · ${sh.documentCount} document(s)</span>
+        <span class="muted">${esc(sh.category)} · ${esc(sh.country)} · ${num(sh.documentCount)} document(s)</span>
       </div>
       <div class="muted">${esc(sh.address)} · Owner: ${esc(sh.ownerName)} ${esc(sh.ownerPhone)}
         ${sh.hasFrontPhoto ? '· shop-front photo ✓' : '· no shop-front photo'}</div>
       ${sh.verifyNote ? `<div class="muted">Last note: ${esc(sh.verifyNote)}</div>` : ''}
       <div class="row" style="margin-top:8px">
-        <button class="ghost" onclick="loadDocuments('${sh.id}')">Documents…</button>
+        <button class="ghost" data-act="documents" data-id="${esc(sh.id)}">Documents…</button>
         ${VERIFY_STATES.filter((v) => v !== sh.verifyState).map((v) =>
-          `<button class="${v === 'verified' ? '' : 'ghost'}" onclick="setVerify('${sh.id}','${v}')">${v.replace('_',' ')}</button>`).join('')}
+          `<button class="${v === 'verified' ? '' : 'ghost'}" data-act="set-verify" data-id="${esc(sh.id)}" data-state="${v}">${v.replace('_',' ')}</button>`).join('')}
       </div>
-      <div id="docs-${sh.id}"></div>
+      <div data-docs-for="${esc(sh.id)}"></div>
     </div>`).join('') : '<p class="muted">Nothing here.</p>';
+  });
 }
 
 async function setVerify(id, state){
+  const name = shopNames.get(id) || id;
   // Refusing or suspending a shop without saying why leaves the owner with
   // nothing to fix, so the note is required for anything but a grant.
   let note = '';
   if (state !== 'verified') {
-    note = prompt(`Note for "${state}" (shown to the owner):`) || '';
+    note = prompt(`Note for "${state}" (shown to the owner of "${name}"):`) || '';
     if (!note) return;
+  } else if (!confirm(`Mark "${name}" VERIFIED? Customers will see the badge and its location becomes fixed.`)) {
+    return;
   }
   try {
-    await api(`/api/admin/shopbook/shops/${id}/verify`, { method:'POST', body: JSON.stringify({ state, note }) });
-    toast('Saved'); loadVerifications('pending_review'); loadShops('pending');
+    await api(`/api/admin/shopbook/shops/${encodeURIComponent(id)}/verify`, { method:'POST', body: JSON.stringify({ state, note }) });
+    toast('Saved'); loadVerifications(view.verifications); loadShops(view.shops);
   } catch(e){ toast('❌ ' + e.message); }
 }
 
+const docsBox = (shopId) => document.querySelector(`[data-docs-for="${CSS.escape(shopId)}"]`);
+
 async function loadDocuments(shopId){
+  const box = docsBox(shopId);
+  if (!box) return;
   try {
-    const { documents } = await api(`/api/admin/shopbook/shops/${shopId}/documents`);
-    $('docs-' + shopId).innerHTML = documents.length ? documents.map((d) => `
+    const { documents } = await api(`/api/admin/shopbook/shops/${encodeURIComponent(shopId)}/documents`);
+    // Only an https link is offered: a stored URL is still data from the server.
+    box.innerHTML = documents.length ? documents.map((d) => `
       <div class="card" style="margin-top:8px">
         <div class="row">
           <b>${esc(d.kind)}</b>
           <span class="tag ${d.status === 'accepted' ? 'ok':'pend'}">${esc(d.status).toUpperCase()}</span>
-          <span class="muted">${esc(d.filename)} · ${Math.round((d.sizeBytes||0)/1024)} KB · ${esc(d.uploadedAt)}</span>
+          <span class="muted">${esc(d.filename)} · ${num(Math.round((Number(d.sizeBytes)||0)/1024))} KB · ${esc(d.uploadedAt)}</span>
         </div>
         ${d.reviewNote ? `<div class="muted">Note: ${esc(d.reviewNote)}</div>` : ''}
         <div class="row" style="margin-top:8px">
-          ${d.viewUrl ? `<a href="${esc(d.viewUrl)}" target="_blank" rel="noopener"><button class="ghost">Open (15 min)</button></a>`
+          ${/^https:\/\//i.test(d.viewUrl || '') ? `<a class="button ghost" href="${esc(d.viewUrl)}" target="_blank" rel="noopener noreferrer">Open (15 min)</a>`
                       : '<span class="muted">No view link — object storage is off</span>'}
-          <button onclick="reviewDoc('${d.id}','accepted','${shopId}')">Accept</button>
-          <button class="danger" onclick="reviewDoc('${d.id}','rejected','${shopId}')">Reject…</button>
+          <button data-act="review-doc" data-id="${esc(d.id)}" data-shop="${esc(shopId)}" data-status="accepted">Accept</button>
+          <button class="danger" data-act="review-doc" data-id="${esc(d.id)}" data-shop="${esc(shopId)}" data-status="rejected">Reject…</button>
         </div>
       </div>`).join('') : '<p class="muted">No documents uploaded.</p>';
-  } catch(e){ toast('❌ ' + e.message); }
+  } catch(e){ box.innerHTML = `<p class="err">Could not load documents: ${esc(e.message)}</p>`; toast('❌ ' + e.message); }
 }
 
 async function reviewDoc(id, status, shopId){
@@ -290,30 +347,36 @@ async function reviewDoc(id, status, shopId){
     if (!note) return;
   }
   try {
-    await api(`/api/admin/shopbook/documents/${id}/review`, { method:'POST', body: JSON.stringify({ status, note }) });
+    await api(`/api/admin/shopbook/documents/${encodeURIComponent(id)}/review`, { method:'POST', body: JSON.stringify({ status, note }) });
     toast('Reviewed'); loadDocuments(shopId);
   } catch(e){ toast('❌ ' + e.message); }
 }
 
 // ── location changes ────────────────────────────────────────────
-async function loadLocations(status){
-  const { requests } = await api('/api/admin/shopbook/location-requests?status=' + status);
-  $('locations').innerHTML = requests.length ? requests.map((q) => `
+const locReqs = new Map();   // id → request, for the confirmation text
+
+function loadLocations(status){
+  view.locations = status;
+  return section('locations', async () => {
+    const { requests } = await api('/api/admin/shopbook/location-requests?status=' + encodeURIComponent(status));
+    requests.forEach((q) => locReqs.set(q.id, q));
+    $('locations').innerHTML = requests.length ? requests.map((q) => `
     <div class="card">
       <div class="row">
         <b>${esc(q.shopName)}</b>
         <span class="tag ${q.status === 'pending' ? 'pend':'ok'}">${esc(q.status).toUpperCase()}</span>
-        <span class="muted">${(q.distanceKm ?? 0).toFixed(2)} km · ${esc(q.requestedAt)}</span>
+        <span class="muted">${num(q.distanceKm ?? 0, 2)} km · ${esc(q.requestedAt)}</span>
       </div>
-      <div class="muted">From: ${esc(q.from.address) || '—'} (${q.from.lat ?? '—'}, ${q.from.lng ?? '—'})</div>
-      <div class="muted">To: ${esc(q.to.address) || '—'} (${q.to.lat}, ${q.to.lng})</div>
+      <div class="muted">From: ${esc(q.from && q.from.address) || '—'} (${num(q.from && q.from.lat)}, ${num(q.from && q.from.lng)})</div>
+      <div class="muted">To: ${esc(q.to && q.to.address) || '—'} (${num(q.to && q.to.lat)}, ${num(q.to && q.to.lng)})</div>
       <div class="muted">Reason: ${esc(q.reason)}</div>
       ${q.reviewNote ? `<div class="muted">Review: ${esc(q.reviewNote)}</div>` : ''}
       ${q.status === 'pending' ? `<div class="row" style="margin-top:8px">
-        <button onclick="decideLocation('${q.id}', true)">Approve move</button>
-        <button class="danger" onclick="decideLocation('${q.id}', false)">Refuse…</button>
+        <button data-act="decide-location" data-id="${esc(q.id)}" data-approve="true">Approve move</button>
+        <button class="danger" data-act="decide-location" data-id="${esc(q.id)}" data-approve="false">Refuse…</button>
       </div>` : ''}
     </div>`).join('') : '<p class="muted">Nothing here.</p>';
+  });
 }
 
 async function decideLocation(id, approve){
@@ -323,86 +386,143 @@ async function decideLocation(id, approve){
   if (!approve) {
     note = prompt('Why is the move refused? (shown to the owner)') || '';
     if (!note) return;
+  } else {
+    const q = locReqs.get(id);
+    const where = (p) => (p && p.address) || `${num(p && p.lat)}, ${num(p && p.lng)}`;
+    if (!confirm(`Move "${q ? q.shopName : id}" ${q ? num(q.distanceKm ?? 0, 2) + ' km' : ''}?\n\nFrom: ${q ? where(q.from) : '?'}\nTo:   ${q ? where(q.to) : '?'}\n\nCustomers will be sent to the new pin.`)) return;
   }
   try {
-    await api(`/api/admin/shopbook/location-requests/${id}/decide`, { method:'POST', body: JSON.stringify({ approve, note }) });
-    toast(approve ? 'Moved' : 'Refused'); loadLocations('pending');
+    await api(`/api/admin/shopbook/location-requests/${encodeURIComponent(id)}/decide`, { method:'POST', body: JSON.stringify({ approve, note }) });
+    toast(approve ? 'Moved' : 'Refused'); loadLocations(view.locations);
   } catch(e){ toast('❌ ' + e.message); }
 }
 
 // ── subscriptions / entitlements ────────────────────────────────
-async function loadSubscriptions(){
-  const { subscriptions } = await api('/api/admin/shopbook/subscriptions');
-  $('subscriptions').innerHTML = subscriptions.length ? subscriptions.map((s) => {
-    const drift = s.displayPlan !== s.entitledPlan;
-    return `
+function loadSubscriptions(){
+  return section('subscriptions', async () => {
+    const { subscriptions } = await api('/api/admin/shopbook/subscriptions');
+    subscriptions.forEach((s) => shopNames.set(s.shopId, s.shopName));
+    $('subscriptions').innerHTML = subscriptions.length ? subscriptions.map((s) => {
+      const drift = s.displayPlan !== s.entitledPlan;
+      return `
     <div class="card">
       <div class="row">
         <b>${esc(s.shopName)}</b>
         <span class="tag ${s.entitledPlan === 'pro' ? 'ok':'pend'}">${esc(s.entitledPlan).toUpperCase()} · ${esc(s.state)}</span>
         ${drift ? `<span class="tag pend">shows ${esc(s.displayPlan)}</span>` : ''}
-        <span class="muted">${s.customers} customer(s) · ${s.products} product(s)
+        <span class="muted">${num(s.customers)} customer(s) · ${num(s.products)} product(s)
           ${s.expiresAt ? '· expires ' + esc(s.expiresAt) : '· no expiry'}
           ${s.source ? '· ' + esc(s.source) : ''} ${s.reference ? '· ' + esc(s.reference) : ''}</span>
       </div>
       <div class="row" style="margin-top:8px">
-        <button onclick="setEntitlement('${s.shopId}','pro','active')">Grant Pro</button>
-        <button class="ghost" onclick="setEntitlement('${s.shopId}','pro','trial')">Pro trial</button>
-        <button class="ghost" onclick="setEntitlement('${s.shopId}','free','cancelled')">Back to Free</button>
+        <button data-act="entitlement" data-id="${esc(s.shopId)}" data-plan="pro" data-state="active">Grant Pro</button>
+        <button class="ghost" data-act="entitlement" data-id="${esc(s.shopId)}" data-plan="pro" data-state="trial">Pro trial</button>
+        <button class="ghost" data-act="entitlement" data-id="${esc(s.shopId)}" data-plan="free" data-state="cancelled">Back to Free</button>
       </div>
     </div>`; }).join('') : '<p class="muted">Nothing here.</p>';
+  });
 }
 
 async function setEntitlement(shopId, plan, state){
-  const expiresAt = plan === 'pro'
-    ? (prompt('Expires at (RFC3339, e.g. 2027-01-31T00:00:00Z) — blank for no expiry:') || '')
-    : '';
-  const reference = prompt('Reference (invoice or note, optional):') || '';
+  const name = shopNames.get(shopId) || shopId;
+  let expiresAt = '';
+  if (plan === 'pro') {
+    const raw = prompt('Expires on (YYYY-MM-DD, or a full RFC3339 time) — blank for no expiry:');
+    if (raw === null) return;
+    expiresAt = raw.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(expiresAt)) expiresAt += 'T23:59:59Z';
+    if (expiresAt && !(/^\d{4}-\d{2}-\d{2}T/.test(expiresAt) && Number.isFinite(Date.parse(expiresAt)))) {
+      toast('❌ That expiry is not a date. Use YYYY-MM-DD.'); return;
+    }
+    if (expiresAt && Date.parse(expiresAt) <= Date.now()) { toast('❌ That expiry is in the past.'); return; }
+  }
+  const reference = prompt('Reference (invoice or note, optional):');
+  if (reference === null) return;
+  const what = plan === 'pro' ? `${state === 'trial' ? 'a Pro TRIAL' : 'PRO'}${expiresAt ? ' until ' + expiresAt : ' with no expiry'}` : 'the FREE plan (Pro features stop; no data is deleted)';
+  if (!confirm(`Give "${name}" ${what}?`)) return;
   try {
-    await api(`/api/admin/shopbook/shops/${shopId}/entitlement`,
+    await api(`/api/admin/shopbook/shops/${encodeURIComponent(shopId)}/entitlement`,
       { method:'POST', body: JSON.stringify({ plan, state, expiresAt, reference }) });
     toast('Entitlement saved'); loadSubscriptions();
   } catch(e){ toast('❌ ' + e.message); }
 }
 
 // ── read-only support windows ───────────────────────────────────
-async function loadOrders(){
-  const shopId = $('auditShop').value.trim();
-  const { orders } = await api('/api/admin/shopbook/orders?shopId=' + encodeURIComponent(shopId));
-  $('support').innerHTML = orders.length ? orders.map((o) => `
+function loadOrders(){
+  return section('support', async () => {
+    const shopId = $('auditShop').value.trim();
+    const { orders } = await api('/api/admin/shopbook/orders?shopId=' + encodeURIComponent(shopId));
+    $('support').innerHTML = orders.length ? orders.map((o) => `
     <div class="card">
       <div class="row"><b>${esc(o.shopName)}</b>
         <span class="tag ${o.status === 'completed' ? 'ok':'pend'}">${esc(o.status).toUpperCase()}</span>
-        <span class="muted">${esc(o.customerName)} · ${esc(o.currency)}${o.total} paid ${esc(o.currency)}${o.paid} · ${esc(o.createdAt)}</span>
+        <span class="muted">${esc(o.customerName)} · ${esc(o.currency)}${num(o.total)} paid ${esc(o.currency)}${num(o.paid)} · ${esc(o.createdAt)}</span>
       </div>
       <div class="muted">${esc(o.id)}</div>
     </div>`).join('') : '<p class="muted">No orders.</p>';
+  });
 }
 
-async function loadReturns(){
-  const { returns } = await api('/api/admin/shopbook/returns');
-  $('support').innerHTML = returns.length ? returns.map((r) => `
+function loadReturns(){
+  return section('support', async () => {
+    const shopId = $('auditShop').value.trim();
+    // ponytail: the admin returns endpoint has no shop filter and its rows carry
+    // no shop id, so a shop id cannot be applied here. Say so rather than show
+    // every shop's returns as if they were filtered. Replace once the backend
+    // accepts ?shopId= (sbAdminReturns).
+    const { returns } = await api('/api/admin/shopbook/returns?shopId=' + encodeURIComponent(shopId));
+    const notice = shopId ? '<p class="err">Returns cannot be filtered by shop yet — showing the latest returns across EVERY shop.</p>' : '';
+    $('support').innerHTML = notice + (returns.length ? returns.map((r) => `
     <div class="card">
       <div class="row"><b>${esc(r.shopName)}</b>
         <span class="tag ${r.status === 'approved' || r.status === 'completed' ? 'ok':'pend'}">${esc(r.status).toUpperCase()}</span>
-        <span class="muted">${esc(r.customerName)} · ${esc(r.currency)}${r.refundTotal} · ${esc(r.settlement)} · ${esc(r.requestedAt)}</span>
+        <span class="muted">${esc(r.customerName)} · ${esc(r.currency)}${num(r.refundTotal)} · ${esc(r.settlement)} · ${esc(r.requestedAt)}</span>
       </div>
       <div class="muted">Reason: ${esc(r.reason)}${r.decisionNote ? ' · Decision: ' + esc(r.decisionNote) : ''}</div>
       ${r.creditNoteId ? `<div class="muted">Credit note ${esc(r.creditNoteId)}</div>` : ''}
-    </div>`).join('') : '<p class="muted">No returns.</p>';
+    </div>`).join('') : '<p class="muted">No returns.</p>');
+  });
 }
 
-async function loadAudit(){
-  const shopId = $('auditShop').value.trim();
-  const { entries } = await api('/api/admin/shopbook/audit?shopId=' + encodeURIComponent(shopId));
-  $('support').innerHTML = entries.length ? entries.map((e) => `
+function loadAudit(){
+  return section('support', async () => {
+    const shopId = $('auditShop').value.trim();
+    const { entries } = await api('/api/admin/shopbook/audit?shopId=' + encodeURIComponent(shopId));
+    $('support').innerHTML = entries.length ? entries.map((e) => `
     <div class="card">
       <div class="row"><b>${esc(e.action)}</b>
         <span class="muted">${esc(e.shopName)} · ${esc(e.actor) || esc(e.role)} · ${esc(e.at)}</span>
       </div>
       <div class="muted">${esc(e.entity)} ${esc(e.entityId)}${e.reason ? ' · ' + esc(e.reason) : ''}</div>
     </div>`).join('') : '<p class="muted">Nothing recorded.</p>';
+  });
 }
+
+// ── one delegated click handler ─────────────────────────────────
+document.addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-act]');
+  if (!b || b.tagName !== 'BUTTON') return;
+  const d = b.dataset;
+  switch (d.act) {
+    case 'connect': loadAll(); break;
+    case 'shops': loadShops(d.filter); break;
+    case 'verifications': loadVerifications(d.filter); break;
+    case 'locations': loadLocations(d.filter); break;
+    case 'new-country': newCountry(); break;
+    case 'save-json': saveJson(d.src, d.kind); break;
+    case 'orders': loadOrders(); break;
+    case 'returns': loadReturns(); break;
+    case 'audit': loadAudit(); break;
+    case 'approve': approve(d.id, d.verified === 'true', d.mode === 'badge'); break;
+    case 'reject-shop': rejectShop(d.id); break;
+    case 'documents': loadDocuments(d.id); break;
+    case 'set-verify': setVerify(d.id, d.state); break;
+    case 'review-doc': reviewDoc(d.id, d.status, d.shop); break;
+    case 'decide-location': decideLocation(d.id, d.approve === 'true'); break;
+    case 'entitlement': setEntitlement(d.id, d.plan, d.state); break;
+  }
+});
+$('key').addEventListener('keydown', (e) => { if (e.key === 'Enter') loadAll(); });
 
 $('base').value = localStorage.getItem('sb_admin_base') || '';
 </script>

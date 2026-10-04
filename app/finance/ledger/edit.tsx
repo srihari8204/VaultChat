@@ -3,11 +3,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useFinanceTheme } from '../../../components/finance/useFinanceTheme';
 import { KeyboardSafe } from '../../../components/ui';
-import { View, ScrollView, StyleSheet, Alert, Platform } from 'react-native';
+import { View, ScrollView, StyleSheet, Alert } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
+import { useDatePicker } from '../../../components/finance/useDatePicker';
+import { useLoadStatus } from '../../../components/finance/useLoad';
 import { type FinancePalette } from '../../../constants/financeTheme';
-import { FinHeader, Label, Field, Segment, Btn, DateField } from '../../../components/finance/ui';
+import { FinHeader, Label, Field, Segment, Btn, DateField, LoadingState, ErrorState } from '../../../components/finance/ui';
 import { fmtDate, num } from '../../../utils/financeFormat';
 import { getLedger, updateLedgerDetails, type LedgerEntry } from '../../../db/ledger';
 import type { LedgerPeriod } from '../../../utils/finance';
@@ -30,7 +31,13 @@ export default function EditLedger() {
   const [end, setEnd] = useState<number | null>(null);
   const [notes, setNotes] = useState('');
 
-  const load = useCallback(() => { if (id) getLedger(id).then(setE); }, [id]);
+  const picker = useDatePicker();
+  const { status, begin, done, fail } = useLoadStatus();
+  const load = useCallback(() => {
+    if (!id) { fail(); return; }
+    begin();
+    getLedger(id).then((row) => { setE(row); done(); }).catch(fail);
+  }, [id, begin, done, fail]);
   useEffect(load, [load]);
 
   useEffect(() => {
@@ -42,7 +49,7 @@ export default function EditLedger() {
 
   const pickDate = (which: 'start' | 'end') => {
     const cur = which === 'start' ? start : (end ?? Date.now());
-    DateTimePickerAndroid.open({ value: new Date(cur), mode: 'date', onChange: (_ev, d) => { if (d) which === 'start' ? setStart(d.getTime()) : setEnd(d.getTime()); } });
+    picker.open(new Date(cur), (d) => { if (which === 'start') setStart(d.getTime()); else setEnd(d.getTime()); });
   };
 
   const onSave = async () => {
@@ -66,25 +73,35 @@ export default function EditLedger() {
     } catch (err: any) { Alert.alert('Could not save', err?.message ?? 'Try again'); }
   };
 
-  if (!e) return <View style={s.screen}><FinHeader title="Edit Ledger" /></View>;
+  if (!e) {
+    return (
+      <View style={s.screen}>
+        <FinHeader title="Edit Ledger" />
+        {status === 'loading' && <LoadingState label="Loading ledger" />}
+        {status === 'error' && <ErrorState title="Could not load this ledger" sub="Nothing has been changed." onRetry={load} />}
+        {status === 'ready' && <ErrorState title="Ledger not found" sub="It may have been deleted." />}
+      </View>
+    );
+  }
 
   return (
     <View style={s.screen}>
       <FinHeader title="Edit Ledger" />
+      {picker.element}
       <KeyboardSafe style={{ flex: 1 }} >
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <Label>Name</Label>
-          <Field value={name} onChangeText={setName} placeholder="Enter name" />
+          <Field label="Name" value={name} onChangeText={setName} placeholder="Enter name" />
           <Label hint="(optional)">Mobile Number</Label>
-          <Field value={mobile} onChangeText={setMobile} placeholder="Enter mobile number" keyboardType="phone-pad" />
+          <Field label="Mobile number, optional" value={mobile} onChangeText={setMobile} placeholder="Enter mobile number" keyboardType="phone-pad" />
           <Label>Principal Amount</Label>
-          <Field value={principal} onChangeText={setPrincipal} placeholder="₹ 0" keyboardType="numeric" />
+          <Field label="Principal amount" value={principal} onChangeText={setPrincipal} placeholder="₹ 0" keyboardType="numeric" />
           <Label>Interest Type</Label>
           <Segment<'simple' | 'compound'> options={[{ k: 'simple', label: 'Simple' }, { k: 'compound', label: 'Compound' }]} value={itype} onChange={setItype} />
           <Label>Rate Type</Label>
           <Segment<'percent' | 'rupees'> options={[{ k: 'percent', label: '% (percentage)' }, { k: 'rupees', label: '₹ per ₹100' }]} value={rateMode} onChange={setRateMode} />
           <Label>{rateMode === 'rupees' ? 'Interest Rate (₹ per ₹100)' : 'Interest Rate (%)'}</Label>
-          <Field value={rate} onChangeText={setRate} placeholder="Enter rate" keyboardType="numeric" />
+          <Field label={rateMode === 'rupees' ? 'Interest rate, rupees per 100' : 'Interest rate, percent'} value={rate} onChangeText={setRate} placeholder="Enter rate" keyboardType="numeric" />
           <Label>Interest Period</Label>
           <Segment<LedgerPeriod> options={[{ k: 'daily', label: 'Daily' }, { k: 'weekly', label: 'Weekly' }, { k: 'monthly', label: 'Monthly' }, { k: 'yearly', label: 'Yearly' }]} value={period} onChange={setPeriod} small />
           <Label>Start Date</Label>
@@ -92,7 +109,7 @@ export default function EditLedger() {
           <Label hint="(optional)">End Date</Label>
           <DateField value={end ? fmtDate(end) : ''} onPress={() => pickDate('end')} />
           <Label hint="(optional)">Notes</Label>
-          <Field value={notes} onChangeText={setNotes} placeholder="Add a note" multiline />
+          <Field label="Notes, optional" value={notes} onChangeText={setNotes} placeholder="Add a note" multiline />
           <View style={{ marginTop: 20 }}>
             <Btn label="Save Changes" icon="checkmark" onPress={onSave} wide />
           </View>

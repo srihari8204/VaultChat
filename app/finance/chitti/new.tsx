@@ -3,9 +3,9 @@
 import React, { useState } from 'react';
 import { useFinanceTheme } from '../../../components/finance/useFinanceTheme';
 import { KeyboardSafe } from '../../../components/ui';
-import { View, ScrollView, StyleSheet, Alert, Platform } from 'react-native';
+import { View, ScrollView, StyleSheet, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
-import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
+import { useDatePicker } from '../../../components/finance/useDatePicker';
 import { type FinancePalette } from '../../../constants/financeTheme';
 import { FinHeader, Label, Field, Btn, DateField, Segment } from '../../../components/finance/ui';
 import { useMe } from '../../../components/finance/useMe';
@@ -17,6 +17,7 @@ export default function NewChitti() {
   const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   const router = useRouter();
   const me = useMe();
+  const picker = useDatePicker();
   const [name, setName] = useState('');
   const [chitValue, setChitValue] = useState('');
   const [installment, setInstallment] = useState('');
@@ -47,33 +48,34 @@ export default function NewChitti() {
   return (
     <View style={s.screen}>
       <FinHeader title="New Lucky Draw Group" />
+      {picker.element}
       <KeyboardSafe style={{ flex: 1 }} >
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <Label>Group Name</Label>
-          <Field value={name} onChangeText={setName} placeholder="e.g. Sundar Group" />
+          <Field label="Group name" value={name} onChangeText={setName} placeholder="e.g. Sundar Group" />
 
           <Label>Chit Value</Label>
-          <Field value={chitValue} onChangeText={setChitValue} placeholder="₹ 0" keyboardType="numeric" />
+          <Field label="Chit value" value={chitValue} onChangeText={setChitValue} placeholder="₹ 0" keyboardType="numeric" />
 
           <Label>Monthly Installment</Label>
-          <Field value={installment} onChangeText={setInstallment} placeholder="₹ 0" keyboardType="numeric" />
+          <Field label="Monthly installment" value={installment} onChangeText={setInstallment} placeholder="₹ 0" keyboardType="numeric" />
 
           <View style={s.row}>
             <View style={{ flex: 1 }}>
               <Label>Members</Label>
-              <Field value={members} onChangeText={setMembers} placeholder="e.g. 20" keyboardType="numeric" />
+              <Field label="Members" value={members} onChangeText={setMembers} placeholder="e.g. 20" keyboardType="numeric" />
             </View>
             <View style={{ flex: 1 }}>
               <Label>Duration (months)</Label>
-              <Field value={duration} onChangeText={setDuration} placeholder="e.g. 20" keyboardType="numeric" />
+              <Field label="Duration in months" value={duration} onChangeText={setDuration} placeholder="e.g. 20" keyboardType="numeric" />
             </View>
           </View>
 
           <Label hint="(optional)">Foreman</Label>
-          <Field value={foreman} onChangeText={setForeman} placeholder="Organizer name" />
+          <Field label="Foreman, optional" value={foreman} onChangeText={setForeman} placeholder="Organizer name" />
 
           <Label>Start Date</Label>
-          <DateField value={fmtDate(start)} onPress={() => DateTimePickerAndroid.open({ value: new Date(start), mode: 'date', onChange: (_e, d) => d && setStart(d.getTime()) })} />
+          <DateField value={fmtDate(start)} onPress={() => picker.open(new Date(start), (d) => setStart(d.getTime()))} />
 
           <Label>Status</Label>
           <Segment<ChittiStatus> options={[{ k: 'active', label: 'Active' }, { k: 'draft', label: 'Draft' }, { k: 'closed', label: 'Closed' }]} value={status} onChange={setStatus} small />

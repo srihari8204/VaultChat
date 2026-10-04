@@ -4,8 +4,8 @@
 import React, { useState } from 'react';
 import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
 import { KeyboardSafe } from '../../components/ui';
-import { View, Text, ScrollView, StyleSheet, Alert, Platform } from 'react-native';
-import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
+import { View, Text, ScrollView, StyleSheet, Alert } from 'react-native';
+import { useDatePicker } from '../../components/finance/useDatePicker';
 import { FIN_HERO, TABULAR, type FinancePalette } from '../../constants/financeTheme';
 import { FinHeader, Label, Field, Segment, Radio, Btn, DateField, HeroCard, Card, RowLine } from '../../components/finance/ui';
 import { useMe } from '../../components/finance/useMe';
@@ -28,11 +28,17 @@ export default function InterestCalc() {
   const [from, setFrom] = useState<number | null>(null);
   const [to, setTo] = useState<number>(Date.now());
   const [durY, setDurY] = useState(''); const [durM, setDurM] = useState(''); const [durD, setDurD] = useState('');
-  const [res, setRes] = useState<{ interest: number; total: number; years: number } | null>(null);
+  // The result carries the inputs it was calculated from, so the PDF can never
+  // pair edited form fields with a stale result (the bug emi.tsx already fixed).
+  const [res, setRes] = useState<{
+    interest: number; total: number; years: number;
+    type: InterestType; principal: number; rate: number; rateMode: 'percent' | 'rupees'; period: LedgerPeriod;
+  } | null>(null);
+  const picker = useDatePicker();
 
   const pick = (which: 'from' | 'to') => {
     const cur = which === 'from' ? (from ?? Date.now()) : to;
-    DateTimePickerAndroid.open({ value: new Date(cur), mode: 'date', onChange: (_e, d) => { if (d) which === 'from' ? setFrom(d.getTime()) : setTo(d.getTime()); } });
+    picker.open(new Date(cur), (d) => { if (which === 'from') setFrom(d.getTime()); else setTo(d.getTime()); });
   };
 
   const onCalc = async () => {
@@ -73,7 +79,7 @@ export default function InterestCalc() {
     if (!Number.isFinite(r.total) || Math.abs(r.total) > Number.MAX_SAFE_INTEGER) {
       return Alert.alert('Out of range', 'That rate and duration produce a number too large to calculate. Try a shorter duration or a lower rate.');
     }
-    const out = { interest: round2(r.interest), total: round2(r.total), years };
+    const out = { interest: round2(r.interest), total: round2(r.total), years, type, principal: P, rate: R, rateMode, period };
     setRes(out);
     if (me) {
       try {
@@ -97,9 +103,9 @@ export default function InterestCalc() {
   const onShare = async () => {
     if (!res) return;
     const html = pdfDocument('Interest Calculation', kvTable([
-      { k: 'Interest type', v: type === 'simple' ? 'Simple' : 'Compound' },
-      { k: 'Principal', v: formatINR(num(principal)) },
-      { k: 'Rate', v: `${rate}${rateMode === 'rupees' ? '₹ per ₹100' : '%'} ${period}` },
+      { k: 'Interest type', v: res.type === 'simple' ? 'Simple' : 'Compound' },
+      { k: 'Principal', v: formatINR(res.principal) },
+      { k: 'Rate', v: `${res.rate}${res.rateMode === 'rupees' ? '₹ per ₹100' : '%'} ${res.period}` },
       { k: 'Duration', v: `${res.years.toFixed(2)} years` },
       { k: 'Interest', v: formatINR(res.interest) },
       { k: 'Total payable', v: formatINR(res.total), tot: true },
@@ -113,6 +119,7 @@ export default function InterestCalc() {
   return (
     <View style={s.screen}>
       <FinHeader title="Interest Calculator" />
+      {picker.element}
       <KeyboardSafe style={{ flex: 1 }} >
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <Label>Interest Type</Label>
@@ -122,13 +129,13 @@ export default function InterestCalc() {
           </View>
 
           <Label>Principal Amount</Label>
-          <Field value={principal} onChangeText={setPrincipal} placeholder="₹ 0" keyboardType="numeric" />
+          <Field label="Principal amount" value={principal} onChangeText={setPrincipal} placeholder="₹ 0" keyboardType="numeric" />
 
           <Label>Rate Type</Label>
           <Segment<'percent' | 'rupees'> options={[{ k: 'percent', label: '% (percentage)' }, { k: 'rupees', label: '₹ per ₹100' }]} value={rateMode} onChange={setRateMode} />
 
           <Label>{rateMode === 'rupees' ? 'Interest Rate (₹ per ₹100)' : 'Interest Rate (%)'}</Label>
-          <Field value={rate} onChangeText={setRate} placeholder="Enter rate" keyboardType="numeric" />
+          <Field label={rateMode === 'rupees' ? 'Interest rate, rupees per 100' : 'Interest rate, percent'} value={rate} onChangeText={setRate} placeholder="Enter rate" keyboardType="numeric" />
 
           <Label>Interest Period</Label>
           <Segment<LedgerPeriod> options={[{ k: 'daily', label: 'Daily' }, { k: 'weekly', label: 'Weekly' }, { k: 'monthly', label: 'Monthly' }, { k: 'yearly', label: 'Yearly' }]} value={period} onChange={setPeriod} small />
@@ -149,9 +156,9 @@ export default function InterestCalc() {
             <>
               <Label>Duration</Label>
               <View style={s.durRow}>
-                <View style={s.durationField}><Field value={durY} onChangeText={setDurY} placeholder="Years" keyboardType="numeric" /></View>
-                <View style={s.durationField}><Field value={durM} onChangeText={setDurM} placeholder="Months" keyboardType="numeric" /></View>
-                <View style={s.durationField}><Field value={durD} onChangeText={setDurD} placeholder="Days" keyboardType="numeric" /></View>
+                <View style={s.durationField}><Field label="Duration in years" value={durY} onChangeText={setDurY} placeholder="Years" keyboardType="numeric" /></View>
+                <View style={s.durationField}><Field label="Duration in months" value={durM} onChangeText={setDurM} placeholder="Months" keyboardType="numeric" /></View>
+                <View style={s.durationField}><Field label="Duration in days" value={durD} onChangeText={setDurD} placeholder="Days" keyboardType="numeric" /></View>
               </View>
             </>
           )}

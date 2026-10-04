@@ -6,7 +6,8 @@ import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'rea
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { financeStatusColors, FIN_HERO, TABULAR, type FinancePalette } from '../../../constants/financeTheme';
-import { FinHeader, Card, HeroCard, RowLine, Pill } from '../../../components/finance/ui';
+import { FinHeader, Card, HeroCard, RowLine, Pill, LoadingState, ErrorState } from '../../../components/finance/ui';
+import { useLoadStatus } from '../../../components/finance/useLoad';
 import { formatINR, fmtDate, fmtDateTime, PERIOD_LABEL } from '../../../utils/financeFormat';
 import { getLedger, deleteLedger, type LedgerEntry } from '../../../db/ledger';
 import { listTimeline, type TimelineRow } from '../../../db/financeTimeline';
@@ -32,14 +33,25 @@ export default function LedgerDetail() {
   const [e, setE] = useState<LedgerEntry | null>(null);
   const [tl, setTl] = useState<TimelineRow[]>([]);
 
+  const { status, begin, done, fail } = useLoadStatus();
   const reload = useCallback(() => {
-    if (!id) return;
-    getLedger(id).then(setE).catch(() => {});
+    if (!id) { fail(); return; }
+    begin();
+    getLedger(id).then((row) => { setE(row); done(); }).catch(fail);
     listTimeline('ledger', id).then(setTl).catch(() => {});
-  }, [id]);
+  }, [id, begin, done, fail]);
   useFocusEffect(reload);
 
-  if (!e) return <View style={s.screen}><FinHeader title="Ledger" /></View>;
+  if (!e) {
+    return (
+      <View style={s.screen}>
+        <FinHeader title="Ledger" />
+        {status === 'loading' && <LoadingState label="Loading ledger" />}
+        {status === 'error' && <ErrorState title="Could not load this ledger" sub="Nothing has been lost." onRetry={reload} />}
+        {status === 'ready' && <ErrorState title="Ledger not found" sub="It may have been deleted." />}
+      </View>
+    );
+  }
 
   const c = computeInterest(e);
   const sc = STATUS_COLORS[e.status];
@@ -63,7 +75,10 @@ export default function LedgerDetail() {
 
   const onDelete = () => Alert.alert('Delete ledger?', `Delete ${e.name}? This cannot be undone here.`, [
     { text: 'Cancel', style: 'cancel' },
-    { text: 'Delete', style: 'destructive', onPress: () => deleteLedger(e.id).then(() => router.back()) },
+    { text: 'Delete', style: 'destructive', onPress: () => {
+      deleteLedger(e.id).then(() => router.back())
+        .catch((err: any) => Alert.alert('Could not delete', err?.message ?? 'Try again'));
+    } },
   ]);
 
   return (

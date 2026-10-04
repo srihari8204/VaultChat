@@ -2,6 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
+<!-- Content-Security-Policy: script-src allows ONLY this page's one inline script, pinned by its SHA-256.
+     After editing that script, recompute the hash, e.g.
+     python3 -c "import re,hashlib,base64,sys;s=open(sys.argv[1]).read();print(base64.b64encode(hashlib.sha256(re.findall(r'<script>(.*?)</script>',s,re.S)[-1].encode()).digest()).decode())" FILE
+     The page refuses to run its script until the hash matches. frame-ancestors cannot be set from a meta tag: send it as a header. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-rROVdpwwPtluSPuSQg4ec4CpKjZU+6iBJQmZ+FlFOw0='; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https: http://localhost:* http://127.0.0.1:*; img-src data:; base-uri 'none'; form-action 'none'" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="dark" />
 <title>crazzychat · Admin Console</title>
@@ -113,11 +118,11 @@
     <div class="logo"><div class="dot">c</div><h1>crazzychat Admin</h1></div>
     <div class="muted">Obsidian Aurora · Midnight Gold</div>
     <div class="field">
-      <label>Server URL</label>
+      <label for="srvUrl">Server URL</label>
       <input id="srvUrl" class="mono" value="https://api.corefinite.com" autocomplete="off" />
     </div>
     <div class="field">
-      <label>Admin Key</label>
+      <label for="adminKey">Admin Key</label>
       <input id="adminKey" type="password" placeholder="x-admin-key" autocomplete="off" />
     </div>
     <button class="btn" id="loginBtn">Connect</button>
@@ -146,7 +151,7 @@
     <section class="panel" data-panel="users">
       <h2 class="sec-h">Users</h2>
       <div class="toolbar">
-        <input id="userSearch" placeholder="Search name / email / phone…" />
+        <input id="userSearch" placeholder="Search name / email / phone…" aria-label="Search users by name, email or phone" />
         <button class="btn sm" id="userSearchBtn">Search</button>
       </div>
       <div class="tablewrap"><table id="userTable"><thead><tr>
@@ -162,7 +167,7 @@
     <section class="panel" data-panel="messages">
       <h2 class="sec-h">Messages · metadata only (no content / E2EE)</h2>
       <div class="toolbar">
-        <select id="msgLimit"><option>50</option><option>100</option><option>200</option></select>
+        <select id="msgLimit" aria-label="Number of messages to show"><option>50</option><option>100</option><option>200</option></select>
         <button class="btn sm" id="msgRefresh">Refresh</button>
       </div>
       <div class="tablewrap"><table id="msgTable"><thead><tr>
@@ -183,10 +188,10 @@
     <section class="panel" data-panel="broadcast">
       <h2 class="sec-h">Broadcast announcement</h2>
       <div class="card" style="max-width:520px">
-        <div class="field"><label>Type</label>
+        <div class="field"><label for="bcType">Type</label>
           <select id="bcType"><option value="info">info</option><option value="update">update</option><option value="warning">warning</option><option value="maintenance">maintenance</option></select>
         </div>
-        <div class="field"><label>Message</label>
+        <div class="field"><label for="bcText">Message</label>
           <textarea id="bcText" rows="4" placeholder="Sent to every connected client via system:announcement"></textarea>
         </div>
         <button class="btn" id="bcSend">Send to all online</button>
@@ -209,7 +214,7 @@
     <section class="panel" data-panel="api">
       <h2 class="sec-h">API explorer · GET</h2>
       <div class="toolbar">
-        <input id="apiPath" class="mono" value="/api/admin/stats" />
+        <input id="apiPath" class="mono" value="/api/admin/stats" aria-label="API path to GET" />
         <button class="btn sm" id="apiGo">GET</button>
       </div>
       <pre class="json" id="apiOut">—</pre>
@@ -259,21 +264,26 @@
     const srv = $('#srvUrl').value.trim(); const key = $('#adminKey').value.trim();
     const errEl = $('#loginErr'); errEl.classList.add('hide');
     if(!srv || !key){ errEl.textContent='Enter both server URL and admin key.'; errEl.classList.remove('hide'); return; }
+    // The key travels in a header to this URL: never over plain http, except to
+    // this machine during development. The CSP's connect-src enforces the same.
+    if(!/^https:\/\//i.test(srv) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(srv)){
+      errEl.textContent='The server URL must start with https://'; errEl.classList.remove('hide'); return;
+    }
     SERVER = srv; KEY = key;
-    $('#loginBtn').textContent = 'Verifying…';
+    $('#loginBtn').textContent = 'Verifying…'; $('#loginBtn').disabled = true;
     try{
       await api('/api/admin/stats');            // verifies the key
       SS.setItem('vc_admin_srv', SERVER); SS.setItem('vc_admin_key', KEY);
       enterApp();
     }catch(e){
       errEl.textContent = e.message; errEl.classList.remove('hide');
-    }finally{ $('#loginBtn').textContent='Connect'; }
+    }finally{ $('#loginBtn').textContent='Connect'; $('#loginBtn').disabled = false; }
   };
   $('#adminKey').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#loginBtn').click(); });
 
   $('#logoutBtn').onclick = ()=>{
     if(socket){ try{socket.disconnect();}catch{} socket=null; }
-    if(dashTimer) clearInterval(dashTimer);
+    if(dashTimer){ clearInterval(dashTimer); dashTimer=null; }
     SS.removeItem('vc_admin_key');           // drop the key
     KEY=''; $('#app').classList.add('hide'); $('#login').classList.remove('hide'); $('#adminKey').value='';
   };
@@ -302,7 +312,18 @@
   function enterApp(){
     $('#login').classList.add('hide'); $('#app').classList.remove('hide');
     $('#srvLabel').textContent = SERVER;
-    buildTabs(); selectTab('dashboard'); connectSocket();
+    buildTabs(); selectTab('dashboard'); connectSocket(); startDashTimer();
+  }
+
+  // Dashboard auto-refresh every 10s while the dashboard is visible. Started on
+  // every entry (it used to start once at page load, so a Disconnect cleared it
+  // for good and a re-login never refreshed again).
+  function startDashTimer(){
+    if(dashTimer) clearInterval(dashTimer);
+    dashTimer = setInterval(()=>{
+      if($('#app').classList.contains('hide')) return;
+      const active=document.querySelector('.panel.active'); if(active&&active.dataset.panel==='dashboard') loadDashboard();
+    }, 10000);
   }
 
   // ── Dashboard ──────────────────────────────────────────────
@@ -424,12 +445,16 @@
 
   // ── Broadcast ──────────────────────────────────────────────
   $('#bcSend').onclick=async ()=>{
+    const btn=$('#bcSend'); if(btn.disabled) return;
     const text=$('#bcText').value.trim(); const type=$('#bcType').value;
-    const out=$('#bcResult'); if(!text){ out.textContent='Enter a message.'; return; }
-    out.textContent='Sending…';
+    const out=$('#bcResult'); out.style.color=''; if(!text){ out.textContent='Enter a message.'; return; }
+    // Goes to EVERY connected client at once and cannot be recalled.
+    if(!confirm('Send this '+type+' announcement to every online user now? It cannot be recalled.\n\n'+text)) return;
+    btn.disabled=true; out.textContent='Sending…';
     try{ const r=await api('/api/admin/broadcast',{method:'POST',body:JSON.stringify({type,text})});
-      out.innerHTML='<span style="color:var(--ok)">✓ Delivered to '+r.delivered+' online client(s).</span>'; $('#bcText').value='';
-    }catch(e){ out.innerHTML='<span style="color:var(--err)">'+esc(e.message)+'</span>'; }
+      out.style.color='var(--ok)'; out.textContent='✓ Delivered to '+Number(r.delivered||0)+' online client(s).'; $('#bcText').value='';
+    }catch(e){ out.style.color='var(--err)'; out.textContent=e.message; }
+    finally{ btn.disabled=false; }
   };
 
   // ── Live log (socket firehose) ─────────────────────────────
@@ -555,12 +580,6 @@
       }
     })();
   }
-
-  // Dashboard auto-refresh 10s while connected + dashboard visible.
-  dashTimer = setInterval(()=>{
-    if($('#app').classList.contains('hide')) return;
-    const active=document.querySelector('.panel.active'); if(active&&active.dataset.panel==='dashboard') loadDashboard();
-  }, 10000);
 
   // ── Boot: auto-enter if we already have a verified key this session ──
   (async function boot(){

@@ -2,6 +2,7 @@
 // SHOP BOOK backend (vaultchat-backend-go/internal/routes/shopbook.go).
 // JWT attach + refresh are handled by api(); this file is just endpoint shapes.
 
+import * as FileSystem from 'expo-file-system/legacy';
 import { api } from '../lib/api';
 import type { ItemAvailability, OrderStatus, ShopStatus } from '../utils/shopbook';
 
@@ -235,6 +236,24 @@ export function saveDocument(d: {
   kind: string; objectKey: string; filename?: string; mime?: string; size?: number;
 }) {
   return api<{ id: string; status: string }>(`/shopbook/my-shop/documents`, { method: 'POST', json: d });
+}
+// What the server accepts (shopbook_verify.go sbDocMimes / sbDocMaxBytes).
+export const DOC_MIMES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+export const DOC_MAX_BYTES = 10 * 1024 * 1024;
+
+/** presign → PUT the file straight to storage → record it. The file never
+ *  passes through the API. */
+export async function uploadDocument(kind: string, file: { uri: string; name?: string; mimeType?: string; size?: number }) {
+  const mime = file.mimeType ?? '';
+  const size = file.size ?? 0;
+  const { uploadUrl, objectKey } = await presignDocument(kind, mime, size);
+  const put = await FileSystem.uploadAsync(uploadUrl, file.uri, {
+    httpMethod: 'PUT',
+    uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+    headers: { 'Content-Type': mime },
+  });
+  if (put.status < 200 || put.status >= 300) throw new Error(`The upload did not complete (${put.status}). Try again.`);
+  return saveDocument({ kind, objectKey, filename: file.name, mime, size });
 }
 export function deleteDocument(id: string) {
   return api<{ ok: boolean }>(`/shopbook/my-shop/documents/${id}`, { method: 'DELETE' });
@@ -925,8 +944,23 @@ export function sendReminder(customerId: string) {
   });
 }
 
-export function setPlan(plan: 'free' | 'pro') {
+// Cancel down to Free only. The server refuses 'pro' (403): Pro comes from a
+// paid entitlement that an admin or a verified purchase writes, never from the
+// owner's own request.
+export function setPlan(plan: 'free') {
   return api<{ ok: boolean; plan: string }>(`/shopbook/my-shop/plan`, { method: 'POST', json: { plan } });
+}
+
+// The plan the shop is ENTITLED to — what every server gate checks. Shop.plan
+// is only a display column and can drift (an expired entitlement does not
+// rewrite it). /reports is the one owner endpoint that returns the entitled
+// plan, so this reads it from the basic report.
+export function entitledPlan() {
+  return reports('basic').then((r) => r.plan);
+}
+// True when the server refused because the feature needs Pro.
+export function needsUpgrade(err: any): boolean {
+  return err?.status === 403 && !!err?.body?.upgrade;
 }
 
 export interface ReportDay { date: string; orders: number; sales: number }

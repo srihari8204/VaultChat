@@ -7,7 +7,9 @@ import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'rea
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { TABULAR, type FinancePalette } from '../../../constants/financeTheme';
-import { FinHeader, HeroCard, Segment, StatTile, TileGrid, Field, Btn, Label, Card } from '../../../components/finance/ui';
+import { FinHeader, HeroCard, Segment, StatTile, TileGrid, Field, Btn, Label, Card, LoadingState, ErrorState } from '../../../components/finance/ui';
+import { useLoadStatus } from '../../../components/finance/useLoad';
+import { nextMemberNumber } from '../../../components/finance/chittiNumber';
 import { inrShort, fmtDate, fmtDateTime, num } from '../../../utils/financeFormat';
 import { formatINR } from '../../../utils/interest';
 import {
@@ -52,14 +54,16 @@ export default function ChittiDetail() {
   const [bid, setBid] = useState('');
   const [commission, setCommission] = useState('');
 
+  const { status, begin, done, fail } = useLoadStatus();
   const reload = useCallback(() => {
-    if (!id) return;
-    getGroup(id).then(setG);
-    listMembers(id).then(setMembers);
-    listCollections(id).then(setCollections);
-    listAuctions(id).then(setAuctions);
+    if (!id) { fail(); return; }
+    begin();
+    Promise.all([getGroup(id), listMembers(id), listCollections(id), listAuctions(id)])
+      .then(([grp, mem, col, auc]) => { setG(grp); setMembers(mem); setCollections(col); setAuctions(auc); done(); })
+      .catch(fail);
+    // History is secondary: a failed read leaves the tab empty, not the screen.
     listTimeline('chitti', id).then(setTimeline).catch(() => {});
-  }, [id]);
+  }, [id, begin, done, fail]);
   useFocusEffect(reload);
 
   const statusFor = useCallback(
@@ -72,7 +76,16 @@ export default function ChittiDetail() {
     [members, statusFor],
   );
 
-  if (!g) return <View style={s.screen}><FinHeader title="Lucky Draw Group" /></View>;
+  if (!g) {
+    return (
+      <View style={s.screen}>
+        <FinHeader title="Lucky Draw Group" />
+        {status === 'loading' && <LoadingState label="Loading group" />}
+        {status === 'error' && <ErrorState title="Could not load this group" sub="Nothing has been lost." onRetry={reload} />}
+        {status === 'ready' && <ErrorState title="Group not found" sub="It may have been deleted." />}
+      </View>
+    );
+  }
 
   const openAddMember = () => {
     setEditingId(null); setMName(''); setMPhone(''); setMAddress('');
@@ -94,11 +107,16 @@ export default function ChittiDetail() {
       phone = norm;
     }
     const address = mAddress.trim() || null;
-    if (editingId) {
-      await updateMember(editingId, { name, phone, address });
-    } else {
-      await insertMember({ group_id: g.id, name, phone, address, number: members.length + 1 });
+    if (!editingId && g.members > 0 && members.length >= g.members) {
+      return Alert.alert('Group is full', `${g.name} is set up for ${g.members} members.`);
     }
+    try {
+      if (editingId) {
+        await updateMember(editingId, { name, phone, address });
+      } else {
+        await insertMember({ group_id: g.id, name, phone, address, number: nextMemberNumber(members) });
+      }
+    } catch (e: any) { return Alert.alert('Could not save the member', e?.message ?? 'Try again.'); }
     setShowMemberForm(false);
     reload();
   };
@@ -190,11 +208,11 @@ export default function ChittiDetail() {
             {showMemberForm ? (
               <Card style={{ marginTop: 16 }}>
                 <Label>Name</Label>
-                <Field value={mName} onChangeText={setMName} placeholder="Member's full name" />
+                <Field label="Member name" value={mName} onChangeText={setMName} placeholder="Member's full name" />
                 <Label hint="(optional)">Mobile Number</Label>
-                <Field value={mPhone} onChangeText={setMPhone} placeholder="e.g. 98765 43210" keyboardType="phone-pad" />
+                <Field label="Mobile number, optional" value={mPhone} onChangeText={setMPhone} placeholder="e.g. 98765 43210" keyboardType="phone-pad" />
                 <Label hint="(optional)">Address</Label>
-                <Field value={mAddress} onChangeText={setMAddress} placeholder="Door no., street, area, city" multiline />
+                <Field label="Address, optional" value={mAddress} onChangeText={setMAddress} placeholder="Door no., street, area, city" multiline />
                 <View style={{ flexDirection: 'row', gap: 8, marginTop: 14 }}>
                   <Btn label="Cancel" kind="ghost" onPress={closeMemberForm} wide />
                   <Btn label={editingId ? 'Save Changes' : 'Add Member'} icon="checkmark" onPress={saveMember} wide />
@@ -276,8 +294,8 @@ export default function ChittiDetail() {
                   ))}
                 </View>
                 <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
-                  <View style={{ flex: 1 }}><Text style={s.formLabel}>Winning bid</Text><Field value={bid} onChangeText={setBid} placeholder="₹ 0" keyboardType="numeric" /></View>
-                  <View style={{ flex: 1 }}><Text style={s.formLabel}>Commission</Text><Field value={commission} onChangeText={setCommission} placeholder="₹ 0" keyboardType="numeric" /></View>
+                  <View style={{ flex: 1 }}><Text style={s.formLabel}>Winning bid</Text><Field label="Winning bid" value={bid} onChangeText={setBid} placeholder="₹ 0" keyboardType="numeric" /></View>
+                  <View style={{ flex: 1 }}><Text style={s.formLabel}>Commission</Text><Field label="Commission" value={commission} onChangeText={setCommission} placeholder="₹ 0" keyboardType="numeric" /></View>
                 </View>
                 {(() => {
                   const sp = previewSplit();

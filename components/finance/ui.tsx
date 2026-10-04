@@ -115,13 +115,16 @@ export function SectionTitle({ children, action }: { children: React.ReactNode; 
  * field that silently swallows a bad value is how a ledger ends up wrong.
  */
 export function Field(props: {
+  /** The visible label's text, spoken by screen readers. The placeholder is
+   *  only a sample ("₹ 0"), so it is a fallback, never the name. */
+  label?: string;
   value: string; onChangeText: (t: string) => void; placeholder?: string;
   keyboardType?: KeyboardTypeOptions; multiline?: boolean; error?: string;
   style?: ViewStyle | TextStyle | (ViewStyle | TextStyle)[];
 }) {
   const FIN = useFinanceTheme();
   const s = React.useMemo(() => makeStyles(FIN), [FIN]);
-  const { style, multiline, error, ...rest } = props;
+  const { style, multiline, error, label, ...rest } = props;
   const [focused, setFocused] = useState(false);
   return (
     <View>
@@ -131,7 +134,7 @@ export function Field(props: {
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         placeholderTextColor={FIN.faint}
-        accessibilityLabel={rest.placeholder}
+        accessibilityLabel={label ?? rest.placeholder}
         style={[
           s.field,
           multiline && s.fieldMulti,
@@ -475,12 +478,17 @@ export function ErrorState({ title = 'Something went wrong', sub, onRetry }: {
   const FIN = useFinanceTheme();
   const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   return (
-    <View style={s.empty} accessible accessibilityLabel={sub ? `${title}. ${sub}` : title}>
-      <View style={[s.emptyIcon, { backgroundColor: FIN.badSoft }]}>
-        <Ionicons name="alert-circle-outline" size={26} color={FIN.bad} />
+    <View style={s.empty}>
+      {/* Only the message is grouped: an `accessible` outer View would also
+          swallow the Try again button, leaving it unreachable on iOS. */}
+      <View style={{ alignItems: 'center', gap: 6 }} accessible accessibilityRole="alert"
+        accessibilityLabel={sub ? `${title}. ${sub}` : title}>
+        <View style={[s.emptyIcon, { backgroundColor: FIN.badSoft }]}>
+          <Ionicons name="alert-circle-outline" size={26} color={FIN.bad} />
+        </View>
+        <Text numberOfLines={1} style={s.emptyTitle}>{title}</Text>
+        {sub ? <Text style={s.emptySub}>{sub}</Text> : null}
       </View>
-      <Text numberOfLines={1} style={s.emptyTitle}>{title}</Text>
-      {sub ? <Text style={s.emptySub}>{sub}</Text> : null}
       {onRetry ? <Btn label="Try again" kind="ghost" onPress={onRetry} style={{ marginTop: 12 }} /> : null}
     </View>
   );

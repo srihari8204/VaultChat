@@ -6,7 +6,8 @@ import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { type FinancePalette } from '../../constants/financeTheme';
-import { FinHeader, EmptyState, IconBtn } from '../../components/finance/ui';
+import { FinHeader, EmptyState, IconBtn, LoadingState, ErrorState } from '../../components/finance/ui';
+import { useLoadStatus } from '../../components/finance/useLoad';
 import { useMe } from '../../components/finance/useMe';
 import { fmtDateTime } from '../../utils/financeFormat';
 import { listLedger } from '../../db/ledger';
@@ -27,9 +28,11 @@ export default function FinanceCalendar() {
   const [monthIdx, setMonthIdx] = useState(today.getMonth());
   const [selected, setSelected] = useState<number>(today.getDate());
   const [events, setEvents] = useState<Ev[]>([]);
+  const { status, begin, done, fail } = useLoadStatus();
 
   const reload = useCallback(() => {
     if (!me) return;
+    begin();
     (async () => {
       const [ledgers, reminders, groups] = await Promise.all([listLedger(me.id), listReminders(me.id), listGroups(me.id)]);
       const evs: Ev[] = [];
@@ -37,8 +40,9 @@ export default function FinanceCalendar() {
       for (const r of reminders) if (r.status === 'active') evs.push({ at: r.next_at, label: r.title, tone: 'warn' });
       for (const g of groups) if (g.status === 'active') evs.push({ at: g.start_date + 30 * 86400000, label: `${g.name} — auction`, tone: 'brand' });
       setEvents(evs);
-    })();
-  }, [me]);
+      done();
+    })().catch(fail);
+  }, [me, begin, done, fail]);
   useFocusEffect(reload);
 
   const byDay = useMemo(() => {
@@ -65,13 +69,17 @@ export default function FinanceCalendar() {
   };
 
   const selectedKey = `${year}-${monthIdx}-${selected}`;
-  const dayEvents = (byDay[selectedKey] ?? []).sort((a, b) => a.at - b.at);
+  const dayEvents = [...(byDay[selectedKey] ?? [])].sort((a, b) => a.at - b.at);
   const toneColor = (t: Ev['tone']) => t === 'good' ? FIN.good : t === 'bad' ? FIN.bad : t === 'brand' ? FIN.brandDeep : FIN.warn;
 
   return (
     <View style={s.screen}>
       <FinHeader title="Calendar" />
       <ScrollView contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
+        {status === 'loading' && <LoadingState label="Loading due dates" />}
+        {status === 'error' && (
+          <ErrorState title="Could not load due dates" sub="The calendar below may be missing events. Nothing has been lost." onRetry={reload} />
+        )}
         <View style={s.monthHead}>
           <IconBtn icon="chevron-back" label="Previous month" onPress={() => step(-1)} />
           <Text style={s.monthTitle}>{MON[monthIdx]} {year}</Text>
