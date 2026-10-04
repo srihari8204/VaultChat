@@ -39,6 +39,9 @@ import { initLang } from '../lib/i18n';
 import { attachUsageFlush, initUsageCounter } from '../lib/usageCounter';
 import { purgeRetiredKeys } from '../lib/retiredKeys';
 import { UsageCounter } from '../components/UsageCounter';
+import { ResumeLock } from '../components/ResumeLock';
+import { ErrorBoundary } from '../components/ErrorBoundary';
+import { useSpaceDeviceAgent } from '../lib/spaces/deviceAgent';
 import { isSessionEnded } from '../lib/sessionEnded';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Sentry from '@sentry/react-native';
@@ -223,6 +226,9 @@ const INSET_SCREENS = [
 
 function RootLayoutInner() {
   const { colors, scheme } = useTheme();
+  // Spaces > Devices: heartbeat + command collector. Idle unless this phone was
+  // registered as a space device (lib/spaces/deviceAgent.ts).
+  useSpaceDeviceAgent();
   /** My user id, for the famEvent ingest below — a ref because the persistent
    *  listener closure outlives any render. */
   const selfIdRef = useRef<string | null>(null);
@@ -896,6 +902,9 @@ function RootLayoutInner() {
       {/* Renders nothing. One observer for every screen, instead of a call at
           the top of 195 of them (audit F9). */}
       <UsageCounter />
+      {/* Renders nothing. Relocks the app after the configured idle timeout
+          when it returns from the background (services/lockService.ts). */}
+      <ResumeLock />
       {/* ABOVE the navigator, so it survives every screen change. A call used
           to take the whole app hostage: the engine owned the call outside
           React, but the call screen's unmount said "hang up", so navigating
@@ -1050,12 +1059,17 @@ function RootLayoutInner() {
 // Sentry.wrap forwards refs + injects a top-level error boundary that
 // reports to Sentry before re-throwing. No-op when Sentry isn't init'd.
 function RootLayout() {
+  // Our own boundary at the root, so a render crash shows a recoverable screen
+  // even in builds without a Sentry DSN (Sentry.wrap below only runs with one).
+  // It depends on no provider, so it sits outside them all.
   return (
-    <VisionComfortProvider>
-      <ThemeProvider>
-        <RootLayoutInner />
-      </ThemeProvider>
-    </VisionComfortProvider>
+    <ErrorBoundary screen="root">
+      <VisionComfortProvider>
+        <ThemeProvider>
+          <RootLayoutInner />
+        </ThemeProvider>
+      </VisionComfortProvider>
+    </ErrorBoundary>
   );
 }
 
