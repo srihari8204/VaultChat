@@ -6,9 +6,9 @@
      After editing that script, recompute the hash, e.g.
      python3 -c "import re,hashlib,base64,sys;s=open(sys.argv[1]).read();print(base64.b64encode(hashlib.sha256(re.findall(r'<script>(.*?)</script>',s,re.S)[-1].encode()).digest()).decode())" FILE
      The page refuses to run its script until the hash matches. frame-ancestors cannot be set from a meta tag: send it as a header. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-cW3rzRw/7/TIzy1Hw82bZrfBLNjH0xAfw1yiOP8NeAM='; style-src 'unsafe-inline'; font-src 'self'; connect-src https: http://localhost:* http://127.0.0.1:*; img-src data:; base-uri 'none'; form-action 'none'" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-vtZ4NWLY3XuBmBctDaiTGrr0cKncE5VRLPgvt2/+fJI='; style-src 'unsafe-inline'; font-src 'self'; connect-src https: http://localhost:* http://127.0.0.1:*; img-src data:; base-uri 'none'; form-action 'none'" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<meta name="color-scheme" content="dark" />
+<meta name="color-scheme" content="dark light" />
 <title>crazzychat · Admin Console</title>
 <style>
   /* Self-hosted: no Google Fonts request carries the admin's IP. The files are
@@ -26,7 +26,22 @@
     --line2:rgba(255,255,255,.07); --gold:#E8B64C; --gold-dim:rgba(232,182,76,.12);
     --txt:#EAF0FB; --sub:rgba(234,240,251,.62); --faint:rgba(234,240,251,.5);  /* .3 / .55 were under 4.5:1 on --bg */
     --ok:#3ECf8E; --warn:#E8B64C; --err:#FF5C72; --info:#5AA9FF;
+    --gold-fill:#E8B64C; --panel-end:#0A0F1C; --topbar:rgba(7,11,20,.92); --well:#05080F; --well-txt:#cfe3ff;
+    --err-txt:#ffb3bd; --chip:rgba(255,255,255,.06); --hover:rgba(255,255,255,.03); --shadow:0 24px 60px rgba(0,0,0,.5);
     --mono:'JetBrains Mono',ui-monospace,monospace; --head:'Sora',sans-serif; --body:'Nunito Sans',sans-serif;
+  }
+  /* Light theme follows the OS setting. Text colours here are the darker
+     variants (all >= 4.5:1 on their backgrounds); --gold-fill stays bright
+     because it is a fill under dark text, never text itself. */
+  @media (prefers-color-scheme: light){
+    :root{
+      --bg:#F4F6FA; --panel:#FFFFFF; --panel2:#EEF1F6; --line:rgba(138,90,0,.22);
+      --line2:rgba(15,23,38,.10); --gold:#8A5A00; --gold-dim:rgba(138,90,0,.12);
+      --txt:#0F1726; --sub:rgba(15,23,38,.70); --faint:rgba(15,23,38,.62);
+      --ok:#0F7A4A; --warn:#B7791F; --err:#C8243B; --info:#1D63C9;
+      --panel-end:#F7F8FB; --topbar:rgba(255,255,255,.92); --well:#F1F4F9; --well-txt:#123A6B;
+      --err-txt:#8F1426; --chip:rgba(15,23,38,.06); --hover:rgba(15,23,38,.04); --shadow:0 12px 32px rgba(15,23,38,.12);
+    }
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;height:100%}
@@ -46,23 +61,23 @@
 
   /* ── Login ── */
   #login{min-height:100%;display:flex;align-items:center;justify-content:center;padding:24px}
-  .card{background:linear-gradient(180deg,var(--panel),#0A0F1C);border:1px solid var(--line);border-radius:18px;padding:24px;width:100%;max-width:380px;box-shadow:0 24px 60px rgba(0,0,0,.5)}
+  .card{background:linear-gradient(180deg,var(--panel),var(--panel-end));border:1px solid var(--line);border-radius:18px;padding:24px;width:100%;max-width:380px;box-shadow:var(--shadow)}
   .logo{display:flex;align-items:center;gap:10px;margin-bottom:6px}
-  .logo .dot{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,var(--gold),#A8761F);display:grid;place-items:center;color:#1a1305;font-weight:800;font-family:var(--head)}
+  .logo .dot{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,var(--gold-fill),#A8761F);display:grid;place-items:center;color:#1a1305;font-weight:800;font-family:var(--head)}
   .logo h1{font-size:18px;margin:0;font-weight:700}
   .muted{color:var(--sub);font-size:12.5px}
   .field{margin-top:14px}
   .field label{display:block;font-size:11px;color:var(--sub);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px}
-  .btn{background:linear-gradient(135deg,var(--gold),#C9942F);color:#1a1305;font-weight:800;border-radius:11px;padding:12px 16px;width:100%;margin-top:18px;font-size:14px}
+  .btn{background:linear-gradient(135deg,var(--gold-fill),#C9942F);color:#1a1305;font-weight:800;border-radius:11px;padding:12px 16px;width:100%;margin-top:18px;font-size:14px}
   .btn:active{transform:translateY(1px)}
   .btn.ghost{background:transparent;color:var(--gold);border:1px solid var(--line);width:auto;margin:0;padding:8px 14px;font-weight:700}
   .btn.sm{padding:7px 12px;width:auto;margin:0;font-size:12.5px;border-radius:9px}
   .btn.danger{background:transparent;border:1px solid rgba(255,92,114,.4);color:var(--err)}
-  .err-box{margin-top:14px;background:rgba(255,92,114,.1);border:1px solid rgba(255,92,114,.35);color:#ffb3bd;border-radius:10px;padding:10px 12px;font-size:12.5px}
+  .err-box{margin-top:14px;background:rgba(255,92,114,.1);border:1px solid rgba(255,92,114,.35);color:var(--err-txt);border-radius:10px;padding:10px 12px;font-size:12.5px}
 
   /* ── App shell ── */
   #app{min-height:100%;display:flex;flex-direction:column}
-  .topbar{position:sticky;top:0;z-index:20;background:rgba(7,11,20,.92);backdrop-filter:blur(12px);border-bottom:1px solid var(--line2);padding:10px 14px;display:flex;align-items:center;gap:10px}
+  .topbar{position:sticky;top:0;z-index:20;background:var(--topbar);backdrop-filter:blur(12px);border-bottom:1px solid var(--line2);padding:10px 14px;display:flex;align-items:center;gap:10px}
   .pill{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;font-weight:700;padding:5px 11px;border-radius:99px;border:1px solid var(--line2)}
   .pill .led{width:8px;height:8px;border-radius:50%;background:var(--faint)}
   .pill.on .led{background:var(--ok);box-shadow:0 0 8px var(--ok)}
@@ -79,7 +94,7 @@
 
   /* ── Stat cards ── */
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
-  .stat{background:linear-gradient(180deg,var(--panel),#0A101D);border:1px solid var(--line);border-radius:14px;padding:15px}
+  .stat{background:linear-gradient(180deg,var(--panel),var(--panel-end));border:1px solid var(--line);border-radius:14px;padding:15px}
   .stat .lbl{font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:1px}
   .stat .val{font-family:var(--head);font-size:26px;font-weight:800;margin-top:6px;color:var(--gold)}
   .stat .val.plain{color:var(--txt)}
@@ -92,7 +107,7 @@
   .badge.ok{background:rgba(62,207,142,.14);color:var(--ok)}
   .badge.bad{background:rgba(255,92,114,.14);color:var(--err)}
   .badge.on{background:rgba(62,207,142,.14);color:var(--ok)}
-  .badge.off{background:rgba(255,255,255,.06);color:var(--faint)}
+  .badge.off{background:var(--chip);color:var(--faint)}
 
   /* ── Tables ── */
   .toolbar{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;align-items:center}
@@ -107,16 +122,16 @@
 
   /* ── Live log ── */
   .logbar{display:flex;gap:10px;margin-bottom:10px;align-items:center}
-  .logwrap{background:#05080F;border:1px solid var(--line2);border-radius:12px;height:62vh;overflow-y:auto;padding:10px;font-family:var(--mono);font-size:11.5px}
+  .logwrap{background:var(--well);border:1px solid var(--line2);border-radius:12px;height:62vh;overflow-y:auto;padding:10px;font-family:var(--mono);font-size:11.5px}
   .logline{padding:3px 6px;border-radius:6px;display:flex;gap:10px;align-items:baseline}
-  .logline:hover{background:rgba(255,255,255,.03)}
+  .logline:hover{background:var(--hover)}
   .logline .t{color:var(--faint);flex-shrink:0}
   .logline .ev{font-weight:700;flex-shrink:0}
   .logline .d{color:var(--sub);overflow:hidden;text-overflow:ellipsis}
   .ev.new_message{color:var(--ok)} .ev.system{color:var(--gold)} .ev.conn{color:var(--info)}
   .ev.del,.ev.message_deleted{color:var(--err)} .ev.other{color:var(--info)}
 
-  pre.json{background:#05080F;border:1px solid var(--line2);border-radius:12px;padding:14px;overflow:auto;font-family:var(--mono);font-size:12px;color:#cfe3ff;max-height:64vh}
+  pre.json{background:var(--well);border:1px solid var(--line2);border-radius:12px;padding:14px;overflow:auto;font-family:var(--mono);font-size:12px;color:var(--well-txt);max-height:64vh}
   .empty{padding:30px;text-align:center;color:var(--faint);font-size:13px}
   .row2{display:flex;gap:10px;flex-wrap:wrap}
   @media(min-width:760px){ main{padding:22px 22px 50px} }
@@ -171,8 +186,8 @@
         <th>Name</th><th>Email</th><th>Phone</th><th>Status</th><th>Last seen</th><th>Joined</th>
       </tr></thead><tbody><tr><td colspan="6" class="empty">—</td></tr></tbody></table></div>
       <div class="pager"><span id="userCount"></span>
-        <button class="btn sm" id="userPrev">‹ Prev</button>
-        <button class="btn sm" id="userNext">Next ›</button>
+        <button class="btn sm" id="userPrev" aria-label="Previous page of users">‹ Prev</button>
+        <button class="btn sm" id="userNext" aria-label="Next page of users">Next ›</button>
       </div>
     </section>
 
@@ -216,7 +231,7 @@
     <section class="panel" data-panel="log" id="panel-log" role="tabpanel" aria-labelledby="tab-log">
       <h2 class="sec-h">Live event log · socket firehose</h2>
       <div class="logbar">
-        <button class="btn sm" id="logPause">Pause</button>
+        <button class="btn sm" id="logPause" aria-pressed="false">Pause</button>
         <button class="btn sm" id="logClear">Clear</button>
         <span class="muted" id="logCount">0 events</span>
       </div>
@@ -357,7 +372,15 @@
   }
 
   // ── Dashboard ──────────────────────────────────────────────
+  // One load at a time: on a slow server the 10 s timer (or a tab click)
+  // used to start a second stats+health pair while the first was still out.
+  let dashLoading = false;
   async function loadDashboard(){
+    if(dashLoading) return;
+    dashLoading = true;
+    try{ await loadDashboardNow(); } finally { dashLoading = false; }
+  }
+  async function loadDashboardNow(){
     try{
       const s = await api('/api/admin/stats');
       const cards = [
@@ -371,7 +394,7 @@
         const v=el('div','val'+(plain?' plain':'')); v.textContent=val; c.appendChild(v); g.appendChild(c);
       });
     }catch(e){ $('#statGrid').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; }
-    loadHealth();
+    await loadHealth();
   }
   async function loadHealth(){
     try{
@@ -460,6 +483,7 @@
         tr.appendChild(cell(ago(s.lastUsedAt)));
         tr.appendChild(cell(fmtDate(s.expiresAt)));
         const act=el('td'); const b=el('button','btn sm danger','Revoke');
+        b.setAttribute('aria-label','Revoke the session of '+(s.name||s.email||short(s.userId))+(s.device?' on '+String(s.device).slice(0,40):''));
         b.onclick=()=>revokeSession(s.id,b); act.appendChild(b); tr.appendChild(act);
         tb.appendChild(tr);
       });
@@ -505,8 +529,12 @@
     $('#logCount').textContent = logBuf+' events';
     if(!logPaused) w.scrollTop=w.scrollHeight;
   }
-  $('#logPause').onclick=function(){ logPaused=!logPaused; this.textContent=logPaused?'Resume':'Pause'; this.style.color=logPaused?'var(--gold)':''; };
-  $('#logClear').onclick=()=>{ $('#logWrap').innerHTML=''; logBuf=0; $('#logCount').textContent='0 events'; };
+  // A toggle: aria-pressed says it is paused. The label stays "Pause" so a
+  // screen reader hears "Pause, toggle button, pressed" rather than a renamed
+  // button whose pressed state would then contradict its name.
+  $('#logPause').onclick=function(){ logPaused=!logPaused; this.setAttribute('aria-pressed',String(logPaused)); this.style.color=logPaused?'var(--gold)':'';
+    $('#logCount').textContent = logBuf+' events'+(logPaused?' · paused':''); };
+  $('#logClear').onclick=()=>{ $('#logWrap').innerHTML=''; logBuf=0; $('#logCount').textContent='0 events'+(logPaused?' · paused':''); };
 
   // ── API explorer ───────────────────────────────────────────
   $('#apiGo').onclick=async ()=>{
@@ -517,7 +545,12 @@
   };
 
   // ── Socket connection (admin key auth + real event firehose) ─
+  // The pill is a live region: write it only when the state CHANGES, so the
+  // reconnect loop does not re-announce "Reconnecting…" on every retry.
+  let statusNow = '';
   function setStatus(state){
+    if(state===statusNow) return;
+    statusNow = state;
     const pill=$('#statusPill'), txt=$('#statusTxt');
     pill.className='pill '+(state==='on'?'on':state==='warn'?'warn':'off');
     txt.textContent = state==='on'?'Live':state==='warn'?'Reconnecting…':'Offline';

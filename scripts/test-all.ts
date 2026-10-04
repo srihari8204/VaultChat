@@ -40,7 +40,7 @@ const ROOT = path.resolve(__dirname, '..');
 // strict build.gradle input, a rotated keystore that never reached the signing
 // config). plugins/selfHealing.selftest.ts is the thing that notices; it was
 // written and then not run, because this array did not include its directory.
-const SEARCH_DIRS = ['lib', 'services', 'utils', 'constants', 'db', 'hooks', 'components', 'scripts', 'plugins'];
+const SEARCH_DIRS = ['lib', 'services', 'utils', 'constants', 'db', 'hooks', 'components', 'scripts', 'plugins', 'admin'];
 const SKIP_DIRS = new Set(['node_modules', '.git', 'android', 'ios', 'dist', 'rust', '__vectors__']);
 // scripts/coldstart.ts matches the `require.main === module` idiom, but what it
 // guards is a BENCHMARK, not a self-check: main() drives `adb`, force-stops the

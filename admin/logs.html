@@ -6,7 +6,7 @@
      After editing that script, recompute the hash, e.g.
      python3 -c "import re,hashlib,base64,sys;s=open(sys.argv[1]).read();print(base64.b64encode(hashlib.sha256(re.findall(r'<script>(.*?)</script>',s,re.S)[-1].encode()).digest()).decode())" FILE
      The page refuses to run its script until the hash matches. frame-ancestors cannot be set from a meta tag: send it as a header. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-THG/u0WI4UH0qiQe72hvEWfzI/JlGhUnju9nxTzL5oY='; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-+40j6rh4fFf3azoFPSsi1zOxi/N6cx2wnIYc4EHm5EM='; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'" />
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>crazzychat Server Logs</title>
 <style>
@@ -36,7 +36,7 @@
   .controls { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
   select, .btn { background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:6px 10px; font-size:12.5px; cursor:pointer; }
   .btn:hover { border-color:var(--accent); }
-  .btn.active { border-color:var(--accent); color:var(--accent); background:rgba(74,159,255,.08); }
+  .btn[aria-pressed="true"] { border-color:var(--accent); color:var(--accent); background:rgba(74,159,255,.08); }
   #filter { background:var(--panel2); border:1px solid var(--border); color:var(--text); border-radius:8px; padding:6px 10px; font-size:12.5px; width:190px; }
 
   main { display:flex; flex:1; min-height:0; }
@@ -94,7 +94,8 @@
       <option value="0">manual</option><option value="2000">2 s</option><option value="5000" selected>5 s</option><option value="10000">10 s</option>
     </select>
     <input id="filter" placeholder="filter (e.g. error, 502)…" aria-label="Filter lines">
-    <button class="btn" id="wrapBtn" title="toggle line wrap">wrap</button>
+    <button class="btn" id="wrapBtn" title="toggle line wrap" aria-pressed="false">wrap</button>
+    <button class="btn" id="announceBtn" title="read new lines aloud with a screen reader" aria-pressed="true">announce new lines</button>
     <button class="btn" id="refreshBtn" title="refresh now">⟳ refresh</button>
     <button class="btn" id="downloadBtn" title="save current view to a file">⬇ save</button>
   </div>
@@ -104,7 +105,8 @@
   <nav id="nav" aria-label="Log sources"></nav>
   <div id="logwrap">
     <!-- Only APPENDED lines are added to the DOM on a refresh (see renderLog), so
-         a polite log region announces new lines, not the whole tail again. -->
+         a polite log region announces new lines, not the whole tail again. A full
+         rebuild is silenced, and "announce new lines" turns announcing off. -->
     <div id="log" role="log" aria-live="polite" aria-relevant="additions" aria-label="Log lines"></div>
     <div id="empty">
       <div id="setup">
@@ -122,7 +124,7 @@
 <footer>
   <span id="meta">—</span>
   <span class="spacer"></span>
-  <span>read-only · token-gated · served from admin.corefinite.com</span>
+  <span>read-only · token-gated</span>
 </footer>
 
 <script>
@@ -140,7 +142,10 @@
     shownKey: '',         // source + filter they were rendered for
     loading: false,       // a load() is in flight — timer ticks skip, never overlap
     sourcing: false,      // a loadSources() is in flight
+    announce: true,       // #log is a polite live region (the "announce" toggle)
+    liveTimer: null,      // turns the region back on after a silenced rebuild
   };
+  try { state.announce = localStorage.getItem('lv_announce') !== 'off'; } catch {}
   // Same-origin API (nginx proxies /logapi/ → 127.0.0.1:9999).
   const EP = '/logapi';
   // The token lives in sessionStorage: it dies with the tab. Logs carry IPs and
@@ -184,12 +189,15 @@
     return '';
   }
 
+  // The filter is matched against the RAW text and each piece escaped after, so
+  // a filter such as "lt" or "amp" can no longer split an &lt; / &amp; entity.
   function lineHtml(raw, q) {
     const line = stripAnsi(raw);
     let h = esc(line);
     if (q) {
-      const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-      h = h.replace(rx, (m) => `<mark>${m}</mark>`);
+      // split() with one capture group: odd indexes are the matches.
+      const rx = new RegExp('(' + q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+      h = line.split(rx).map((part, i) => (i % 2 ? `<mark>${esc(part)}</mark>` : esc(part))).join('');
     }
     const cls = classify(line);
     return `<span class="ln${cls ? ' ' + cls : ''}">${h || ' '}</span>`;
@@ -219,7 +227,13 @@
     const key = state.src + '\u0000' + q;
     const keep = key === state.shownKey ? overlap(state.shown, lines) : -1;
     if (keep < 0) {
+      // A rebuild (first load, a source or filter change: up to 2,000 lines) is
+      // not news. Silence the region while it is replaced, and only turn it back
+      // on once typing in the filter has paused, so only later appends are read.
+      liveRegion(false);
       logEl.innerHTML = lines.map((raw) => lineHtml(raw, q)).join('');
+      clearTimeout(state.liveTimer);
+      state.liveTimer = setTimeout(() => liveRegion(true), 600);
     } else {
       // Append only what is new, then trim the top to the same window.
       const tpl = document.createElement('template');
@@ -231,6 +245,10 @@
     $('empty').style.display = state.connected ? 'none' : 'flex';
     $('meta').textContent = `${state.src} · ${lines.length}${q ? ' matching' : ''} lines · ${new Date().toLocaleTimeString()}`;
     if (state.stick) wrapEl.scrollTop = wrapEl.scrollHeight;
+  }
+
+  function liveRegion(on) {
+    $('log').setAttribute('aria-live', on && state.announce ? 'polite' : 'off');
   }
 
   const token = () => $('token').value.trim();
@@ -330,7 +348,16 @@
     $('log').innerHTML = ''; $('nav').innerHTML = '';
     setConnected(false, 'token cleared');
   };
-  $('wrapBtn').onclick = () => { $('log').classList.toggle('wrap'); $('wrapBtn').classList.toggle('active'); };
+  $('wrapBtn').onclick = () => { $('wrapBtn').setAttribute('aria-pressed', String($('log').classList.toggle('wrap'))); };
+  $('announceBtn').onclick = () => {
+    state.announce = !state.announce;
+    try { localStorage.setItem('lv_announce', state.announce ? 'on' : 'off'); } catch {}
+    $('announceBtn').setAttribute('aria-pressed', String(state.announce));
+    clearTimeout(state.liveTimer);
+    liveRegion(true);
+  };
+  $('announceBtn').setAttribute('aria-pressed', String(state.announce));
+  liveRegion(true);
   $('downloadBtn').onclick = () => {
     const blob = new Blob([state.lastLines.join('\n')], { type: 'text/plain' });
     const a = document.createElement('a');

@@ -69,6 +69,11 @@ served by **host nginx** from the admin site root (`/var/www/admin.corefinite.co
 per `docs/SERVER_INVENTORY.md`). Caddy does not serve them, so the headers
 below go in nginx, not in `caddy/Caddyfile`.
 
+Each page's `<meta>` CSP pins the SHA-256 of its one inline script; a page
+whose pin is stale refuses to run its script. Check all three before copying
+(from a checkout with node_modules, e.g. a dev machine):
+`npx tsx admin/adminPages.selftest.ts` — it also fails on inline `on*=` handlers.
+
 ```bash
 cd /home/srihari/vaultchat && git pull
 ADMIN_ROOT=$(grep -rhoP 'root\s+\K[^;]+' /etc/nginx/sites-enabled/* | head -1)  # verify!

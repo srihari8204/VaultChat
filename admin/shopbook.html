@@ -6,15 +6,26 @@
      After editing that script, recompute the hash, e.g.
      python3 -c "import re,hashlib,base64,sys;s=open(sys.argv[1]).read();print(base64.b64encode(hashlib.sha256(re.findall(r'<script>(.*?)</script>',s,re.S)[-1].encode()).digest()).decode())" FILE
      The page refuses to run its script until the hash matches. frame-ancestors cannot be set from a meta tag: send it as a header. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-eYjOjo8H/sgMf/CSo+jK37h8dLLhxmn1+t3dqpa8kT4='; style-src 'unsafe-inline'; connect-src https: http://localhost:* http://127.0.0.1:*; img-src data:; base-uri 'none'; form-action 'none'" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-H3SOMKGG0RLFyyJvVItFP2GbZUBD+K1bZexYnhgVXsc='; style-src 'unsafe-inline'; connect-src https: http://localhost:* http://127.0.0.1:*; img-src data:; base-uri 'none'; form-action 'none'" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<meta name="color-scheme" content="dark" />
+<meta name="color-scheme" content="dark light" />
 <title>Shop Book · Admin</title>
 <style>
   :root{
     --bg:#070B14; --panel:#0D1322; --panel2:#111A2E; --line:rgba(11,122,59,.35);
     --line2:rgba(255,255,255,.07); --green:#22C55E; --green-dim:rgba(34,197,94,.12);
     --txt:#EAF0FB; --sub:rgba(234,240,251,.55); --err:#FF5C72; --warn:#E8B64C;
+    --green-fill:#22C55E; --on-green:#052e12; --danger-fill:#D42A41; --warn-dim:rgba(232,182,76,.14);
+  }
+  /* Light theme follows the OS setting; every text colour is >= 4.5:1 on its
+     background. The button fills stay the same in both themes. (The danger
+     fill was #FF5C72 under white text, 3:1; #D42A41 is 5:1.) */
+  @media (prefers-color-scheme: light){
+    :root{
+      --bg:#F4F6FA; --panel:#FFFFFF; --panel2:#EEF1F6; --line:rgba(15,122,61,.30);
+      --line2:rgba(15,23,38,.12); --green:#0F7A3D; --green-dim:rgba(15,122,61,.10);
+      --txt:#0F1726; --sub:rgba(15,23,38,.70); --err:#C8243B; --warn:#8A5A00;
+    }
   }
   *{box-sizing:border-box}
   html,body{margin:0;min-height:100%}
@@ -25,13 +36,13 @@
   input:focus,select:focus,textarea:focus{border-color:var(--green)}
   /* Keyboard focus is always visible: outline:none used to remove it from every field. */
   :focus-visible{outline:2px solid var(--green);outline-offset:2px}
-  textarea[aria-invalid="true"]{border-color:var(--err)}
+  textarea[aria-invalid="true"],input[aria-invalid="true"]{border-color:var(--err)}
   button:disabled{opacity:.55;cursor:progress}
   .pages{display:flex;gap:12px;font-size:13px;margin-bottom:6px}
   .pages a{color:var(--green)}
-  button{cursor:pointer;border:none;border-radius:9px;padding:9px 14px;font-weight:700;font-size:13px;background:var(--green);color:#052e12}
+  button{cursor:pointer;border:none;border-radius:9px;padding:9px 14px;font-weight:700;font-size:13px;background:var(--green-fill);color:var(--on-green)}
   button.ghost{background:var(--panel2);color:var(--txt);border:1px solid var(--line2)}
-  button.danger{background:var(--err);color:#fff}
+  button.danger{background:var(--danger-fill);color:#fff}
   .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:14px 0}
   .bar input{flex:1;min-width:180px}
   .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
@@ -40,7 +51,7 @@
   .card{background:var(--panel);border:1px solid var(--line2);border-radius:12px;padding:14px;margin-bottom:10px}
   .card .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
   .tag{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11px;font-weight:700}
-  .tag.ok{background:var(--green-dim);color:var(--green)} .tag.pend{background:rgba(232,182,76,.14);color:var(--warn)}
+  .tag.ok{background:var(--green-dim);color:var(--green)} .tag.pend{background:var(--warn-dim);color:var(--warn)}
   .muted{color:var(--sub);font-size:12px}
   textarea{width:100%;min-height:120px;font-family:ui-monospace,monospace;font-size:12px}
   .hide{display:none!important}
@@ -48,6 +59,12 @@
   .err{color:var(--err);font-size:13px}
   a.button{display:inline-block;text-decoration:none;border-radius:9px;padding:9px 14px;font-weight:700;font-size:13px}
   a.button.ghost{background:var(--panel2);color:var(--txt);border:1px solid var(--line2)}
+  .entform{margin-top:10px;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--panel2)}
+  .entform h3{font-size:14px;margin:0 0 10px}
+  .fld{display:flex;flex-direction:column;gap:4px;margin-bottom:10px;max-width:380px}
+  .fld label{font-size:12px;font-weight:700}
+  .entform .summary{font-weight:700;margin:0 0 10px}
+  .entform .summary:empty,.entform .err:empty{display:none}
   #msg{position:fixed;bottom:16px;right:16px;background:var(--panel2);border:1px solid var(--line);padding:10px 16px;border-radius:10px;opacity:0;transition:opacity .3s}
 </style>
 </head>
@@ -132,6 +149,9 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':
 // Numbers from the API are escaped too: a field that "is always a number" is
 // only as true as the server that sent it.
 const num = (v, digits) => { const n = Number(v); return Number.isFinite(n) ? (digits == null ? String(n) : n.toFixed(digits)) : '—'; };
+// Repeated buttons ("Approve", "Save", "Accept"…) get the shop in their
+// accessible name, starting with the visible text (WCAG label-in-name).
+const named = (text, who) => `aria-label="${esc(text)}, ${esc(who)}"`;
 let toastTimer = null;
 function toast(t){ const m=$('msg'); m.textContent=t; m.style.opacity=1; clearTimeout(toastTimer); toastTimer=setTimeout(()=>m.style.opacity=0, 5000); }
 
@@ -205,10 +225,10 @@ function loadShops(filter){
       </div>
       <div class="muted">${esc(sh.address)} · Owner: ${esc(sh.ownerName)} ${esc(sh.ownerPhone)}</div>
       <div class="row" style="margin-top:8px">
-        ${sh.approved ? '' : `<button data-act="approve" data-id="${esc(sh.id)}" data-verified="false">Approve</button>
-        <button data-act="approve" data-id="${esc(sh.id)}" data-verified="true">Approve + Verified ✓</button>
-        <button class="danger" data-act="reject-shop" data-id="${esc(sh.id)}">Reject…</button>`}
-        ${sh.approved ? `<button class="ghost" data-act="approve" data-mode="badge" data-id="${esc(sh.id)}" data-verified="${!sh.verified}">${sh.verified ? 'Remove verified badge' : 'Grant verified badge'}</button>` : ''}
+        ${sh.approved ? '' : `<button data-act="approve" data-id="${esc(sh.id)}" data-verified="false" ${named('Approve', sh.name)}>Approve</button>
+        <button data-act="approve" data-id="${esc(sh.id)}" data-verified="true" ${named('Approve + Verified', sh.name)}>Approve + Verified ✓</button>
+        <button class="danger" data-act="reject-shop" data-id="${esc(sh.id)}" ${named('Reject…', sh.name)}>Reject…</button>`}
+        ${sh.approved ? `<button class="ghost" data-act="approve" data-mode="badge" data-id="${esc(sh.id)}" data-verified="${!sh.verified}" ${named(sh.verified ? 'Remove verified badge' : 'Grant verified badge', sh.name)}>${sh.verified ? 'Remove verified badge' : 'Grant verified badge'}</button>` : ''}
       </div>
     </div>`).join('') : '<p class="muted">Nothing here.</p>';
   });
@@ -240,7 +260,7 @@ function loadCountries(){
         <span class="muted">${esc(c.currencySymbol)} ${esc(c.currencyCode)} · ${esc(c.taxType)}</span>
         <span class="tag ${c.enabled ? 'ok':'pend'}">${c.enabled ? 'ENABLED':'DISABLED'}</span></div>
       <textarea id="country-${i}" aria-label="${esc(c.name)} tax configuration JSON">${esc(JSON.stringify(c, null, 2))}</textarea>
-      <div class="row" style="margin-top:8px"><button data-act="save-json" data-src="country-${i}" data-kind="countries">Save</button></div>
+      <div class="row" style="margin-top:8px"><button data-act="save-json" data-src="country-${i}" data-kind="countries" ${named('Save', c.name)}>Save</button></div>
     </div>`).join('');
   });
 }
@@ -262,7 +282,7 @@ function loadCategories(){
     <div class="card">
       <div class="row"><b>${esc(c.icon)} ${esc(c.label)}</b><span class="muted">${esc(c.id)} · ${num((c.items || []).length)} starter item(s)</span></div>
       <textarea id="cat-${i}" aria-label="${esc(c.label)} category JSON">${esc(JSON.stringify(c, null, 2))}</textarea>
-      <div class="row" style="margin-top:8px"><button data-act="save-json" data-src="cat-${i}" data-kind="categories">Save</button></div>
+      <div class="row" style="margin-top:8px"><button data-act="save-json" data-src="cat-${i}" data-kind="categories" ${named('Save', c.label)}>Save</button></div>
     </div>`).join('');
   });
 }
@@ -354,9 +374,9 @@ function loadVerifications(state){
         ${sh.hasFrontPhoto ? '· shop-front photo ✓' : '· no shop-front photo'}</div>
       ${sh.verifyNote ? `<div class="muted">Last note: ${esc(sh.verifyNote)}</div>` : ''}
       <div class="row" style="margin-top:8px">
-        <button class="ghost" data-act="documents" data-id="${esc(sh.id)}">Documents…</button>
+        <button class="ghost" data-act="documents" data-id="${esc(sh.id)}" ${named('Documents…', sh.name)}>Documents…</button>
         ${VERIFY_STATES.filter((v) => v !== sh.verifyState).map((v) =>
-          `<button class="${v === 'verified' ? '' : 'ghost'}" data-act="set-verify" data-id="${esc(sh.id)}" data-state="${v}">${v.replace('_',' ')}</button>`).join('')}
+          `<button class="${v === 'verified' ? '' : 'ghost'}" data-act="set-verify" data-id="${esc(sh.id)}" data-state="${v}" ${named(v.replace('_',' '), sh.name)}>${v.replace('_',' ')}</button>`).join('')}
       </div>
       <div data-docs-for="${esc(sh.id)}"></div>
     </div>`).join('') : '<p class="muted">Nothing here.</p>';
@@ -387,6 +407,7 @@ async function loadDocuments(shopId){
   if (!box) return;
   try {
     const { documents } = await api(`/api/admin/shopbook/shops/${encodeURIComponent(shopId)}/documents`);
+    const shopName = shopNames.get(shopId) || shopId;
     // Only an https link is offered: a stored URL is still data from the server.
     box.innerHTML = documents.length ? documents.map((d) => `
       <div class="card" style="margin-top:8px">
@@ -399,8 +420,8 @@ async function loadDocuments(shopId){
         <div class="row" style="margin-top:8px">
           ${/^https:\/\//i.test(d.viewUrl || '') ? `<a class="button ghost" href="${esc(d.viewUrl)}" target="_blank" rel="noopener noreferrer">Open (15 min)</a>`
                       : '<span class="muted">No view link — object storage is off</span>'}
-          <button data-act="review-doc" data-id="${esc(d.id)}" data-shop="${esc(shopId)}" data-status="accepted">Accept</button>
-          <button class="danger" data-act="review-doc" data-id="${esc(d.id)}" data-shop="${esc(shopId)}" data-status="rejected">Reject…</button>
+          <button data-act="review-doc" data-id="${esc(d.id)}" data-shop="${esc(shopId)}" data-status="accepted" ${named('Accept', d.kind + ' of ' + shopName)}>Accept</button>
+          <button class="danger" data-act="review-doc" data-id="${esc(d.id)}" data-shop="${esc(shopId)}" data-status="rejected" ${named('Reject…', d.kind + ' of ' + shopName)}>Reject…</button>
         </div>
       </div>`).join('') : '<p class="muted">No documents uploaded.</p>';
   } catch(e){ box.innerHTML = `<p class="err">Could not load documents: ${esc(e.message)}</p>`; toast('❌ ' + e.message); }
@@ -438,8 +459,8 @@ function loadLocations(status){
       <div class="muted">Reason: ${esc(q.reason)}</div>
       ${q.reviewNote ? `<div class="muted">Review: ${esc(q.reviewNote)}</div>` : ''}
       ${q.status === 'pending' ? `<div class="row" style="margin-top:8px">
-        <button data-act="decide-location" data-id="${esc(q.id)}" data-approve="true">Approve move</button>
-        <button class="danger" data-act="decide-location" data-id="${esc(q.id)}" data-approve="false">Refuse…</button>
+        <button data-act="decide-location" data-id="${esc(q.id)}" data-approve="true" ${named('Approve move', q.shopName)}>Approve move</button>
+        <button class="danger" data-act="decide-location" data-id="${esc(q.id)}" data-approve="false" ${named('Refuse…', q.shopName)}>Refuse…</button>
       </div>` : ''}
     </div>`).join('') : '<p class="muted">Nothing here.</p>';
   });
@@ -468,7 +489,12 @@ function loadSubscriptions(){
   return section('subscriptions', async () => {
     const { subscriptions } = await api('/api/admin/shopbook/subscriptions');
     subscriptions.forEach((s) => shopNames.set(s.shopId, s.shopName));
-    $('subscriptions').innerHTML = subscriptions.length ? subscriptions.map((s) => {
+    // proRequestedAt: set by the owner's "Request Pro", cleared by any decision
+    // here; the server lists requesters first. Servers before that backend
+    // change (written 2026-10-04, deploy pending) do not send it: no tag then.
+    const asked = subscriptions.filter((s) => s.proRequestedAt).length;
+    $('subscriptions').innerHTML = (asked ? `<p class="muted">${num(asked)} shop(s) asked for Pro — listed first.</p>` : '') +
+      (subscriptions.length ? subscriptions.map((s) => {
       const drift = s.displayPlan !== s.entitledPlan;
       return `
     <div class="card">
@@ -476,54 +502,152 @@ function loadSubscriptions(){
         <b>${esc(s.shopName)}</b>
         <span class="tag ${s.entitledPlan === 'pro' ? 'ok':'pend'}">${esc(s.entitledPlan).toUpperCase()} · ${esc(s.state)}</span>
         ${drift ? `<span class="tag pend">shows ${esc(s.displayPlan)}</span>` : ''}
+        ${s.proRequestedAt ? `<span class="tag pend">Pro requested ${esc(s.proRequestedAt)}</span>` : ''}
         <span class="muted">${num(s.customers)} customer(s) · ${num(s.products)} product(s)
           ${s.expiresAt ? '· expires ' + esc(s.expiresAt) : '· no expiry'}
           ${s.source ? '· ' + esc(s.source) : ''} ${s.reference ? '· ' + esc(s.reference) : ''}</span>
       </div>
       <div class="row" style="margin-top:8px">
-        <button data-act="entitlement" data-id="${esc(s.shopId)}" data-plan="pro" data-state="active">Grant Pro</button>
-        <button class="ghost" data-act="entitlement" data-id="${esc(s.shopId)}" data-plan="pro" data-state="trial">Pro trial</button>
-        <button class="ghost" data-act="entitlement" data-id="${esc(s.shopId)}" data-plan="free" data-state="cancelled">Back to Free</button>
+        <button data-act="entitlement" data-id="${esc(s.shopId)}" data-plan="pro" data-state="active" ${named('Grant Pro…', s.shopName)}>Grant Pro…</button>
+        <button class="ghost" data-act="entitlement" data-id="${esc(s.shopId)}" data-plan="pro" data-state="trial" ${named('Pro trial…', s.shopName)}>Pro trial…</button>
+        <button class="ghost" data-act="entitlement" data-id="${esc(s.shopId)}" data-plan="free" data-state="cancelled" ${named('Back to Free…', s.shopName)}>Back to Free…</button>
       </div>
-    </div>`; }).join('') : '<p class="muted">Nothing here.</p>';
+      <div data-ent-for="${esc(s.shopId)}"></div>
+    </div>`; }).join('') : '<p class="muted">Nothing here.</p>');
   });
 }
 
-async function setEntitlement(shopId, plan, state){
-  const name = shopNames.get(shopId) || shopId;
-  let expiresAt = '';
-  if (plan === 'pro') {
-    const raw = prompt('Expires on (YYYY-MM-DD, or a full RFC3339 time) — blank for no expiry:');
-    if (raw === null) return;
-    expiresAt = raw.trim();
-    if (/^\d{4}-\d{2}-\d{2}$/.test(expiresAt)) expiresAt += 'T23:59:59Z';
-    if (expiresAt && !(/^\d{4}-\d{2}-\d{2}T/.test(expiresAt) && Number.isFinite(Date.parse(expiresAt)))) {
-      toast('❌ That expiry is not a date. Use YYYY-MM-DD.'); return;
-    }
-    if (expiresAt && Date.parse(expiresAt) <= Date.now()) { toast('❌ That expiry is in the past.'); return; }
-  }
-  const reference = prompt('Reference (invoice or note, optional):');
-  if (reference === null) return;
-  const what = plan === 'pro' ? `${state === 'trial' ? 'a Pro TRIAL' : 'PRO'}${expiresAt ? ' until ' + expiresAt : ' with no expiry'}` : 'the FREE plan (Pro features stop; no data is deleted)';
-  if (!confirm(`Give "${name}" ${what}?`)) return;
-  try {
-    await api(`/api/admin/shopbook/shops/${encodeURIComponent(shopId)}/entitlement`,
-      { method:'POST', body: JSON.stringify({ plan, state, expiresAt, reference }) });
-    toast('Entitlement saved'); loadSubscriptions();
-  } catch(e){ toast('❌ ' + e.message); }
+// The entitlement change is an inline form (it was a chain of prompt()s):
+// a real date input, an optional reference, validation shown in the form,
+// then a second press of the same button confirms a spelled-out summary.
+const ENT_WHAT = { 'pro:active': 'PRO', 'pro:trial': 'a Pro TRIAL', 'free:cancelled': 'the FREE plan' };
+const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+let entSeq = 0;
+
+// Pure: the expiresAt to send, or the reason the date is not acceptable.
+// raw is an <input type=date> value ('' or YYYY-MM-DD); today is the local
+// YYYY-MM-DD; badInput is the input's validity.badInput (a half-typed date
+// reads as '' — it must not turn into "no expiry").
+function entitlementExpiry(plan, raw, today, badInput){
+  if (plan !== 'pro') return { expiresAt: '' };
+  if (badInput) return { error: 'Finish the expiry date, or clear it for no expiry.' };
+  const v = String(raw || '').trim();
+  if (!v) return { expiresAt: '' };
+  const t = /^\d{4}-\d{2}-\d{2}$/.test(v) ? Date.parse(v + 'T00:00:00Z') : NaN;
+  if (!Number.isFinite(t) || new Date(t).toISOString().slice(0, 10) !== v) return { error: 'The expiry must be a date (YYYY-MM-DD).' };
+  if (v <= today) return { error: 'The expiry must be after today.' };
+  return { expiresAt: v + 'T23:59:59Z' };
 }
+
+function entitlementSummary(name, plan, state, expiresAt, reference){
+  const what = plan === 'pro'
+    ? `${ENT_WHAT[plan + ':' + state]} ${expiresAt ? 'until ' + expiresAt.slice(0, 10) + ' (23:59 UTC)' : 'with NO expiry'}`
+    : 'the FREE plan. Pro features stop; no data is deleted';
+  return `Give "${name}" ${what}.` + (reference ? ` Reference: ${reference}.` : '') + ' Press Confirm to save, or change a field to start over.';
+}
+
+function openEntitlement(shopId, plan, state){
+  const slot = document.querySelector(`[data-ent-for="${CSS.escape(shopId)}"]`);
+  if (!slot) return;
+  const name = shopNames.get(shopId) || shopId;
+  const uid = 'ent' + (++entSeq);
+  const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+  slot.innerHTML = `
+    <form class="entform" data-ent-form data-id="${esc(shopId)}" data-plan="${esc(plan)}" data-state="${esc(state)}" aria-labelledby="${uid}-h" novalidate>
+      <h3 id="${uid}-h">Give "${esc(name)}" ${esc(ENT_WHAT[plan + ':' + state] || plan)}</h3>
+      ${plan === 'pro' ? `<div class="fld"><label for="${uid}-exp">Expires on (optional)</label>
+        <input id="${uid}-exp" name="expires" type="date" min="${ymd(tomorrow)}" aria-describedby="${uid}-exph">
+        <span class="muted" id="${uid}-exph">Blank means no expiry. Pro ends at 23:59 UTC on that day.</span></div>`
+        : '<p class="muted">Pro features stop. No data is deleted.</p>'}
+      <div class="fld"><label for="${uid}-ref">Reference (optional)</label>
+        <input id="${uid}-ref" name="reference" placeholder="invoice number or note" autocomplete="off"></div>
+      <p class="err" role="alert" data-ent-err></p>
+      <p class="summary" id="${uid}-sum" role="status" data-ent-summary></p>
+      <div class="row">
+        <button type="submit" data-ent-submit aria-describedby="${uid}-sum">Review</button>
+        <button type="button" class="ghost" data-act="ent-cancel" data-id="${esc(shopId)}">Cancel</button>
+      </div>
+    </form>`;
+  slot.querySelector('input').focus();
+}
+
+function closeEntitlement(shopId){
+  const slot = document.querySelector(`[data-ent-for="${CSS.escape(shopId)}"]`);
+  if (slot) slot.innerHTML = '';
+  const opener = document.querySelector(`[data-act="entitlement"][data-id="${CSS.escape(shopId)}"]`);
+  if (opener) opener.focus();
+}
+
+// Any edit after "Review" withdraws the summary: what is confirmed is always
+// what the form shows.
+function resetEntitlementReview(f){
+  delete f.dataset.review;
+  f.querySelector('[data-ent-summary]').textContent = '';
+  f.querySelector('[data-ent-submit]').textContent = 'Review';
+}
+
+async function submitEntitlement(f){
+  const btn = f.querySelector('[data-ent-submit]');
+  if (btn.disabled) return;
+  const { id, plan, state } = f.dataset;
+  const exp = f.elements.namedItem('expires');
+  const errEl = f.querySelector('[data-ent-err]');
+  const v = entitlementExpiry(plan, exp ? exp.value : '', ymd(new Date()), !!(exp && exp.validity.badInput));
+  if (v.error) {
+    resetEntitlementReview(f);
+    errEl.textContent = v.error;
+    if (exp) { exp.setAttribute('aria-invalid', 'true'); exp.focus(); }
+    return;
+  }
+  errEl.textContent = '';
+  if (exp) exp.removeAttribute('aria-invalid');
+  const reference = f.elements.namedItem('reference').value.trim();
+  if (!f.dataset.review) {
+    f.dataset.review = '1';
+    f.querySelector('[data-ent-summary]').textContent =
+      entitlementSummary(shopNames.get(id) || id, plan, state, v.expiresAt, reference);
+    btn.textContent = 'Confirm';
+    btn.focus();
+    return;
+  }
+  btn.disabled = true; btn.setAttribute('aria-busy', 'true');
+  try {
+    await api(`/api/admin/shopbook/shops/${encodeURIComponent(id)}/entitlement`,
+      { method:'POST', body: JSON.stringify({ plan, state, expiresAt: v.expiresAt, reference }) });
+    toast('Entitlement saved');
+    await loadSubscriptions();
+  } catch (e) {
+    errEl.textContent = 'Not saved: ' + e.message;
+    btn.disabled = false; btn.removeAttribute('aria-busy');
+  }
+}
+
+document.addEventListener('submit', (ev) => {
+  const f = ev.target.closest('form[data-ent-form]');
+  if (!f) return;
+  ev.preventDefault();   // never a real submission (the CSP has form-action 'none')
+  submitEntitlement(f);
+});
+document.addEventListener('input', (ev) => {
+  const f = ev.target.closest('form[data-ent-form]');
+  if (f && f.dataset.review) resetEntitlementReview(f);
+});
 
 // ── read-only support windows ───────────────────────────────────
 function loadOrders(){
   return section('support', async () => {
     const shopId = $('auditShop').value.trim();
     const { orders } = await api('/api/admin/shopbook/orders?shopId=' + encodeURIComponent(shopId));
+    // rejectReason / rejectNote (the owner's "other" note, migration 140) are
+    // shown when a row carries them. sbAdminOrders does not select them yet
+    // (backend handoff), so today nothing extra renders.
     $('support').innerHTML = orders.length ? orders.map((o) => `
     <div class="card">
       <div class="row"><b>${esc(o.shopName)}</b>
         <span class="tag ${o.status === 'completed' ? 'ok':'pend'}">${esc(o.status).toUpperCase()}</span>
         <span class="muted">${esc(o.customerName)} · ${esc(o.currency)}${num(o.total)} paid ${esc(o.currency)}${num(o.paid)} · ${esc(o.createdAt)}</span>
       </div>
+      ${o.rejectReason || o.rejectNote ? `<div class="muted">Rejected: ${esc(o.rejectReason)}${o.rejectNote ? ' — ' + esc(o.rejectNote) : ''}</div>` : ''}
       <div class="muted">${esc(o.id)}</div>
     </div>`).join('') : '<p class="muted">No orders.</p>';
   });
@@ -591,10 +715,15 @@ document.addEventListener('click', (ev) => {
     case 'set-verify': return setVerify(d.id, d.state);
     case 'review-doc': return reviewDoc(d.id, d.status, d.shop);
     case 'decide-location': return decideLocation(d.id, d.approve === 'true');
-    case 'entitlement': return setEntitlement(d.id, d.plan, d.state);
+    case 'entitlement': return openEntitlement(d.id, d.plan, d.state);
+    case 'ent-cancel': return closeEntitlement(d.id);
   } })());
 });
-$('key').addEventListener('keydown', (e) => { if (e.key === 'Enter') loadAll(); });
+// Enter connects through the same button, so it gets the same busy guard
+// (it used to call loadAll() directly and could overlap a click).
+const connectOnEnter = (e) => { if (e.key === 'Enter') document.querySelector('[data-act="connect"]').click(); };
+$('key').addEventListener('keydown', connectOnEnter);
+$('base').addEventListener('keydown', connectOnEnter);
 
 $('base').value = localStorage.getItem('sb_admin_base') || '';
 </script>
