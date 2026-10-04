@@ -25,9 +25,11 @@ import { AuroraBackground } from '../components/ui/AuroraBackground';
 import { AppText as Text } from '../components/ui/Text';
 import { brandAlpha } from '../constants/theme';
 import { requestToJoin, myInvitations } from '../lib/chatService';
-import { groupTypeInfo } from '../lib/groups/catalog';
+import { groupTypeInfo, hexColorOr } from '../lib/groups/catalog';
 
-type State = 'idle' | 'sending' | 'asked' | 'member';
+// 'invited': they already hold an invitation for this group; answering it is
+// what lets them in, so this screen sends them to it rather than asking again.
+type State = 'idle' | 'sending' | 'asked' | 'invited' | 'member';
 
 export default function GroupJoinScreen() {
   const { colors } = useTheme();
@@ -41,8 +43,11 @@ export default function GroupJoinScreen() {
   const [checking, setChecking] = useState(true);
 
   const type = groupTypeInfo(params.groupType ? String(params.groupType) : null);
-  const accent = String(params.color || '') || type.color;
-  const icon = (String(params.icon || '') || type.icon) as keyof typeof Ionicons.glyphMap;
+  // The card's route params are whatever the sender's message carried: draw only
+  // a known glyph and a #RRGGBB colour, else the type's own.
+  const accent = hexColorOr(params.color ? String(params.color) : null, type.color);
+  const rawIcon = String(params.icon || '');
+  const icon = (rawIcon && rawIcon in Ionicons.glyphMap ? rawIcon : type.icon) as keyof typeof Ionicons.glyphMap;
 
   // Do I already have a request in flight? Without this the screen offers to
   // ask again, the server refuses on the duplicate guard, and the refusal reads
@@ -50,10 +55,12 @@ export default function GroupJoinScreen() {
   useFocusEffect(useCallback(() => {
     let live = true;
     (async () => {
+      if (!groupId) { setChecking(false); return; }
       try {
         const mine = await myInvitations();
         if (!live) return;
-        if (mine.some((i) => i.chatId === groupId)) setState('asked');
+        const row = mine.find((i) => i.chatId === groupId);
+        if (row) setState(row.requested ? 'asked' : 'invited');
       } catch {
         // Offline: leave the button available. The server is the real guard,
         // and refusing to let someone try because a list did not load is worse
@@ -66,19 +73,33 @@ export default function GroupJoinScreen() {
   }, [groupId]));
 
   const ask = async () => {
-    if (state !== 'idle') return;
+    if (state !== 'idle' || !groupId) return;
     setState('sending');
     try {
       await requestToJoin(groupId);
       setState('asked');
     } catch (e: any) {
       const msg: string = e?.message ?? 'Try again.';
-      if (/already in this group/i.test(msg)) { setState('member'); return; }
-      if (/already have a request|already have an invitation/i.test(msg)) { setState('asked'); return; }
+      // ponytail: the server sends these as 409 with prose only (no error code),
+      // so the text is matched, and only on a 409. Replace with the code once
+      // POST /chats/:id/membership/request returns one (backend handoff).
+      if (e?.status === 409 && /already in this group/i.test(msg)) { setState('member'); return; }
+      if (e?.status === 409 && /already have a request|already have an invitation/i.test(msg)) { setState('asked'); return; }
       setState('idle');
       Alert.alert('Could not ask to join', msg);
     }
   };
+
+  if (!groupId) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center', padding: 32 }}>
+        <AuroraBackground variant="chat" />
+        <Stack.Screen options={{ headerShown: true, headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false, title: 'Join a group', headerTitleAlign: 'center' }} />
+        <Text style={{ color: colors.text, fontWeight: '700', fontSize: 15 }}>Group not found</Text>
+        <Text style={{ color: colors.textDim, fontSize: 13, textAlign: 'center', marginTop: 6 }}>This card did not say which group it is for.</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -90,14 +111,14 @@ export default function GroupJoinScreen() {
           <View style={[st.icon, { backgroundColor: accent + '22', borderColor: accent }]}>
             <Ionicons name={icon} size={34} color={accent} />
           </View>
-          <Text numberOfLines={1} style={{ color: colors.text, fontWeight: '800', fontSize: 21, marginTop: 14, textAlign: 'center' }}>
+          <Text numberOfLines={1} accessibilityRole="header" style={{ color: colors.text, fontWeight: '800', fontSize: 21, marginTop: 14, textAlign: 'center' }}>
             {name}
           </Text>
           <Text style={{ color: colors.textDim, fontSize: 13.5, marginTop: 4 }}>{type.label}</Text>
         </View>
 
         {checking ? (
-          <ActivityIndicator color={colors.primary} style={{ marginTop: 34 }} />
+          <ActivityIndicator color={colors.primary} style={{ marginTop: 34 }} accessibilityLabel="Checking for an earlier request" />
         ) : state === 'member' ? (
           <View style={[st.note, { borderColor: colors.success, backgroundColor: colors.success + '12' }]}>
             <Ionicons name="checkmark-circle" size={19} color={colors.success} />
@@ -105,6 +126,20 @@ export default function GroupJoinScreen() {
               You are already in {name}.
             </Text>
           </View>
+        ) : state === 'invited' ? (
+          <>
+            <View style={[st.note, { borderColor: accent, backgroundColor: accent + '12' }]}>
+              <Ionicons name="mail-unread-outline" size={19} color={accent} />
+              <Text style={{ color: colors.text, fontSize: 13.5, flex: 1, lineHeight: 19 }}>
+                You already have an invitation to {name}. Answer it in your invitations.
+              </Text>
+            </View>
+            <TouchableOpacity onPress={() => router.replace('/group-invitations' as any)}
+              accessibilityRole="button" style={[st.btn, { backgroundColor: accent }]}>
+              <Ionicons name="mail-open-outline" size={18} color="#fff" />
+              <Text style={st.btnTxt}>Open invitations</Text>
+            </TouchableOpacity>
+          </>
         ) : state === 'asked' ? (
           <View style={[st.note, { borderColor: accent, backgroundColor: accent + '12' }]}>
             <Ionicons name="hourglass-outline" size={19} color={accent} />
@@ -120,6 +155,8 @@ export default function GroupJoinScreen() {
               decide.
             </Text>
             <TouchableOpacity onPress={ask} disabled={state !== 'idle'}
+              accessibilityRole="button" accessibilityLabel={`Ask to join ${name}`}
+              accessibilityState={{ disabled: state !== 'idle', busy: state === 'sending' }}
               style={[st.btn, { backgroundColor: accent }]}>
               {state === 'sending'
                 ? <ActivityIndicator color="#fff" />
@@ -130,7 +167,7 @@ export default function GroupJoinScreen() {
         )}
 
         {(state === 'asked' || state === 'member') && (
-          <TouchableOpacity onPress={() => router.back()}
+          <TouchableOpacity onPress={() => router.back()} accessibilityRole="button"
             style={[st.btn, { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.glassStroke }]}>
             <Text style={[st.btnTxt, { color: colors.text }]}>Done</Text>
           </TouchableOpacity>

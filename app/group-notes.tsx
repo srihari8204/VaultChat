@@ -19,16 +19,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { AuroraBackground } from '../components/ui/AuroraBackground';
 import { AppText as Text } from '../components/ui/Text';
-import { sendMessage, getMessages, decryptFromChat } from '../lib/chatService';
-import { unionWithLocalHistoryAsc } from '../lib/messageHistory';
+import { sendMessage } from '../lib/chatService';
 import { getCurrentUserAsync } from './(constants)/authService';
 import {
   encodeNoteOp, decodeNoteOp, foldNotes, sortNotes, preview, newNoteId,
   type Note, type NoteOp,
 } from '../lib/groups/notes';
+import { readGroupOps } from '../lib/groups/opThread';
 import { KeyboardSafe } from '../components/ui';
-
-const SCAN_LIMIT = 400;
+import { ThreadGaps } from '../components/groups/ThreadGaps';
 
 const when = (ts: number) => {
   const d = new Date(ts), now = new Date();
@@ -43,8 +42,10 @@ export default function GroupNotesScreen() {
 
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
-  // First load failed with nothing to show: an error, not "No notes yet".
+  // Load failed: an error screen when nothing is listed, a banner over the list otherwise.
   const [failed, setFailed] = useState(false);
+  // What the last read could not see: undecryptable messages, and whether paging stopped early.
+  const [gaps, setGaps] = useState<{ unreadable: number; complete: boolean }>({ unreadable: 0, complete: true });
   const [me, setMe] = useState<string | null>(null);
 
   const [editing, setEditing] = useState<Note | null>(null);
@@ -56,20 +57,9 @@ export default function GroupNotesScreen() {
   const rebuild = useCallback(async () => {
     if (!groupId) { setLoading(false); return; }
     try {
-      // Ops older than the retention window survive only on this device.
-      const msgs = await unionWithLocalHistoryAsc(
-        groupId, await getMessages(groupId, { limit: SCAN_LIMIT }), SCAN_LIMIT * 4);
-      const ops: NoteOp[] = [];
-      for (const m of msgs) {
-        if (m.deletedAt || !m.content) continue;
-        let body = '';
-        try { body = await decryptFromChat(groupId, m.senderId, m.content, m.id); } catch { continue; }
-        const op = decodeNoteOp(body);
-        // `by` is inside the encrypted body, so any member could write someone
-        // else's id there. The transport sender is authenticated: an op whose
-        // claimed author is not its sender is a forgery and is dropped.
-        if (op && op.by === String(m.senderId)) ops.push(op);
-      }
+      // Paged server read plus this device's own history (lib/groups/opThread).
+      const { ops, unreadable, complete } = await readGroupOps<NoteOp>(groupId, decodeNoteOp);
+      setGaps({ unreadable, complete });
       setNotes(foldNotes(ops));
       setFailed(false);
     } catch {
@@ -186,6 +176,14 @@ export default function GroupNotesScreen() {
         </View>
       ) : (
         <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+          {failed && (
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Couldn't refresh notes. Showing what was loaded before. Retry"
+              onPress={() => { setLoading(true); rebuild(); }}
+              style={[st.banner, { borderColor: colors.danger }]}>
+              <Ionicons name="cloud-offline-outline" size={15} color={colors.danger} />
+              <Text style={{ color: colors.danger, fontSize: 12.5, flex: 1 }}>Couldn’t refresh — these may be out of date. Tap to retry.</Text>
+            </TouchableOpacity>
+          )}
           {ordered.map((n) => (
             <TouchableOpacity key={n.id} onPress={() => openEdit(n)} activeOpacity={0.75}
               accessibilityRole="button" accessibilityLabel={`${n.title}${n.pinned ? ', pinned' : ''}. Edit note`}
@@ -194,7 +192,7 @@ export default function GroupNotesScreen() {
                 <Text style={{ color: colors.text, fontWeight: '700', fontSize: 15, flex: 1 }} numberOfLines={1}>
                   {n.title}
                 </Text>
-                <TouchableOpacity accessibilityLabel={n.pinned ? `Unpin ${n.title}` : `Pin ${n.title}`} onPress={() => togglePin(n)} hitSlop={8}>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel={n.pinned ? `Unpin ${n.title}` : `Pin ${n.title}`} onPress={() => togglePin(n)} hitSlop={12}>
                   <Ionicons name={n.pinned ? 'pin' : 'pin-outline'} size={17} color={n.pinned ? colors.primary : colors.textFaint} />
                 </TouchableOpacity>
               </View>
@@ -208,6 +206,7 @@ export default function GroupNotesScreen() {
               </Text>
             </TouchableOpacity>
           ))}
+          <ThreadGaps unreadable={gaps.unreadable} complete={gaps.complete} what="notes" />
         </ScrollView>
       )}
 
@@ -218,25 +217,26 @@ export default function GroupNotesScreen() {
             coords with absolute screen coords, so the lift came up short.
             keyboardOnly: this sheet already sets its own bottom padding. */}
         <KeyboardSafe keyboardOnly style={st.backdrop}>
-          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setCreating(false)} />
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setCreating(false)}
+            accessibilityRole="button" accessibilityLabel="Close without saving" />
           <View style={[st.sheet, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
               <Text style={{ color: colors.text, fontWeight: '800', fontSize: 16, flex: 1 }}>
                 {editing ? 'Edit note' : 'New note'}
               </Text>
               {!!editing && (
-                <TouchableOpacity accessibilityLabel="Delete this note" onPress={() => remove(editing)} hitSlop={8}>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Delete this note" onPress={() => remove(editing)} hitSlop={12}>
                   <Ionicons name="trash-outline" size={19} color={colors.danger} />
                 </TouchableOpacity>
               )}
             </View>
 
             <View style={[st.field, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
-              <TextInput value={draftTitle} onChangeText={setDraftTitle} placeholder="Title"
+              <TextInput value={draftTitle} onChangeText={setDraftTitle} placeholder="Title" accessibilityLabel="Note title"
                 placeholderTextColor={colors.textFaint} style={[st.input, { color: colors.text }]} maxLength={120} />
             </View>
             <View style={[st.field, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft, height: 150, alignItems: 'flex-start', paddingTop: 12, marginTop: 10 }]}>
-              <TextInput value={draftBody} onChangeText={setDraftBody} placeholder="Write something…" multiline
+              <TextInput value={draftBody} onChangeText={setDraftBody} placeholder="Write something…" multiline accessibilityLabel="Note text"
                 placeholderTextColor={colors.textFaint} style={[st.input, { color: colors.text, height: '100%' }]} />
             </View>
 
@@ -261,6 +261,7 @@ export default function GroupNotesScreen() {
 const st = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   card: { borderWidth: 1, borderRadius: 14, padding: 14, marginBottom: 10 },
+  banner: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderWidth: 1, borderRadius: 12, marginBottom: 12 },
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' },
   sheet: { borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, padding: 18, paddingBottom: 32 },
   field: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, minHeight: 48 },

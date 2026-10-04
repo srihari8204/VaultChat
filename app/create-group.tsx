@@ -5,6 +5,12 @@
 // person gets an INVITATION they accept or decline in /group-invitations —
 // the same consent path as Group info → Add member (/family-add) and
 // /group-create. Nobody is added to a group without agreeing to join.
+//
+// WHY TWO "NEW GROUP" SCREENS. This one makes a plain chat group from New chat.
+// /group-create makes a typed Family Space group (type, icon, member cap,
+// permissions), saves it to the local space registry and makes it the active
+// space. Different products sharing one consent model; merging them is a
+// product decision, not a refactor.
 
 import { useAuthHeader } from '../hooks/useAuthHeader';
 import { HEADER_TOP, SCREEN_BOTTOM } from '../constants/layout';
@@ -17,7 +23,8 @@ import { useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
-import { AppText as Text, Avatar, AuroraBackground } from '../components/ui';
+import { AppText as Text, Avatar, AuroraBackground, KeyboardSafe } from '../components/ui';
+import { useKeyboardInset } from '../lib/useKeyboardInset';
 import { listChats, createGroupChat, createInvitation, attachmentUrl } from '../lib/chatService';
 
 interface Pick { userId: string; name: string; photoURL: string | null }
@@ -43,6 +50,9 @@ export default function CreateGroupScreen() {
   // The contact list itself failed to load (vs. a failed create).
   const [loadFailed, setLoadFailed] = useState(false);
   const [reload, setReload] = useState(0);
+  // With the keyboard up, KeyboardSafe lifts the bar; it then drops its own
+  // gesture-bar padding, which the keyboard already covers.
+  const kb = useKeyboardInset();
 
   useEffect(() => {
     let active = true;
@@ -101,12 +111,13 @@ export default function CreateGroupScreen() {
       const { id } = await createGroupChat(groupName.trim(), { allowEmpty: true });
       const ids = Array.from(selected);
       const results = await Promise.allSettled(ids.map(userId => createInvitation(id, { userId })));
-      const failed = results.filter(r => r.status === 'rejected').length;
+      const nameOf = (uid: string) => people.find(p => p.userId === uid)?.name ?? 'Someone';
+      const failed = ids.filter((_, i) => results[i].status === 'rejected').map(nameOf);
       router.replace({ pathname: '/chat', params: { id } } as any);
-      if (failed > 0) {
+      if (failed.length > 0) {
         Alert.alert(
           'Some invitations were not sent',
-          `${failed} of ${ids.length} could not be invited. Open Group info → Add member to try again.`,
+          `Not invited: ${failed.join(', ')}. Open Group info → Add member to try again.`,
         );
       }
     } catch (e: any) {
@@ -130,7 +141,7 @@ export default function CreateGroupScreen() {
   };
 
   return (
-    <View style={s.screen}>
+    <KeyboardSafe keyboardOnly style={s.screen}>
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
 
@@ -138,7 +149,7 @@ export default function CreateGroupScreen() {
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={s.headerTitle}>New Group</Text>
+        <Text style={s.headerTitle} accessibilityRole="header">New Group</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -149,9 +160,10 @@ export default function CreateGroupScreen() {
         value={groupName}
         onChangeText={setGroupName}
         maxLength={100}
+        accessibilityLabel="Group name"
       />
 
-      {error && <View style={s.errorBar}><Text style={s.errorTxt}>{error}</Text></View>}
+      {error && <View style={s.errorBar} accessibilityLiveRegion="polite"><Text style={s.errorTxt}>{error}</Text></View>}
 
       {/* Selected members as removable chips (WhatsApp) */}
       {selectedPeople.length > 0 && (
@@ -170,13 +182,16 @@ export default function CreateGroupScreen() {
       {/* Search */}
       <View style={s.searchWrap}>
         <Ionicons name="search" size={18} color={colors.textDim} />
-        <TextInput style={s.searchInput} value={query} onChangeText={setQuery} placeholder="Search contacts" placeholderTextColor={colors.textDim} autoCorrect={false} />
+        <TextInput style={s.searchInput} value={query} onChangeText={setQuery} placeholder="Search contacts" placeholderTextColor={colors.textDim} autoCorrect={false} accessibilityLabel="Search contacts" />
       </View>
 
       <Text style={s.label}>{selected.size} SELECTED · THEY JOIN WHEN THEY ACCEPT</Text>
 
+      {/* The list region takes the remaining height, so the Create bar below it
+          sits in normal flow and KeyboardSafe can lift it above the keyboard. */}
+      <View style={{ flex: 1 }}>
       {loading ? (
-        <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
+        <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} accessibilityLabel="Loading contacts" />
       ) : loadFailed && people.length === 0 ? (
         <View style={s.empty}>
           <Ionicons name="cloud-offline-outline" size={56} color={colors.textDim} />
@@ -195,13 +210,14 @@ export default function CreateGroupScreen() {
           data={filtered}
           keyExtractor={p => p.userId}
           renderItem={renderItem}
-          contentContainerStyle={{ paddingBottom: 96 }}
+          contentContainerStyle={{ paddingBottom: 16 }}
           keyboardShouldPersistTaps="handled"
           ListEmptyComponent={<Text style={s.emptyTxt}>No contacts found</Text>}
         />
       )}
+      </View>
 
-      <View style={s.bottomBar}>
+      <View style={[s.bottomBar, kb > 0 && { paddingBottom: 16 }]}>
         <TouchableOpacity
           style={[s.createBtn, !canCreate && s.createBtnOff]}
           onPress={create}
@@ -217,7 +233,7 @@ export default function CreateGroupScreen() {
               </Text>}
         </TouchableOpacity>
       </View>
-    </View>
+    </KeyboardSafe>
   );
 }
 
@@ -231,7 +247,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     marginHorizontal: 16, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 13,
     borderWidth: 1, borderColor: c.glassStroke,
   },
-  errorBar: { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.4)', borderWidth: 1, marginHorizontal: 16, marginTop: 10, padding: 10, borderRadius: 10 },
+  // danger is #RRGGBB in both palettes, so a hex alpha suffix is valid.
+  errorBar: { backgroundColor: c.danger + '1F', borderColor: c.danger + '66', borderWidth: 1, marginHorizontal: 16, marginTop: 10, padding: 10, borderRadius: 10 },
   errorTxt: { color: c.danger, fontSize: 12 },
   label: { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 8 },
   chipRow: { maxHeight: 46, marginTop: 12 },
@@ -247,13 +264,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   checkSel: { backgroundColor: c.primary, borderColor: c.primary },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40, gap: 12 },
   emptyTxt: { color: c.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20 },
-  // paddingBottom carries the gesture inset (2026-09-17). The bar is pinned at
-  // bottom:0 so its background correctly reaches the screen edge — but with a
-  // flat padding of 16 the CREATE BUTTON ITSELF sat inside the gesture area on
-  // every device, because edgeToEdge is enabled for all API levels. Padding the
-  // content, not moving the bar, keeps the fill edge-to-edge and the control
-  // reachable. SCREEN_BOTTOM is live, so this follows a rotation.
-  bottomBar: { position: 'absolute', left: 0, right: 0, bottom: 0, padding: 16, paddingBottom: 16 + SCREEN_BOTTOM, backgroundColor: c.glass, borderTopWidth: 1, borderTopColor: c.hairline },
+  // paddingBottom carries the gesture inset (2026-09-17): the bar's fill
+  // reaches the screen edge while the CREATE BUTTON stays out of the gesture
+  // area (edgeToEdge is on at every API level). SCREEN_BOTTOM is live, so this
+  // follows a rotation. In normal flow (not absolute) since 2026-10-04, so
+  // KeyboardSafe lifts it above the keyboard instead of the keyboard covering it.
+  bottomBar: { padding: 16, paddingBottom: 16 + SCREEN_BOTTOM, backgroundColor: c.glass, borderTopWidth: 1, borderTopColor: c.hairline },
   createBtn: { backgroundColor: c.primary, borderRadius: 12, paddingVertical: 15, alignItems: 'center' },
   createBtnOff: { backgroundColor: c.glassSoft },
   createTxt: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },

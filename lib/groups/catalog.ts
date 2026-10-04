@@ -97,6 +97,15 @@ export function groupIdentity(group: {
   };
 }
 
+/**
+ * A group colour that arrived from outside (a shared card's route params, a
+ * server row), or `fallback`. Only `#RRGGBB`: screens append a two-digit alpha
+ * (`accent + '22'`), which turns anything else into an invalid colour.
+ */
+export function hexColorOr(v: string | null | undefined, fallback: string): string {
+  return typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v) ? v : fallback;
+}
+
 // ── self-check ──
 if (require.main === module) {
   // The client list is checked against the migrations that actually seed

@@ -8,12 +8,16 @@
 //
 // Privacy is a real setting, not decoration: `invite_only` routes every redeem
 // through the admin approval queue that already exists.
+//
+// Not merged with app/create-group.tsx: that one makes a plain chat group from
+// New chat; this one makes a typed Family Space group and makes it the active
+// space. Both invite rather than add. See the note at the top of that file.
 
 import React, { useMemo, useState } from 'react';
 import { KeyboardSafe } from '../components/ui';
 import {
   View, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
-  ActivityIndicator, Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,7 +29,14 @@ import { GROUP_TYPES, groupTypeInfo, type GroupType } from '../lib/groups/catalo
 import { saveGroup, setActiveGroupId } from '../lib/groups/store';
 import { createGroupChat } from '../lib/chatService';
 
-const PALETTE = ['#9D6FD0', '#4A9FFF', '#22C55E', '#F59E0B', '#EC4899', '#14B8A6', '#EF4444', '#8B5CF6'];
+// Group identity colours: DATA sent to the server and shown to every member,
+// not theme colours, so they stay fixed. Named so a screen reader says a colour,
+// not a hex code.
+const PALETTE: { hex: string; name: string }[] = [
+  { hex: '#9D6FD0', name: 'Purple' }, { hex: '#4A9FFF', name: 'Blue' }, { hex: '#22C55E', name: 'Green' },
+  { hex: '#F59E0B', name: 'Amber' }, { hex: '#EC4899', name: 'Pink' }, { hex: '#14B8A6', name: 'Teal' },
+  { hex: '#EF4444', name: 'Red' }, { hex: '#8B5CF6', name: 'Violet' },
+];
 const ICONS: (keyof typeof Ionicons.glyphMap)[] = [
   'home', 'people', 'briefcase', 'airplane', 'school', 'football',
   'medkit', 'storefront', 'library', 'leaf', 'car', 'bicycle',
@@ -105,6 +116,7 @@ export default function GroupCreateScreen() {
               <TouchableOpacity
                 key={g.type}
                 onPress={() => { setType(g.type); setIcon(null); setColor(null); }}
+                accessibilityRole="radio" accessibilityLabel={`${g.label}. ${g.blurb}`} accessibilityState={{ selected: on, checked: on }}
                 style={[st.typeCell, { borderColor: on ? g.color : colors.border, backgroundColor: on ? g.color + '1a' : colors.card }]}
               >
                 <Ionicons name={g.icon} size={19} color={on ? g.color : colors.textDim} />
@@ -122,7 +134,7 @@ export default function GroupCreateScreen() {
           <TextInput
             value={name} onChangeText={setName} placeholder={`e.g. ${info.label}`}
             placeholderTextColor={colors.textFaint} style={[st.input, { color: colors.text }]}
-            maxLength={100} returnKeyType="next"
+            maxLength={100} returnKeyType="next" accessibilityLabel="Group name"
           />
         </View>
 
@@ -131,16 +143,17 @@ export default function GroupCreateScreen() {
           <TextInput
             value={description} onChangeText={setDescription} placeholder="Description (optional)"
             placeholderTextColor={colors.textFaint} style={[st.input, { color: colors.text }]}
-            maxLength={300}
+            maxLength={300} accessibilityLabel="Description, optional"
           />
         </View>
 
         <Text style={[st.h, { color: colors.text }]}>Colour</Text>
         <View style={st.swatches}>
           {PALETTE.map((c) => (
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Colour ${c}`} key={c} onPress={() => setColor(c)}
-              style={[st.swatch, { backgroundColor: c, borderColor: shownColor === c ? colors.text : 'transparent' }]}>
-              {shownColor === c && <Ionicons name="checkmark" size={15} color="#fff" />}
+            <TouchableOpacity accessibilityRole="radio" accessibilityLabel={`Colour ${c.name}`} key={c.hex} onPress={() => setColor(c.hex)}
+              accessibilityState={{ selected: shownColor === c.hex, checked: shownColor === c.hex }} hitSlop={4}
+              style={[st.swatch, { backgroundColor: c.hex, borderColor: shownColor === c.hex ? colors.text : 'transparent' }]}>
+              {shownColor === c.hex && <Ionicons name="checkmark" size={15} color="#fff" />}
             </TouchableOpacity>
           ))}
         </View>
@@ -148,7 +161,8 @@ export default function GroupCreateScreen() {
         <Text style={[st.h, { color: colors.text }]}>Icon</Text>
         <View style={st.swatches}>
           {ICONS.map((ic) => (
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Icon ${ic}`} key={ic} onPress={() => setIcon(ic)}
+            <TouchableOpacity accessibilityRole="radio" accessibilityLabel={`Icon ${ic.replace(/-/g, ' ')}`} key={ic} onPress={() => setIcon(ic)}
+              accessibilityState={{ selected: shownIcon === ic, checked: shownIcon === ic }}
               style={[st.iconCell, { borderColor: shownIcon === ic ? shownColor : colors.border, backgroundColor: shownIcon === ic ? shownColor + '1a' : colors.card }]}>
               <Ionicons name={ic} size={18} color={shownIcon === ic ? shownColor : colors.textDim} />
             </TouchableOpacity>
@@ -163,6 +177,7 @@ export default function GroupCreateScreen() {
           const on = privacy === key;
           return (
             <TouchableOpacity key={key} onPress={() => setPrivacy(key)}
+              accessibilityRole="radio" accessibilityLabel={`${label}. ${blurb}`} accessibilityState={{ selected: on, checked: on }}
               style={[st.privacyRow, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? brandAlpha(0.08) : colors.card }]}>
               <Ionicons name={ic} size={19} color={on ? colors.primary : colors.textDim} />
               <View style={{ flex: 1 }}>
@@ -175,6 +190,7 @@ export default function GroupCreateScreen() {
         })}
 
         <TouchableOpacity onPress={create} disabled={busy || !name.trim()}
+          accessibilityRole="button" accessibilityState={{ disabled: busy || !name.trim(), busy }}
           style={[st.btn, { backgroundColor: name.trim() && !busy ? colors.primary : colors.border }]}>
           {busy ? <ActivityIndicator color="#fff" />
             : <><Ionicons name="add-circle" size={18} color="#fff" /><Text style={st.btnTxt}>Create group</Text></>}

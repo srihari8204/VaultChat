@@ -22,14 +22,14 @@ import { HEADER_TOP } from '../constants/layout';
 import { brandAlpha, type Palette } from '../constants/theme';
 import { useLocalSearchParams, useRouter, Stack, useFocusEffect } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState , useMemo} from 'react';
-import { FlatList, StyleSheet, Text, TouchableOpacity, View, ActivityIndicator, Image } from 'react-native';
+import { Alert, FlatList, StyleSheet, TouchableOpacity, View, ActivityIndicator, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { CALL_ENGINE_V2 } from '../constants/flags';
 import { useTheme } from '../lib/theme';
-import { getChat, attachmentUrl, type ChatMember } from '../lib/chatService';
+import { getChat, attachmentUrl, createDirectChat, type ChatMember } from '../lib/chatService';
 import { getSocket } from '../lib/socket';
 import { getCurrentUserAsync } from './(constants)/authService';
-import { AuroraBackground } from '../components/ui';
+import { AuroraBackground, AppText as Text } from '../components/ui';
 import { initialOf } from '../lib/format';
 
 type CallMode = 'voice' | 'video';
@@ -72,11 +72,22 @@ export default function GroupCallsScreen() {
     return () => { active = false; };
   }, [chatId, reload]);
 
-  const callMember = (m: ChatMember) => {
-    router.push({
-      pathname: mode === 'video' ? '/videocall' : '/voicecall',
-      params: { chatId, peerUid: m.userId, peerName: m.name || m.email || 'Member' },
-    } as any);
+  // A 1:1 call needs the DIRECT chat with that member (voicecall/videocall
+  // take "the chat to call — must be a direct chat"), never this group's id.
+  // Same path as family-member and contacts: open-or-create it first.
+  const [opening, setOpening] = useState<string | null>(null);
+  const callMember = async (m: ChatMember) => {
+    if (opening) return;
+    setOpening(m.userId);
+    try {
+      const direct = await createDirectChat({ userId: m.userId });
+      router.push({
+        pathname: mode === 'video' ? '/videocall' : '/voicecall',
+        params: { chatId: direct.id, peerUid: m.userId, peerName: m.name || m.email || 'Member' },
+      } as any);
+    } catch (e: any) {
+      Alert.alert('Could not start the call', e?.message ?? 'Try again.');
+    } finally { setOpening(null); }
   };
 
   // Group call through the SFU: ring every member, then join the call room.
@@ -92,6 +103,7 @@ export default function GroupCallsScreen() {
     if (starting.current || members.length === 0) return;
     starting.current = true;
     const uids = members.map(m => m.userId);
+    let rang = true;
     if (!CALL_ENGINE_V2) {
       try {
         const me = await getCurrentUserAsync();
@@ -99,17 +111,27 @@ export default function GroupCallsScreen() {
         for (const to of uids) {
           s.emit('call_incoming', { to, chatId, group: true, groupName, video: mode === 'video' ? '1' : '0', fromName: me?.name || 'Someone' });
         }
-      } catch {}
+      } catch { rang = false; }
     }
-    router.push({
-      pathname: '/group-call-active',
-      params: {
-        chatId,
-        video: mode === 'video' ? '1' : '0',
-        name: groupName,
-        members: uids.join(','),
-      },
-    } as any);
+    try {
+      router.push({
+        pathname: '/group-call-active',
+        params: {
+          chatId,
+          video: mode === 'video' ? '1' : '0',
+          name: groupName,
+          members: uids.join(','),
+        },
+      } as any);
+    } catch (e: any) {
+      starting.current = false;   // nothing opened: let the next tap try again
+      Alert.alert('Could not start the call', e?.message ?? 'Try again.');
+      return;
+    }
+    if (!rang) {
+      // The call room opened, but nobody was told it exists.
+      Alert.alert('Members were not rung', 'Could not reach the server to ring the group. They can still join from the group chat.');
+    }
   }, [members, chatId, groupName, mode, router]);
 
   return (
@@ -120,11 +142,11 @@ export default function GroupCallsScreen() {
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={s.title} numberOfLines={1}>{(groupName as string) || 'Group'} · Call</Text>
+        <Text style={s.title} numberOfLines={1} accessibilityRole="header">{(groupName as string) || 'Group'} · Call</Text>
         <View style={{ width: 40 }} />
       </View>
 
-      <View style={s.modeRow}>
+      <View style={s.modeRow} accessibilityRole="radiogroup" accessibilityLabel="Call type">
         {(['voice', 'video'] as const).map(mo => (
           <TouchableOpacity key={mo} style={[s.modeBtn, mode === mo && s.modeBtnActive]} onPress={() => setMode(mo)}
             accessibilityRole="radio" accessibilityLabel={mo === 'voice' ? 'Voice' : 'Video'} accessibilityState={{ selected: mode === mo, checked: mode === mo }}>
@@ -149,11 +171,11 @@ export default function GroupCallsScreen() {
       <Text style={s.noticeTxt}>Rings everyone in the group at once. Or tap a member below for a 1:1 call.</Text>
 
       {loading ? (
-        <ActivityIndicator color={colors.primary} style={{ marginTop: 30 }} />
+        <ActivityIndicator color={colors.primary} style={{ marginTop: 30 }} accessibilityLabel="Loading members" />
       ) : failed ? (
         <View style={{ alignItems: 'center', padding: 40, gap: 12 }}>
           <Text style={s.sub}>Couldn’t load the group’s members.</Text>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry loading members" onPress={() => { setLoading(true); setReload(n => n + 1); }}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry loading members" onPress={() => { setLoading(true); setReload(n => n + 1); }} style={{ padding: 10 }}>
             <Text style={[s.name, { color: colors.primary }]}>Retry</Text>
           </TouchableOpacity>
         </View>
@@ -165,8 +187,9 @@ export default function GroupCallsScreen() {
           renderItem={({ item }) => {
             const name = item.name || item.email || 'Member';
             return (
-              <TouchableOpacity style={s.row} onPress={() => callMember(item)} activeOpacity={0.7}
-                accessibilityRole="button" accessibilityLabel={`${mode === 'video' ? 'Video' : 'Voice'} call ${name}${item.online ? ', online' : ''}`}>
+              <TouchableOpacity style={s.row} onPress={() => callMember(item)} activeOpacity={0.7} disabled={!!opening}
+                accessibilityRole="button" accessibilityLabel={`${mode === 'video' ? 'Video' : 'Voice'} call ${name}${item.online ? ', online' : ''}`}
+                accessibilityState={{ disabled: !!opening, busy: opening === item.userId }}>
                 <View style={s.avatar}>
                   {item.photoURL && authHeader
                     ? <Image source={{ uri: attachmentUrl(item.photoURL), headers: { Authorization: authHeader } }} style={s.avatarImg} />
@@ -177,7 +200,11 @@ export default function GroupCallsScreen() {
                   <Text style={s.name} numberOfLines={1}>{name}</Text>
                   <Text style={s.sub}>{item.online ? 'Online' : 'Tap to call'}</Text>
                 </View>
-                <View style={s.callBtn}><Ionicons name={mode === 'voice' ? 'call' : 'videocam'} size={18} color={colors.primary} /></View>
+                <View style={s.callBtn}>
+                  {opening === item.userId
+                    ? <ActivityIndicator size="small" color={colors.primary} />
+                    : <Ionicons name={mode === 'voice' ? 'call' : 'videocam'} size={18} color={colors.primary} />}
+                </View>
               </TouchableOpacity>
             );
           }}

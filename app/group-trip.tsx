@@ -29,6 +29,8 @@ import {
   startTrip, joinTrip, leaveTrip, endTrip, subscribeTrip, currentTrip,
 } from '../lib/groups/tripSession';
 import { type CircleMember } from '../lib/family/types';
+import { TRIP_TTL_MS } from '../lib/groups/trips';
+import { permissionDenied } from '../lib/permissionDenied';
 
 const COORD_RE = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/;
 
@@ -115,6 +117,14 @@ export default function GroupTripScreen() {
         const lat = Number(m[1]), lng = Number(m[2]);
         if (Math.abs(lat) <= 90 && Math.abs(lng) <= 180) dest = { lat, lng };
       } else {
+        // Android's geocoder needs location permission. A trip needs it anyway
+        // (each phone works out its own ETA), so ask here, where it is obvious why.
+        let perm = await Location.getForegroundPermissionsAsync();
+        if (!perm.granted && perm.canAskAgain) perm = await Location.requestForegroundPermissionsAsync();
+        if (!perm.granted) {
+          permissionDenied('Location needed', 'A trip uses your location to find the place and work out your arrival time.', perm.canAskAgain);
+          return;
+        }
         const hit = await Location.geocodeAsync(q);
         if (hit[0]) dest = { lat: hit[0].latitude, lng: hit[0].longitude };
       }
@@ -159,7 +169,14 @@ export default function GroupTripScreen() {
       { text: 'Cancel', style: 'cancel' },
       { text: 'End trip', style: 'destructive', onPress: async () => {
         // Pass the trip on screen: after a restart it is not in tripSession's memory.
-        try { await endTrip(trip); setTrip(null); setPings([]); }
+        try {
+          const { confirmed } = await endTrip(trip);
+          setTrip(null); setPings([]);
+          if (!confirmed) {
+            Alert.alert('Ended on this phone',
+              `The server did not confirm, so others may still see the trip for up to ${Math.round(TRIP_TTL_MS / 3600_000)} hours. Check your connection.`);
+          }
+        }
         catch (e: any) { Alert.alert('Could not end the trip', e?.message ?? 'Check your connection and try again.'); }
       } },
     ]);
@@ -171,6 +188,17 @@ export default function GroupTripScreen() {
       : k === 'dim' ? colors.textDim : colors.primary;
   };
 
+  if (!groupId) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center', padding: 32 }}>
+        <AuroraBackground variant="chat" />
+        <Stack.Screen options={{ headerShown: true, title: 'Trip', headerTitleAlign: 'center', headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false }} />
+        <Text style={{ color: colors.text, fontWeight: '700', fontSize: 15 }}>Group not found</Text>
+        <Text style={{ color: colors.textDim, fontSize: 13, textAlign: 'center', marginTop: 6 }}>This link did not say which group the trip is for.</Text>
+      </View>
+    );
+  }
+
   return (
     <KeyboardSafe style={{ flex: 1, backgroundColor: colors.bg }}>
       <AuroraBackground variant="chat" />
@@ -180,12 +208,13 @@ export default function GroupTripScreen() {
 
         {!trip ? (
           <>
-            <Text style={[st.h, { color: colors.text }]}>Where are you all going?</Text>
+            <Text style={[st.h, { color: colors.text }]} accessibilityRole="header">Where are you all going?</Text>
             <View style={[st.field, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
               <Ionicons name="flag" size={18} color={colors.textDim} />
               <TextInput value={where} onChangeText={setWhere} placeholder="Address, place, or lat, lng"
                 placeholderTextColor={colors.textFaint} style={[st.input, { color: colors.text }]}
-                autoCapitalize="none" returnKeyType="go" onSubmitEditing={begin} />
+                autoCapitalize="none" returnKeyType="go" onSubmitEditing={begin}
+                accessibilityLabel="Destination: address, place, or latitude and longitude" />
             </View>
             <TouchableOpacity onPress={() => setLead((v) => !v)}
               accessibilityRole="checkbox" accessibilityLabel="Everyone follows my route" accessibilityState={{ checked: lead }}

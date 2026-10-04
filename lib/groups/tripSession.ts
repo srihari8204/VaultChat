@@ -445,19 +445,25 @@ export async function leaveTrip(): Promise<void> {
  *
  * Throws when the legacy end marker cannot be sent (nothing else would ever
  * end that trip), so the caller can report it and the user can retry.
+ *
+ * Resolves `{ confirmed: false }` when the server end call failed: the trip is
+ * ended on this phone, but other members keep seeing it until the server's
+ * TTL (TRIP_TTL_MS) clears it. The caller tells the user so.
  */
-export async function endTrip(trip?: Trip | null): Promise<void> {
+export async function endTrip(trip?: Trip | null): Promise<{ confirmed: boolean }> {
   const cur = active ?? trip ?? null;
-  if (!cur) return;
+  if (!cur) return { confirmed: true };
   const { groupId, id } = cur;
+  let confirmed = true;
   if (id.startsWith('srv_')) {
     // The server broadcasts space_trip_end to the room; a failure here is
     // eventually corrected by the TTL, so ending locally is never blocked.
-    try { await apiOf()(`/chats/${groupId}/trip/end`, { method: 'POST', json: {} }); } catch { /* TTL cleans up */ }
+    try { await apiOf()(`/chats/${groupId}/trip/end`, { method: 'POST', json: {} }); } catch { confirmed = false; }
   } else {
     await sendMessage(groupId, TRIP_END_PREFIX + JSON.stringify({ id }), 'system');
   }
   lastAnnounce.delete(groupId);
   emit(EV_END, { chatId: groupId, tripId: id }).catch(() => {});
   active = null; myKey = null; routeShape = []; wasDeviating = false; announcedArrival = false;
+  return { confirmed };
 }

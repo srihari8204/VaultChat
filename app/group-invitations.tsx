@@ -20,7 +20,7 @@
 
 import React, { useCallback, useState } from 'react';
 import {
-  View, StyleSheet, TouchableOpacity, ScrollView, Alert,
+  View, StyleSheet, TouchableOpacity, FlatList, Alert,
   ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { Stack, useFocusEffect, router } from 'expo-router';
@@ -30,7 +30,7 @@ import { AuroraBackground } from '../components/ui/AuroraBackground';
 import { AppText as Text } from '../components/ui/Text';
 import { brandAlpha } from '../constants/theme';
 import { myInvitations, acceptInvitation, rejectInvitation, type MyInvitation } from '../lib/chatService';
-import { groupTypeInfo } from '../lib/groups/catalog';
+import { groupTypeInfo, hexColorOr } from '../lib/groups/catalog';
 
 /** How long until it lapses, in words. Precision here would be false comfort. */
 const expiresIn = (iso: string) => {
@@ -49,10 +49,13 @@ export default function GroupInvitationsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [acting, setActing] = useState<number | null>(null);
+  // Last load failed: an error with Retry when nothing is listed (never
+  // "No invitations"), a banner over the list otherwise.
+  const [failed, setFailed] = useState(false);
 
   const load = useCallback(async () => {
-    try { setItems(await myInvitations()); }
-    catch { /* offline or unauthorised: keep whatever is on screen */ }
+    try { setItems(await myInvitations()); setFailed(false); }
+    catch { setFailed(true); /* keep whatever is on screen */ }
     finally { setLoading(false); setRefreshing(false); }
   }, []);
 
@@ -94,6 +97,7 @@ export default function GroupInvitationsScreen() {
       [
         { text: 'Keep it', style: 'cancel' },
         { text: 'Decline', style: 'destructive', onPress: async () => {
+          if (acting) return;
           setActing(inv.id);
           try { await rejectInvitation(inv.id); await load(); }
           catch (e: any) { Alert.alert('Could not decline', e?.message ?? 'Try again.'); }
@@ -105,13 +109,14 @@ export default function GroupInvitationsScreen() {
 
   const card = (inv: MyInvitation) => {
     const type = groupTypeInfo(inv.groupType);
-    const accent = inv.color || type.color;
-    const icon = (inv.icon || type.icon) as keyof typeof Ionicons.glyphMap;
+    // Server data, but drawn as-is: only a known glyph and a #RRGGBB colour.
+    const accent = hexColorOr(inv.color, type.color);
+    const icon = (inv.icon && inv.icon in Ionicons.glyphMap ? inv.icon : type.icon) as keyof typeof Ionicons.glyphMap;
     const waiting = inv.status === 'accepted';
     const busy = acting === inv.id;
 
     return (
-      <View key={inv.id} style={[st.card, { backgroundColor: colors.glassSoft, borderColor: waiting ? accent : colors.border }]}>
+      <View style={[st.card, { backgroundColor: colors.glassSoft, borderColor: waiting ? accent : colors.border }]}>
         <View style={st.cardTop}>
           <View style={[st.icon, { backgroundColor: accent + '22' }]}>
             <Ionicons name={icon} size={22} color={accent} />
@@ -146,11 +151,12 @@ export default function GroupInvitationsScreen() {
 
         <View style={st.actions}>
           {busy ? (
-            <View style={[st.btn, { backgroundColor: colors.border }]}><ActivityIndicator color={colors.text} /></View>
+            <View style={[st.btn, { backgroundColor: colors.border }]}><ActivityIndicator color={colors.text} accessibilityLabel="Working" /></View>
           ) : (
             <>
               {inv.canAccept && (
-                <TouchableOpacity onPress={() => accept(inv)} style={[st.btn, { backgroundColor: accent }]}>
+                <TouchableOpacity onPress={() => accept(inv)} style={[st.btn, { backgroundColor: accent }]}
+                  accessibilityRole="button" accessibilityLabel={`${inv.joinsOnAccept ? 'Join' : 'Accept'} ${inv.name ?? 'this group'}`}>
                   <Ionicons name="checkmark" size={17} color="#fff" />
                   <Text style={st.btnTxt}>{inv.joinsOnAccept ? 'Join' : 'Accept'}</Text>
                 </TouchableOpacity>
@@ -160,13 +166,15 @@ export default function GroupInvitationsScreen() {
                   showing both at once told people to sit still next to the
                   control that would have finished the job. */}
               {waiting && !inv.canAccept && (
-                <View style={[st.btn, { backgroundColor: 'transparent', borderWidth: 1, borderColor: accent }]}>
+                <View style={[st.btn, { backgroundColor: 'transparent', borderWidth: 1, borderColor: accent }]}
+                  accessible accessibilityRole="text" accessibilityLabel="Waiting for an admin">
                   <Ionicons name="hourglass-outline" size={16} color={accent} />
                   <Text style={[st.btnTxt, { color: accent }]}>Waiting</Text>
                 </View>
               )}
               {inv.canDecline && (
                 <TouchableOpacity onPress={() => decline(inv)}
+                  accessibilityRole="button" accessibilityLabel={`${inv.requested ? 'Withdraw your request to' : 'Decline'} ${inv.name ?? 'this group'}`}
                   style={[st.btn, { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.glassStroke, flex: 0.7 }]}>
                   <Text style={[st.btnTxt, { color: colors.textDim }]}>
                     {inv.requested ? 'Withdraw' : 'Decline'}
@@ -189,16 +197,36 @@ export default function GroupInvitationsScreen() {
       }} />
 
       {loading ? (
-        <View style={st.center}><ActivityIndicator color={colors.primary} /></View>
+        <View style={st.center}><ActivityIndicator color={colors.primary} accessibilityLabel="Loading invitations" /></View>
+      ) : failed && items.length === 0 ? (
+        <View style={[st.center, { padding: 32 }]}>
+          <Ionicons name="cloud-offline-outline" size={30} color={colors.textFaint} />
+          <Text style={{ color: colors.text, fontWeight: '700', marginTop: 10 }}>Couldn’t load invitations</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry loading invitations"
+            onPress={() => { setLoading(true); load(); }}
+            style={[st.btn, { flex: 0, paddingHorizontal: 24, marginTop: 14, borderWidth: 1, borderColor: colors.glassStroke }]}>
+            <Text style={[st.btnTxt, { color: colors.primary }]}>Retry</Text>
+          </TouchableOpacity>
+        </View>
       ) : (
-        <ScrollView
+        <FlatList
+          data={items}
+          keyExtractor={(inv) => String(inv.id)}
+          renderItem={({ item }) => card(item)}
           contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
           refreshControl={
             <RefreshControl refreshing={refreshing} tintColor={colors.primary}
               onRefresh={() => { setRefreshing(true); load(); }} />
           }
-        >
-          {items.length === 0 && (
+          ListHeaderComponent={failed ? (
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Couldn't refresh invitations. Retry"
+              onPress={() => { setRefreshing(true); load(); }}
+              style={[st.banner, { borderColor: colors.danger }]}>
+              <Ionicons name="cloud-offline-outline" size={15} color={colors.danger} />
+              <Text style={{ color: colors.danger, fontSize: 12.5, flex: 1 }}>Couldn’t refresh — this list may be out of date. Tap to retry.</Text>
+            </TouchableOpacity>
+          ) : null}
+          ListEmptyComponent={
             <View style={[st.emptyWrap, { borderColor: colors.glassStroke, backgroundColor: brandAlpha(0.06) }]}>
               <Ionicons name="mail-open-outline" size={30} color={colors.primary} />
               <Text style={{ color: colors.text, fontWeight: '700', fontSize: 15, marginTop: 10 }}>
@@ -208,11 +236,8 @@ export default function GroupInvitationsScreen() {
                 When somebody adds you to a group, it appears here for you to accept or decline.
               </Text>
             </View>
-          )}
-
-          {items.map(card)}
-
-          {items.length > 0 && (
+          }
+          ListFooterComponent={items.length > 0 ? (
             <View style={[st.footer, { borderColor: colors.glassStroke }]}>
               <Ionicons name="lock-closed-outline" size={15} color={colors.textDim} />
               <Text style={{ color: colors.textDim, fontSize: 11.5, flex: 1, lineHeight: 16 }}>
@@ -220,8 +245,8 @@ export default function GroupInvitationsScreen() {
                 Nobody is added to a group without accepting first.
               </Text>
             </View>
-          )}
-        </ScrollView>
+          ) : null}
+        />
       )}
     </View>
   );
@@ -229,6 +254,7 @@ export default function GroupInvitationsScreen() {
 
 const st = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  banner: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderWidth: 1, borderRadius: 12, marginBottom: 12 },
   card: { borderWidth: 1, borderRadius: 16, padding: 15, marginBottom: 12 },
   cardTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   icon: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },

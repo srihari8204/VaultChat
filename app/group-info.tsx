@@ -21,10 +21,8 @@ import {
   Alert,
   FlatList,
   Image,
-  ScrollView,
   StyleSheet,
   Switch,
-  Text,
   TextInput,
   TouchableOpacity,
   View,
@@ -50,7 +48,7 @@ import {
 } from '../lib/chatService';
 import { unionWithLocalHistory } from '../lib/messageHistory';
 import SharedMediaThumb from '../components/chat/SharedMediaThumb';
-import { AuroraBackground } from '../components/ui';
+import { AuroraBackground, KeyboardSafe, AppText as Text } from '../components/ui';
 import { permissionDenied } from '../lib/permissionDenied';
 import { memberActions } from '../lib/groups/permissions';
 
@@ -294,7 +292,7 @@ export default function GroupInfoScreen() {
         <Text style={{ color: colors.textDim, fontSize: 13, textAlign: 'center', marginBottom: 16 }}>
           This link did not say which group to open.
         </Text>
-        <TouchableOpacity onPress={() => router.back()} activeOpacity={0.8}>
+        <TouchableOpacity onPress={() => router.back()} activeOpacity={0.8} accessibilityRole="button" style={{ padding: 8 }}>
           <Text style={{ color: colors.primary, fontSize: 15, fontWeight: '700' }}>Go back</Text>
         </TouchableOpacity>
       </View>
@@ -320,6 +318,7 @@ export default function GroupInfoScreen() {
   if (loading || !chat) {
     return (
       <View style={[S.screen, S.center]}>
+        <AuroraBackground />
         <View style={[S.header, { position: 'absolute', top: 0, left: 0, right: 0 }]}>
           <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
             <Ionicons name="arrow-back" size={24} color={colors.text} />
@@ -336,13 +335,16 @@ export default function GroupInfoScreen() {
     ? activeMembers.filter(m => (m.name || m.email || m.userId).toLowerCase().includes(mq))
     : activeMembers;
 
-  return (
-    <ScrollView style={S.screen} contentContainerStyle={{ paddingBottom: 64 }}>
+  // One FlatList is the screen's only scroller: everything above the member
+  // list is its header, Leave is its footer. A non-scrolling FlatList nested
+  // in a ScrollView rendered every member at once.
+  const header = (
+    <>
       <View style={S.header}>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={S.titleBar}>Group info</Text>
+        <Text style={S.titleBar} accessibilityRole="header">Group info</Text>
       </View>
 
       <View style={S.heroWrap}>
@@ -376,6 +378,7 @@ export default function GroupInfoScreen() {
               autoFocus
               maxLength={100}
               onSubmitEditing={onRename}
+              accessibilityLabel="Group name"
             />
             <TouchableOpacity onPress={onRename} disabled={saving} style={[S.saveBtn, saving && { opacity: 0.6 }]}
               accessibilityRole="button" accessibilityLabel="Save group name" accessibilityState={{ disabled: saving, busy: saving }}>
@@ -404,6 +407,7 @@ export default function GroupInfoScreen() {
               multiline
               maxLength={512}
               autoFocus
+              accessibilityLabel="Group description"
             />
             <TouchableOpacity onPress={onSaveDesc} disabled={saving} style={[S.saveBtn, saving && { opacity: 0.6 }]}
               accessibilityRole="button" accessibilityLabel="Save description" accessibilityState={{ disabled: saving, busy: saving }}>
@@ -555,7 +559,7 @@ export default function GroupInfoScreen() {
             <Ionicons name="link-outline" size={22} color={colors.text} style={S.navIcon} />
             <View style={{ flex: 1 }}>
               <Text style={S.navTitle}>Invite links</Text>
-              <Text style={S.navSub}>Create & share links to invite people</Text>
+              <Text style={S.navSub}>Anyone with a link can join, or ask to if approval is on</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
           </TouchableOpacity>
@@ -573,19 +577,30 @@ export default function GroupInfoScreen() {
               onChangeText={setMemberQuery}
               placeholder="Search members"
               placeholderTextColor={colors.textDim}
+              accessibilityLabel="Search members"
             />
             {memberQuery.length > 0 && (
-              <TouchableOpacity accessibilityLabel="Clear member search" onPress={() => setMemberQuery('')} hitSlop={8}>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Clear member search" onPress={() => setMemberQuery('')} hitSlop={14}>
                 <Ionicons name="close-circle" size={16} color={colors.textDim} />
               </TouchableOpacity>
             )}
           </View>
         )}
-        <FlatList
-          data={shownMembers}
-          scrollEnabled={false}
-          keyExtractor={m => m.userId}
-          renderItem={({ item: m }) => (
+      </View>
+    </>
+  );
+
+  return (
+    <KeyboardSafe style={S.screen}>
+      <AuroraBackground />
+      <FlatList
+        data={shownMembers}
+        keyExtractor={m => m.userId}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ paddingBottom: 64 }}
+        ListHeaderComponent={header}
+        renderItem={({ item: m }) => (
+          <View style={S.memberItem}>
             <MemberRow
               member={m}
               meId={meId}
@@ -596,14 +611,16 @@ export default function GroupInfoScreen() {
               authHeader={authHeader}
               onRemove={() => onRemoveMember(m)}
             />
-          )}
-        />
-      </View>
-
-      <TouchableOpacity style={S.leaveBtn} onPress={onLeave} activeOpacity={0.85} accessibilityRole="button">
-        <Text style={S.leaveTxt}>Leave group</Text>
-      </TouchableOpacity>
-    </ScrollView>
+          </View>
+        )}
+        ListEmptyComponent={mq ? <Text style={[S.descPlaceholder, S.memberItem]}>No members match “{memberQuery.trim()}”.</Text> : null}
+        ListFooterComponent={
+          <TouchableOpacity style={S.leaveBtn} onPress={onLeave} activeOpacity={0.85} accessibilityRole="button">
+            <Text style={S.leaveTxt}>Leave group</Text>
+          </TouchableOpacity>
+        }
+      />
+    </KeyboardSafe>
   );
 }
 
@@ -670,7 +687,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 8, gap: 8 },
   backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backTxt:       { color: c.text, fontSize: 26, fontWeight: '600' },
   titleBar:      { color: c.text, fontSize: 22, fontWeight: '800' },
 
   heroWrap:      { alignItems: 'center', paddingVertical: 20, gap: 8 },
@@ -697,7 +713,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   navIcon:       { width: 28, textAlign: 'center' },
   navTitle:      { color: c.text, fontSize: 15, fontWeight: '600' },
   navSub:        { color: c.textDim, fontSize: 12, marginTop: 2 },
-  navChevron:    { color: c.textDim, fontSize: 22, fontWeight: '300' },
   mediaGrid:     { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 12 },
 
   descText:      { color: c.text, fontSize: 15, lineHeight: 21, marginTop: 4 },
@@ -706,12 +721,13 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   descInput:     { color: c.text, backgroundColor: c.glassSoft, borderRadius: 12, padding: 12, fontSize: 15, minHeight: 70, textAlignVertical: 'top' },
   memberSearch:  { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: c.glassSoft, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 6 },
   memberSearchInput: { flex: 1, color: c.text, fontSize: 14, padding: 0 },
+  memberItem:    { paddingHorizontal: 16 },
   memberRow:     { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   memberAvatarWrap: { width: 44, height: 44 },
   memberAvatar:  { width: 44, height: 44, borderRadius: 22, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   memberAvatarImg: { width: '100%', height: '100%' },
   memberAvatarTxt: { color: '#fff', fontWeight: '700', fontSize: 17 },
-  memberPresenceDot: { position: 'absolute', right: 0, bottom: 0, width: 12, height: 12, borderRadius: 6, backgroundColor: '#22C55E', borderWidth: 2, borderColor: c.bg },
+  memberPresenceDot: { position: 'absolute', right: 0, bottom: 0, width: 12, height: 12, borderRadius: 6, backgroundColor: c.online, borderWidth: 2, borderColor: c.bg },
   memberName:    { color: c.text, fontSize: 15, fontWeight: '600' },
   memberMeTag:   { color: c.textDim, fontSize: 12, fontWeight: '400' },
   memberSub:     { color: c.textDim, fontSize: 12, marginTop: 2 },

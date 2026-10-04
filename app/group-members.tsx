@@ -29,7 +29,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { AuroraBackground } from '../components/ui/AuroraBackground';
 import { AppText as Text } from '../components/ui/Text';
-import { brandAlpha } from '../constants/theme';
+import { brandAlpha, type Palette } from '../constants/theme';
 import {
   getChat, setMemberRole, removeChatMember, transferOwnership, setApprovalMode,
   listChats, shareGroup, attachmentUrl,
@@ -45,9 +45,11 @@ import { getCurrentUserAsync } from './(constants)/authService';
 import { initialOf } from '../lib/format';
 import { useAuthHeader } from '../hooks/useAuthHeader';
 
-const ROLE_TONE: Record<GroupRole, string> = {
-  owner: '#F59E0B', admin: '#9D6FD0', moderator: '#4A9FFF', member: '#22C55E', guest: '#6B7280',
-};
+/** Role dot colour, from theme tokens so it follows light/dark. */
+const roleTone = (c: Palette, r: string): string => (
+  r === 'owner' ? c.purple : r === 'admin' ? c.primary : r === 'moderator' ? c.accentLight
+    : r === 'member' ? c.success : c.textFaint
+);
 
 const MODES: { key: ApprovalMode; label: string; blurb: string }[] = [
   { key: 'strict', label: 'Strict', blurb: 'They accept, then an admin approves. Two yeses.' },
@@ -76,6 +78,8 @@ export default function GroupMembersScreen() {
   const [sheet, setSheet] = useState<ChatMember | null>(null);
   const [sharing, setSharing] = useState(false);
   const [chats, setChats] = useState<ChatSummary[]>([]);
+  // Share picker: loading, or the chat list failed (an error, not "no chats").
+  const [chatsState, setChatsState] = useState<'loading' | 'ok' | 'failed'>('loading');
 
   const load = useCallback(async () => {
     if (!groupId) { setLoading(false); return; }
@@ -160,8 +164,9 @@ export default function GroupMembersScreen() {
   // the recipient would tap it only to be told no.
   const openShare = async () => {
     setSharing(true);
-    try { setChats((await listChats()).filter((c) => c.id !== groupId)); }
-    catch { setChats([]); }
+    setChatsState('loading');
+    try { setChats((await listChats()).filter((c) => c.id !== groupId)); setChatsState('ok'); }
+    catch { setChatsState('failed'); }
   };
 
   const doShare = (to: ChatSummary) => {
@@ -232,7 +237,7 @@ export default function GroupMembersScreen() {
             {m.name ?? 'crazzychat user'}{isMe ? ' (you)' : ''}
           </Text>
           <View style={st.roleWrap}>
-            <View style={[st.dot, { backgroundColor: ROLE_TONE[role] ?? colors.textDim }]} />
+            <View style={[st.dot, { backgroundColor: roleTone(colors, role) }]} />
             <Text style={{ color: colors.textDim, fontSize: 12 }}>
               {ROLE_LABELS[role] ?? m.role}
             </Text>
@@ -267,6 +272,14 @@ export default function GroupMembersScreen() {
         </View>
       ) : (
         <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+          {failed && (
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Couldn't refresh members. Showing the last list. Retry"
+              onPress={() => { setLoading(true); load(); }}
+              style={[st.banner, { borderColor: colors.danger }]}>
+              <Ionicons name="cloud-offline-outline" size={15} color={colors.danger} />
+              <Text style={{ color: colors.danger, fontSize: 12.5, flex: 1 }}>Couldn’t refresh — this list may be out of date. Tap to retry.</Text>
+            </TouchableOpacity>
+          )}
           <View style={st.sechead}>
             <Text style={[st.h, { color: colors.text, marginBottom: 0 }]}>
               {members.length} {members.length === 1 ? 'member' : 'members'}
@@ -283,6 +296,7 @@ export default function GroupMembersScreen() {
           {hasPerm(perms, 'invite_members') && (
             <TouchableOpacity
               onPress={() => router.push({ pathname: '/group-invites' as any, params: { chatId: groupId, name: groupName } })}
+              accessibilityRole="button"
               style={[st.addBtn, { borderColor: colors.glassStroke }]}
             >
               <Ionicons name="person-add-outline" size={18} color={colors.primary} />
@@ -321,7 +335,7 @@ export default function GroupMembersScreen() {
 
               {mode === 'admin_approval' && (
                 <>
-                  <TouchableOpacity onPress={openShare}
+                  <TouchableOpacity onPress={openShare} accessibilityRole="button"
                     style={[st.addBtn, { borderColor: colors.glassStroke, marginTop: 18 }]}>
                     <Ionicons name="share-outline" size={18} color={colors.primary} />
                     <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 14 }}>
@@ -342,7 +356,7 @@ export default function GroupMembersScreen() {
       {/* ── share picker ── */}
       <Modal visible={sharing} transparent animationType="slide" onRequestClose={() => setSharing(false)}>
         <View style={st.backdrop}>
-          <Pressable style={{ flex: 1 }} onPress={() => setSharing(false)} />
+          <Pressable style={{ flex: 1 }} onPress={() => setSharing(false)} accessibilityRole="button" accessibilityLabel="Close" />
           <View style={[st.sheet, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke, maxHeight: '70%' }]}>
             <Text style={{ color: colors.text, fontWeight: '800', fontSize: 16, marginBottom: 4 }}>
               Share with
@@ -351,13 +365,19 @@ export default function GroupMembersScreen() {
               They can ask to join. You still approve.
             </Text>
             <ScrollView>
-              {chats.length === 0 && (
+              {chatsState === 'loading' ? (
+                <ActivityIndicator color={colors.primary} style={{ paddingVertical: 16 }} accessibilityLabel="Loading your chats" />
+              ) : chatsState === 'failed' ? (
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Couldn't load your chats. Retry" onPress={openShare}>
+                  <Text style={{ color: colors.danger, fontSize: 13.5, paddingVertical: 12 }}>Couldn’t load your chats. Tap to retry.</Text>
+                </TouchableOpacity>
+              ) : chats.length === 0 ? (
                 <Text style={{ color: colors.textDim, fontSize: 13.5, paddingVertical: 12 }}>
                   No other chats to share into yet.
                 </Text>
-              )}
-              {chats.map((c) => (
+              ) : chats.map((c) => (
                 <TouchableOpacity key={c.id} onPress={() => doShare(c)}
+                  accessibilityRole="button" accessibilityLabel={`Share in ${c.name ?? c.peerName ?? 'Chat'}`}
                   style={[st.opt, { borderColor: colors.glassStroke }]}>
                   <Ionicons name={c.type === 'group' ? 'people' : 'person'} size={18} color={colors.primary} />
                   <Text style={{ color: colors.text, fontSize: 14, fontWeight: '600', flex: 1 }} numberOfLines={1}>
@@ -366,7 +386,7 @@ export default function GroupMembersScreen() {
                 </TouchableOpacity>
               ))}
             </ScrollView>
-            <TouchableOpacity onPress={() => setSharing(false)}
+            <TouchableOpacity onPress={() => setSharing(false)} accessibilityRole="button"
               style={[st.close, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
               <Text style={{ color: colors.text, fontWeight: '700', fontSize: 14.5 }}>Close</Text>
             </TouchableOpacity>
@@ -377,77 +397,19 @@ export default function GroupMembersScreen() {
       {/* ── per-member actions ── */}
       <Modal visible={!!sheet} transparent animationType="slide" onRequestClose={() => setSheet(null)}>
         <View style={st.backdrop}>
-          <Pressable style={{ flex: 1 }} onPress={() => setSheet(null)} />
+          <Pressable style={{ flex: 1 }} onPress={() => setSheet(null)} accessibilityRole="button" accessibilityLabel="Close" />
           <View style={[st.sheet, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
-            {!!sheet && (() => {
-              const role = sheet.role as GroupRole;
-              const acts = actionsFor(sheet);
-              const options = acts.roles;
-              return (
-                <>
-                  <View style={st.sheetHead}>
-                    {avatar(sheet, 46)}
-                    <View style={{ flex: 1, minWidth: 0 }}>
-                      <Text style={{ color: colors.text, fontWeight: '800', fontSize: 16 }} numberOfLines={1}>
-                        {sheet.name ?? 'crazzychat user'}
-                      </Text>
-                      <Text style={{ color: colors.textDim, fontSize: 12.5 }}>
-                        {ROLE_LABELS[role] ?? sheet.role} · {ROLE_BLURBS[role] ?? ''}
-                      </Text>
-                    </View>
-                  </View>
-
-                  {options.length > 0 && (
-                    <>
-                      <Text style={[st.h, { color: colors.textDim, marginTop: 20 }]}>Change role</Text>
-                      {options.map((r) => (
-                        <TouchableOpacity key={r} onPress={() => changeRole(sheet, r)}
-                          accessibilityRole="radio" accessibilityLabel={`${ROLE_LABELS[r]}. ${ROLE_BLURBS[r]}`}
-                          accessibilityState={{ selected: r === role, checked: r === role }}
-                          style={[st.opt, { borderColor: colors.glassStroke }]}>
-                          <View style={[st.dot, { backgroundColor: ROLE_TONE[r] }]} />
-                          <View style={{ flex: 1 }}>
-                            <Text style={{ color: colors.text, fontSize: 14, fontWeight: r === role ? '800' : '600' }}>
-                              {ROLE_LABELS[r]}
-                            </Text>
-                            <Text style={{ color: colors.textDim, fontSize: 11.5 }}>{ROLE_BLURBS[r]}</Text>
-                          </View>
-                          {r === role && <Ionicons name="checkmark" size={18} color={colors.primary} />}
-                        </TouchableOpacity>
-                      ))}
-                    </>
-                  )}
-
-                  {acts.canTransfer && (
-                    <TouchableOpacity onPress={() => handOver(sheet)} accessibilityRole="button"
-                      style={[st.opt, { borderColor: colors.glassStroke, marginTop: 14 }]}>
-                      <Ionicons name="key-outline" size={18} color="#F59E0B" />
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ color: colors.text, fontSize: 14, fontWeight: '700' }}>Make owner</Text>
-                        <Text style={{ color: colors.textDim, fontSize: 11.5 }}>
-                          You become an admin. Only they can hand it back.
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  )}
-
-                  {acts.canRemove && (
-                    <TouchableOpacity onPress={() => remove(sheet)} accessibilityRole="button"
-                      style={[st.opt, { borderColor: colors.danger + '55', marginTop: 8 }]}>
-                      <Ionicons name="person-remove-outline" size={18} color={colors.danger} />
-                      <Text style={{ color: colors.danger, fontSize: 14, fontWeight: '700', flex: 1 }}>
-                        Remove from group
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-
-                  <TouchableOpacity onPress={() => setSheet(null)}
-                    style={[st.close, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
-                    <Text style={{ color: colors.text, fontWeight: '700', fontSize: 14.5 }}>Close</Text>
-                  </TouchableOpacity>
-                </>
-              );
-            })()}
+            {!!sheet && (
+              <MemberSheet
+                member={sheet}
+                acts={actionsFor(sheet)}
+                avatar={avatar(sheet, 46)}
+                onRole={(r) => changeRole(sheet, r)}
+                onHandOver={() => handOver(sheet)}
+                onRemove={() => remove(sheet)}
+                onClose={() => setSheet(null)}
+              />
+            )}
           </View>
         </View>
       </Modal>
@@ -455,7 +417,86 @@ export default function GroupMembersScreen() {
   );
 }
 
+/** Per-member actions sheet: role radios, hand over, remove. */
+function MemberSheet({ member, acts, avatar, onRole, onHandOver, onRemove, onClose }: {
+  member: ChatMember;
+  acts: ReturnType<typeof memberActions>;
+  avatar: React.ReactNode;
+  onRole: (r: GroupRole) => void;
+  onHandOver: () => void;
+  onRemove: () => void;
+  onClose: () => void;
+}) {
+  const { colors } = useTheme();
+  const role = member.role as GroupRole;
+  return (
+    <>
+      <View style={st.sheetHead}>
+        {avatar}
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={{ color: colors.text, fontWeight: '800', fontSize: 16 }} numberOfLines={1} accessibilityRole="header">
+            {member.name ?? 'crazzychat user'}
+          </Text>
+          <Text style={{ color: colors.textDim, fontSize: 12.5 }}>
+            {ROLE_LABELS[role] ?? member.role} · {ROLE_BLURBS[role] ?? ''}
+          </Text>
+        </View>
+      </View>
+
+      {acts.roles.length > 0 && (
+        <>
+          <Text style={[st.h, { color: colors.textDim, marginTop: 20 }]}>Change role</Text>
+          {acts.roles.map((r) => (
+            <TouchableOpacity key={r} onPress={() => onRole(r)}
+              accessibilityRole="radio" accessibilityLabel={`${ROLE_LABELS[r]}. ${ROLE_BLURBS[r]}`}
+              accessibilityState={{ selected: r === role, checked: r === role }}
+              style={[st.opt, { borderColor: colors.glassStroke }]}>
+              <View style={[st.dot, { backgroundColor: roleTone(colors, r) }]} />
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: colors.text, fontSize: 14, fontWeight: r === role ? '800' : '600' }}>
+                  {ROLE_LABELS[r]}
+                </Text>
+                <Text style={{ color: colors.textDim, fontSize: 11.5 }}>{ROLE_BLURBS[r]}</Text>
+              </View>
+              {r === role && <Ionicons name="checkmark" size={18} color={colors.primary} />}
+            </TouchableOpacity>
+          ))}
+        </>
+      )}
+
+      {acts.canTransfer && (
+        <TouchableOpacity onPress={onHandOver} accessibilityRole="button"
+          style={[st.opt, { borderColor: colors.glassStroke, marginTop: 14 }]}>
+          <Ionicons name="key-outline" size={18} color={roleTone(colors, 'owner')} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.text, fontSize: 14, fontWeight: '700' }}>Make owner</Text>
+            <Text style={{ color: colors.textDim, fontSize: 11.5 }}>
+              You become an admin. Only they can hand it back.
+            </Text>
+          </View>
+        </TouchableOpacity>
+      )}
+
+      {acts.canRemove && (
+        <TouchableOpacity onPress={onRemove} accessibilityRole="button"
+          style={[st.opt, { borderColor: colors.danger + '55', marginTop: 8 }]}>
+          <Ionicons name="person-remove-outline" size={18} color={colors.danger} />
+          <Text style={{ color: colors.danger, fontSize: 14, fontWeight: '700', flex: 1 }}>
+            Remove from group
+          </Text>
+        </TouchableOpacity>
+      )}
+
+      <TouchableOpacity onPress={onClose} accessibilityRole="button"
+        style={[st.close, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
+        <Text style={{ color: colors.text, fontWeight: '700', fontSize: 14.5 }}>Close</Text>
+      </TouchableOpacity>
+    </>
+  );
+}
+
 const st = StyleSheet.create({
+  banner: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderWidth: 1, borderRadius: 12, marginBottom: 12 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   h: { fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 10 },
   sechead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },

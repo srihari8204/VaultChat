@@ -1,10 +1,12 @@
 // app/group-invites.tsx — add people to a group, entirely inside crazzychat
 // (Groups & Circles, membership v2).
 //
-// WHAT IS NOT HERE, deliberately: no QR code, no shareable link, no SMS or
-// WhatsApp hand-off, no "copy invite code". Every one of those turns an
-// invitation into something forwardable, and a forwardable invitation is a
-// credential — the wrong way to protect a group that is mostly family.
+// WHAT IS NOT HERE: no QR code, no shareable link, no SMS or WhatsApp hand-off.
+// An invitation from this screen is addressed to one account and cannot be
+// forwarded. Shareable links DO exist for groups, separately: admins make them
+// in Group info → Invite links (/invite-link, POST /chats/:id/invite-links),
+// and anyone holding one can join (or ask, when "Approve invite-link joins" is
+// on in Group admin). The footer says both, so the two never contradict.
 //
 // Three sections, matching the three things an admin actually does:
 //   Add      search people and invite them
@@ -71,12 +73,18 @@ export default function GroupInvitesScreen() {
   const [results, setResults] = useState<InviteCandidate[]>([]);
   const [searching, setSearching] = useState(false);
   const [searched, setSearched] = useState(false);
+  // The search request failed: "Nobody found" would be a false answer.
+  const [searchFailed, setSearchFailed] = useState(false);
   const [inviting, setInviting] = useState<string | null>(null);
 
   const [waiting, setWaiting] = useState<PendingMember[]>([]);
   const [sent, setSent] = useState<Invitation[]>([]);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<number | null>(null);
+  // Which half of the last refresh failed, shown over the lists instead of silence.
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  // Resend in flight, per invitation (double-tap guard).
+  const [resending, setResending] = useState<number | null>(null);
 
   const refresh = useCallback(async () => {
     if (!chatId) { setLoading(false); return; }
@@ -88,6 +96,7 @@ export default function GroupInvitesScreen() {
     ]);
     if (inv.status === 'fulfilled') setSent(inv.value);
     if (pend.status === 'fulfilled') setWaiting(pend.value);
+    setRefreshFailed(inv.status === 'rejected' || pend.status === 'rejected');
     setLoading(false);
   }, [chatId]);
 
@@ -99,15 +108,15 @@ export default function GroupInvitesScreen() {
   const seq = useRef(0);
   useEffect(() => {
     const term = q.trim();
-    if (term.length < 2) { setResults([]); setSearched(false); setSearching(false); return; }
+    if (term.length < 2) { setResults([]); setSearched(false); setSearchFailed(false); setSearching(false); return; }
     setSearching(true);
     const mine = ++seq.current;
     const t = setTimeout(async () => {
       try {
         const hits = await inviteCandidates(chatId, term);
-        if (mine === seq.current) { setResults(hits); setSearched(true); }
+        if (mine === seq.current) { setResults(hits); setSearched(true); setSearchFailed(false); }
       } catch {
-        if (mine === seq.current) { setResults([]); setSearched(true); }
+        if (mine === seq.current) { setResults([]); setSearched(true); setSearchFailed(true); }
       } finally {
         if (mine === seq.current) setSearching(false);
       }
@@ -158,8 +167,11 @@ export default function GroupInvitesScreen() {
   };
 
   const doResend = async (inv: Invitation) => {
-    try { await resendInvitation(chatId, inv.id); refresh(); }
+    if (resending != null) return;
+    setResending(inv.id);
+    try { await resendInvitation(chatId, inv.id); await refresh(); }
     catch (e: any) { Alert.alert('Could not renew', e?.message ?? 'Try again.'); }
+    finally { setResending(null); }
   };
 
   // Withdrawing your OWN invitation and revoking somebody else's are different
@@ -213,7 +225,7 @@ export default function GroupInvitesScreen() {
       }} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
 
-        <Text style={[st.h, { color: colors.text }]}>Add to {groupName}</Text>
+        <Text style={[st.h, { color: colors.text }]} accessibilityRole="header">Add to {groupName}</Text>
 
         <View style={[st.field, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
           <Ionicons name="search" size={17} color={colors.textDim} />
@@ -223,10 +235,11 @@ export default function GroupInvitesScreen() {
             placeholderTextColor={colors.textFaint}
             style={[st.input, { color: colors.text }]}
             autoCapitalize="none" autoCorrect={false} returnKeyType="search"
+            accessibilityLabel="Search people to invite"
           />
           {searching && <ActivityIndicator size="small" color={colors.primary} />}
           {!searching && q.length > 0 && (
-            <TouchableOpacity onPress={() => setQ('')} accessibilityLabel="Clear the search" hitSlop={8}>
+            <TouchableOpacity onPress={() => setQ('')} accessibilityRole="button" accessibilityLabel="Clear the search" hitSlop={12}>
               <Ionicons name="close-circle" size={17} color={colors.textFaint} />
             </TouchableOpacity>
           )}
@@ -237,7 +250,16 @@ export default function GroupInvitesScreen() {
           phone number or email.
         </Text>
 
-        {searched && results.length === 0 && !searching && (
+        {searched && searchFailed && !searching && (
+          <View style={[st.empty, { borderColor: colors.danger }]} accessibilityLiveRegion="polite">
+            <Ionicons name="cloud-offline-outline" size={17} color={colors.danger} />
+            <Text style={{ color: colors.danger, fontSize: 12.5, flex: 1, lineHeight: 17 }}>
+              Couldn’t search right now. Check your connection and try again.
+            </Text>
+          </View>
+        )}
+
+        {searched && !searchFailed && results.length === 0 && !searching && (
           <View style={[st.empty, { borderColor: colors.glassStroke }]}>
             <Ionicons name="person-outline" size={17} color={colors.textDim} />
             <Text style={{ color: colors.textDim, fontSize: 12.5, flex: 1, lineHeight: 17 }}>
@@ -260,6 +282,8 @@ export default function GroupInvitesScreen() {
             </View>
             {c.state === 'invitable' ? (
               <TouchableOpacity onPress={() => invite(c)} disabled={inviting === c.id}
+                accessibilityRole="button" accessibilityLabel={`Invite ${c.name ?? 'crazzychat user'}`}
+                accessibilityState={{ disabled: inviting === c.id, busy: inviting === c.id }} hitSlop={6}
                 style={[st.pill, { backgroundColor: colors.primary }]}>
                 {inviting === c.id ? <ActivityIndicator size="small" color="#fff" />
                   : <Text style={st.pillTxt}>Invite</Text>}
@@ -272,6 +296,14 @@ export default function GroupInvitesScreen() {
             )}
           </View>
         ))}
+
+        {refreshFailed && !loading && (
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Couldn't refresh invitations. Retry" onPress={() => { setLoading(true); refresh(); }}
+            style={[st.empty, { borderColor: colors.danger, marginTop: 24 }]}>
+            <Ionicons name="cloud-offline-outline" size={17} color={colors.danger} />
+            <Text style={{ color: colors.danger, fontSize: 12.5, flex: 1 }}>Couldn’t refresh the lists below. Tap to retry.</Text>
+          </TouchableOpacity>
+        )}
 
         {/* ── waiting on the owner ── */}
         <View style={st.sechead}>
@@ -301,12 +333,13 @@ export default function GroupInvitesScreen() {
             {acting === p.id ? <ActivityIndicator size="small" color={colors.primary} /> : (
               <>
                 {p.canApprove && (
-                  <TouchableOpacity onPress={() => approve(p)} style={[st.pill, { backgroundColor: colors.success }]}>
+                  <TouchableOpacity onPress={() => approve(p)} style={[st.pill, { backgroundColor: colors.success }]} hitSlop={6}
+                    accessibilityRole="button" accessibilityLabel={`Approve ${p.name ?? 'crazzychat user'}`}>
                     <Text style={st.pillTxt}>Approve</Text>
                   </TouchableOpacity>
                 )}
                 {p.canReject && (
-                  <TouchableOpacity accessibilityLabel={`Decline ${p.name ?? "crazzychat user"}`} onPress={() => decline(p)} style={st.rowBtn}>
+                  <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Decline ${p.name ?? "crazzychat user"}`} onPress={() => decline(p)} style={st.rowBtn} hitSlop={8}>
                     <Ionicons name="close-circle" size={19} color={colors.danger} />
                   </TouchableOpacity>
                 )}
@@ -339,10 +372,14 @@ export default function GroupInvitesScreen() {
                 </Text>
                 <Text style={{ color: t, fontSize: 11.5 }}>{STATUS_LABEL[inv.status]}</Text>
               </View>
-              <TouchableOpacity accessibilityLabel={`Resend the invitation to ${inv.name ?? inv.ref ?? "crazzychat user"}`} onPress={() => doResend(inv)} style={st.rowBtn}>
-                <Ionicons name="refresh" size={17} color={colors.primary} />
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Resend the invitation to ${inv.name ?? inv.ref ?? "crazzychat user"}`}
+                accessibilityState={{ disabled: resending != null, busy: resending === inv.id }}
+                disabled={resending != null} onPress={() => doResend(inv)} style={st.rowBtn} hitSlop={8}>
+                {resending === inv.id
+                  ? <ActivityIndicator size="small" color={colors.primary} />
+                  : <Ionicons name="refresh" size={17} color={colors.primary} />}
               </TouchableOpacity>
-              <TouchableOpacity accessibilityLabel={`Withdraw the invitation to ${inv.name ?? inv.ref ?? "crazzychat user"}`} onPress={() => doWithdraw(inv)} style={st.rowBtn}>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Withdraw the invitation to ${inv.name ?? inv.ref ?? "crazzychat user"}`} onPress={() => doWithdraw(inv)} style={st.rowBtn} hitSlop={8}>
                 <Ionicons name="close-circle" size={17} color={colors.danger} />
               </TouchableOpacity>
             </View>
@@ -352,8 +389,9 @@ export default function GroupInvitesScreen() {
         <View style={[st.footer, { borderColor: colors.glassStroke }]}>
           <Ionicons name="lock-closed-outline" size={15} color={colors.textDim} />
           <Text style={{ color: colors.textDim, fontSize: 11.5, flex: 1, lineHeight: 16 }}>
-            Invitations stay inside crazzychat. There is no link or code to share, so an
-            invitation cannot be forwarded to somebody it was not meant for.
+            Invitations sent here go to one account and cannot be forwarded. A group can
+            also have invite links (Group info → Invite links): anyone with a link can join,
+            or ask to, if link joins need approval.
           </Text>
         </View>
       </ScrollView>

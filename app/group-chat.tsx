@@ -1,42 +1,20 @@
-// app/group-chat.tsx — legacy redirect.
+// app/group-chat.tsx — redirect shim for old deep links only.
 //
 // The standalone Firestore group-chat screen is superseded by the shared,
-// Postgres-backed /chat screen, which renders both direct and group chats
-// (members, polls, reactions, disappearing messages, the lot). This module
-// now just forwards any old navigation here to /chat so there is one chat
-// surface and no remaining Firebase dependency.
+// Postgres-backed /chat screen, which renders both direct and group chats.
+// Nothing in the app links here (lib/orphanRoutes.selftest.ts pins that); it
+// exists so an old `/group-chat?chatId=…` link still opens the chat.
+//
+// <Redirect> replaces the route as it mounts and renders nothing: no spinner to
+// flash, nothing for a screen reader to announce. A link without an id has no
+// chat to open, so it lands on the chat list, not on a Back that a cold-start
+// deep link has nowhere to go.
 
-import React, { useEffect , useMemo} from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { type Palette } from '../constants/theme';
-import { useTheme } from '../lib/theme';
-
-function useS() {
-  const { colors } = useTheme();
-  return useMemo(() => makeStyles(colors), [colors]);
-}
+import { Redirect, useLocalSearchParams } from 'expo-router';
 
 export default function GroupChatRedirect() {
-  const { colors } = useTheme();
-  const s = useS();
-  const router = useRouter();
   const params = useLocalSearchParams<{ chatId?: string; id?: string; groupName?: string }>();
   const id = String(params.chatId ?? params.id ?? '');
-
-  useEffect(() => {
-    if (id) router.replace({ pathname: '/chat', params: { id, name: params.groupName ?? '' } } as any);
-    else router.back();
-  }, [id]);
-
-  return (
-    <View style={s.center}>
-      <Stack.Screen options={{ headerShown: false }} />
-      <ActivityIndicator color={colors.primary} size="large" />
-    </View>
-  );
+  if (!id) return <Redirect href={'/(tabs)/chats' as any} />;
+  return <Redirect href={{ pathname: '/chat', params: { id, name: String(params.groupName ?? '') } } as any} />;
 }
-
-const makeStyles = (c: Palette) => StyleSheet.create({
-  center: { flex: 1, backgroundColor: c.bg, justifyContent: 'center', alignItems: 'center' },
-});

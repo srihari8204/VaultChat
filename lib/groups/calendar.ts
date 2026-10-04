@@ -209,6 +209,14 @@ export function eventReminderItems(occ: Occurrence[], me: string): Task[] {
 export const GENERIC_EVENT_REMINDER = 'An event in your shared calendar is coming up';
 
 /**
+ * Booked event reminders whose lock-screen text still shows a title — what has
+ * to be rewritten when the tray-privacy preference stops allowing names.
+ */
+export function revealingReminders<T extends { title: string }>(booked: T[]): T[] {
+  return booked.filter((b) => b.title !== GENERIC_EVENT_REMINDER);
+}
+
+/**
  * What an event reminder may say on this phone's lock screen. A shared event
  * reminds every member, so the title is often another member's words about
  * their own plans, readable by whoever holds this phone. It shows only for an
@@ -219,6 +227,59 @@ export function eventReminderTitle(
   item: Pick<Task, 'title' | 'createdBy'>, me: string, preview: NotifPreview,
 ): string {
   return item.createdBy === me && preview === 'name' ? item.title : GENERIC_EVENT_REMINDER;
+}
+
+// ── composer quick picks (app/group-calendar.tsx) ──
+// The day and hour chips are shortcuts over one start time, which the date
+// picker can also set to any minute. Each chip changes only its own part.
+
+/** `start` moved to the day `addDays` after `now`, keeping its time of day. */
+export function withDayOffset(start: number, addDays: number, now: number): number {
+  const s = new Date(start);
+  const d = new Date(now);
+  d.setDate(d.getDate() + addDays);
+  d.setHours(s.getHours(), s.getMinutes(), 0, 0);
+  return d.getTime();
+}
+
+/** `start` on the same day at `hour`:00. */
+export function withHour(start: number, hour: number): number {
+  const d = new Date(start);
+  d.setHours(hour, 0, 0, 0);
+  return d.getTime();
+}
+
+/** Is `start` on the day `addDays` after `now`? (Selected state of a day chip.) */
+export function isDayOffset(start: number, addDays: number, now: number): boolean {
+  const d = new Date(now);
+  d.setDate(d.getDate() + addDays);
+  return new Date(start).toDateString() === d.toDateString();
+}
+
+/**
+ * What this user may do to one event. Presentation only; the server re-checks.
+ *
+ * Delete mirrors calMayEdit (vaultchat-backend-go/internal/routes/
+ * chats_calendar.go): the person who added it, or anyone holding
+ * edit_settings (in an untyped group the server reads that as admin/owner).
+ *
+ * Edit is narrower on purpose: only the author. The payload is sealed with the
+ * writer's group sender key, but readers open it with `createdBy`'s key (the
+ * row never records who last wrote it). An admin's edit of someone else's
+ * event would therefore be unreadable for every member.
+ */
+export function eventActions(a: {
+  createdBy: string | null | undefined;
+  me: string | null;
+  typed: boolean;
+  myRole: string | null | undefined;
+  permissions: readonly string[] | null | undefined;
+}): { canEdit: boolean; canDelete: boolean } {
+  const mine = !!a.me && a.createdBy === a.me;
+  const settings = a.typed
+    ? (a.permissions ?? []).includes('edit_settings')
+    : a.myRole === 'owner' || a.myRole === 'admin';
+  return { canEdit: mine, canDelete: mine || settings };
 }
 
 // ── self-check ──

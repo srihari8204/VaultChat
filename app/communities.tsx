@@ -4,7 +4,7 @@
 // group. List your communities → open one → see its groups → tap to chat.
 
 import { HEADER_TOP, SCREEN_BOTTOM } from '../constants/layout';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, ScrollView, FlatList, TouchableOpacity, StyleSheet, Modal, TextInput, Alert, ActivityIndicator, BackHandler,
 } from 'react-native';
@@ -36,6 +36,10 @@ export default function CommunitiesScreen() {
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
   const [busy, setBusy] = useState(false);
+  // Error-bar retry in flight: the bar shows a spinner instead of looking dead.
+  const [retrying, setRetrying] = useState(false);
+  // Only the latest openCommunity may write: tapping A then B must end on B.
+  const openSeq = useRef(0);
 
   const loadList = useCallback(async () => {
     // Local-first: paint cached list instantly, then refresh in background.
@@ -56,24 +60,35 @@ export default function CommunitiesScreen() {
   // Detail is in-screen state, not a route: Android back returns to the list.
   useEffect(() => {
     if (!detail) return;
-    const sub = BackHandler.addEventListener('hardwareBackPress', () => { setDetail(null); return true; });
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => { openSeq.current++; setDetail(null); return true; });
     return () => sub.remove();
   }, [detail]);
 
   const openCommunity = useCallback(async (id: string) => {
-    // Local-first: paint cached detail instantly, else show spinner.
-    const cached = await readCache<CommunityDetail>('community:' + id);
-    if (cached) { setDetail(cached); setLoading(false); }
-    else setLoading(true);
+    const seq = ++openSeq.current;
+    let cached: CommunityDetail | null = null;
     try {
+      // Local-first: paint cached detail instantly, else show spinner. Read
+      // inside the try: an unreadable cache must fall through to the network.
+      cached = await readCache<CommunityDetail>('community:' + id).catch(() => null);
+      if (seq !== openSeq.current) return;
+      if (cached) { setDetail(cached); setLoading(false); }
+      else setLoading(true);
       const d = await getCommunity(id);
+      if (seq !== openSeq.current) return;
       setDetail(d);
       writeCache('community:' + id, d);
     } catch {
-      if (!cached) Alert.alert('Error', 'Could not open this community.');
+      if (seq === openSeq.current && !cached) Alert.alert('Could not open this community', 'Check your connection and try again.');
     }
-    finally { setLoading(false); }
+    finally { if (seq === openSeq.current) setLoading(false); }
   }, []);
+
+  const retryList = useCallback(async () => {
+    if (retrying) return;
+    setRetrying(true);
+    try { await loadList(); } finally { setRetrying(false); }
+  }, [retrying, loadList]);
 
   const submitModal = useCallback(async () => {
     const n = name.trim();
@@ -101,8 +116,8 @@ export default function CommunitiesScreen() {
       <AuroraBackground />
         <Stack.Screen options={{ headerShown: false }} />
         <View style={S.header}>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => setDetail(null)} style={S.hBtn} hitSlop={8}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
-          <Text style={S.hTitle} numberOfLines={1}>{detail.name}</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back to communities" onPress={() => { openSeq.current++; setDetail(null); }} style={S.hBtn} hitSlop={8}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
+          <Text style={S.hTitle} numberOfLines={1} accessibilityRole="header">{detail.name}</Text>
         </View>
 
         <FlatList
@@ -153,13 +168,16 @@ export default function CommunitiesScreen() {
       <Stack.Screen options={{ headerShown: false }} />
       <View style={S.header}>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={S.hBtn} hitSlop={8}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
-        <Text style={S.hTitle}>Communities</Text>
+        <Text style={S.hTitle} accessibilityRole="header">Communities</Text>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="New community" onPress={() => { setName(''); setDesc(''); setModal('community'); }} style={S.hBtn} hitSlop={8}><Ionicons name="add" size={24} color={colors.text} /></TouchableOpacity>
       </View>
 
       {loadError && !loading && list.length > 0 && (
-        <TouchableOpacity style={S.errBar} accessibilityRole="button" accessibilityLabel="Couldn't refresh communities. Showing saved list. Tap to retry" onPress={loadList}>
-          <Text style={S.errTxt}>Couldn’t refresh — showing saved list. Tap to retry.</Text>
+        <TouchableOpacity style={S.errBar} accessibilityRole="button" accessibilityLabel="Couldn't refresh communities. Showing saved list. Retry"
+          accessibilityState={{ busy: retrying, disabled: retrying }} disabled={retrying} onPress={retryList}>
+          {retrying
+            ? <ActivityIndicator color={colors.danger} size="small" accessibilityLabel="Retrying" />
+            : <Text style={S.errTxt}>Couldn’t refresh — showing saved list. Tap to retry.</Text>}
         </TouchableOpacity>
       )}
       {loading ? (
@@ -205,10 +223,10 @@ export default function CommunitiesScreen() {
         <KeyboardSafe keyboardOnly>
         <View style={S.modalBackdrop}>
           <ScrollView style={S.modalCard} contentContainerStyle={S.modalContent} keyboardShouldPersistTaps="handled">
-            <Text style={S.modalTitle}>{modal === 'group' ? 'New group' : 'New community'}</Text>
-            <TextInput style={S.modalInput} value={name} onChangeText={setName} placeholder={modal === 'group' ? 'Group name' : 'Community name'} placeholderTextColor={colors.textDim} autoFocus maxLength={100} />
+            <Text style={S.modalTitle} accessibilityRole="header">{modal === 'group' ? 'New group' : 'New community'}</Text>
+            <TextInput style={S.modalInput} value={name} onChangeText={setName} placeholder={modal === 'group' ? 'Group name' : 'Community name'} accessibilityLabel={modal === 'group' ? 'Group name' : 'Community name'} placeholderTextColor={colors.textDim} autoFocus maxLength={100} />
             {modal === 'community' && (
-              <TextInput style={[S.modalInput, { minHeight: 60, textAlignVertical: 'top' }]} value={desc} onChangeText={setDesc} placeholder="Description (optional)" placeholderTextColor={colors.textDim} multiline maxLength={512} />
+              <TextInput style={[S.modalInput, { minHeight: 60, textAlignVertical: 'top' }]} value={desc} onChangeText={setDesc} placeholder="Description (optional)" accessibilityLabel="Description, optional" placeholderTextColor={colors.textDim} multiline maxLength={512} />
             )}
             <View style={S.modalBtns}>
               <TouchableOpacity accessibilityRole="button" onPress={() => setModal(null)} style={S.modalBtn}><Text style={S.modalCancel}>Cancel</Text></TouchableOpacity>

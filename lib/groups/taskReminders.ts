@@ -22,13 +22,14 @@ import {
   type ScheduledReminder, type PlannedReminder,
 } from './reminders';
 import type { Task } from './tasks';
-import { eventReminderTitle } from './calendar';
+import { eventReminderTitle, revealingReminders, GENERIC_EVENT_REMINDER } from './calendar';
 import { getNotifPreview } from '../privacyPrefs';
 
 const KEY = (groupId: string) => `vc_group_task_reminders_${groupId}`;
 // Calendar event reminders reuse the same reconciler with their own bookkeeping,
 // so a task sync never sees (and cancels) an event reminder, or vice versa.
-const EVENT_KEY = (groupId: string) => `vc_group_event_reminders_${groupId}`;
+const EVENT_KEY_PREFIX = 'vc_group_event_reminders_';
+const EVENT_KEY = (groupId: string) => EVENT_KEY_PREFIX + groupId;
 
 /** What differs between the task and calendar-event reminders. */
 interface ReminderKind {
@@ -133,29 +134,66 @@ async function reconcile(
 
   const kept = booked.filter((b) => !plan.cancel.includes(b.notifId));
   for (const r of plan.schedule) {
-    let notifId = '';
-    if (granted) {
-      try {
-        const { title, body } = kind.text(r);
-        notifId = await Notifications.scheduleNotificationAsync({
-          content: {
-            title, body,
-            // The root tap handler routes on chatId; a group's task thread IS
-            // its chat, so tapping the reminder lands in the right place.
-            data: kind.data(r.taskId),
-          },
-          trigger: {
-            type: Notifications.SchedulableTriggerInputTypes.DATE,
-            date: new Date(r.fireAt),
-          } as any,
-        });
-      } catch { notifId = ''; }
-    }
-    kept.push({ ...r, notifId });
+    kept.push({ ...r, notifId: granted ? await book(kind, r) : '' });
   }
 
   await saveBooked(kind.key, kept);
   return { booked: plan.schedule.length, cancelled: plan.cancel.length };
+}
+
+/** Schedule one reminder; '' when the OS refused (it is still recorded as booked). */
+async function book(kind: ReminderKind, r: PlannedReminder): Promise<string> {
+  try {
+    const { title, body } = kind.text(r);
+    return await Notifications.scheduleNotificationAsync({
+      content: {
+        title, body,
+        // The root tap handler routes on chatId; a group's task thread IS
+        // its chat, so tapping the reminder lands in the right place.
+        data: kind.data(r.taskId),
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: new Date(r.fireAt),
+      } as any,
+    });
+  } catch { return ''; }
+}
+
+/**
+ * Rewrite every booked calendar reminder, in every group, to the generic text
+ * NOW, rather than when each group's calendar is next opened (the only time
+ * syncEventReminders runs). For the moment the tray-privacy preference stops
+ * allowing names (lib/privacyPrefs setNotifPreview).
+ *
+ * Only ever tightens. Showing titles again needs the real titles, which only a
+ * calendar sync has, so loosening still applies on the next sync.
+ */
+export async function hideBookedEventReminderTitles(now: number = Date.now()): Promise<number> {
+  let keys: readonly string[];
+  try { keys = (await AsyncStorage.getAllKeys()).filter((k) => k.startsWith(EVENT_KEY_PREFIX)); }
+  catch { return 0; }
+  let granted = false;
+  try { granted = (await Notifications.getPermissionsAsync()).granted; } catch { granted = false; }
+  let rewritten = 0;
+  for (const key of keys) {
+    const booked = await loadBooked(key);
+    const reveal = new Set(revealingReminders(booked));
+    if (reveal.size === 0) continue;
+    const kind = EVENT_KIND(key.slice(EVENT_KEY_PREFIX.length));
+    const next: ScheduledReminder[] = [];
+    for (const b of booked) {
+      if (!reveal.has(b)) { next.push(b); continue; }
+      if (b.notifId) {
+        try { await Notifications.cancelScheduledNotificationAsync(b.notifId); } catch { /* already gone */ }
+      }
+      const generic = { ...b, title: GENERIC_EVENT_REMINDER };
+      next.push({ ...generic, notifId: granted && b.fireAt > now ? await book(kind, generic) : '' });
+      rewritten++;
+    }
+    await saveBooked(key, next);
+  }
+  return rewritten;
 }
 
 /** Drop every task and event reminder for a group — used when leaving it. */

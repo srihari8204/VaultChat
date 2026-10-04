@@ -18,8 +18,9 @@ import { useTheme } from '../lib/theme';
 import { AuroraBackground } from '../components/ui/AuroraBackground';
 import { AppText as Text } from '../components/ui/Text';
 import { brandAlpha } from '../constants/theme';
-import { sendMessage, getMessages, decryptFromChat } from '../lib/chatService';
-import { unionWithLocalHistoryAsc } from '../lib/messageHistory';
+import { sendMessage } from '../lib/chatService';
+import { readGroupOps } from '../lib/groups/opThread';
+import { ThreadGaps } from '../components/groups/ThreadGaps';
 import { circleMembers } from '../lib/family/circle';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { syncTaskReminders } from '../lib/groups/taskReminders';
@@ -28,9 +29,6 @@ import {
   type Task, type TaskOp,
 } from '../lib/groups/tasks';
 import { type CircleMember } from '../lib/family/types';
-
-/** How far back to read the thread when rebuilding the list. */
-const SCAN_LIMIT = 400;
 
 const DUE_PRESETS: { label: string; ms: number | null }[] = [
   { label: 'No date', ms: null },
@@ -57,8 +55,10 @@ export default function GroupTasksScreen() {
   const [members, setMembers] = useState<CircleMember[]>([]);
   const [me, setMe] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  // Rebuild failed: shown as an error, not as "Nothing yet".
+  // Rebuild failed: an error when nothing is listed, a banner over the list otherwise.
   const [failed, setFailed] = useState(false);
+  // What the last read could not see (lib/groups/opThread).
+  const [gaps, setGaps] = useState<{ unreadable: number; complete: boolean }>({ unreadable: 0, complete: true });
   const [title, setTitle] = useState('');
   const [dueMs, setDueMs] = useState<number | null>(null);
   const [assignee, setAssignee] = useState<string | null>(null);
@@ -68,19 +68,9 @@ export default function GroupTasksScreen() {
   const rebuild = useCallback(async () => {
     if (!groupId) { setLoading(false); return; }
     try {
-      // Ops older than the retention window survive only on this device.
-      const msgs = await unionWithLocalHistoryAsc(
-        groupId, await getMessages(groupId, { limit: SCAN_LIMIT }), SCAN_LIMIT * 4);
-      const ops: TaskOp[] = [];
-      for (const m of msgs) {
-        if (m.deletedAt || !m.content) continue;
-        let body = '';
-        try { body = await decryptFromChat(groupId, m.senderId, m.content, m.id); } catch { continue; }
-        const op = decodeOp(body);
-        // `by` travels inside the encrypted body and is not authenticated; the
-        // message sender is. Drop ops that claim another member's authorship.
-        if (op && op.by === String(m.senderId)) ops.push(op);
-      }
+      // Paged server read plus this device's own history (lib/groups/opThread).
+      const { ops, unreadable, complete } = await readGroupOps<TaskOp>(groupId, decodeOp);
+      setGaps({ unreadable, complete });
       const folded = foldTasks(ops);
       setTasks(folded);
       setFailed(false);
@@ -175,12 +165,12 @@ export default function GroupTasksScreen() {
         <View style={[st.field, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
           <Ionicons name="add-circle-outline" size={19} color={colors.textDim} />
           <TextInput
-            value={title} onChangeText={setTitle} placeholder="Add a task…"
+            value={title} onChangeText={setTitle} placeholder="Add a task…" accessibilityLabel="New task"
             placeholderTextColor={colors.textFaint} style={[st.input, { color: colors.text }]}
             returnKeyType="done" onSubmitEditing={addTask} maxLength={200}
           />
           {!!title.trim() && (
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Add this task" accessibilityState={{ disabled: busy || !me, busy }} onPress={addTask} disabled={busy || !me}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Add this task" accessibilityState={{ disabled: busy || !me, busy }} onPress={addTask} disabled={busy || !me} hitSlop={10}>
               {busy ? <ActivityIndicator size="small" color={colors.primary} />
                 : <Ionicons name="arrow-forward-circle" size={26} color={colors.primary} />}
             </TouchableOpacity>
@@ -241,12 +231,21 @@ export default function GroupTasksScreen() {
           </Text>
         )}
 
+        {!loading && ordered.length > 0 && failed && (
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Couldn't refresh tasks. Showing what was loaded before. Retry"
+            onPress={() => { setLoading(true); rebuild(); }}
+            style={[st.banner, { borderColor: colors.danger }]}>
+            <Ionicons name="cloud-offline-outline" size={15} color={colors.danger} />
+            <Text style={{ color: colors.danger, fontSize: 12.5, flex: 1 }}>Couldn’t refresh — this list may be out of date. Tap to retry.</Text>
+          </TouchableOpacity>
+        )}
+
         {ordered.map((t) => {
           const late = isOverdue(t, now);
           const who = nameOf(t.assignee);
           return (
             <View key={t.id} style={[st.row, { borderColor: colors.glassStroke }]}>
-              <TouchableOpacity accessibilityRole="checkbox" accessibilityState={{ checked: t.done }} accessibilityLabel={t.done ? `Mark ${t.title} not done` : `Mark ${t.title} done`} onPress={() => toggle(t)} style={st.check} hitSlop={8}>
+              <TouchableOpacity accessibilityRole="checkbox" accessibilityState={{ checked: t.done }} accessibilityLabel={t.done ? `Mark ${t.title} not done` : `Mark ${t.title} done`} onPress={() => toggle(t)} style={st.check} hitSlop={10}>
                 <Ionicons
                   name={t.done ? 'checkmark-circle' : 'ellipse-outline'}
                   size={23}
@@ -270,12 +269,13 @@ export default function GroupTasksScreen() {
                   </Text>
                 )}
               </View>
-              <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Delete the task ${t.title}`} onPress={() => remove(t)} style={{ padding: 6 }} hitSlop={6}>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Delete the task ${t.title}`} onPress={() => remove(t)} style={{ padding: 6 }} hitSlop={8}>
                 <Ionicons name="trash-outline" size={17} color={colors.textFaint} />
               </TouchableOpacity>
             </View>
           );
         })}
+        {!loading && <ThreadGaps unreadable={gaps.unreadable} complete={gaps.complete} what="tasks" />}
       </ScrollView>
     </KeyboardSafe>
   );
@@ -290,4 +290,5 @@ const st = StyleSheet.create({
   h: { fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.3 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
   check: { padding: 2 },
+  banner: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderWidth: 1, borderRadius: 12, marginBottom: 8 },
 });

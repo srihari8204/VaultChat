@@ -11,7 +11,7 @@
 // immediately. Without that, a setting would only take effect after a restart,
 // which for a privacy control is a bug, not a delay.
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, StyleSheet, TouchableOpacity, ScrollView, Switch, ActivityIndicator, Alert,
 } from 'react-native';
@@ -54,6 +54,15 @@ export default function GroupPrivacyScreen() {
 
   const [p, setP] = useState<GroupPrivacy>(DEFAULT_GROUP_PRIVACY);
   const [loading, setLoading] = useState(true);
+  // The timer chips, the summary and "Sharing stops" are all relative to now:
+  // tick while a timer is set so they never go stale or point into the past.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    setNow(Date.now());
+    if (p.sharingUntil == null) return;
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, [p.sharingUntil]);
 
   useFocusEffect(useCallback(() => {
     let live = true;
@@ -79,7 +88,12 @@ export default function GroupPrivacyScreen() {
       return;
     }
     setP(saved);
-    try { await reloadPrivacy(groupId); } catch { /* not publishing right now */ }
+    try { await reloadPrivacy(groupId); }
+    catch {
+      // Saved, but the running publisher could not re-read it: say so rather
+      // than let a privacy change look applied when it is not yet.
+      Alert.alert('Saved, not applied yet', 'Live sharing in this group keeps the previous setting until it next starts. Turn sharing off and on to apply it now.');
+    }
   };
 
   const startTemporary = (ms: number | null) =>
@@ -124,7 +138,7 @@ export default function GroupPrivacyScreen() {
           </View>
           <View style={{ flex: 1 }}>
             <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15 }}>
-              {describePrivacy(p, Date.now())}
+              {describePrivacy(p, now)}
             </Text>
             <Text style={{ color: colors.textDim, fontSize: 12.5 }}>in {groupName}</Text>
           </View>
@@ -135,7 +149,7 @@ export default function GroupPrivacyScreen() {
           never leaves this phone — the group does not receive it and choose not to show it.
         </Text>
 
-        <Text style={[st.h, { color: colors.text }]}>Location</Text>
+        <Text style={[st.h, { color: colors.text }]} accessibilityRole="header">Location</Text>
         {PRECISIONS.map((opt) => {
           const on = p.precision === opt.key && !p.invisible;
           return (
@@ -200,7 +214,7 @@ export default function GroupPrivacyScreen() {
           {DURATIONS.map((d) => {
             // Only the end time is stored, so the timed chips are derived from
             // what is left: up to an hour reads as "1 hour", more as "8 hours".
-            const left = p.sharingUntil == null ? null : p.sharingUntil - Date.now();
+            const left = p.sharingUntil == null ? null : p.sharingUntil - now;
             const on = d.ms == null ? left == null
               : left != null && left > 0 && (d.ms <= HOUR_MS ? left <= HOUR_MS : left > HOUR_MS);
             return (
@@ -212,7 +226,12 @@ export default function GroupPrivacyScreen() {
             );
           })}
         </View>
-        {p.sharingUntil != null && (
+        {p.sharingUntil != null && p.sharingUntil <= now && (
+          <Text style={{ color: colors.textDim, fontSize: 13, paddingVertical: 12 }}>
+            Sharing stopped at {new Date(p.sharingUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}. Pick a time above to share again.
+          </Text>
+        )}
+        {p.sharingUntil != null && p.sharingUntil > now && (
           <TouchableOpacity
             accessibilityRole="button"
             onPress={() => Alert.alert('Stop the timer?', 'You will keep sharing until you change it yourself.', [

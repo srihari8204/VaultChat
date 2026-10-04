@@ -1,10 +1,11 @@
 // app/group-insights.tsx — group insights (Groups & Circles, G6).
 //
-// Everything on this screen is computed from data ALREADY ON THIS PHONE — the
-// local track store and the local alert inbox. Nothing is fetched for it and
-// nothing is uploaded, not even a total. That is stated in the footer, because
-// a screen full of numbers about where people went is exactly the kind of thing
-// a user is entitled to be suspicious of.
+// Everything on this screen is computed ON THIS PHONE, from the local track
+// store, the local alert inbox and the group's own messages (fetched like any
+// chat, for the trip announcements in them). Nothing computed here is
+// uploaded, not even a total. The footer says exactly that, because a screen
+// full of numbers about where people went is exactly the kind of thing a user
+// is entitled to be suspicious of.
 //
 // Distances are estimates: history is deliberately throttled, so the figures
 // understate real travel. The copy says "estimated" rather than implying an
@@ -20,7 +21,8 @@ import { AppText as Text } from '../components/ui/Text';
 import { getTrack } from '../lib/family/history';
 import { loadAlerts, selectAlerts } from '../lib/family/alerts';
 import { circleMembers } from '../lib/family/circle';
-import { getGroup, historyAccess } from '../lib/groups/store';
+import { historyAccess } from '../lib/groups/store';
+import { groupWithHistoryAccess } from '../lib/family/historyGate';
 import { getCurrentUserAsync } from './(constants)/authService';
 import {
   summarise, groupSummary, weekBounds, formatDistance,
@@ -31,12 +33,10 @@ import { announceFromMessage } from '../lib/groups/tripSession';
 import { unionWithLocalHistoryAsc } from '../lib/messageHistory';
 import { getMessages } from '../lib/chatService';
 import { type CircleMember } from '../lib/family/types';
-import { initialOf } from '../lib/format';
+import { Avatar } from '../components/ui';
 
 type Span = 'week' | 'month';
 
-const AVATAR_COLORS = ['#4A9FFF', '#EC4899', '#22C55E', '#F59E0B', '#A855F7', '#EF4444', '#14B8A6', '#F97316'];
-const colorFor = (id: string) => AVATAR_COLORS[[...id].reduce((a, c) => a + c.charCodeAt(0), 0) % AVATAR_COLORS.length];
 
 const ago = (ts: number) => {
   const h = (Date.now() - ts) / 3600_000;
@@ -46,7 +46,7 @@ const ago = (ts: number) => {
 };
 
 export default function GroupInsightsScreen() {
-  const { colors, scheme } = useTheme();
+  const { colors } = useTheme();
   const params = useLocalSearchParams<{ groupId?: string; name?: string }>();
   const groupId = String(params.groupId || '');
 
@@ -54,6 +54,8 @@ export default function GroupInsightsScreen() {
   const [members, setMembers] = useState<CircleMember[]>([]);
   const [insights, setInsights] = useState<MemberInsight[]>([]);
   const [loading, setLoading] = useState(true);
+  // The load itself failed (storage or network) — not the same as "we don't know who you are".
+  const [failed, setFailed] = useState(false);
   const [me, setMe] = useState<string | null>(null);
   // Whether this user may see OTHER members' figures. Starts denied.
   const [mayViewOthers, setMayViewOthers] = useState(false);
@@ -81,16 +83,14 @@ export default function GroupInsightsScreen() {
         const u = await getCurrentUserAsync().catch(() => null);
         const myId = u ? String(u.id) : null;
 
-        const g = await getGroup(groupId);
         // Untyped legacy groups keep their previous openness rather than being
-        // silently tightened on upgrade — and a group whose permissions have
-        // never been CACHED is unknown, not denied (2026-09-17). The registry
-        // only learns permissions from a successful getChat, so a migrated
-        // circle, an unvisited space and every group read offline had an absent
-        // list; treating that as an empty permission set locked this screen down
-        // to "showing only your own activity" for people who own the circle.
-        // See historyAccess() for the three cases.
-        const allowed = historyAccess(g) !== 'denied';
+        // silently tightened on upgrade. A typed group whose permissions were
+        // never cached is UNKNOWN: groupWithHistoryAccess asks the server
+        // (GET /chats/:id) rather than guessing allowed or denied. If it cannot
+        // be asked it throws, and the catch below shows "Couldn't load" with
+        // Retry: neither a false "your role can't see this" nor everyone's track.
+        const g = await groupWithHistoryAccess(groupId);
+        const allowed = historyAccess(g) === 'allowed';
 
         // Withhold the LOAD, not just the computation (2026-09-17). getTrack with
         // no userId returns EVERY member's positions, and `allowed` gated only the
@@ -108,6 +108,7 @@ export default function GroupInsightsScreen() {
         const alerts = selectAlerts(groupId, 'all');
 
         if (!live) return;
+        setFailed(false);
         setMe(myId);
         setMayViewOthers(allowed);
         setMembers(mem);
@@ -117,8 +118,8 @@ export default function GroupInsightsScreen() {
         setInsights(summarise(ids, track, alerts, range));
 
         // Trip history is a FOLD over the group thread's own announcements plus
-        // the local alert inbox — nothing new is stored and nothing is fetched
-        // for it beyond messages this device already syncs.
+        // the local alert inbox. Nothing new is stored; the recent messages are
+        // fetched like any chat read, and the fold runs here.
         try {
           const msgs = await unionWithLocalHistoryAsc(
             groupId, await getMessages(groupId, { limit: 300 }), 1200);
@@ -137,10 +138,15 @@ export default function GroupInsightsScreen() {
           }
           if (live) setTrips(foldTripHistory(announces, alerts, range));
         } catch { /* offline: the rest of the screen still works */ }
-      } catch { /* nothing loaded: the screen's empty state applies */ }
+      } catch {
+        // Nothing loaded. Say so with Retry; the empty state would read as a quiet week.
+        if (live) setFailed(true);
+      }
       finally { if (live) setLoading(false); }
     })();
     return () => { live = false; };
+    // reload is a deliberate trigger (Retry), not a value read inside.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupId, range, reload]));
 
   const summary = useMemo(() => groupSummary(insights), [insights]);
@@ -149,6 +155,11 @@ export default function GroupInsightsScreen() {
     () => [...insights].sort((a, b) => b.distanceM - a.distanceM),
     [insights],
   );
+  const repeatDestinations = useMemo(
+    () => frequentDestinations(trips, 3).filter((d) => d.count > 1),
+    [trips],
+  );
+  const retry = () => { setLoading(true); setReload((n) => n + 1); };
 
   const stat = (label: string, value: string) => (
     <View style={st.stat}>
@@ -163,7 +174,7 @@ export default function GroupInsightsScreen() {
       <Stack.Screen options={{ headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,
         headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */  title: 'Insights', headerTitleAlign: 'center' }} />
 
-      <View style={[st.tabs, { borderColor: colors.glassStroke }]}>
+      <View style={[st.tabs, { borderColor: colors.glassStroke }]} accessibilityRole="tablist">
         {(['week', 'month'] as Span[]).map((sp) => {
           const on = sp === span;
           return (
@@ -182,6 +193,7 @@ export default function GroupInsightsScreen() {
               if (sp === span) return;
               setSpan(sp); setLoading(true);
             }}
+              accessibilityRole="tab" accessibilityState={{ selected: on }}
               style={[st.tab, { borderColor: on ? colors.primary : 'transparent', backgroundColor: on ? colors.primary + '22' : 'transparent' }]}>
               <Text style={{ color: on ? colors.primary : colors.textDim, fontWeight: on ? '800' : '600', fontSize: 13 }}>
                 {sp === 'week' ? 'This week' : 'This month'}
@@ -192,7 +204,19 @@ export default function GroupInsightsScreen() {
       </View>
 
       {loading ? (
-        <View style={st.center}><ActivityIndicator color={colors.primary} /></View>
+        <View style={st.center}><ActivityIndicator color={colors.primary} accessibilityLabel="Loading insights" /></View>
+      ) : failed ? (
+        <View style={[st.center, { padding: 32 }]}>
+          <Ionicons name="cloud-offline-outline" size={30} color={colors.textFaint} />
+          <Text style={{ color: colors.text, fontWeight: '700', marginTop: 10 }}>Couldn’t load insights</Text>
+          <Text style={{ color: colors.textDim, fontSize: 13, textAlign: 'center', marginTop: 4 }}>
+            This is not an empty {span}. Nothing could be read this time.
+          </Text>
+          <TouchableOpacity onPress={retry} accessibilityRole="button" accessibilityLabel="Try loading insights again"
+            style={[st.retry, { borderColor: colors.primary, marginTop: 14 }]}>
+            <Text style={{ color: colors.primary, fontSize: 12.5, fontWeight: '700' }}>Retry</Text>
+          </TouchableOpacity>
+        </View>
       ) : (
         <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
           <View style={[st.card, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
@@ -223,7 +247,7 @@ export default function GroupInsightsScreen() {
               </Text>
               {!me && (
                 <TouchableOpacity
-                  onPress={() => { setLoading(true); setReload((n) => n + 1); }}
+                  onPress={retry}
                   accessibilityRole="button"
                   accessibilityLabel="Try loading insights again"
                   style={[st.retry, { borderColor: colors.primary }]}
@@ -245,9 +269,7 @@ export default function GroupInsightsScreen() {
 
           {ranked.map((i) => (
             <View key={i.userId} style={[st.row, { borderColor: colors.glassStroke }]}>
-              <View style={[st.avatar, { backgroundColor: colorFor(i.userId) }]}>
-                <Text style={[st.avatarTxt, scheme === 'light' && { color: '#070A18' }]}>{initialOf(nameOf(i.userId))}</Text>
-              </View>
+              <Avatar name={nameOf(i.userId)} size={34} ring />
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14 }} numberOfLines={1}>
                   {nameOf(i.userId)}
@@ -274,10 +296,9 @@ export default function GroupInsightsScreen() {
             </Text>
           ) : (
             <>
-              {frequentDestinations(trips, 3).filter((d) => d.count > 1).length > 0 && (
+              {repeatDestinations.length > 0 && (
                 <Text style={{ color: colors.textDim, fontSize: 12.5, marginBottom: 10 }}>
-                  Most visited: {frequentDestinations(trips, 3).filter((d) => d.count > 1)
-                    .map((d) => `${d.name} (${d.count})`).join(' · ')}
+                  Most visited: {repeatDestinations.map((d) => `${d.name} (${d.count})`).join(' · ')}
                 </Text>
               )}
               {trips.map((t) => (
@@ -303,9 +324,10 @@ export default function GroupInsightsScreen() {
           <View style={[st.footer, { borderColor: colors.glassStroke }]}>
             <Ionicons name="phone-portrait-outline" size={15} color={colors.textDim} />
             <Text style={{ color: colors.textDim, fontSize: 11.5, flex: 1, lineHeight: 16 }}>
-              Worked out on this phone from data it already holds. Nothing on this screen is sent
-              anywhere — not even a total. Distances are estimated from periodic position samples,
-              so they read low rather than high.
+              Worked out on this phone from its own location history and alerts, plus the group’s
+              recent messages (read like any chat, for trip announcements). Nothing on this screen
+              is sent anywhere — not even a total. Distances are estimated from periodic position
+              samples, so they read low rather than high.
             </Text>
           </View>
         </ScrollView>
@@ -331,6 +353,5 @@ const st = StyleSheet.create({
   h: { fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.3, marginTop: 26, marginBottom: 10 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
   avatar: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
-  avatarTxt: { color: '#fff', fontWeight: '800', fontSize: 14 },
   footer: { flexDirection: 'row', gap: 9, alignItems: 'flex-start', marginTop: 24, paddingTop: 14, borderTopWidth: StyleSheet.hairlineWidth },
 });
