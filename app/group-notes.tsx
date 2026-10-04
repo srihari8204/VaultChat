@@ -9,9 +9,9 @@
 // editing offline just queues a message and devices converge without this
 // screen coordinating anything.
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
-  View, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
+  View, StyleSheet, TouchableOpacity, FlatList, TextInput, Alert,
   ActivityIndicator, Modal,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
@@ -57,11 +57,15 @@ export default function GroupNotesScreen() {
   // Banner Retry in flight: the list stays on screen (no full-screen spinner).
   const [retrying, setRetrying] = useState(false);
 
+  // The ops the list was folded from: a new op is folded onto these, not onto
+  // a log rebuilt from the folded notes (which loses what the fold dropped).
+  const opsRef = useRef<NoteOp[]>([]);
   const rebuild = useCallback(async () => {
     if (!groupId) { setLoading(false); return; }
     try {
       // Paged server read plus this device's own history (lib/groups/opThread).
       const { ops, unreadable, complete } = await readGroupOps<NoteOp>(groupId, decodeNoteOp);
+      opsRef.current = ops;
       setGaps({ unreadable, complete });
       setNotes(foldNotes(ops));
       setFailed(false);
@@ -83,18 +87,8 @@ export default function GroupNotesScreen() {
 
   /** Publish one event and fold it in locally so the UI is instant. Resolves false on failure. */
   const publish = async (op: NoteOp): Promise<boolean> => {
-    setNotes((prev) => {
-      const replay: NoteOp[] = prev.map((n) => ({
-        k: 'add', id: n.id, at: n.createdAt, by: n.createdBy, title: n.title, body: n.body,
-      }));
-      for (const n of prev) {
-        if (n.updatedAt !== n.createdAt) {
-          replay.push({ k: 'edit', id: n.id, at: n.updatedAt, by: n.updatedBy, title: n.title, body: n.body });
-        }
-        if (n.pinned) replay.push({ k: 'pin', id: n.id, at: n.updatedAt, by: n.updatedBy, pinned: true });
-      }
-      return foldNotes([...replay, op]);
-    });
+    opsRef.current = [...opsRef.current, op];
+    setNotes(foldNotes(opsRef.current));
     try {
       await sendMessage(groupId, encodeNoteOp(op));
       return true;
@@ -186,22 +180,27 @@ export default function GroupNotesScreen() {
           </Text>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
-          {failed && (
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Couldn't refresh notes. Showing what was loaded before. Retry"
-              accessibilityState={{ busy: retrying, disabled: retrying }} disabled={retrying}
-              onPress={retryInPlace}
-              style={[st.banner, { borderColor: colors.danger }]}>
-              {retrying ? <ActivityIndicator size="small" color={colors.danger} />
-                : <Ionicons name="cloud-offline-outline" size={15} color={colors.danger} />}
-              <Text style={{ color: colors.danger, fontSize: 12.5, flex: 1 }}>Couldn’t refresh — these may be out of date. Tap to retry.</Text>
-            </TouchableOpacity>
-          )}
-          {ordered.map((n) => (
+        <FlatList
+          data={ordered}
+          keyExtractor={(n) => n.id}
+          contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
+          ListHeaderComponent={<>
+            {failed && (
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Couldn't refresh notes. Showing what was loaded before. Retry"
+                accessibilityState={{ busy: retrying, disabled: retrying }} disabled={retrying}
+                onPress={retryInPlace}
+                style={[st.banner, { borderColor: colors.danger }]}>
+                {retrying ? <ActivityIndicator size="small" color={colors.danger} />
+                  : <Ionicons name="cloud-offline-outline" size={15} color={colors.danger} />}
+                <Text style={{ color: colors.danger, fontSize: 12.5, flex: 1 }}>Couldn’t refresh — these may be out of date. Tap to retry.</Text>
+              </TouchableOpacity>
+            )}
+          </>}
+          renderItem={({ item: n }) => (
             // Edit and Pin are SIBLINGS: a touchable nested in a touchable is
             // merged into one element by screen readers (Pin was unreachable
             // with VoiceOver).
-            <View key={n.id} style={[st.card, { backgroundColor: colors.glassSoft, borderColor: n.pinned ? colors.primary : colors.border }]}>
+            <View style={[st.card, { backgroundColor: colors.glassSoft, borderColor: n.pinned ? colors.primary : colors.border }]}>
               <TouchableOpacity onPress={() => openEdit(n)} activeOpacity={0.75} style={st.cardMain}
                 accessibilityRole="button" accessibilityLabel={`${n.title}${n.pinned ? ', pinned' : ''}. Edit note`}>
                 <Text style={{ color: colors.text, fontWeight: '700', fontSize: 15, paddingRight: 30 }} numberOfLines={1}>
@@ -221,9 +220,9 @@ export default function GroupNotesScreen() {
                 <Ionicons name={n.pinned ? 'pin' : 'pin-outline'} size={17} color={n.pinned ? colors.primary : colors.textFaint} />
               </TouchableOpacity>
             </View>
-          ))}
-          <ThreadGaps unreadable={gaps.unreadable} complete={gaps.complete} what="notes" />
-        </ScrollView>
+          )}
+          ListFooterComponent={<ThreadGaps unreadable={gaps.unreadable} complete={gaps.complete} what="notes" />}
+        />
       )}
 
       <Modal visible={creating} transparent animationType="slide" onRequestClose={() => setCreating(false)}>

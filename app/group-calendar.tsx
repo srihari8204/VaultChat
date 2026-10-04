@@ -307,13 +307,18 @@ export default function GroupCalendarScreen() {
         <TouchableOpacity onPress={() => shiftMonth(-1)} accessibilityRole="button" accessibilityLabel="Previous month" hitSlop={10} style={{ padding: 6 }}>
           <Ionicons name="chevron-back" size={20} color={colors.primary} />
         </TouchableOpacity>
-        <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15 }}>{monthLabel(cursor)}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15 }} accessibilityRole="header">{monthLabel(cursor)}</Text>
+          {/* Switching months keeps the list (dimmed) and shows this instead of
+              a full-screen spinner; the full spinner is only for an empty list. */}
+          {loading && days.length > 0 && <ActivityIndicator size="small" color={colors.primary} accessibilityLabel="Loading this month" />}
+        </View>
         <TouchableOpacity onPress={() => shiftMonth(1)} accessibilityRole="button" accessibilityLabel="Next month" hitSlop={10} style={{ padding: 6 }}>
           <Ionicons name="chevron-forward" size={20} color={colors.primary} />
         </TouchableOpacity>
       </View>
 
-      {loading ? (
+      {loading && days.length === 0 ? (
         <View style={st.center}><ActivityIndicator color={colors.primary} /></View>
       ) : days.length === 0 && failed ? (
         <View style={[st.center, { padding: 34 }]}>
@@ -334,7 +339,7 @@ export default function GroupCalendarScreen() {
           {unreadable > 0 && <UnreadableNote count={unreadable} />}
         </View>
       ) : (
-        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} style={loading ? { opacity: 0.55 } : undefined}>
           {failed && (
             <TouchableOpacity accessibilityRole="button" accessibilityLabel="Couldn't refresh this month. Showing what was loaded before. Retry"
               onPress={() => { setLoading(true); load(); }}
@@ -412,7 +417,7 @@ export default function GroupCalendarScreen() {
               />
             )}
 
-            <View style={st.chips}>
+            <View style={st.chips} accessibilityRole="radiogroup" accessibilityLabel="Day">
               {WHEN.map((wd) => {
                 const on = isDayOffset(start, wd.addDays, Date.now());
                 return (
@@ -425,7 +430,8 @@ export default function GroupCalendarScreen() {
               })}
             </View>
 
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 10 }} contentContainerStyle={{ gap: 7 }}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 10 }} contentContainerStyle={{ gap: 7 }}
+              accessibilityRole="radiogroup" accessibilityLabel="Time">
               {HOURS.map((h) => {
                 const d = new Date(start);
                 const on = d.getHours() === h && d.getMinutes() === 0;
@@ -441,7 +447,7 @@ export default function GroupCalendarScreen() {
               })}
             </ScrollView>
 
-            <View style={st.chips}>
+            <View style={st.chips} accessibilityRole="radiogroup" accessibilityLabel="Repeat">
               {REPEATS.map((rp) => {
                 const on = repeat === rp.key;
                 return (

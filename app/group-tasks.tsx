@@ -6,10 +6,10 @@
 // task offline queues a message like any other, and the fold is order-
 // independent, so devices converge without anything here having to coordinate.
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { KeyboardSafe } from '../components/ui';
 import {
-  View, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
+  View, StyleSheet, TouchableOpacity, FlatList, TextInput, Alert,
   ActivityIndicator,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
@@ -65,12 +65,16 @@ export default function GroupTasksScreen() {
   const [assignee, setAssignee] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // The ops the list was folded from: a new op is folded onto these, not onto
+  // adds rebuilt from the folded list (which lost edits' order and authors).
+  const opsRef = useRef<TaskOp[]>([]);
   /** Rebuild the list by folding every task event in the thread. */
   const rebuild = useCallback(async () => {
     if (!groupId) { setLoading(false); return; }
     try {
       // Paged server read plus this device's own history (lib/groups/opThread).
       const { ops, unreadable, complete } = await readGroupOps<TaskOp>(groupId, decodeOp);
+      opsRef.current = ops;
       setGaps({ unreadable, complete });
       const folded = foldTasks(ops);
       setTasks(folded);
@@ -100,18 +104,8 @@ export default function GroupTasksScreen() {
 
   /** Publish one event, then optimistically fold it in so the UI is instant. Resolves false on failure. */
   const publish = async (op: TaskOp): Promise<boolean> => {
-    setTasks((prev) => foldTasks([
-      // Re-encode the current list as adds so the new op folds against it
-      // without a round trip. The authoritative rebuild happens on next focus.
-      ...prev.map((t): TaskOp => ({
-        k: 'add', id: t.id, at: t.createdAt, by: t.createdBy,
-        title: t.title, assignee: t.assignee, dueAt: t.dueAt,
-      })),
-      ...prev.filter((t) => t.done).map((t): TaskOp => ({
-        k: 'done', id: t.id, at: t.updatedAt, by: t.doneBy ?? t.createdBy, done: true,
-      })),
-      op,
-    ]));
+    opsRef.current = [...opsRef.current, op];
+    setTasks(foldTasks(opsRef.current));
     try {
       await sendMessage(groupId, encodeOp(op));
       return true;
@@ -163,99 +157,109 @@ export default function GroupTasksScreen() {
       <AuroraBackground variant="chat" />
       <Stack.Screen options={{ headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,
         headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */  title: 'Tasks', headerTitleAlign: 'center' }} />
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+      <FlatList
+        data={ordered}
+        keyExtractor={(t) => t.id}
+        // Rows also read member names (assignee) and the clock (overdue).
+        extraData={members}
+        contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
+        keyboardShouldPersistTaps="handled"
+        ListHeaderComponent={<>
+          <View style={[st.field, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
+            <Ionicons name="add-circle-outline" size={19} color={colors.textDim} />
+            <TextInput
+              value={title} onChangeText={setTitle} placeholder="Add a task…" accessibilityLabel="New task"
+              placeholderTextColor={colors.textFaint} style={[st.input, { color: colors.text }]}
+              returnKeyType="done" onSubmitEditing={addTask} maxLength={200}
+            />
+            {!!title.trim() && (
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Add this task" accessibilityState={{ disabled: busy || !me, busy }} onPress={addTask} disabled={busy || !me} hitSlop={10}>
+                {busy ? <ActivityIndicator size="small" color={colors.primary} />
+                  : <Ionicons name="arrow-forward-circle" size={26} color={colors.primary} />}
+              </TouchableOpacity>
+            )}
+          </View>
 
-        <View style={[st.field, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
-          <Ionicons name="add-circle-outline" size={19} color={colors.textDim} />
-          <TextInput
-            value={title} onChangeText={setTitle} placeholder="Add a task…" accessibilityLabel="New task"
-            placeholderTextColor={colors.textFaint} style={[st.input, { color: colors.text }]}
-            returnKeyType="done" onSubmitEditing={addTask} maxLength={200}
-          />
           {!!title.trim() && (
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Add this task" accessibilityState={{ disabled: busy || !me, busy }} onPress={addTask} disabled={busy || !me} hitSlop={10}>
-              {busy ? <ActivityIndicator size="small" color={colors.primary} />
-                : <Ionicons name="arrow-forward-circle" size={26} color={colors.primary} />}
+            <>
+              <View style={st.chips} accessibilityRole="radiogroup" accessibilityLabel="Due date">
+                {DUE_PRESETS.map((d) => {
+                  const on = dueMs === d.ms;
+                  return (
+                    <TouchableOpacity key={d.label} onPress={() => setDueMs(d.ms)}
+                      accessibilityRole="radio" accessibilityLabel={`Due ${d.label}`} accessibilityState={{ selected: on, checked: on }}
+                      style={[st.chip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? brandAlpha(0.1) : 'transparent' }]}>
+                      <Text style={{ color: on ? colors.primary : colors.text, fontSize: 12 }}>{d.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              <View style={st.chips} accessibilityRole="radiogroup" accessibilityLabel="Assigned to">
+                <TouchableOpacity onPress={() => setAssignee(null)}
+                  accessibilityRole="radio" accessibilityLabel="Assign to anyone" accessibilityState={{ selected: assignee == null, checked: assignee == null }}
+                  style={[st.chip, { borderColor: assignee == null ? colors.primary : colors.border, backgroundColor: assignee == null ? brandAlpha(0.1) : 'transparent' }]}>
+                  <Text style={{ color: assignee == null ? colors.primary : colors.text, fontSize: 12 }}>Anyone</Text>
+                </TouchableOpacity>
+                {members.map((m) => {
+                  const on = assignee === m.id;
+                  return (
+                    <TouchableOpacity key={m.id} onPress={() => setAssignee(m.id)}
+                      accessibilityRole="radio" accessibilityLabel={`Assign to ${m.id === me ? 'me' : m.name}`} accessibilityState={{ selected: on, checked: on }}
+                      style={[st.chip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? brandAlpha(0.1) : 'transparent' }]}>
+                      <Text style={{ color: on ? colors.primary : colors.text, fontSize: 12 }} numberOfLines={1}>
+                        {m.id === me ? 'Me' : m.name}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </>
+          )}
+
+          <View style={st.sechead}>
+            <Text style={[st.h, { color: colors.text }]} accessibilityRole="header">
+              {open ? `${open} to do` : 'All done'}
+            </Text>
+            {loading && <ActivityIndicator size="small" color={colors.primary} />}
+          </View>
+
+          {!loading && ordered.length === 0 && failed && (
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Couldn't load tasks. Retry" onPress={() => { setLoading(true); rebuild(); }}>
+              <Text style={{ color: colors.danger, fontSize: 13.5 }}>Couldn’t load tasks. Tap to retry.</Text>
             </TouchableOpacity>
           )}
-        </View>
+          {!loading && ordered.length === 0 && !failed && (
+            <Text style={{ color: colors.textDim, fontSize: 13.5 }}>
+              Nothing yet. Anything you add here is shared with the group and stays encrypted.
+            </Text>
+          )}
 
-        {!!title.trim() && (
-          <>
-            <View style={st.chips} accessibilityRole="radiogroup" accessibilityLabel="Due date">
-              {DUE_PRESETS.map((d) => {
-                const on = dueMs === d.ms;
-                return (
-                  <TouchableOpacity key={d.label} onPress={() => setDueMs(d.ms)}
-                    accessibilityRole="radio" accessibilityLabel={`Due ${d.label}`} accessibilityState={{ selected: on, checked: on }}
-                    style={[st.chip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? brandAlpha(0.1) : 'transparent' }]}>
-                    <Text style={{ color: on ? colors.primary : colors.text, fontSize: 12 }}>{d.label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-            <View style={st.chips} accessibilityRole="radiogroup" accessibilityLabel="Assigned to">
-              <TouchableOpacity onPress={() => setAssignee(null)}
-                accessibilityRole="radio" accessibilityLabel="Assign to anyone" accessibilityState={{ selected: assignee == null, checked: assignee == null }}
-                style={[st.chip, { borderColor: assignee == null ? colors.primary : colors.border, backgroundColor: assignee == null ? brandAlpha(0.1) : 'transparent' }]}>
-                <Text style={{ color: assignee == null ? colors.primary : colors.text, fontSize: 12 }}>Anyone</Text>
-              </TouchableOpacity>
-              {members.map((m) => {
-                const on = assignee === m.id;
-                return (
-                  <TouchableOpacity key={m.id} onPress={() => setAssignee(m.id)}
-                    accessibilityRole="radio" accessibilityLabel={`Assign to ${m.id === me ? 'me' : m.name}`} accessibilityState={{ selected: on, checked: on }}
-                    style={[st.chip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? brandAlpha(0.1) : 'transparent' }]}>
-                    <Text style={{ color: on ? colors.primary : colors.text, fontSize: 12 }} numberOfLines={1}>
-                      {m.id === me ? 'Me' : m.name}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </>
-        )}
-
-        <View style={st.sechead}>
-          <Text style={[st.h, { color: colors.text }]} accessibilityRole="header">
-            {open ? `${open} to do` : 'All done'}
-          </Text>
-          {loading && <ActivityIndicator size="small" color={colors.primary} />}
-        </View>
-
-        {!loading && ordered.length === 0 && failed && (
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Couldn't load tasks. Retry" onPress={() => { setLoading(true); rebuild(); }}>
-            <Text style={{ color: colors.danger, fontSize: 13.5 }}>Couldn’t load tasks. Tap to retry.</Text>
-          </TouchableOpacity>
-        )}
-        {!loading && ordered.length === 0 && !failed && (
-          <Text style={{ color: colors.textDim, fontSize: 13.5 }}>
-            Nothing yet. Anything you add here is shared with the group and stays encrypted.
-          </Text>
-        )}
-
-        {!loading && ordered.length > 0 && failed && (
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Couldn't refresh tasks. Showing what was loaded before. Retry"
-            onPress={() => { setLoading(true); rebuild(); }}
-            style={[st.banner, { borderColor: colors.danger }]}>
-            <Ionicons name="cloud-offline-outline" size={15} color={colors.danger} />
-            <Text style={{ color: colors.danger, fontSize: 12.5, flex: 1 }}>Couldn’t refresh — this list may be out of date. Tap to retry.</Text>
-          </TouchableOpacity>
-        )}
-
-        {ordered.map((t) => {
+          {!loading && ordered.length > 0 && failed && (
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Couldn't refresh tasks. Showing what was loaded before. Retry"
+              onPress={() => { setLoading(true); rebuild(); }}
+              style={[st.banner, { borderColor: colors.danger }]}>
+              <Ionicons name="cloud-offline-outline" size={15} color={colors.danger} />
+              <Text style={{ color: colors.danger, fontSize: 12.5, flex: 1 }}>Couldn’t refresh — this list may be out of date. Tap to retry.</Text>
+            </TouchableOpacity>
+          )}
+        </>}
+        renderItem={({ item: t }) => {
           const late = isOverdue(t, now);
           const who = nameOf(t.assignee);
+          const due = t.dueAt != null ? `${late ? 'overdue, ' : ''}due ${dueLabel(t.dueAt, now)}` : '';
           return (
-            <View key={t.id} style={[st.row, { borderColor: colors.glassStroke }]}>
-              <TouchableOpacity accessibilityRole="checkbox" accessibilityState={{ checked: t.done }} accessibilityLabel={t.done ? `Mark ${t.title} not done` : `Mark ${t.title} done`} onPress={() => toggle(t)} style={st.check} hitSlop={10}>
+            <View style={[st.row, { borderColor: colors.glassStroke }]}>
+              <TouchableOpacity accessibilityRole="checkbox" accessibilityState={{ checked: t.done }}
+                accessibilityLabel={[t.title, who ? `for ${who}` : '', due].filter(Boolean).join(', ')}
+                accessibilityHint={t.done ? 'Marks it not done' : 'Marks it done'} onPress={() => toggle(t)} style={st.check} hitSlop={10}>
                 <Ionicons
                   name={t.done ? 'checkmark-circle' : 'ellipse-outline'}
                   size={23}
                   color={t.done ? colors.success : colors.textDim}
                 />
               </TouchableOpacity>
-              <View style={{ flex: 1, minWidth: 0 }}>
+              {/* Read as part of the checkbox above (title, assignee, due). */}
+              <View style={{ flex: 1, minWidth: 0 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
                 <Text
                   style={{
                     color: t.done ? colors.textDim : colors.text, fontSize: 14.5,
@@ -277,9 +281,9 @@ export default function GroupTasksScreen() {
               </TouchableOpacity>
             </View>
           );
-        })}
-        {!loading && <ThreadGaps unreadable={gaps.unreadable} complete={gaps.complete} what="tasks" />}
-      </ScrollView>
+        }}
+        ListFooterComponent={loading ? null : <ThreadGaps unreadable={gaps.unreadable} complete={gaps.complete} what="tasks" />}
+      />
     </KeyboardSafe>
   );
 }

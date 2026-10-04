@@ -25,18 +25,12 @@ import { useTheme } from '../lib/theme';
 import { AuroraBackground } from '../components/ui/AuroraBackground';
 import { AppText as Text } from '../components/ui/Text';
 import { brandAlpha } from '../constants/theme';
-import { GROUP_TYPES, groupTypeInfo, inkOn, type GroupType } from '../lib/groups/catalog';
+import { GROUP_COLORS, GROUP_TYPES, groupTypeInfo, inkOn, type GroupType } from '../lib/groups/catalog';
 import { saveGroup, setActiveGroupId } from '../lib/groups/store';
 import { createGroupChat } from '../lib/chatService';
 
-// Group identity colours: DATA sent to the server and shown to every member,
-// not theme colours, so they stay fixed. Named so a screen reader says a colour,
-// not a hex code.
-const PALETTE: { hex: string; name: string }[] = [
-  { hex: '#9D6FD0', name: 'Purple' }, { hex: '#4A9FFF', name: 'Blue' }, { hex: '#22C55E', name: 'Green' },
-  { hex: '#F59E0B', name: 'Amber' }, { hex: '#EC4899', name: 'Pink' }, { hex: '#14B8A6', name: 'Teal' },
-  { hex: '#EF4444', name: 'Red' }, { hex: '#8B5CF6', name: 'Violet' },
-];
+// Group identity colours (data, not theme): GROUP_COLORS in lib/groups/catalog.ts.
+const PALETTE = GROUP_COLORS;
 const ICONS: (keyof typeof Ionicons.glyphMap)[] = [
   'home', 'people', 'briefcase', 'airplane', 'school', 'football',
   'medkit', 'storefront', 'library', 'leaf', 'car', 'bicycle',
@@ -94,9 +88,10 @@ export default function GroupCreateScreen() {
       await saveGroup({ id, name: n, groupType: type, icon: icon ?? null, color: color ?? null, privacy });
       await setActiveGroupId(id);
     } catch { savedHere = false; }
-    setBusy(false);
-    // Replace: Back should not return to a half-filled create form.
-    router.replace({ pathname: '/group-invites' as any, params: { chatId: id, name: n } });
+    // Replace: Back should not return to a half-filled create form. `busy`
+    // stays set: this screen is leaving, and re-enabling Create first would
+    // leave a frame where a second tap could start a second group.
+    router.replace({ pathname: '/group-invites', params: { chatId: id, name: n } });
     if (!savedHere) {
       Alert.alert('Group created', `${n} was created, but this phone could not make it your active space. You can switch to it from Family.`);
     }

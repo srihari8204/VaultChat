@@ -56,17 +56,21 @@ export default function GroupCallsScreen() {
   // One tap starts one call; cleared when the screen is focused again, or after
   // a few seconds in case the call screen never took focus.
   const starting = useRef(false);
-  useFocusEffect(useCallback(() => { starting.current = false; }, []));
+  // The same flag for the Start button (busy, disabled); the ref is the guard.
+  const [startBusy, setStartBusy] = useState(false);
+  const setStarting = useCallback((on: boolean) => { starting.current = on; setStartBusy(on); }, []);
+  useFocusEffect(useCallback(() => { setStarting(false); }, [setStarting]));
 
   useEffect(() => {
     let active = true;
     (async () => {
       try {
-        const [chat, me] = await Promise.all([chatId ? getChat(chatId) : Promise.resolve(null as any), getCurrentUserAsync()]);
-        if (active && chat) {
+        if (!chatId) return;   // GroupNotFound is drawn below
+        const [chat, me] = await Promise.all([getChat(chatId), getCurrentUserAsync()]);
+        if (active) {
           setMembers(chat.members.filter((m: ChatMember) => !m.leftAt && m.userId !== me?.id));
+          setFailed(false);
         }
-        if (active) setFailed(!chat);
       } catch { if (active) setFailed(true); } finally {
         if (active) setLoading(false);
       }
@@ -86,7 +90,7 @@ export default function GroupCallsScreen() {
       router.push({
         pathname: mode === 'video' ? '/videocall' : '/voicecall',
         params: { chatId: direct.id, peerUid: m.userId, peerName: m.name || m.email || 'Member' },
-      } as any);
+      });
     } catch (e: any) {
       Alert.alert('Could not start the call', e?.message ?? 'Try again.');
     } finally { setOpening(null); }
@@ -103,7 +107,7 @@ export default function GroupCallsScreen() {
   // indistinguishable to the callee.
   const startGroupCall = useCallback(async () => {
     if (starting.current || members.length === 0) return;
-    starting.current = true;
+    setStarting(true);
     const uids = members.map(m => m.userId);
     let rang = true;
     if (!CALL_ENGINE_V2) {
@@ -124,18 +128,18 @@ export default function GroupCallsScreen() {
           name: groupName,
           members: uids.join(','),
         },
-      } as any);
+      });
     } catch (e: any) {
-      starting.current = false;   // nothing opened: let the next tap try again
+      setStarting(false);   // nothing opened: let the next tap try again
       Alert.alert('Could not start the call', e?.message ?? 'Try again.');
       return;
     }
-    setTimeout(() => { starting.current = false; }, 3000);
+    setTimeout(() => setStarting(false), 3000);
     if (!rang) {
       // The call room opened, but nobody was told it exists.
       Alert.alert('Members were not rung', 'Could not reach the server to ring the group. They can still join from the group chat.');
     }
-  }, [members, chatId, groupName, mode, router]);
+  }, [members, chatId, groupName, mode, router, setStarting]);
 
   if (!chatId) return <GroupNotFound title="Group call" />;
 
@@ -162,15 +166,17 @@ export default function GroupCallsScreen() {
       </View>
 
       <TouchableOpacity
-        style={[s.startBtn, (loading || members.length === 0) && { opacity: 0.5 }]}
+        style={[s.startBtn, (loading || members.length === 0 || startBusy) && { opacity: 0.5 }]}
         activeOpacity={0.85}
         onPress={startGroupCall}
-        disabled={loading || members.length === 0}
+        disabled={loading || members.length === 0 || startBusy}
         accessibilityRole="button"
         accessibilityLabel={`Start ${mode} group call`}
-        accessibilityState={{ disabled: loading || members.length === 0 }}
+        accessibilityState={{ disabled: loading || members.length === 0 || startBusy, busy: startBusy }}
       >
-        <Ionicons name={mode === 'video' ? 'videocam' : 'call'} size={20} color={colors.onPrimary} />
+        {startBusy
+          ? <ActivityIndicator size="small" color={colors.onPrimary} />
+          : <Ionicons name={mode === 'video' ? 'videocam' : 'call'} size={20} color={colors.onPrimary} />}
         <Text style={s.startTxt}>Start {mode} group call</Text>
       </TouchableOpacity>
       <Text style={s.noticeTxt}>Rings everyone in the group at once. Or tap a member below for a 1:1 call.</Text>

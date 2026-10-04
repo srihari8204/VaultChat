@@ -28,6 +28,7 @@ import { useTheme } from '../lib/theme';
 import { AppText as Text, Avatar, AuroraBackground, KeyboardSafe } from '../components/ui';
 import { useKeyboardInset } from '../lib/useKeyboardInset';
 import { listChats, createGroupChat, createInvitation, attachmentUrl } from '../lib/chatService';
+import { tint } from '../lib/tintColor';
 
 interface Pick { userId: string; name: string; photoURL: string | null }
 
@@ -115,15 +116,16 @@ export default function CreateGroupScreen() {
       const { id } = await createGroupChat(name, { allowEmpty: true });
       if (selected.size === 0) {
         // Back from Add people lands in the new group, not on this form.
-        router.replace({ pathname: '/chat', params: { id } } as any);
-        router.push({ pathname: '/group-invites' as any, params: { chatId: id, name } });
+        router.replace({ pathname: '/chat', params: { id } });
+        // `fresh`: Add people says the group already exists, even if nobody is added.
+        router.push({ pathname: '/group-invites', params: { chatId: id, name, fresh: '1' } });
         return;
       }
       const ids = Array.from(selected);
       const results = await Promise.allSettled(ids.map(userId => createInvitation(id, { userId })));
       const nameOf = (uid: string) => people.find(p => p.userId === uid)?.name ?? 'Someone';
       const failed = ids.filter((_, i) => results[i].status === 'rejected').map(nameOf);
-      router.replace({ pathname: '/chat', params: { id } } as any);
+      router.replace({ pathname: '/chat', params: { id } });
       if (failed.length > 0) {
         Alert.alert(
           'Some invitations were not sent',
@@ -195,7 +197,11 @@ export default function CreateGroupScreen() {
         <TextInput style={s.searchInput} value={query} onChangeText={setQuery} placeholder="Search contacts" placeholderTextColor={colors.textDim} autoCorrect={false} accessibilityLabel="Search contacts" />
       </View>
 
-      <Text style={s.label} accessibilityRole="header">{selected.size} SELECTED · THEY JOIN WHEN THEY ACCEPT</Text>
+      {/* A count that changes as you pick: a polite live region, not a header. */}
+      <Text style={s.label} accessibilityLiveRegion="polite"
+        accessibilityLabel={`${selected.size} selected. They join when they accept.`}>
+        {selected.size} SELECTED · THEY JOIN WHEN THEY ACCEPT
+      </Text>
       <Text style={s.hint}>Not in your chats? Create the group, then add anyone by phone number or email.</Text>
 
       {/* The list region takes the remaining height, so the Create bar below it
@@ -259,7 +265,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderWidth: 1, borderColor: c.glassStroke,
   },
   // danger is #RRGGBB in both palettes, so a hex alpha suffix is valid.
-  errorBar: { backgroundColor: c.danger + '1F', borderColor: c.danger + '66', borderWidth: 1, marginHorizontal: 16, marginTop: 10, padding: 10, borderRadius: 10 },
+  errorBar: { backgroundColor: tint(c.danger, 0.12), borderColor: tint(c.danger, 0.4), borderWidth: 1, marginHorizontal: 16, marginTop: 10, padding: 10, borderRadius: 10 },
   errorTxt: { color: c.danger, fontSize: 12 },
   label: { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 4 },
   hint: { color: c.textFaint, fontSize: 12, lineHeight: 16, paddingHorizontal: 16, paddingBottom: 8 },

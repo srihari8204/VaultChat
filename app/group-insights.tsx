@@ -36,6 +36,7 @@ import { pageBack, OP_PAGE } from '../lib/groups/opThread';
 import { GroupNotFound } from '../components/groups/GroupNotFound';
 import { type CircleMember } from '../lib/family/types';
 import { Avatar } from '../components/ui';
+import { tint } from '../lib/tintColor';
 
 type Span = 'week' | 'month';
 
@@ -62,6 +63,11 @@ export default function GroupInsightsScreen() {
   // Whether this user may see OTHER members' figures. Starts denied.
   const [mayViewOthers, setMayViewOthers] = useState(false);
   const [trips, setTrips] = useState<TripRecord[]>([]);
+  // The trip fold could not read the thread ('failed'), or read only part of
+  // the range ('partial'): said under Trips, never a false "No group trips".
+  const [tripsState, setTripsState] = useState<'ok' | 'partial' | 'failed'>('ok');
+  // circleMembers failed: rows fall back to "Member", and a note says why.
+  const [namesFailed, setNamesFailed] = useState(false);
   /** Bumped by Retry. getCurrentUserAsync() failing used to end the screen on
    *  "Nothing recorded yet" with no way back — the load only ever re-ran on a
    *  fresh focus, so the user had to know to leave and come back (2026-09-17). */
@@ -102,7 +108,7 @@ export default function GroupInsightsScreen() {
         // your own id instead: your own positions are the one reading that needs
         // no permission. Fails closed when the id is unknown.
         const [mem, track] = await Promise.all([
-          circleMembers(groupId).catch(() => [] as CircleMember[]),
+          circleMembers(groupId).catch(() => null),
           allowed ? getTrack(groupId, { from: range.from, to: range.to })
             : myId ? getTrack(groupId, { from: range.from, to: range.to, userId: myId })
               : [],
@@ -114,10 +120,15 @@ export default function GroupInsightsScreen() {
         setFailed(false);
         setMe(myId);
         setMayViewOthers(allowed);
-        setMembers(mem);
+        setMembers(mem ?? []);
+        setNamesFailed(mem === null);
         // Without the permission, only your own figures are computed at all —
         // filtering at render would still have built everyone else's numbers.
-        const ids = allowed ? mem.map((m) => m.id) : (myId ? [myId] : []);
+        // A failed member list leaves the ids the track itself names, so
+        // everyone recorded is still counted (only their names are missing).
+        const ids = allowed
+          ? (mem ? mem.map((m) => m.id) : [...new Set(track.map((p) => p.userId))])
+          : (myId ? [myId] : []);
         setInsights(summarise(ids, track, alerts, range));
 
         // Trip history is a FOLD over the group thread's own announcements plus
@@ -127,7 +138,7 @@ export default function GroupInsightsScreen() {
           // Paged: the server caps a page at OP_PAGE (200), so one request
           // could cut a busy month short. Stop once a page reaches before the
           // range starts.
-          const { messages: server } = await pageBack(
+          const { messages: server, complete } = await pageBack(
             (before) => getMessages(groupId, { limit: OP_PAGE, before }),
             undefined,
             (page) => page.some((m) => Date.parse(m.createdAt) < range.from),
@@ -146,8 +157,11 @@ export default function GroupInsightsScreen() {
               });
             }
           }
-          if (live) setTrips(foldTripHistory(announces, alerts, range));
-        } catch { /* offline: the rest of the screen still works */ }
+          if (live) { setTrips(foldTripHistory(announces, alerts, range)); setTripsState(complete ? 'ok' : 'partial'); }
+        } catch {
+          // Offline: the rest of the screen still works; Trips says it could not be read.
+          if (live) { setTrips([]); setTripsState('failed'); }
+        }
       } catch {
         // Nothing loaded. Say so with Retry; the empty state would read as a quiet week.
         if (live) setFailed(true);
@@ -206,7 +220,7 @@ export default function GroupInsightsScreen() {
               setSpan(sp); setLoading(true);
             }}
               accessibilityRole="tab" accessibilityState={{ selected: on }}
-              style={[st.tab, { borderColor: on ? colors.primary : 'transparent', backgroundColor: on ? colors.primary + '22' : 'transparent' }]}>
+              style={[st.tab, { borderColor: on ? colors.primary : 'transparent', backgroundColor: on ? tint(colors.primary, 0.13) : 'transparent' }]}>
               <Text style={{ color: on ? colors.primary : colors.textDim, fontWeight: on ? '800' : '600', fontSize: 13 }}>
                 {sp === 'week' ? 'This week' : 'This month'}
               </Text>
@@ -271,6 +285,14 @@ export default function GroupInsightsScreen() {
           )}
 
           <Text style={[st.h, { color: colors.text }]} accessibilityRole="header">By member</Text>
+          {namesFailed && (
+            <TouchableOpacity accessibilityRole="button" onPress={retry}
+              accessibilityLabel="Couldn't load member names. Retry">
+              <Text style={{ color: colors.danger, fontSize: 12.5, marginBottom: 10 }}>
+                Couldn’t load member names, so they show as “Member”. Tap to retry.
+              </Text>
+            </TouchableOpacity>
+          )}
           {ranked.length === 0 && (
             <Text style={{ color: colors.textDim, fontSize: 13.5 }}>
               {!mayViewOthers && !me
@@ -309,7 +331,17 @@ export default function GroupInsightsScreen() {
           ))}
 
           <Text style={[st.h, { color: colors.text }]} accessibilityRole="header">Trips</Text>
-          {trips.length === 0 ? (
+          {tripsState !== 'ok' && (
+            <TouchableOpacity accessibilityRole="button" onPress={retry}
+              accessibilityLabel={tripsState === 'failed' ? "Couldn't read this group's trips. Retry" : 'Some older trips could not be read. Retry'}>
+              <Text style={{ color: colors.danger, fontSize: 12.5, marginBottom: 10 }}>
+                {tripsState === 'failed'
+                  ? 'Couldn’t read this group’s trips. Tap to retry.'
+                  : 'Some older trips this ' + span + ' could not be read. Tap to retry.'}
+              </Text>
+            </TouchableOpacity>
+          )}
+          {tripsState === 'failed' ? null : trips.length === 0 ? (
             <Text style={{ color: colors.textDim, fontSize: 13.5 }}>
               No group trips this {span}.
             </Text>
@@ -327,7 +359,7 @@ export default function GroupInsightsScreen() {
                     t.arrivals.length ? `${t.arrivals.length} arrived` : 'nobody arrived',
                     t.deviations ? `${t.deviations} off-route` : '',
                   ].filter(Boolean).join(', ')}>
-                  <View style={[st.avatar, { backgroundColor: colors.primary + '22' }]}>
+                  <View style={[st.avatar, { backgroundColor: tint(colors.primary, 0.13) }]}>
                     <Ionicons name="car" size={16} color={colors.primary} />
                   </View>
                   <View style={{ flex: 1, minWidth: 0 }}>

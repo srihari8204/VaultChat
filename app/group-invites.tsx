@@ -40,6 +40,7 @@ import { useAuthHeader } from '../hooks/useAuthHeader';
 import { inkOn } from '../lib/groups/catalog';
 import { approvalQueue, isLinkRow, queueKey, type QueueRow } from '../lib/groups/serverContracts';
 import { GroupNotFound } from '../components/groups/GroupNotFound';
+import { tint } from '../lib/tintColor';
 
 const STATUS_TONE: Record<InvitationStatus, 'good' | 'warn' | 'bad' | 'mute'> = {
   joined: 'good', accepted: 'warn', pending: 'warn',
@@ -69,7 +70,8 @@ const SEARCH_DEBOUNCE_MS = 300;
 export default function GroupInvitesScreen() {
   const { colors } = useTheme();
   const authHeader = useAuthHeader();
-  const params = useLocalSearchParams<{ chatId?: string; name?: string }>();
+  // `fresh`: opened straight after "Create & add people" (app/create-group.tsx).
+  const params = useLocalSearchParams<{ chatId?: string; name?: string; fresh?: string }>();
   const chatId = String(params.chatId || '');
   const groupName = String(params.name || 'this group');
 
@@ -151,8 +153,12 @@ export default function GroupInvitesScreen() {
   };
 
   // A link request is approved by user id on /join-requests; an invitation by its id.
+  // The exact guard: `acting` inside an Alert callback is the value from when
+  // the Alert opened, so a second confirm could slip past it.
+  const actingRef = useRef(false);
   const approve = async (p: QueueRow) => {
-    if (acting) return;
+    if (actingRef.current) return;
+    actingRef.current = true;
     setActing(queueKey(p));
     try {
       if (isLinkRow(p)) await approveJoinRequest(chatId, String(p.userId));
@@ -160,7 +166,7 @@ export default function GroupInvitesScreen() {
       await refresh();
     }
     catch (e: any) { Alert.alert('Could not approve', e?.message ?? 'Try again.'); }
-    finally { setActing(null); }
+    finally { actingRef.current = false; setActing(null); }
   };
 
   const decline = (p: QueueRow) => {
@@ -170,7 +176,8 @@ export default function GroupInvitesScreen() {
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Turn down', style: 'destructive', onPress: async () => {
-          if (acting) return;
+          if (actingRef.current) return;
+          actingRef.current = true;
           setActing(queueKey(p));
           try {
             if (isLinkRow(p)) await rejectJoinRequest(chatId, String(p.userId));
@@ -178,7 +185,7 @@ export default function GroupInvitesScreen() {
             await refresh();
           }
           catch (e: any) { Alert.alert('Could not do that', e?.message ?? 'Try again.'); }
-          finally { setActing(null); }
+          finally { actingRef.current = false; setActing(null); }
         } },
       ],
     );
@@ -196,6 +203,7 @@ export default function GroupInvitesScreen() {
   // acts on the server — they land in different statuses so the group's history
   // still says who ended it. Offering the right one is the only way that
   // distinction survives contact with a user.
+  const withdrawingRef = useRef(false);
   const doWithdraw = (inv: Invitation) => {
     Alert.alert(
       inv.mine ? 'Withdraw your invitation?' : 'Revoke this invitation?',
@@ -203,14 +211,15 @@ export default function GroupInvitesScreen() {
       [
         { text: 'Keep it', style: 'cancel' },
         { text: inv.mine ? 'Withdraw' : 'Revoke', style: 'destructive', onPress: async () => {
-          if (withdrawing != null) return;
+          if (withdrawingRef.current) return;
+          withdrawingRef.current = true;
           setWithdrawing(inv.id);
           try {
             if (inv.mine) await cancelInvitation(chatId, inv.id);
             else await revokeInvitation(chatId, inv.id);
             await refresh();
           } catch (e: any) { Alert.alert('Could not do that', e?.message ?? 'Try again.'); }
-          finally { setWithdrawing(null); }
+          finally { withdrawingRef.current = false; setWithdrawing(null); }
         } },
       ],
     );
@@ -249,6 +258,12 @@ export default function GroupInvitesScreen() {
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
 
         <Text style={[st.h, { color: colors.text }]} accessibilityRole="header">Add to {groupName}</Text>
+        {params.fresh === '1' && sent.length === 0 && (
+          <Text style={{ color: colors.textDim, fontSize: 12.5, lineHeight: 17, marginBottom: 12 }}>
+            {groupName} is already created, with just you in it. If you go back without inviting
+            anyone it stays that way; you can leave it from Group info.
+          </Text>
+        )}
 
         <View style={[st.field, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
           <Ionicons name="search" size={17} color={colors.textDim} />
@@ -387,7 +402,7 @@ export default function GroupInvitesScreen() {
           const t = tone(STATUS_TONE[inv.status]);
           return (
             <View key={inv.id} style={[st.row, { borderColor: colors.glassStroke }]}>
-              <View style={[st.rowIcon, { backgroundColor: t + '22' }]}>
+              <View style={[st.rowIcon, { backgroundColor: tint(t, 0.13) }]}>
                 <Ionicons name={inv.status === 'expired' ? 'hourglass' : 'paper-plane'} size={16} color={t} />
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>

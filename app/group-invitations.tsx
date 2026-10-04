@@ -78,8 +78,8 @@ export default function GroupInvitationsScreen() {
         // Only a typed group (a Space) lives in /family and shares location; a
         // plain chat group (New group in Chats) opens as a chat.
         if (inv.groupType) {
-          router.push({ pathname: '/family' as any, params: { groupId: res.chatId } });
-          router.push({ pathname: '/group-privacy' as any, params: { groupId: res.chatId, name: inv.name ?? '' } });
+          router.push({ pathname: '/family', params: { groupId: res.chatId } });
+          router.push({ pathname: '/group-privacy', params: { groupId: res.chatId, name: inv.name ?? '' } });
         } else {
           router.push({ pathname: '/chat', params: { id: String(res.chatId) } });
         }
@@ -179,8 +179,11 @@ export default function GroupInvitationsScreen() {
               {waiting && !inv.canAccept && (
                 <View style={[st.btn, { backgroundColor: 'transparent', borderWidth: 1, borderColor: accent }]}
                   accessible accessibilityRole="text" accessibilityLabel="Waiting for an admin">
-                  <Ionicons name="hourglass-outline" size={16} color={accent} />
-                  <Text style={[st.btnTxt, { color: accent }]}>Waiting</Text>
+                  {/* Theme ink, not the accent: the accent is server data and a
+                      light one is unreadable as text on the glass card. The
+                      border keeps the group's colour. */}
+                  <Ionicons name="hourglass-outline" size={16} color={colors.textDim} />
+                  <Text style={[st.btnTxt, { color: colors.text }]}>Waiting</Text>
                 </View>
               )}
               {inv.canDecline && (

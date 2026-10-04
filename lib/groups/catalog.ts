@@ -106,6 +106,18 @@ export function hexColorOr(v: string | null | undefined, fallback: string): stri
   return typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v) ? v : fallback;
 }
 
+/**
+ * The colours a creator can pick for a group (app/group-create.tsx). Group
+ * identity DATA, sent to the server and shown to every member, so fixed rather
+ * than themed; named so a screen reader says a colour, not a hex code. Here so
+ * the self-check below covers them (6-digit hex, readable ink).
+ */
+export const GROUP_COLORS: readonly { hex: string; name: string }[] = [
+  { hex: '#9D6FD0', name: 'Purple' }, { hex: '#4A9FFF', name: 'Blue' }, { hex: '#22C55E', name: 'Green' },
+  { hex: '#F59E0B', name: 'Amber' }, { hex: '#EC4899', name: 'Pink' }, { hex: '#14B8A6', name: 'Teal' },
+  { hex: '#EF4444', name: 'Red' }, { hex: '#8B5CF6', name: 'Violet' },
+];
+
 /** WCAG 2.x relative luminance of a `#RRGGBB` colour. */
 function luminance(hex: string): number {
   const ch = [1, 3, 5].map((i) => {
@@ -202,6 +214,15 @@ if (require.main === module) {
   for (const g of GROUP_TYPES) {
     const r = ratio(g.color, inkOn(g.color));
     if (r < 4.5) throw new Error(`ink on ${g.type} ${g.color} is only ${r.toFixed(2)}:1`);
+  }
+  // the creator's colour picks: valid, distinct, and readable the same way
+  const hexes = new Set<string>();
+  for (const c of GROUP_COLORS) {
+    if (!/^#[0-9A-Fa-f]{6}$/.test(c.hex) || !c.name) throw new Error(`bad pick colour ${c.name} ${c.hex}`);
+    if (hexes.has(c.hex.toUpperCase())) throw new Error(`duplicate pick colour ${c.hex}`);
+    hexes.add(c.hex.toUpperCase());
+    const r = ratio(c.hex, inkOn(c.hex));
+    if (r < 4.5) throw new Error(`ink on ${c.name} ${c.hex} is only ${r.toFixed(2)}:1`);
   }
 
   console.log('groups/catalog self-check OK');

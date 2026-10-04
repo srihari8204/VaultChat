@@ -94,9 +94,16 @@ export default function GroupPrivacyScreen() {
   // Saves run one after another: setGroupPrivacy reads, merges and writes the
   // stored value, so two quick taps in parallel could each merge onto the same
   // old value and the second would undo the first.
+  // `pending` counts queued saves, so the summary can say "Saving…" while the
+  // controls still show what is stored (they change only when a save lands).
   const queue = useRef<Promise<void>>(Promise.resolve());
+  const [pending, setPending] = useState(0);
   const patch = (next: Partial<GroupPrivacy>) => {
-    queue.current = queue.current.then(() => applyPatch(next)).catch(() => {});
+    setPending((n) => n + 1);
+    // applyPatch reports its own failures (an Alert) and never rethrows; the
+    // catch only keeps one unexpected rejection from stalling every later save.
+    queue.current = queue.current.then(() => applyPatch(next)).catch(() => {})
+      .finally(() => setPending((n) => n - 1));
     return queue.current;
   };
 
@@ -175,7 +182,9 @@ export default function GroupPrivacyScreen() {
             <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15 }}>
               {describePrivacy(p, now)}
             </Text>
-            <Text style={{ color: colors.textDim, fontSize: 12.5 }}>in {groupName}</Text>
+            <Text style={{ color: colors.textDim, fontSize: 12.5 }} accessibilityLiveRegion="polite">
+              {pending > 0 ? `Saving… (in ${groupName})` : `in ${groupName}`}
+            </Text>
           </View>
         </View>
 

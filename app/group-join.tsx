@@ -16,7 +16,7 @@
 
 import React, { useCallback, useState } from 'react';
 import {
-  View, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, ScrollView,
+  View, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, ScrollView, AccessibilityInfo,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -27,6 +27,8 @@ import { brandAlpha } from '../constants/theme';
 import { requestToJoin, myInvitations } from '../lib/chatService';
 import { groupTypeInfo, hexColorOr, inkOn } from '../lib/groups/catalog';
 import { joinRefusal } from '../lib/groups/serverContracts';
+import { GroupNotFound } from '../components/groups/GroupNotFound';
+import { tint } from '../lib/tintColor';
 
 // 'invited': they already hold an invitation for this group; answering it is
 // what lets them in, so this screen sends them to it rather than asking again.
@@ -77,33 +79,39 @@ export default function GroupJoinScreen() {
     return () => { live = false; };
   }, [groupId]));
 
+  // "Done" from a cold-start deep link has nothing to go back to.
+  const done = () => (router.canGoBack() ? router.back() : router.replace('/(tabs)/chats'));
+
+  // The note that replaces the button after a tap is announced (Android reads
+  // the live region; iOS needs the announcement).
+  const announce = (next: State) => {
+    const say: Partial<Record<State, string>> = {
+      asked: 'Request sent. The admins will decide.',
+      member: `You are already in ${name}.`,
+      accepted: 'You already accepted an invitation. An admin still has to approve you.',
+    };
+    if (say[next]) AccessibilityInfo.announceForAccessibility(say[next]!);
+  };
+
   const ask = async () => {
     if (state !== 'idle' || !groupId) return;
     setState('sending');
     try {
       await requestToJoin(groupId);
       setState('asked');
+      announce('asked');
     } catch (e: any) {
       // A 409 that means "you already did this" is a state, not a failure: the
       // server's `code` once deployed, its wording until then
       // (lib/groups/serverContracts joinRefusal).
       const refusal = joinRefusal(e);
-      if (refusal) { setState(refusal); return; }
+      if (refusal) { setState(refusal); announce(refusal); return; }
       setState('idle');
       Alert.alert('Could not ask to join', e?.message ?? 'Try again.');
     }
   };
 
-  if (!groupId) {
-    return (
-      <View style={{ flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center', padding: 32 }}>
-        <AuroraBackground variant="chat" />
-        <Stack.Screen options={{ headerShown: true, headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false, title: 'Join a group', headerTitleAlign: 'center' }} />
-        <Text style={{ color: colors.text, fontWeight: '700', fontSize: 15 }}>Group not found</Text>
-        <Text style={{ color: colors.textDim, fontSize: 13, textAlign: 'center', marginTop: 6 }}>This card did not say which group it is for.</Text>
-      </View>
-    );
-  }
+  if (!groupId) return <GroupNotFound title="Join a group" detail="This card did not say which group it is for." />;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -112,7 +120,7 @@ export default function GroupJoinScreen() {
       <ScrollView contentContainerStyle={{ padding: 20, paddingTop: 32 }}>
 
         <View style={st.hero}>
-          <View style={[st.icon, { backgroundColor: accent + '22', borderColor: accent }]}>
+          <View style={[st.icon, { backgroundColor: tint(accent, 0.13), borderColor: accent }]}>
             <Ionicons name={icon} size={34} color={accent} />
           </View>
           <Text numberOfLines={1} accessibilityRole="header" style={{ color: colors.text, fontWeight: '800', fontSize: 21, marginTop: 14, textAlign: 'center' }}>
@@ -124,7 +132,7 @@ export default function GroupJoinScreen() {
         {checking ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: 34 }} accessibilityLabel="Checking for an earlier request" />
         ) : state === 'member' ? (
-          <View style={[st.note, { borderColor: colors.success, backgroundColor: colors.success + '12' }]}>
+          <View accessibilityLiveRegion="polite" style={[st.note, { borderColor: colors.success, backgroundColor: tint(colors.success, 0.07) }]}>
             <Ionicons name="checkmark-circle" size={19} color={colors.success} />
             <Text style={{ color: colors.text, fontSize: 13.5, flex: 1, lineHeight: 19 }}>
               You are already in {name}.
@@ -132,20 +140,20 @@ export default function GroupJoinScreen() {
           </View>
         ) : state === 'invited' ? (
           <>
-            <View style={[st.note, { borderColor: accent, backgroundColor: accent + '12' }]}>
+            <View accessibilityLiveRegion="polite" style={[st.note, { borderColor: accent, backgroundColor: tint(accent, 0.07) }]}>
               <Ionicons name="mail-unread-outline" size={19} color={accent} />
               <Text style={{ color: colors.text, fontSize: 13.5, flex: 1, lineHeight: 19 }}>
                 You already have an invitation to {name}. Answer it in your invitations.
               </Text>
             </View>
-            <TouchableOpacity onPress={() => router.replace('/group-invitations' as any)}
+            <TouchableOpacity onPress={() => router.replace('/group-invitations')}
               accessibilityRole="button" style={[st.btn, { backgroundColor: accent }]}>
               <Ionicons name="mail-open-outline" size={18} color={ink} />
               <Text style={[st.btnTxt, { color: ink }]}>Open invitations</Text>
             </TouchableOpacity>
           </>
         ) : state === 'accepted' ? (
-          <View style={[st.note, { borderColor: accent, backgroundColor: accent + '12' }]}>
+          <View accessibilityLiveRegion="polite" style={[st.note, { borderColor: accent, backgroundColor: tint(accent, 0.07) }]}>
             <Ionicons name="hourglass-outline" size={19} color={accent} />
             <Text style={{ color: colors.text, fontSize: 13.5, flex: 1, lineHeight: 19 }}>
               You accepted an invitation to {name}. An admin still has to approve you — you will be
@@ -153,7 +161,7 @@ export default function GroupJoinScreen() {
             </Text>
           </View>
         ) : state === 'asked' ? (
-          <View style={[st.note, { borderColor: accent, backgroundColor: accent + '12' }]}>
+          <View accessibilityLiveRegion="polite" style={[st.note, { borderColor: accent, backgroundColor: tint(accent, 0.07) }]}>
             <Ionicons name="hourglass-outline" size={19} color={accent} />
             <Text style={{ color: colors.text, fontSize: 13.5, flex: 1, lineHeight: 19 }}>
               Your request is with the admins. You will be added if they approve it — nothing
@@ -179,7 +187,7 @@ export default function GroupJoinScreen() {
         )}
 
         {(state === 'asked' || state === 'accepted' || state === 'member') && (
-          <TouchableOpacity onPress={() => router.back()} accessibilityRole="button"
+          <TouchableOpacity onPress={done} accessibilityRole="button"
             style={[st.btn, { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.glassStroke }]}>
             <Text style={[st.btnTxt, { color: colors.text }]}>Done</Text>
           </TouchableOpacity>

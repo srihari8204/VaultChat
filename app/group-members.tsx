@@ -19,9 +19,9 @@
 // The gating functions are the client mirror of the Go ones, and
 // scripts/check-permission-mirror.ts proves the two still agree.
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
-  View, StyleSheet, TouchableOpacity, ScrollView, Alert,
+  View, StyleSheet, TouchableOpacity, Alert,
   ActivityIndicator, Modal, Image, Pressable, FlatList,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect, router } from 'expo-router';
@@ -83,6 +83,7 @@ export default function GroupMembersScreen() {
   const [chatsState, setChatsState] = useState<'loading' | 'ok' | 'failed'>('loading');
   // A share is being posted (double-tap guard: one card per confirm).
   const [shareBusy, setShareBusy] = useState(false);
+  const shareRef = useRef(false);
 
   const load = useCallback(async () => {
     if (!groupId) { setLoading(false); return; }
@@ -108,6 +109,14 @@ export default function GroupMembersScreen() {
   }, [groupId]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  // Banner Retry keeps the list on screen: the banner shows a spinner instead.
+  const [retrying, setRetrying] = useState(false);
+  const retryInPlace = useCallback(async () => {
+    if (retrying) return;
+    setRetrying(true);
+    try { await load(); } finally { setRetrying(false); }
+  }, [retrying, load]);
 
   const ordered = useMemo(() => {
     const rank = (r: string) => {
@@ -180,12 +189,14 @@ export default function GroupMembersScreen() {
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Share', onPress: async () => {
-          if (shareBusy) return;
+          // A ref, not `shareBusy`: this callback holds the value from when the Alert opened.
+          if (shareRef.current) return;
+          shareRef.current = true;
           setShareBusy(true);
           setSharing(false);
           try { await shareGroup(to.id, groupId); Alert.alert('Shared', `The card is in your chat with ${to.name ?? 'them'}.`); }
           catch (e: any) { Alert.alert('Could not share', e?.message ?? 'Try again.'); }
-          finally { setShareBusy(false); }
+          finally { shareRef.current = false; setShareBusy(false); }
         } },
       ],
     );
@@ -232,7 +243,7 @@ export default function GroupMembersScreen() {
         key={m.userId}
         disabled={!actionable || busy === m.userId}
         onPress={() => setSheet(m)}
-        accessibilityRole={actionable ? 'button' : undefined}
+        accessibilityRole={actionable ? 'button' : 'text'}
         accessibilityLabel={`${m.name ?? 'crazzychat user'}${isMe ? ' (you)' : ''}, ${ROLE_LABELS[role] ?? m.role}`}
         accessibilityHint={actionable ? 'Opens role and member actions' : undefined}
         accessibilityState={{ disabled: !actionable, busy: busy === m.userId }}
@@ -280,89 +291,96 @@ export default function GroupMembersScreen() {
           </TouchableOpacity>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
-          {failed && (
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Couldn't refresh members. Showing the last list. Retry"
-              onPress={() => { setLoading(true); load(); }}
-              style={[st.banner, { borderColor: colors.danger }]}>
-              <Ionicons name="cloud-offline-outline" size={15} color={colors.danger} />
-              <Text style={{ color: colors.danger, fontSize: 12.5, flex: 1 }}>Couldn’t refresh — this list may be out of date. Tap to retry.</Text>
-            </TouchableOpacity>
-          )}
-          <View style={st.sechead}>
-            <Text style={[st.h, { color: colors.text, marginBottom: 0 }]} accessibilityRole="header">
-              {members.length} {members.length === 1 ? 'member' : 'members'}
-            </Text>
-            {seats >= 0 && (
-              <Text style={{ color: seats === 0 ? colors.danger : colors.textDim, fontSize: 12 }}>
-                {seats === 0 ? 'Group is full' : `${seats} ${seats === 1 ? 'seat' : 'seats'} left`}
-              </Text>
+        <FlatList
+          data={ordered}
+          keyExtractor={(m) => m.userId}
+          renderItem={({ item }) => row(item)}
+          contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
+          ListHeaderComponent={<>
+            {failed && (
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Couldn't refresh members. Showing the last list. Retry"
+                onPress={retryInPlace} disabled={retrying} accessibilityState={{ busy: retrying, disabled: retrying }}
+                style={[st.banner, { borderColor: colors.danger }]}>
+                {retrying
+                  ? <ActivityIndicator size="small" color={colors.danger} accessibilityLabel="Retrying" />
+                  : <Ionicons name="cloud-offline-outline" size={15} color={colors.danger} />}
+                <Text style={{ color: colors.danger, fontSize: 12.5, flex: 1 }}>Couldn’t refresh — this list may be out of date. Tap to retry.</Text>
+              </TouchableOpacity>
             )}
-          </View>
-
-          {ordered.map(row)}
-
-          {hasPerm(perms, 'invite_members') && (
-            <TouchableOpacity
-              onPress={() => router.push({ pathname: '/group-invites' as any, params: { chatId: groupId, name: groupName } })}
-              accessibilityRole="button"
-              style={[st.addBtn, { borderColor: colors.glassStroke }]}
-            >
-              <Ionicons name="person-add-outline" size={18} color={colors.primary} />
-              <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 14 }}>Add people</Text>
-            </TouchableOpacity>
-          )}
-
-          {/* ── how people get in ── */}
-          {myRole === 'owner' && typed && (
-            <>
-              <Text style={[st.h, { color: colors.text, marginTop: 30 }]} accessibilityRole="header">How people join</Text>
-              <View accessibilityRole="radiogroup" accessibilityLabel="How people join">
-              {MODES.map((m) => {
-                const on = m.key === mode;
-                return (
-                  <TouchableOpacity key={m.key} onPress={() => pickMode(m.key)} disabled={busy === 'mode'}
-                    accessibilityRole="radio" accessibilityLabel={`${m.label}. ${m.blurb}`} accessibilityState={{ selected: on, checked: on, disabled: busy === 'mode' }}
-                    style={[st.mode, {
-                      borderColor: on ? colors.primary : colors.border,
-                      backgroundColor: on ? brandAlpha(0.08) : 'transparent',
-                    }]}>
-                    <Ionicons
-                      name={on ? 'radio-button-on' : 'radio-button-off'}
-                      size={19} color={on ? colors.primary : colors.textFaint}
-                    />
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ color: colors.text, fontWeight: '700', fontSize: 14 }}>{m.label}</Text>
-                      <Text style={{ color: colors.textDim, fontSize: 12, marginTop: 2, lineHeight: 16 }}>{m.blurb}</Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-              </View>
-              <Text style={{ color: colors.textFaint, fontSize: 11.5, marginTop: 10, lineHeight: 16 }}>
-                Only you can change this. Nobody is ever added to {groupName} without agreeing to
-                join, whichever setting is on.
+            <View style={st.sechead}>
+              <Text style={[st.h, { color: colors.text, marginBottom: 0 }]} accessibilityRole="header">
+                {members.length} {members.length === 1 ? 'member' : 'members'}
               </Text>
-
-              {mode === 'admin_approval' && (
-                <>
-                  <TouchableOpacity onPress={openShare} accessibilityRole="button" disabled={shareBusy}
-                    accessibilityState={{ disabled: shareBusy, busy: shareBusy }}
-                    style={[st.addBtn, { borderColor: colors.glassStroke, marginTop: 18 }]}>
-                    <Ionicons name="share-outline" size={18} color={colors.primary} />
-                    <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 14 }}>
-                      Share this group in a chat
-                    </Text>
-                  </TouchableOpacity>
-                  <Text style={{ color: colors.textFaint, fontSize: 11.5, marginTop: 8, lineHeight: 16 }}>
-                    Posts a card they can tap to ask to join. It carries no code and lets nobody
-                    in — every request still comes to you.
-                  </Text>
-                </>
+              {seats >= 0 && (
+                <Text style={{ color: seats === 0 ? colors.danger : colors.textDim, fontSize: 12 }}>
+                  {seats === 0 ? 'Group is full' : `${seats} ${seats === 1 ? 'seat' : 'seats'} left`}
+                </Text>
               )}
-            </>
-          )}
-        </ScrollView>
+            </View>
+          </>}
+          ListFooterComponent={<>
+            {hasPerm(perms, 'invite_members') && (
+              <TouchableOpacity
+                onPress={() => router.push({ pathname: '/group-invites', params: { chatId: groupId, name: groupName } })}
+                accessibilityRole="button"
+                style={[st.addBtn, { borderColor: colors.glassStroke }]}
+              >
+                <Ionicons name="person-add-outline" size={18} color={colors.primary} />
+                <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 14 }}>Add people</Text>
+              </TouchableOpacity>
+            )}
+
+            {/* ── how people get in ── */}
+            {myRole === 'owner' && typed && (
+              <>
+                <Text style={[st.h, { color: colors.text, marginTop: 30 }]} accessibilityRole="header">How people join</Text>
+                <View accessibilityRole="radiogroup" accessibilityLabel="How people join">
+                {MODES.map((m) => {
+                  const on = m.key === mode;
+                  return (
+                    <TouchableOpacity key={m.key} onPress={() => pickMode(m.key)} disabled={busy === 'mode'}
+                      accessibilityRole="radio" accessibilityLabel={`${m.label}. ${m.blurb}`} accessibilityState={{ selected: on, checked: on, disabled: busy === 'mode' }}
+                      style={[st.mode, {
+                        borderColor: on ? colors.primary : colors.border,
+                        backgroundColor: on ? brandAlpha(0.08) : 'transparent',
+                      }]}>
+                      <Ionicons
+                        name={on ? 'radio-button-on' : 'radio-button-off'}
+                        size={19} color={on ? colors.primary : colors.textFaint}
+                      />
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: colors.text, fontWeight: '700', fontSize: 14 }}>{m.label}</Text>
+                        <Text style={{ color: colors.textDim, fontSize: 12, marginTop: 2, lineHeight: 16 }}>{m.blurb}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+                </View>
+                <Text style={{ color: colors.textFaint, fontSize: 11.5, marginTop: 10, lineHeight: 16 }}>
+                  Only you can change this. Nobody is ever added to {groupName} without agreeing to
+                  join, whichever setting is on.
+                </Text>
+
+                {mode === 'admin_approval' && (
+                  <>
+                    <TouchableOpacity onPress={openShare} accessibilityRole="button" disabled={shareBusy}
+                      accessibilityState={{ disabled: shareBusy, busy: shareBusy }}
+                      style={[st.addBtn, { borderColor: colors.glassStroke, marginTop: 18 }]}>
+                      <Ionicons name="share-outline" size={18} color={colors.primary} />
+                      <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 14 }}>
+                        Share this group in a chat
+                      </Text>
+                    </TouchableOpacity>
+                    <Text style={{ color: colors.textFaint, fontSize: 11.5, marginTop: 8, lineHeight: 16 }}>
+                      Posts a card they can tap to ask to join. It carries no code and lets nobody
+                      in — every request still comes to you.
+                    </Text>
+                  </>
+                )}
+              </>
+            )}
+          </>}
+        />
       )}
 
       {/* ── share picker ── */}

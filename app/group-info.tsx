@@ -12,17 +12,14 @@
 // DELETE /chats/:id/members/:userId
 
 import { useAuthHeader } from '../hooks/useAuthHeader';
-import { HEADER_TOP } from '../constants/layout';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState , useMemo} from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   FlatList,
   Image,
-  StyleSheet,
-  Switch,
   TextInput,
   TouchableOpacity,
   View,
@@ -30,7 +27,6 @@ import {
 } from 'react-native';
 import { getShareViewing, setShareViewing } from '../lib/viewerPrefs';
 import { Ionicons } from '@expo/vector-icons';
-import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { initialOf } from '../lib/format';
@@ -47,16 +43,12 @@ import {
   type Message,
 } from '../lib/chatService';
 import { unionWithLocalHistory } from '../lib/messageHistory';
-import SharedMediaThumb from '../components/chat/SharedMediaThumb';
 import { AuroraBackground, KeyboardSafe, AppText as Text } from '../components/ui';
 import { permissionDenied } from '../lib/permissionDenied';
-import { memberActions, ROLE_LABELS } from '../lib/groups/permissions';
+import { memberActions } from '../lib/groups/permissions';
 import { GroupNotFound } from '../components/groups/GroupNotFound';
-
-function useS() {
-  const { colors } = useTheme();
-  return useMemo(() => makeStyles(colors), [colors]);
-}
+import { GroupInfoTools, MemberRow } from '../components/groups/GroupInfoSections';
+import { useGroupInfoStyles as useS } from '../components/groups/groupInfoStyles';
 
 export default function GroupInfoScreen() {
   const { colors } = useTheme();
@@ -88,9 +80,19 @@ export default function GroupInfoScreen() {
   const [descDraft, setDescDraft] = useState('');
   const [shareViewing, setShareViewingState] = useState(true);   // Live Chat Viewers (#58) — group default ON
   useEffect(() => { if (chatId) getShareViewing(chatId, true).then(setShareViewingState).catch(() => {}); }, [chatId]);
-  const toggleShareViewing = useCallback((on: boolean) => {
+  const shareSeq = useRef(0);
+  const toggleShareViewing = useCallback(async (on: boolean) => {
+    const mine = ++shareSeq.current;
     setShareViewingState(on);
-    setShareViewing(chatId, on).catch(() => {});
+    // setShareViewing swallows its own storage error (lib/viewerPrefs), so read
+    // the value back: if it did not stick, show what is really saved and say so.
+    // Only the latest toggle checks, so a quick on-off is not read as a failure.
+    await setShareViewing(chatId, on);
+    const saved = await getShareViewing(chatId, true);
+    if (mine === shareSeq.current && saved !== on) {
+      setShareViewingState(saved);
+      Alert.alert('Could not save', 'Your viewing-status setting was not changed. Try again.');
+    }
   }, [chatId]);
 
   const load = useCallback(async () => {
@@ -141,23 +143,33 @@ export default function GroupInfoScreen() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Stale-banner Retry in flight: the banner shows a spinner (and stays, so a
+  // second failure keeps the warning) until the refresh settles.
+  const [retrying, setRetrying] = useState(false);
+  const retryStale = useCallback(async () => {
+    if (retrying) return;
+    setRetrying(true);
+    try { await load(); } finally { setRetrying(false); }
+  }, [retrying, load]);
+
   // Shared-media strip: the newest 9 images/videos. The device's own history
-  // comes first (no network, and delete-on-delivery nulls a delivered body
+  // paints first (no network, and delete-on-delivery nulls a delivered body
   // server-side, so the server list alone drops media this phone can still
-  // render); the server is asked only when this phone has fewer than 9.
-  // Best-effort: a failure here just leaves the row without its preview.
+  // render); then one server page is merged in the background, so media this
+  // phone has not synced yet still shows. Best-effort: if the server page
+  // fails, the local strip stays as it is.
   useEffect(() => {
     if (!chatId) return;
     let active = true;
     const pick = (list: Message[]) =>
       list.filter(m => !m.deletedAt && (m.type === 'image' || m.type === 'video')).slice(0, 9);
     (async () => {
-      let shown = pick(await unionWithLocalHistory(chatId, [], 400).catch(() => [] as Message[]));
-      if (shown.length < 9) {
-        const server = await getMessages(chatId, { limit: 200 }).catch(() => [] as Message[]);
-        shown = pick(await unionWithLocalHistory(chatId, server, 400).catch(() => [] as Message[]));
-      }
-      if (active) setMedia(shown);
+      const local = pick(await unionWithLocalHistory(chatId, [], 400).catch(() => [] as Message[]));
+      if (active && local.length) setMedia(local);
+      const server = await getMessages(chatId, { limit: 200 }).catch(() => null);
+      if (!server) return;
+      const merged = await unionWithLocalHistory(chatId, server, 400).catch(() => null);
+      if (active && merged) setMedia(pick(merged));
     })();
     return () => { active = false; };
   }, [chatId]);
@@ -262,7 +274,7 @@ export default function GroupInfoScreen() {
       { text: 'Leave', style: 'destructive', onPress: async () => {
           try {
             await removeChatMember(chat.id, meId);
-            router.replace('/(tabs)/chats' as any);
+            router.replace('/(tabs)/chats');
           } catch (e: any) {
             Alert.alert('Leave failed', e?.message ?? 'Try again');
           }
@@ -281,7 +293,7 @@ export default function GroupInfoScreen() {
   const onAddMember = useCallback(() => {
     if (!chat || !isAdmin) return;
     router.push({
-      pathname: '/family-add' as any,
+      pathname: '/family-add',
       params: { chatId: chat.id, name: chat.name ?? 'Group' },
     });
   }, [chat, isAdmin, router]);
@@ -390,8 +402,11 @@ export default function GroupInfoScreen() {
 
       {stale && (
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Couldn't refresh this group. Showing the saved copy. Retry"
-          onPress={() => { setStale(false); load(); }} style={S.staleBar}>
-          <Ionicons name="cloud-offline-outline" size={15} color={colors.danger} />
+          accessibilityState={{ busy: retrying, disabled: retrying }} disabled={retrying}
+          onPress={retryStale} style={S.staleBar}>
+          {retrying
+            ? <ActivityIndicator size="small" color={colors.danger} accessibilityLabel="Retrying" />
+            : <Ionicons name="cloud-offline-outline" size={15} color={colors.danger} />}
           <Text style={S.staleTxt}>Couldn’t refresh — this may be out of date. Tap to retry.</Text>
         </TouchableOpacity>
       )}
@@ -439,134 +454,8 @@ export default function GroupInfoScreen() {
         </TouchableOpacity>
       )}
 
-      {/* Group call — rings every member, then joins the mesh call room. */}
-      <View style={S.section}>
-        <TouchableOpacity
-          style={S.navRow}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-          onPress={() => router.push({ pathname: '/group-calls', params: { chatId: chat.id, groupName: chat.name ?? 'Group' } } as any)}
-        >
-          <Ionicons name="call-outline" size={22} color={colors.text} style={S.navIcon} />
-          <View style={{ flex: 1 }}>
-            <Text style={S.navTitle}>Group call</Text>
-            <Text style={S.navSub}>Voice or video with this group</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
-        </TouchableOpacity>
-      </View>
-
-      {/* Media, links and docs — WhatsApp-style row → shared media gallery */}
-      <View style={S.section}>
-        <TouchableOpacity
-          style={S.navRow}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-          onPress={() => router.push({ pathname: '/media-gallery', params: { chatId: chat.id } } as any)}
-        >
-          <Ionicons name="images-outline" size={22} color={colors.text} style={S.navIcon} />
-          <View style={{ flex: 1 }}>
-            <Text style={S.navTitle}>Media, links and docs</Text>
-            <Text style={S.navSub}>Everything shared in this group</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
-        </TouchableOpacity>
-        {media.length > 0 && (
-          <View style={S.mediaGrid}>
-            {media.map(m => (
-              <SharedMediaThumb
-                key={m.id}
-                m={m}
-                chatId={chat.id}
-                authHeader={authHeader}
-                size={mediaSize}
-                onPress={() => router.push({ pathname: '/media-gallery', params: { chatId: chat.id } } as any)}
-              />
-            ))}
-          </View>
-        )}
-      </View>
-
-      {/* Shared tools. These screens take only the group id and run on the
-          group's own message thread / calendar endpoint, so they work for any
-          group, not just a Family Space. Location tools (trip, insights,
-          location privacy) stay in Family Space, where location is shared. */}
-      <View style={S.section}>
-        <Text style={S.label}>SHARED</Text>
-        {([
-          { path: '/group-calendar', icon: 'calendar-outline', title: 'Shared calendar', sub: 'Events everyone in the group can see' },
-          { path: '/group-notes', icon: 'document-text-outline', title: 'Shared notes', sub: 'Lists and notes, encrypted end to end' },
-          { path: '/group-tasks', icon: 'checkbox-outline', title: 'Shared tasks', sub: 'To-dos with due dates and reminders' },
-        ] as const).map(t => (
-          <TouchableOpacity
-            key={t.path}
-            style={S.navRow}
-            activeOpacity={0.7}
-            accessibilityRole="button"
-            accessibilityLabel={t.title}
-            accessibilityHint={t.sub}
-            onPress={() => router.push({ pathname: t.path, params: { groupId: chat.id, name: chat.name ?? 'Group' } } as any)}
-          >
-            <Ionicons name={t.icon} size={22} color={colors.text} style={S.navIcon} />
-            <View style={{ flex: 1 }}>
-              <Text style={S.navTitle}>{t.title}</Text>
-              <Text style={S.navSub}>{t.sub}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      {/* Live Chat Viewers (#58) — share whether you're currently viewing this chat */}
-      <View style={S.section}>
-        <Text style={S.label}>PRIVACY</Text>
-        <View style={S.navRow}>
-          <Ionicons name="eye-outline" size={22} color={colors.text} style={S.navIcon} />
-          <View style={{ flex: 1 }}>
-            <Text style={S.navTitle}>Share my viewing status</Text>
-            <Text style={S.navSub}>Let members see when you’re viewing this chat now</Text>
-          </View>
-          <Switch
-            accessibilityLabel="Share my viewing status"
-            value={shareViewing}
-            onValueChange={toggleShareViewing}
-            trackColor={{ true: colors.primary, false: colors.border }}
-            thumbColor="#fff"
-          />
-        </View>
-      </View>
-
-      {isAdmin && (
-        <View style={S.section}>
-          <Text style={S.label}>ADMIN</Text>
-          <TouchableOpacity
-            style={S.navRow}
-            activeOpacity={0.7}
-            accessibilityRole="button"
-            onPress={() => router.push({ pathname: '/group-admin', params: { chatId: chat.id, groupName: chat.name ?? '' } } as any)}
-          >
-            <Ionicons name="shield-checkmark-outline" size={22} color={colors.text} style={S.navIcon} />
-            <View style={{ flex: 1 }}>
-              <Text style={S.navTitle}>Group settings & permissions</Text>
-              <Text style={S.navSub}>Roles, slow mode, who can send, join requests</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={S.navRow}
-            activeOpacity={0.7}
-            accessibilityRole="button"
-            onPress={() => router.push({ pathname: '/invite-link', params: { chatId: chat.id, groupName: chat.name ?? '' } } as any)}
-          >
-            <Ionicons name="link-outline" size={22} color={colors.text} style={S.navIcon} />
-            <View style={{ flex: 1 }}>
-              <Text style={S.navTitle}>Invite links</Text>
-              <Text style={S.navSub}>Anyone with a link can join, or ask to if approval is on</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
-          </TouchableOpacity>
-        </View>
-      )}
+      <GroupInfoTools chat={chat} isAdmin={isAdmin} media={media} mediaSize={mediaSize}
+        authHeader={authHeader} shareViewing={shareViewing} onShareViewing={toggleShareViewing} />
 
       <View style={S.section}>
         <Text style={S.label}>{activeMembers.length} MEMBERS</Text>
@@ -625,119 +514,3 @@ export default function GroupInfoScreen() {
     </KeyboardSafe>
   );
 }
-
-function MemberRow({
-  member, meId, canRemove, authHeader, onRemove,
-}: {
-  member:     ChatMember;
-  meId:       string | null;
-  /** From memberActions (lib/groups/permissions.ts), the check group-admin/group-members use. */
-  canRemove:  boolean;
-  authHeader: string | null;
-  onRemove:   () => void;
-}) {
-  const S = useS();
-  const isMe = member.userId === meId;
-  const showRemove = canRemove;
-  const letter = initialOf(member.name, member.email);
-  // A member with no name and no email used to be shown as eight hex digits of
-  // their user id — which reads as a bug, not as a person. Email is optional now,
-  // so this is an ordinary row, and it says so in words.
-  const display = member.name?.trim() || member.email?.trim() || 'crazzychat user';
-  return (
-    <View style={S.memberRow}>
-      <View style={S.memberAvatarWrap}>
-        <View style={S.memberAvatar}>
-          {member.photoURL && authHeader ? (
-            <Image
-              source={{ uri: attachmentUrl(member.photoURL), headers: { Authorization: authHeader } }}
-              style={S.memberAvatarImg}
-            />
-          ) : (
-            <Text style={S.memberAvatarTxt}>{letter}</Text>
-          )}
-        </View>
-        {member.online && <View style={S.memberPresenceDot} />}
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={S.memberName} numberOfLines={1}>
-          {display}
-          {isMe && <Text style={S.memberMeTag}> (you)</Text>}
-        </Text>
-        {/* Sub-line only when there is something to say. Without an email it was
-            a second UUID fragment under the first — noise, not information. */}
-        {(member.role !== 'member' || !!member.email) && (
-          <Text style={S.memberSub} numberOfLines={1}>
-            {member.role !== 'member' && `${ROLE_LABELS[member.role as keyof typeof ROLE_LABELS] ?? member.role}${member.email ? ' · ' : ''}`}
-            {member.email}
-          </Text>
-        )}
-      </View>
-      {showRemove && (
-        <TouchableOpacity onPress={onRemove} style={S.removeBtn} activeOpacity={0.7} hitSlop={10} accessibilityRole="button" accessibilityLabel={`Remove ${display} from the group`}>
-          <Text style={S.removeBtnTxt}>Remove</Text>
-        </TouchableOpacity>
-      )}
-    </View>
-  );
-}
-
-
-const makeStyles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: 'transparent' },
-  center:        { justifyContent: 'center', alignItems: 'center' },
-
-  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 8, gap: 8 },
-  backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  titleBar:      { color: c.text, fontSize: 22, fontWeight: '800' },
-
-  heroWrap:      { alignItems: 'center', paddingVertical: 20, gap: 8 },
-  hero:          { width: 112, height: 112, borderRadius: 56, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  heroImg:       { width: '100%', height: '100%' },
-  heroTxt:       { color: c.onPrimary, fontSize: 48, fontWeight: '800' },
-  heroBusy:      { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.4)' },
-  heroEditPill:  { position: 'absolute', right: 0, bottom: 0, backgroundColor: c.primary, borderRadius: 16, padding: 6, borderWidth: 2, borderColor: c.bg },
-  groupName:     { color: c.text, fontSize: 22, fontWeight: '700' },
-  subInfo:       { color: c.textDim, fontSize: 12 },
-
-  renameRow:     { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, width: '100%' },
-  renameInput:   { flex: 1, color: c.text, backgroundColor: c.glassSoft, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16 },
-  saveBtn:       { backgroundColor: c.primary, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10 },
-  saveBtnTxt:    { color: c.onPrimary, fontWeight: '700' },
-
-  staleBar:      { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginTop: 4, padding: 10, borderRadius: 12, borderWidth: 1, borderColor: c.danger },
-  staleTxt:      { color: c.danger, fontSize: 12.5, flex: 1 },
-  addBtn:        { flexDirection: 'row', gap: 8, marginHorizontal: 16, marginTop: 8, padding: 12, borderRadius: 12, backgroundColor: c.glassSoft, borderWidth: 1, borderColor: c.glassStroke, alignItems: 'center', justifyContent: 'center' },
-  addBtnTxt:     { color: c.primary, fontWeight: '700' },
-
-  section:       { paddingHorizontal: 16, marginTop: 16 },
-  label:         { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 8 },
-
-  navRow:        { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
-  navIcon:       { width: 28, textAlign: 'center' },
-  navTitle:      { color: c.text, fontSize: 15, fontWeight: '600' },
-  navSub:        { color: c.textDim, fontSize: 12, marginTop: 2 },
-  mediaGrid:     { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 12 },
-
-  descText:      { color: c.text, fontSize: 15, lineHeight: 21, marginTop: 4 },
-  descPlaceholder: { color: c.textDim, fontSize: 15, marginTop: 4 },
-  descEditRow:   { gap: 8 },
-  descInput:     { color: c.text, backgroundColor: c.glassSoft, borderRadius: 12, padding: 12, fontSize: 15, minHeight: 70, textAlignVertical: 'top' },
-  memberSearch:  { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: c.glassSoft, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 6 },
-  memberSearchInput: { flex: 1, color: c.text, fontSize: 14, padding: 0 },
-  memberItem:    { paddingHorizontal: 16 },
-  memberRow:     { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
-  memberAvatarWrap: { width: 44, height: 44 },
-  memberAvatar:  { width: 44, height: 44, borderRadius: 22, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  memberAvatarImg: { width: '100%', height: '100%' },
-  memberAvatarTxt: { color: c.onPrimary, fontWeight: '700', fontSize: 17 },
-  memberPresenceDot: { position: 'absolute', right: 0, bottom: 0, width: 12, height: 12, borderRadius: 6, backgroundColor: c.online, borderWidth: 2, borderColor: c.bg },
-  memberName:    { color: c.text, fontSize: 15, fontWeight: '600' },
-  memberMeTag:   { color: c.textDim, fontSize: 12, fontWeight: '400' },
-  memberSub:     { color: c.textDim, fontSize: 12, marginTop: 2 },
-  removeBtn:     { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, borderWidth: 1, borderColor: c.danger },
-  removeBtnTxt:  { color: c.danger, fontSize: 11, fontWeight: '700' },
-
-  leaveBtn:      { marginHorizontal: 16, marginTop: 32, padding: 14, borderRadius: 24, borderWidth: 1, borderColor: c.danger, alignItems: 'center' },
-  leaveTxt:      { color: c.danger, fontWeight: '700' },
-});

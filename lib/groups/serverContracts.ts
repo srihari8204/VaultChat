@@ -61,7 +61,7 @@ async function call<T>(path: string, opts: { method: string; json?: unknown }, o
   try {
     return await api<T>(path, opts as any);
   } catch (e: any) {
-    if (routeMissing(e, own404s)) throw new NotAvailableYet();
+    if (routeMissing(e, own404s)) { managementKnown = false; throw new NotAvailableYet(); }
     throw e;
   }
 }
@@ -90,6 +90,46 @@ export function attachGroupToCommunity(id: string, chatId: string) {
     `/communities/${cid(id)}/groups/${cid(chatId)}`, { method: 'POST' }, ATTACH_404);
 }
 
+/**
+ * What the support probe's answer means. The probe is `PATCH /communities/:id`
+ * with an empty body: on a server with the C9 routes that is refused before
+ * anything is written (400 "name or description required", 403 for a
+ * non-owner, 404 "Community not found"); on today's server the route is
+ * missing (405, or the gateway's catch-all 404). Anything else (offline, a 5xx)
+ * says nothing: null.
+ */
+export function managementProbeResult(e: ApiError | null | undefined): boolean | null {
+  if (!e) return true;
+  if (routeMissing(e, COMMUNITY_404)) return false;
+  if (e.status === 400 || e.status === 403 || e.status === 404) return true;
+  return null;
+}
+
+// ponytail: remembered for the app session, so a server deployed while the
+// app is open is noticed only after a restart. Replace with a server-sent
+// capability list if one is ever added.
+let managementKnown: boolean | undefined;
+
+/**
+ * Whether this server has community edit / delete / leave / attach (C9).
+ * Probes once per app session (the routes ship together, so one answers for
+ * all four); null = could not tell this time (the actions stay, with their
+ * "Not available yet" fallback).
+ */
+export async function communityManagementSupported(id: string): Promise<boolean | null> {
+  if (managementKnown !== undefined) return managementKnown;
+  const { api } = await import('../api');
+  let known: boolean | null;
+  try {
+    await api(`/communities/${cid(id)}`, { method: 'PATCH', json: {} } as any);
+    known = true;
+  } catch (e: any) {
+    known = managementProbeResult(e);
+  }
+  if (known !== null) managementKnown = known;
+  return known;
+}
+
 // ── C8: one approval queue ──
 
 /** A row of GET /chats/:id/membership/pending?include=link. `source` is absent on today's server. */
@@ -113,6 +153,13 @@ export const isLinkRow = (r: QueueRow): boolean => r.source === 'link';
 
 /** A stable key: link rows have no invitation id. */
 export const queueKey = (r: QueueRow): string => (isLinkRow(r) ? `link:${r.userId}` : `inv:${r.id}`);
+
+/**
+ * True when the server answered in the merged (C8) shape: every row carries
+ * `source`. Today's server sends none. An empty queue says nothing either way,
+ * but then there are no link requests to show twice.
+ */
+export const queueMerged = (rows: readonly QueueRow[]): boolean => rows.some((r) => r.source !== undefined);
 
 /** Invitations and (once deployed) invite-link requests, in one list. Today: invitations only. */
 export async function approvalQueue(chatId: string): Promise<QueueRow[]> {

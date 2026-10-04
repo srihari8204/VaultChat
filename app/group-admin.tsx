@@ -14,9 +14,10 @@
  *     "Link join requests" list here.
  *   - `approval_mode` + /membership/pending: INVITATIONS and "ask to join"
  *     cards. Set under Members → How people join; approved in Add people.
- * Merging them needs the link-join path to write a chat_invitations request
- * row instead of chat_join_requests (logged as a backend handoff). Until then
- * this screen names which door each setting guards and links to the other.
+ * The server can merge the two READ lists (R4 backend C8, not deployed yet):
+ * once it does, link requests are approved in Add people → Waiting and this
+ * screen links there instead of listing them a second time. Until then this
+ * screen lists them, names which door each setting guards and links to the other.
  */
 
 import { brandAlpha, type Palette } from '../constants/theme';
@@ -39,6 +40,8 @@ import { HEADER_TOP } from '../constants/layout';
 import { initialOf } from '../lib/format';
 import { memberActions, ROLE_LABELS as GROUP_ROLE_LABELS, type GroupRole } from '../lib/groups/permissions';
 import { GroupNotFound } from '../components/groups/GroupNotFound';
+import { makeLatestSaver } from '../lib/groups/latestSave';
+import { approvalQueue, isLinkRow, queueMerged } from '../lib/groups/serverContracts';
 
 type Policy = 'everyone' | 'admins';
 
@@ -120,10 +123,20 @@ export default function GroupAdminScreen() {
     bannerTimer.current = setTimeout(() => setBanner(null), 2600);
   }, []);
 
+  // Once the server merges invite-link requests into the approval queue (R4
+  // backend C8), they are listed in Add people → Waiting with the invitations;
+  // listing them here too would show each request in two places. So: when the
+  // queue answers in the merged shape, this section points there instead.
+  // Today's server answers without `source`, and the list stays here.
+  const [linkReqsInQueue, setLinkReqsInQueue] = useState<number | null>(null);
   const loadJoinReqs = useCallback((id: string) => {
-    listJoinRequests(id)
-      .then((r) => { setJoinReqs(r); setReqsFailed(false); })
-      .catch(() => setReqsFailed(true));
+    Promise.allSettled([listJoinRequests(id), approvalQueue(id)]).then(([reqs, queue]) => {
+      const merged = queue.status === 'fulfilled' && queueMerged(queue.value);
+      setLinkReqsInQueue(merged ? queue.value.filter(isLinkRow).length : null);
+      if (merged) { setJoinReqs([]); setReqsFailed(false); return; }
+      if (reqs.status === 'fulfilled') { setJoinReqs(reqs.value); setReqsFailed(false); }
+      else setReqsFailed(true);
+    });
   }, []);
 
   const load = useCallback(async () => {
@@ -156,6 +169,9 @@ export default function GroupAdminScreen() {
   useEffect(() => { load(); }, [load]);
 
   const isAdmin = myRole === 'admin' || myRole === 'owner';
+  // What a member row reads besides the row itself (a stable value, so the
+  // list re-renders its rows only when one of these changes).
+  const rowDeps = useMemo(() => ({ roleMenuUid, myRole, myId, typed, perms }), [roleMenuUid, myRole, myId, typed, perms]);
 
   const saveName = async () => {
     const name = groupName.trim();
@@ -173,33 +189,36 @@ export default function GroupAdminScreen() {
     }
   };
 
-  // One save per setting at a time: a second tap while the first PATCH is in
-  // flight would restore the wrong `prev` if either failed.
-  const inFlight = useRef(new Set<string>());
+  // One save chain per setting: a different option tapped while a save runs
+  // is shown at once and written right after it (only the latest choice is
+  // written); a failure returns the control to the last value the server
+  // accepted (lib/groups/latestSave.ts).
+  const saver = useRef(makeLatestSaver()).current;
   const applySetting = async <T,>(
-    key: keyof Parameters<typeof updateChat>[1], prev: T, next: T, set: (v: T) => void, ok: string,
-  ): Promise<boolean> => {
-    if (prev === next || inFlight.current.has(key)) return false;
-    inFlight.current.add(key);
-    set(next);
-    try { await updateChat(chatId!, { [key]: next } as Parameters<typeof updateChat>[1]); flash('ok', ok); return true; }
-    catch (e: any) { set(prev); flash('err', e?.message ?? 'Failed'); return false; }
-    finally { inFlight.current.delete(key); }
+    key: keyof Parameters<typeof updateChat>[1], prev: T, next: T, set: (v: T) => void, ok: (v: T) => string,
+  ): Promise<T | undefined> => {
+    const r = await saver(key, prev, next,
+      (v: T) => updateChat(chatId!, { [key]: v } as Parameters<typeof updateChat>[1]), set);
+    if (r.status === 'saved') { flash('ok', ok(r.value)); return r.value; }
+    if (r.status === 'failed') flash('err', (r.error as { message?: string } | null)?.message ?? 'Failed');
+    return undefined;
   };
 
-  const changeSlowMode = (v: number) => applySetting('slowModeSeconds', slowMode, v, setSlowMode,
-    v ? `Slow mode: ${v < 60 ? v + 's' : v / 60 + 'm'}` : 'Slow mode off');
-  const changeSendPolicy = (p: Policy) => applySetting('sendPolicy', sendPolicy, p, setSendPolicy,
-    p === 'admins' ? 'Only admins can send' : 'Everyone can send');
-  const changeMediaPolicy = (p: Policy) => applySetting('mediaPolicy', mediaPolicy, p, setMediaPolicy,
-    p === 'admins' ? 'Only admins send media' : 'Everyone can send media');
-  const changeAddPolicy = (p: Policy) => applySetting('addMembersPolicy', addPolicy, p, setAddPolicy,
-    p === 'everyone' ? 'Anyone can add members' : 'Only admins add members');
-  const toggleAntiSpam = (v: boolean) => { applySetting('antiSpamLinks', antiSpam, v, setAntiSpam,
-    v ? 'Link anti-spam on' : 'Link anti-spam off'); };
+  const changeSlowMode = (v: number) => applySetting<number>('slowModeSeconds', slowMode, v, setSlowMode,
+    (x) => x ? `Slow mode: ${x < 60 ? x + 's' : x / 60 + 'm'}` : 'Slow mode off');
+  const changeSendPolicy = (p: Policy) => applySetting<Policy>('sendPolicy', sendPolicy, p, setSendPolicy,
+    (x) => x === 'admins' ? 'Only admins can send' : 'Everyone can send');
+  const changeMediaPolicy = (p: Policy) => applySetting<Policy>('mediaPolicy', mediaPolicy, p, setMediaPolicy,
+    (x) => x === 'admins' ? 'Only admins send media' : 'Everyone can send media');
+  const changeAddPolicy = (p: Policy) => applySetting<Policy>('addMembersPolicy', addPolicy, p, setAddPolicy,
+    (x) => x === 'everyone' ? 'Anyone can add members' : 'Only admins add members');
+  const toggleAntiSpam = (v: boolean) => { applySetting<boolean>('antiSpamLinks', antiSpam, v, setAntiSpam,
+    (x) => x ? 'Link anti-spam on' : 'Link anti-spam off'); };
   const toggleApprove = async (v: boolean) => {
-    if (!(await applySetting('approveMembers', approve, v, setApprove, v ? 'New members need approval' : 'Open joining'))) return;
-    if (v) loadJoinReqs(chatId!); else { setJoinReqs([]); setReqsFailed(false); }
+    const saved = await applySetting<boolean>('approveMembers', approve, v, setApprove,
+      (x) => x ? 'New members need approval' : 'Open joining');
+    if (saved === undefined) return;
+    if (saved) loadJoinReqs(chatId!); else { setJoinReqs([]); setReqsFailed(false); }
   };
 
   const approveReq = async (uid: string) => {
@@ -290,7 +309,7 @@ export default function GroupAdminScreen() {
       <FlatList
         data={members}
         keyExtractor={(m) => m.userId}
-        extraData={[roleMenuUid, myRole, myId, typed, perms]}
+        extraData={rowDeps}
         contentContainerStyle={{ paddingBottom: 60 }}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
@@ -299,7 +318,7 @@ export default function GroupAdminScreen() {
             'member' then, and "Only admins can edit" would be a guess. */}
         {!loadFailed && (
         <View style={s.section}>
-          <Text style={s.sectionTitle}>Group Info</Text>
+          <Text style={s.sectionTitle} accessibilityRole="header">Group Info</Text>
           <Text style={s.label}>Group Name</Text>
           <TextInput
             style={[s.input, !isAdmin && s.inputDisabled]}
@@ -328,12 +347,12 @@ export default function GroupAdminScreen() {
         {/* Group Controls (admin only) */}
         {isAdmin && (
           <View style={s.section}>
-            <Text style={s.sectionTitle}>Group Controls</Text>
+            <Text style={s.sectionTitle} accessibilityRole="header">Group Controls</Text>
 
-            <Text style={s.ctrlLabel}>Who can send messages</Text>
+            <Text style={s.ctrlLabel} accessibilityRole="header">Who can send messages</Text>
             <PolicyToggle label="Who can send messages" value={sendPolicy} onChange={changeSendPolicy} />
 
-            <Text style={[s.ctrlLabel, { marginTop: 14 }]}>Slow mode (between messages)</Text>
+            <Text style={[s.ctrlLabel, { marginTop: 14 }]} accessibilityRole="header">Slow mode (between messages)</Text>
             <View style={s.slowRow} accessibilityRole="radiogroup" accessibilityLabel="Slow mode">
               {SLOW_OPTS.map(opt => (
                 <TouchableOpacity
@@ -348,10 +367,10 @@ export default function GroupAdminScreen() {
                 </TouchableOpacity>
               ))}
             </View>
-            <Text style={[s.ctrlLabel, { marginTop: 14 }]}>Who can send media</Text>
+            <Text style={[s.ctrlLabel, { marginTop: 14 }]} accessibilityRole="header">Who can send media</Text>
             <PolicyToggle label="Who can send media" value={mediaPolicy} onChange={changeMediaPolicy} />
 
-            <Text style={[s.ctrlLabel, { marginTop: 14 }]}>Who can add members</Text>
+            <Text style={[s.ctrlLabel, { marginTop: 14 }]} accessibilityRole="header">Who can add members</Text>
             <PolicyToggle label="Who can add members" value={addPolicy} onChange={changeAddPolicy} />
 
             <View style={s.switchRow}>
@@ -367,7 +386,7 @@ export default function GroupAdminScreen() {
                 style={s.linkRow}
                 accessibilityRole="link"
                 accessibilityLabel="Invitations and join requests follow How people join, in Members"
-                onPress={() => router.push({ pathname: '/group-members', params: { groupId: chatId, name: savedName } } as any)}
+                onPress={() => router.push({ pathname: '/group-members', params: { groupId: chatId, name: savedName } })}
               >
                 <Text style={s.switchSub}>
                   Invitations and “ask to join” follow <Text style={{ color: colors.primary, fontWeight: '700' }}>How people join</Text> in Members.
@@ -392,8 +411,19 @@ export default function GroupAdminScreen() {
         {/* Pending join requests (admin, approve-members on) */}
         {isAdmin && approve && (
           <View style={s.section}>
-            <Text style={s.sectionTitle} accessibilityRole="header">Link join requests ({joinReqs.length})</Text>
-            {reqsFailed ? (
+            <Text style={s.sectionTitle} accessibilityRole="header">
+              Link join requests ({linkReqsInQueue ?? joinReqs.length})
+            </Text>
+            {linkReqsInQueue !== null ? (
+              <TouchableOpacity style={s.linkRow} accessibilityRole="link"
+                accessibilityLabel="Link join requests are approved with invitations in Add people, under Waiting"
+                onPress={() => router.push({ pathname: '/group-invites', params: { chatId, name: savedName } })}>
+                <Text style={s.switchSub}>
+                  Approve them with invitations in <Text style={{ color: colors.primary, fontWeight: '700' }}>Add people → Waiting</Text>.
+                </Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.textDim} />
+              </TouchableOpacity>
+            ) : reqsFailed ? (
               <TouchableOpacity accessibilityRole="button" accessibilityLabel="Couldn't load join requests. Retry" onPress={() => loadJoinReqs(chatId!)}>
                 <Text style={[s.hint, { color: colors.danger }]}>Couldn’t load join requests. Tap to retry.</Text>
               </TouchableOpacity>
@@ -403,7 +433,8 @@ export default function GroupAdminScreen() {
               <View key={r.userId} style={s.memberRow}>
                 <View style={s.avatar}><Text style={s.avatarText}>{initialOf(r.name)}</Text></View>
                 <Text style={[s.memberName, { flex: 1 }]} numberOfLines={1}>{r.name || r.userId.slice(0, 8)}</Text>
-                <TouchableOpacity style={s.reqApprove} onPress={() => approveReq(r.userId)} hitSlop={6}
+                <TouchableOpacity style={s.reqApprove} onPress={() => approveReq(r.userId)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 0 }}
                   accessibilityRole="button" accessibilityLabel={`Approve ${r.name || 'this person'}`}><Text style={s.reqApproveTxt}>Approve</Text></TouchableOpacity>
                 <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Reject the join request from ${r.name || r.userId.slice(0, 8)}`} style={s.reqReject} onPress={() => rejectReq(r)} hitSlop={10}><Ionicons name="close" size={18} color={colors.danger} /></TouchableOpacity>
               </View>

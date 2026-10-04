@@ -15,8 +15,16 @@ import type { CommunityStyles } from './communityStyles';
 
 export type CommunityAction = 'edit' | 'delete' | 'leave' | 'attach';
 
+/**
+ * Whether this server has the C9 management routes: 'probing' (asking once),
+ * 'yes', 'no' (not deployed: the actions are replaced by a note, so nothing
+ * fails after a confirm), or 'unknown' (the probe could not tell; the actions
+ * stay and still say "Not available yet" if the route is missing).
+ */
+export type ManageSupport = 'probing' | 'yes' | 'no' | 'unknown';
+
 export function CommunityDetailView({
-  S, detail, stale, retrying, acting, onBack, onRetry, onOpenGroup, onNewGroup, onAction,
+  S, detail, stale, retrying, acting, manage, onBack, onRetry, onOpenGroup, onNewGroup, onAction,
 }: {
   S: CommunityStyles;
   detail: CommunityDetail;
@@ -25,6 +33,7 @@ export function CommunityDetailView({
   retrying: boolean;
   /** A management request in flight. */
   acting: CommunityAction | null;
+  manage: ManageSupport;
   onBack: () => void;
   onRetry: () => void;
   onOpenGroup: (chatId: string) => void;
@@ -33,6 +42,7 @@ export function CommunityDetailView({
 }) {
   const { colors } = useTheme();
   const busy = acting != null;
+  const canManage = manage === 'yes' || manage === 'unknown';
   const actionRow = (a: CommunityAction, icon: keyof typeof Ionicons.glyphMap, label: string, danger = false) => (
     <TouchableOpacity style={danger ? S.dangerRow : S.addRow} activeOpacity={0.7} disabled={busy}
       accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled: busy, busy: acting === a }}
@@ -55,7 +65,7 @@ export function CommunityDetailView({
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.hTitle} numberOfLines={1} accessibilityRole="header">{detail.name}</Text>
-        {detail.isOwner && (
+        {detail.isOwner && canManage && (
           <TouchableOpacity accessibilityRole="button" accessibilityLabel="Edit community name and description" disabled={busy}
             accessibilityState={{ disabled: busy }} onPress={() => onAction('edit')} style={S.hBtn} hitSlop={8}>
             <Ionicons name="create-outline" size={22} color={colors.text} />
@@ -110,10 +120,17 @@ export function CommunityDetailView({
               <View style={S.addIcon}><Ionicons name="add" size={22} color={colors.primary} /></View>
               <Text style={S.addTxt}>New group</Text>
             </TouchableOpacity>
-            {actionRow('attach', 'link-outline', 'Add a group you manage')}
-            {detail.isOwner
+            {canManage && actionRow('attach', 'link-outline', 'Add a group you manage')}
+            {canManage && (detail.isOwner
               ? actionRow('delete', 'trash-outline', 'Delete community', true)
-              : actionRow('leave', 'exit-outline', 'Leave community', true)}
+              : actionRow('leave', 'exit-outline', 'Leave community', true))}
+            {manage === 'no' && (
+              <Text style={[S.emptySub, { marginHorizontal: 24, marginTop: 12, textAlign: 'left' }]}>
+                {detail.isOwner
+                  ? 'Editing or deleting this community, and adding a group you already have, need a server update that has not been released yet.'
+                  : 'Leaving this community, and adding a group you already have, need a server update that has not been released yet. You can still leave each group on its own.'}
+              </Text>
+            )}
           </View>
         }
       />

@@ -19,6 +19,7 @@ import { useTheme } from '../lib/theme';
 import { AuroraBackground } from '../components/ui/AuroraBackground';
 import { AppText as Text } from '../components/ui/Text';
 import { circleMembers } from '../lib/family/circle';
+import { tint } from '../lib/tintColor';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { navigateTo } from '../lib/nav/openNavigation';
 import {
@@ -63,6 +64,14 @@ export default function GroupTripScreen() {
   // Navigate / Leave / End in flight (double-tap guard).
   const [acting, setActing] = useState<'join' | 'leave' | 'end' | null>(null);
   const [tick, setTick] = useState(0);
+  // circleMembers failed: participants show as "Member"; a note says why, with Retry.
+  const [namesFailed, setNamesFailed] = useState(false);
+  const loadNames = useCallback(() => {
+    if (!groupId) return;
+    circleMembers(groupId)
+      .then((m) => { setMembers(m); setNamesFailed(false); })
+      .catch(() => setNamesFailed(true));
+  }, [groupId]);
 
   useFocusEffect(useCallback(() => {
     let live = true;
@@ -73,7 +82,9 @@ export default function GroupTripScreen() {
       const myId = u ? String(u.id) : null;
       setMe(myId);
       if (!groupId || !myId) return;
-      circleMembers(groupId).then((m) => live && setMembers(m)).catch(() => {});
+      circleMembers(groupId)
+        .then((m) => { if (live) { setMembers(m); setNamesFailed(false); } })
+        .catch(() => { if (live) setNamesFailed(true); });
       const off = await subscribeTrip(
         groupId, myId,
         (e) => {
@@ -224,7 +235,7 @@ export default function GroupTripScreen() {
             </View>
             <TouchableOpacity onPress={() => setLead((v) => !v)}
               accessibilityRole="checkbox" accessibilityLabel="Everyone follows my route" accessibilityState={{ checked: lead }}
-              style={[st.lead, { borderColor: lead ? colors.primary : colors.border, backgroundColor: lead ? colors.primary + '14' : 'transparent' }]}>
+              style={[st.lead, { borderColor: lead ? colors.primary : colors.border, backgroundColor: lead ? tint(colors.primary, 0.08) : 'transparent' }]}>
               <Ionicons name={lead ? 'checkbox' : 'square-outline'} size={19} color={lead ? colors.primary : colors.textFaint} />
               <View style={{ flex: 1 }}>
                 <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13.5 }}>Everyone follows my route</Text>
@@ -249,7 +260,7 @@ export default function GroupTripScreen() {
         ) : (
           <>
             <View style={[st.dest, { backgroundColor: colors.glassSoft, borderColor: done ? colors.success : colors.primary }]}>
-              <View style={[st.destIcon, { backgroundColor: (done ? colors.success : colors.primary) + '22' }]}>
+              <View style={[st.destIcon, { backgroundColor: tint(done ? colors.success : colors.primary, 0.13) }]}>
                 <Ionicons name={done ? 'checkmark-done' : 'flag'} size={20} color={done ? colors.success : colors.primary} />
               </View>
               <View style={{ flex: 1 }}>
@@ -281,7 +292,7 @@ export default function GroupTripScreen() {
               {trip.startedBy === me ? (
                 <TouchableOpacity onPress={end} disabled={!!acting} accessibilityRole="button"
                   accessibilityState={{ disabled: !!acting, busy: acting === 'end' }}
-                  style={[st.action, { borderColor: colors.danger, backgroundColor: colors.danger + '12' }]}>
+                  style={[st.action, { borderColor: colors.danger, backgroundColor: tint(colors.danger, 0.07) }]}>
                   {acting === 'end' ? <ActivityIndicator size="small" color={colors.danger} />
                     : <Ionicons name="flag-outline" size={18} color={colors.danger} />}
                   <Text style={[st.actionTxt, { color: colors.danger }]}>End trip</Text>
@@ -289,7 +300,7 @@ export default function GroupTripScreen() {
               ) : (
                 <TouchableOpacity onPress={leave} disabled={!!acting} accessibilityRole="button"
                   accessibilityState={{ disabled: !!acting, busy: acting === 'leave' }}
-                  style={[st.action, { borderColor: colors.danger, backgroundColor: colors.danger + '12' }]}>
+                  style={[st.action, { borderColor: colors.danger, backgroundColor: tint(colors.danger, 0.07) }]}>
                   {acting === 'leave' ? <ActivityIndicator size="small" color={colors.danger} />
                     : <Ionicons name="exit-outline" size={18} color={colors.danger} />}
                   <Text style={[st.actionTxt, { color: colors.danger }]}>Leave</Text>
@@ -300,6 +311,14 @@ export default function GroupTripScreen() {
             <Text style={[st.h, { color: colors.text, marginTop: 26 }]} accessibilityRole="header">
               {participants.length ? `${participants.length} on the way` : 'Nobody sharing yet'}
             </Text>
+
+            {namesFailed && participants.length > 0 && (
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Couldn't load member names. Retry" onPress={loadNames}>
+                <Text style={{ color: colors.danger, fontSize: 12.5, marginBottom: 8 }}>
+                  Couldn’t load member names, so they show as “Member”. Tap to retry.
+                </Text>
+              </TouchableOpacity>
+            )}
 
             {participants.length === 0 && (
               <Text style={{ color: colors.textDim, fontSize: 13.5 }}>
@@ -312,7 +331,7 @@ export default function GroupTripScreen() {
                 accessibilityLabel={`${p.name}, ${STATUS_LABEL[p.status]}${p.status !== 'arrived' && p.etaAt != null
                   ? `, arriving in about ${minutesUntil(p.etaAt, now)} minutes`
                   : p.status !== 'arrived' ? ', no arrival time yet' : ''}`}>
-                <View style={[st.dot, { backgroundColor: tone(p.status) + '22' }]}>
+                <View style={[st.dot, { backgroundColor: tint(tone(p.status), 0.13) }]}>
                   <Ionicons
                     name={p.status === 'arrived' ? 'checkmark' : p.status === 'deviated' ? 'git-branch'
                       : p.status === 'stale' ? 'cloud-offline-outline' : 'car'}

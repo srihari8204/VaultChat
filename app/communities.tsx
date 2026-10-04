@@ -14,25 +14,17 @@ import {
   listCommunities, createCommunity, getCommunity, createCommunityGroup, listChats,
   type Community, type CommunityDetail, type ChatSummary,
 } from '../lib/chatService';
-import { readCache, writeCache } from '../lib/localCache';
+import { clearCache, readCache, writeCache } from '../lib/localCache';
 import { AuroraBackground } from '../components/ui';
 import { AppText as Text } from '../components/ui/Text';
 import { makeCommunityStyles } from '../components/groups/communityStyles';
 import { CommunityNameModal, type NameModalMode } from '../components/groups/CommunityNameModal';
-import { CommunityDetailView, type CommunityAction } from '../components/groups/CommunityDetailView';
+import { CommunityDetailView, type CommunityAction, type ManageSupport } from '../components/groups/CommunityDetailView';
 import { CommunityAttachSheet } from '../components/groups/CommunityAttachSheet';
 import {
   editCommunity, deleteCommunity, leaveCommunity, attachGroupToCommunity, NotAvailableYet,
+  communityManagementSupported,
 } from '../lib/groups/serverContracts';
-
-/** Edit / delete / leave / attach are new server routes (R4 backend C9), not deployed yet. */
-const notYet = (e: unknown, what: string) => {
-  if (e instanceof NotAvailableYet) {
-    Alert.alert('Not available yet', `${what} needs a server update that has not been released. Nothing was changed.`);
-    return true;
-  }
-  return false;
-};
 
 export default function CommunitiesScreen() {
   const { colors } = useTheme();
@@ -61,6 +53,28 @@ export default function CommunitiesScreen() {
   const [myGroups, setMyGroups] = useState<ChatSummary[]>([]);
   // Only the latest openCommunity may write: tapping A then B must end on B.
   const openSeq = useRef(0);
+  // Edit / delete / leave / attach are new server routes (R4 backend C9, not
+  // deployed yet). Asked once per app session; while missing, the detail view
+  // shows a note instead of four actions that would fail after a confirm.
+  const [manage, setManage] = useState<ManageSupport>('probing');
+  const detailId = detail?.id;
+  useEffect(() => {
+    if (!detailId) return;
+    let live = true;
+    communityManagementSupported(detailId).then(
+      (k) => { if (live) setManage(k === null ? 'unknown' : k ? 'yes' : 'no'); },
+      () => { if (live) setManage('unknown'); },
+    );
+    return () => { live = false; };
+  }, [detailId]);
+
+  /** A C9 route turned out to be missing (the probe could not tell earlier). */
+  const notYet = useCallback((e: unknown, what: string) => {
+    if (!(e instanceof NotAvailableYet)) return false;
+    setManage('no');
+    Alert.alert('Not available yet', `${what} needs a server update that has not been released. Nothing was changed.`);
+    return true;
+  }, []);
 
   const loadList = useCallback(async () => {
     // Local-first: paint cached list instantly, then refresh in background.
@@ -142,7 +156,7 @@ export default function CommunitiesScreen() {
     } catch (e: any) {
       if (!notYet(e, 'Adding an existing group')) Alert.alert('Could not add the group', e?.message ?? 'Try again.');
     } finally { setActing(null); }
-  }, [detail, acting, openCommunity]);
+  }, [detail, acting, openCommunity, notYet]);
 
   const onAction = useCallback((a: CommunityAction) => {
     if (!detail || acting) return;
@@ -153,6 +167,8 @@ export default function CommunitiesScreen() {
       setActing(a);
       try {
         if (a === 'delete') await deleteCommunity(d.id); else await leaveCommunity(d.id);
+        // The saved copy would reopen a community that is gone (or left).
+        clearCache('community:' + d.id).catch(() => {});
         closeDetail();
         loadList();
       } catch (e: any) {
@@ -173,7 +189,7 @@ export default function CommunitiesScreen() {
         { text: 'Leave', style: 'destructive', onPress: run },
       ]);
     }
-  }, [detail, acting, loadMyGroups, closeDetail, loadList]);
+  }, [detail, acting, loadMyGroups, closeDetail, loadList, notYet]);
 
   const submitModal = useCallback(async () => {
     const n = name.trim();
@@ -201,7 +217,7 @@ export default function CommunitiesScreen() {
       }
     } catch (e: any) { Alert.alert(modal === 'edit' ? 'Could not save' : 'Could not create', e?.message ?? 'Try again'); }
     finally { setBusy(false); }
-  }, [name, desc, modal, detail, busy, openCommunity, loadList]);
+  }, [name, desc, modal, detail, busy, openCommunity, loadList, notYet]);
 
   const nameModal = (
       <CommunityNameModal S={S} mode={modal} name={name} desc={desc} onName={setName} onDesc={setDesc}
@@ -213,9 +229,9 @@ export default function CommunitiesScreen() {
     return (
       <>
         <CommunityDetailView
-          S={S} detail={detail} stale={detailStale} retrying={retrying} acting={acting}
+          S={S} detail={detail} stale={detailStale} retrying={retrying} acting={acting} manage={manage}
           onBack={closeDetail} onRetry={retryDetail}
-          onOpenGroup={(id) => router.push({ pathname: '/chat', params: { id } } as any)}
+          onOpenGroup={(id) => router.push({ pathname: '/chat', params: { id } })}
           onNewGroup={() => { setName(''); setModal('group'); }}
           onAction={onAction}
         />

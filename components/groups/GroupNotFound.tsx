@@ -13,7 +13,7 @@ import { AppText as Text } from '../ui/Text';
 
 export function GroupNotFound({ title, detail }: { title: string; detail?: string }) {
   const { colors } = useTheme();
-  const leave = () => (router.canGoBack() ? router.back() : router.replace('/(tabs)/chats' as any));
+  const leave = () => (router.canGoBack() ? router.back() : router.replace('/(tabs)/chats'));
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center', padding: 32 }}>
       <AuroraBackground variant="chat" />
