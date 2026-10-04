@@ -13,4 +13,6 @@
  * (#0040FD) and 4.69:1 (#8C49FC), both AA for the 16 pt labels;
  * constants/brandCtaInk.selftest.ts keeps it that way if either side changes.
  */
-export const BRAND_CTA_INK = '#FFFFFF';
+// One value with constants/theme GRADIENT_INK (the same white on the same
+// gradient for Button and GlassChip), so the two cannot drift apart.
+export { GRADIENT_INK as BRAND_CTA_INK } from './theme';

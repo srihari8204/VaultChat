@@ -44,6 +44,12 @@ export async function sampleVideo(
   }
 }
 
+/** Stop a running sampleVideo between frames (it then resolves []). A build
+ *  without the native method keeps the old behaviour: the sample runs out. */
+export function cancelSampling(): void {
+  try { Native?.cancelSampling?.(); } catch { /* best effort */ }
+}
+
 /** Convenience: sample and analyse in one call. */
 export async function analyseVideo(
   uri: string,

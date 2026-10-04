@@ -102,6 +102,22 @@ class VaultViewModule(reactContext: ReactApplicationContext) :
         }
     }
 
+    // Reads the window's FLAG_SECURE itself (lib/screenGuard readSecureStateSettled),
+    // so the privacy dashboard reports the window, not the last value JS applied.
+    // No activity → null, which JS treats as "unknown" and falls back on.
+    @ReactMethod
+    fun isSecure(promise: Promise) {
+        val activity: Activity? = getCurrentActivity()
+        if (activity == null) { promise.resolve(null); return }
+        activity.runOnUiThread {
+            try {
+                promise.resolve((activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE) != 0)
+            } catch (e: Throwable) {
+                promise.reject("E_SECURE_READ", e)
+            }
+        }
+    }
+
     // ── State ────────────────────────────────────────────────
 
     @ReactMethod

@@ -20,7 +20,7 @@ import { Stack, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
 import { getMedia } from '../lib/mediaStore';
-import { verifyMedia, formatReport, type VaultCheckReport } from '../lib/vaultcheck';
+import { verifyMedia, formatReport, cancelSampling, type VaultCheckReport } from '../lib/vaultcheck';
 import { userErrorText } from '../lib/userErrorText';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
@@ -49,10 +49,11 @@ export default function VaultCheckScreen() {
   const [elapsed, setElapsed] = useState(0);
   // A timeout only stops WAITING: the running analysis is kept here and Try
   // again waits on it again instead of starting a second one alongside it.
-  // Leaving the screen cancels it (between stages — lib/vaultcheck).
+  // Leaving the screen cancels it (between stages, and the native frame
+  // sampling between frames — lib/vaultcheck).
   const inflight = useRef<{ key: string; p: Promise<VaultCheckReport> } | null>(null);
   const left = useRef(false);
-  useEffect(() => () => { left.current = true; }, []);
+  useEffect(() => () => { left.current = true; cancelSampling(); }, []);
   // Screen readers get one progress update on a long check (the elapsed
   // counter is deliberately not a live region).
   useEffect(() => {

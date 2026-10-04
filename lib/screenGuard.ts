@@ -163,8 +163,8 @@ async function applySecure(enabled: boolean): Promise<boolean> {
  * noteWindowSecure by the VaultCalls.setWindowSecure paths (lib/call/engine.ts,
  * lib/golive/native.ts) — not a read of the window itself. The async
  * readSecureStateSettled reads the window through VaultViewGuard.isSecure when
- * a build has that method (plugins/android/VaultViewModule.kt; not there yet),
- * and falls back to this.
+ * a build has that method (plugins/android/VaultViewModule.kt; written, not
+ * yet in a shipped build), and falls back to this.
  */
 export function readSecureState(): boolean | 'unknown' {
   if (__DEV__ || Platform.OS !== 'android') return false;

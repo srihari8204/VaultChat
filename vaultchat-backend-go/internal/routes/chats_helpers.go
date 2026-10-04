@@ -104,12 +104,17 @@ func chatsGet(w http.ResponseWriter, r *http.Request) {
 		`SELECT cm.user_id, cm.role, cm.joined_at, cm.last_read_message_id, cm.last_delivered_message_id,
 		        cm.muted, cm.left_at,
 		        u.email, u.name, u.first_name_cipher, u.last_name_cipher, u.email_cipher,
-		        u.photo_url, u.online, u.last_seen_at, u.last_seen_visible, u.status, u.read_receipts
+		        u.photo_url, u.online, u.last_seen_at, u.last_seen_visible, u.status, u.read_receipts,
+		        COALESCE(g.hide_online, FALSE), COALESCE(g.hide_last_seen, FALSE), COALESCE(g.hide_read, FALSE)
 		 FROM chat_members cm
 		 JOIN users u ON u.id = cm.user_id
+		 -- Ghost Mode: what this member hides from the CALLER. Realtime already
+		 -- withholds these signals (presence_changed, message_read); a reload
+		 -- must not hand them back.
+		 LEFT JOIN ghost_mode g ON g.owner_id = cm.user_id AND g.target_id = $2
 		 WHERE cm.chat_id = $1
 		 ORDER BY cm.joined_at`,
-		[]any{chatID}, func(rows pgx.Rows) error {
+		[]any{chatID, user.ID}, func(rows pgx.Rows) error {
 			var (
 				userID, role              string
 				joinedAt                  time.Time
@@ -120,11 +125,14 @@ func chatsGet(w http.ResponseWriter, r *http.Request) {
 				photoURL, status          *string
 				online, lastSeenVisible   *bool
 				readReceipts              *bool
+				ghostOnline, ghostSeen    bool
+				ghostRead                 bool
 			)
 			if e := rows.Scan(&userID, &role, &joinedAt, &lastRead, &lastDelivered,
 				&muted, &leftAt,
 				&email, &name, &fnc, &lnc, &ec,
-				&photoURL, &online, &lastSeenAt, &lastSeenVisible, &status, &readReceipts); e != nil {
+				&photoURL, &online, &lastSeenAt, &lastSeenVisible, &status, &readReceipts,
+				&ghostOnline, &ghostSeen, &ghostRead); e != nil {
 				return e
 			}
 			ident := vault.IdentityFromRow(fnc, lnc, ec, nil, nil, nil, name, email, nil, nil, nil)
@@ -150,12 +158,18 @@ func chatsGet(w http.ResponseWriter, r *http.Request) {
 				anonName := chatsAnonName
 				m.Name, m.Email, m.PhotoURL, m.Status = &anonName, nil, nil, nil
 			}
-			if online != nil {
+			if online != nil && !ghostOnline {
 				m.Online = *online
 			}
-			// last_seen_visible === false → blank lastSeenAt (privacy).
-			if lastSeenVisible == nil || *lastSeenVisible {
+			// last_seen_visible === false, or Ghost Mode hide_last_seen toward
+			// the caller → blank lastSeenAt (privacy; same rule as GET /chats).
+			if (lastSeenVisible == nil || *lastSeenVisible) && !ghostSeen {
 				m.LastSeenAt = httpx.JST(lastSeenAt)
+			}
+			// hide_read: realtime drops this member's message_read for the
+			// caller, so the pointer stays withheld here too. Delivered stays.
+			if ghostRead {
+				m.LastReadMessageID = nil
 			}
 			rr := readReceipts == nil || *readReceipts // !== false
 			members = append(members, memberRow{pub: m, leftAt: leftAt, readReceipts: rr})

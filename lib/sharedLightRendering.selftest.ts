@@ -70,9 +70,11 @@ for (const stop of drawn.find(x => x.type === 'Gradient')!.props.colors) {
 assert.ok(drawn.some(x => x.props.style.backgroundColor === 'rgba(0,0,0,0.08)'), 'count badge does not wash out the button');
 scheme = 'dark'; connection = 'CONNECTING'; render(Banner);
 assert.equal(drawn.find(x => x.type === 'Text')!.props.style.color, '#fff', 'dark status ink unchanged');
-render(Chip, { label: 'Unread', active: true });
-assert.deepEqual(drawn.find(x => x.type === 'Gradient')!.props.colors,
-  [PALETTES.dark.accentLight, PALETTES.dark.accentDeep], 'dark chip gradient unchanged');
+render(Chip, { label: 'Unread', count: 3, active: true });
+for (const stop of drawn.find(x => x.type === 'Gradient')!.props.colors) {
+  assert.ok(ratio('#FFFFFF', stop) >= 4.5, 'every dark active-chip stop supports white text');
+}
+assert.ok(drawn.some(x => x.props.style.backgroundColor === 'rgba(0,0,0,0.08)'), 'dark count badge darkens, never washes out, the pill');
 
 let observed: ReturnType<typeof useGamePalette>;
 function Probe() { observed = useGamePalette(); return null; }

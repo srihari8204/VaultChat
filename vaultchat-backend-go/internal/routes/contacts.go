@@ -239,10 +239,19 @@ func syncVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := db.Pool.Exec(ctx,
-		`UPDATE sync_codes SET verified_by = $1, verified_at = NOW() WHERE code = $2`,
-		user.ID, code); err != nil {
+	// Single use is decided HERE, not by the read above: two redemptions that
+	// both passed the read race on this conditional UPDATE and exactly one row
+	// changes. The loser (or a code that expired in between) gets 409.
+	tag, err := db.Pool.Exec(ctx,
+		`UPDATE sync_codes SET verified_by = $1, verified_at = NOW()
+		  WHERE code = $2 AND verified_at IS NULL AND expires_at > NOW() AND initiator_id <> $1`,
+		user.ID, code)
+	if err != nil {
 		httpx.Err(w, 500, "Verification failed")
+		return
+	}
+	if tag.RowsAffected() != 1 {
+		httpx.Err(w, http.StatusConflict, "Code already used")
 		return
 	}
 	var id string
@@ -268,8 +277,11 @@ func trustedList(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := httpx.UserFrom(r)
 	rows, err := db.Pool.Query(ctx,
-		`SELECT tc.contact_id, u.name, u.vault_id, u.online
+		`SELECT tc.contact_id, u.name, u.vault_id,
+		        u.online AND NOT COALESCE(g.hide_online, FALSE)
 		   FROM trusted_contacts tc JOIN users u ON u.id = tc.contact_id
+		   -- Ghost Mode hide_online toward me: presence_changed is withheld, so is this.
+		   LEFT JOIN ghost_mode g ON g.owner_id = tc.contact_id AND g.target_id = tc.owner_id
 		  WHERE tc.owner_id = $1
 		  ORDER BY tc.created_at`, user.ID)
 	if err != nil {

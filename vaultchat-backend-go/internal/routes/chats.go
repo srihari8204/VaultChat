@@ -1244,22 +1244,24 @@ func chatsList(w http.ResponseWriter, r *http.Request) {
 		          u.last_name_cipher  AS peer_lnc,
 		          u.email_cipher      AS peer_ec,
 		          u.photo_url AS peer_photo,
-		          u.online   AS peer_online,
+		          -- Ghost Mode (g = what the peer hides from me): realtime
+		          -- withholds presence_changed and message_read for these, so the
+		          -- list must not reveal them on the next load.
+		          u.online AND NOT COALESCE(g.hide_online, FALSE) AS peer_online,
 		          CASE WHEN u.read_receipts
 		                AND (SELECT read_receipts FROM users WHERE id = $1)
+		                AND NOT COALESCE(g.hide_read, FALSE)
 		               THEN cm2.last_read_message_id ELSE NULL END AS peer_last_read,
 		          cm2.last_delivered_message_id AS peer_last_delivered,
 		          CASE
 		            WHEN u.last_seen_visible
-		             AND NOT COALESCE((
-		               SELECT g.hide_last_seen FROM ghost_mode g
-		                WHERE g.owner_id = u.id AND g.target_id = $1
-		             ), FALSE)
+		             AND NOT COALESCE(g.hide_last_seen, FALSE)
 		            THEN u.last_seen_at
 		            ELSE NULL
 		          END AS peer_last_seen
 		     FROM chat_members cm2
 		     JOIN users u ON u.id = cm2.user_id
+		     LEFT JOIN ghost_mode g ON g.owner_id = u.id AND g.target_id = $1
 		    WHERE cm2.chat_id = c.id
 		      AND cm2.user_id <> $1
 		      AND cm2.left_at IS NULL

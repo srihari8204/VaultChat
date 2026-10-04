@@ -86,19 +86,26 @@ func chatsMessageReceipts(w http.ResponseWriter, r *http.Request) {
 		        (SELECT l.at FROM chat_receipt_log l
 		          WHERE l.chat_id = $1 AND l.user_id = cm.user_id AND l.kind = 'r' AND l.message_id >= $2
 		          ORDER BY l.message_id LIMIT 1),
-		        COALESCE(u.read_receipts, TRUE)
+		        COALESCE(u.read_receipts, TRUE),
+		        COALESCE(g.hide_read, FALSE)
 		   FROM chat_members cm JOIN users u ON u.id = cm.user_id
+		   LEFT JOIN ghost_mode g ON g.owner_id = cm.user_id AND g.target_id = $3
 		  WHERE cm.chat_id = $1 AND cm.user_id <> $3 AND cm.left_at IS NULL
 		  ORDER BY cm.joined_at`,
 		[]any{chatID, msgID, user.ID}, func(rs pgx.Rows) error {
 			var row chatsReceiptRow
 			var dAt, rAt *time.Time
-			var receipts bool
-			if e := rs.Scan(&row.UserID, &row.Delivered, &row.Read, &dAt, &rAt, &receipts); e != nil {
+			var receipts, ghostRead bool
+			if e := rs.Scan(&row.UserID, &row.Delivered, &row.Read, &dAt, &rAt, &receipts, &ghostRead); e != nil {
 				return e
 			}
 			if !receipts {
 				anyReceiptsOff = true
+			}
+			// Ghost Mode hide_read toward the sender: realtime never sent them
+			// this member's message_read, so Message Info must not either.
+			if ghostRead {
+				row.Read, rAt = false, nil
 			}
 			row.DeliveredAt, row.ReadAt = httpx.JST(dAt), httpx.JST(rAt)
 			rows = append(rows, row)

@@ -10,7 +10,7 @@ import { StyleSheet, TouchableOpacity, View, type StyleProp, type ViewStyle } fr
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { GLASS, GLOW } from '../../constants/glass';
-import { GRADIENT_INK } from '../../constants/theme';
+import { BRAND_BLUE, GRADIENT_INK } from '../../constants/theme';
 import { useColors, useTheme } from '../../lib/theme';
 import { AppText } from './Text';
 
@@ -29,9 +29,9 @@ export function GlassChip({ label, count, active = false, onPress, icon, style, 
   const c = useColors();
   const { scheme } = useTheme();
   // White on the accent gradient (constants/theme GRADIENT_INK); idle text is
-  // the dim token. Light's flat accentDeep is 6.33:1. Dark's gradient starts at
-  // accentLight, where white is only 2.09:1 — pinned as "unchanged" by
-  // lib/sharedLightRendering.selftest.ts, so changing it is a coordinated edit.
+  // the dim token. Light's flat accentDeep is 6.33:1. Dark runs BRAND_BLUE →
+  // accentDeep (6.66 / 6.33:1); it used to start at accentLight, where white is
+  // only 2.09:1. lib/sharedLightRendering.selftest.ts checks every stop ≥ 4.5:1.
   const fg = active ? GRADIENT_INK : c.textDim;
   const showCount = typeof count === 'number' && count > 0;
   const inner = (
@@ -39,7 +39,7 @@ export function GlassChip({ label, count, active = false, onPress, icon, style, 
       {icon && <Ionicons name={icon} size={14} color={fg} />}
       <AppText variant="callout" color={fg} numberOfLines={1}>{label}</AppText>
       {showCount && (
-        <View style={[styles.count, { backgroundColor: active ? (scheme === 'light' ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.22)') : c.glassSoft }]}>
+        <View style={[styles.count, { backgroundColor: active ? 'rgba(0,0,0,0.08)' : c.glassSoft }]}>
           <AppText variant="tiny" color={fg} numberOfLines={1}>{count > 99 ? '99+' : String(count)}</AppText>
         </View>
       )}
@@ -57,7 +57,7 @@ export function GlassChip({ label, count, active = false, onPress, icon, style, 
     >
       {active ? (
         <LinearGradient
-          colors={[scheme === 'light' ? c.accentDeep : c.accentLight, c.accentDeep]}
+          colors={[scheme === 'light' ? c.accentDeep : BRAND_BLUE, c.accentDeep]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={[styles.pill, { borderColor: c.glassStroke, borderWidth: scheme === 'light' ? 1 : StyleSheet.hairlineWidth }]}

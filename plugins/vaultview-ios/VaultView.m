@@ -31,6 +31,8 @@ RCT_EXTERN_METHOD(extractTrackingId:(NSString *)srcPath
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(cancelSampling)
+
 RCT_EXTERN_METHOD(sampleVideoChannels:(NSString *)path
                   startMs:(nonnull NSNumber *)startMs
                   endMs:(nonnull NSNumber *)endMs

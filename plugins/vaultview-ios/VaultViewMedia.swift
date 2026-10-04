@@ -198,13 +198,44 @@ class VaultViewMedia: NSObject {
 
   // ── rPPG frame sampling ──────────────────────────────────
 
+  // Same design as the Kotlin twin: sampling runs on its own serial queue so a
+  // cancelSampling() on the module's method queue is not stuck behind it, and a
+  // generation captured at call time decides which samples a cancel stops.
+  private let samplerQueue = DispatchQueue(label: "vaultview.media.sampler", qos: .userInitiated)
+  private let genLock = NSLock()
+  private var sampleGen = 0
+
+  private func currentGen() -> Int {
+    genLock.lock(); defer { genLock.unlock() }
+    return sampleGen
+  }
+
+  /// Stop sampleVideoChannels between frames; it rejects with "cancelled".
+  @objc func cancelSampling() {
+    genLock.lock(); sampleGen += 1; genLock.unlock()
+  }
+
   /// See the Kotlin twin for the contract. Returns [{ tMs, r, g, b }]; frames
   /// the decoder cannot produce are skipped, never interpolated.
   @objc(sampleVideoChannels:startMs:endMs:frames:roiX:roiY:roiW:roiH:resolver:rejecter:)
   func sampleVideoChannels(
     _ path: String, startMs: NSNumber, endMs: NSNumber, frames: NSNumber,
     roiX: NSNumber, roiY: NSNumber, roiW: NSNumber, roiH: NSNumber,
-    resolver resolve: RCTPromiseResolveBlock, rejecter reject: RCTPromiseRejectBlock
+    resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    let token = currentGen()
+    samplerQueue.async { [weak self] in
+      guard let self = self else { reject("cancelled", "cancelled", nil); return }
+      self.sampleVideoChannelsOn(token, path, startMs: startMs, endMs: endMs, frames: frames,
+                                 roiX: roiX, roiY: roiY, roiW: roiW, roiH: roiH,
+                                 resolve: resolve, reject: reject)
+    }
+  }
+
+  private func sampleVideoChannelsOn(
+    _ token: Int, _ path: String, startMs: NSNumber, endMs: NSNumber, frames: NSNumber,
+    roiX: NSNumber, roiY: NSNumber, roiW: NSNumber, roiH: NSNumber,
+    resolve: RCTPromiseResolveBlock, reject: RCTPromiseRejectBlock
   ) {
     let clean = path.hasPrefix("file://") ? String(path.dropFirst(7)) : path
     let asset = AVURLAsset(url: URL(fileURLWithPath: clean))
@@ -221,6 +252,7 @@ class VaultViewMedia: NSObject {
     var out: [[String: Any]] = []
 
     for i in 0..<n {
+      if currentGen() != token { reject("cancelled", "cancelled", nil); return }
       let tMs = s + step * Double(i)
       let time = CMTime(seconds: tMs / 1000.0, preferredTimescale: 600)
       guard let cg = try? gen.copyCGImage(at: time, actualTime: nil) else { continue }

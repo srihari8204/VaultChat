@@ -32,6 +32,8 @@ import { verifyC2pa, type C2paResult } from './c2pa';
 import { analyseVideo, isRppgAvailable, type RppgResult } from './rppg';
 import { run as runDetector, type DetectorResult } from './detector';
 
+export { cancelSampling } from './rppg';
+
 export type Verdict = 'likely-authentic' | 'unknown' | 'likely-fake';
 
 export interface VaultCheckReport {
@@ -76,9 +78,10 @@ export async function verifyMedia(
   cancelled: () => boolean = () => false,
 ): Promise<VaultCheckReport> {
   const notChecked: string[] = [];
-  // ponytail: checked between stages only. A stage already running (the file
-  // read, the native frame sampling, the detector) finishes first; the later
-  // stages are skipped. Stopping mid-stage needs cancellable native calls.
+  // ponytail: checked between stages only. The native frame sampling also
+  // stops mid-stage when the caller calls cancelSampling() (builds with the
+  // native method); the file read and the detector still finish first and the
+  // later stages are skipped. Stopping those needs cancellable native calls.
   const stop = () => { if (cancelled()) throw new VaultCheckCancelled(); };
 
   // ── C2PA ──

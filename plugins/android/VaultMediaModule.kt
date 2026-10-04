@@ -10,6 +10,8 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import java.io.File
 import java.io.FileOutputStream
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * VaultView / VaultCheck pixel work — Android.
@@ -243,12 +245,42 @@ class VaultMediaModule(reactContext: ReactApplicationContext) :
      * Returns [{ tMs, r, g, b }]. Frames the decoder cannot produce are skipped
      * rather than interpolated — JS must check the spacing it actually got.
      */
+    // Sampling runs on its own thread: every @ReactMethod of every module shares
+    // one native-modules thread, so a cancelSampling() queued behind a running
+    // sample would only arrive after it finished. Single thread = samples still
+    // run one at a time, as before.
+    private val sampler = Executors.newSingleThreadExecutor()
+    // Bumped by cancelSampling(). A sample captures it when JS calls, so a
+    // cancel stops the running sample and any queued behind it, and never
+    // touches a sample requested afterwards.
+    private val sampleGen = AtomicInteger(0)
+
+    /** Stop sampleVideoChannels between frames; it rejects with "cancelled". */
+    @ReactMethod
+    fun cancelSampling() {
+        sampleGen.incrementAndGet()
+    }
+
     @ReactMethod
     fun sampleVideoChannels(
         path: String, startMs: Double, endMs: Double, frames: Int,
         roiX: Double, roiY: Double, roiW: Double, roiH: Double,
         promise: Promise,
     ) {
+        val gen = sampleGen.get()
+        try {
+            sampler.execute { sampleVideoChannelsOn(gen, path, startMs, endMs, frames, roiX, roiY, roiW, roiH, promise) }
+        } catch (e: Throwable) {
+            promise.reject("sample_failed", e.message, e)   // executor shut down (module invalidated)
+        }
+    }
+
+    private fun sampleVideoChannelsOn(
+        gen: Int, path: String, startMs: Double, endMs: Double, frames: Int,
+        roiX: Double, roiY: Double, roiW: Double, roiH: Double,
+        promise: Promise,
+    ) {
+        if (sampleGen.get() != gen) { promise.reject("cancelled", "cancelled"); return }
         val retriever = MediaMetadataRetriever()
         try {
             retriever.setDataSource(path.removePrefix("file://"))
@@ -256,6 +288,7 @@ class VaultMediaModule(reactContext: ReactApplicationContext) :
             val n = frames.coerceIn(2, 300)
             val step = (endMs - startMs) / (n - 1)
             for (i in 0 until n) {
+                if (sampleGen.get() != gen) { promise.reject("cancelled", "cancelled"); return }
                 val tMs = startMs + step * i
                 val frame = retriever.getFrameAtTime(
                     (tMs * 1000).toLong(), MediaMetadataRetriever.OPTION_CLOSEST,
@@ -286,5 +319,11 @@ class VaultMediaModule(reactContext: ReactApplicationContext) :
         } finally {
             try { retriever.release() } catch (_: Throwable) {}
         }
+    }
+
+    override fun invalidate() {
+        sampleGen.incrementAndGet()
+        sampler.shutdown()
+        super.invalidate()
     }
 }
