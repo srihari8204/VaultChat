@@ -423,6 +423,9 @@ export interface OrderDetail {
   cancelReason: string;
   cancelledBy: '' | 'customer' | 'owner';
   rejectReason: string;
+  // The owner's free text behind a rejection coded 'other'. Absent until the
+  // server stores and returns it, and then shown beside the reason.
+  rejectNote?: string;
   notCollectedReason: string;   // '' unless the order expired or was written off
   hasInvoice: boolean;
   /**
@@ -806,10 +809,12 @@ export function setItemAvailability(
 }
 
 // `reason` is required for 'rejected' (one of the six codes) and 'cancelled'
-// (free text); the backend validates transitions and windows.
-export function setOrderStatus(orderId: string, status: OrderStatus, reason = '') {
+// (free text); the backend validates transitions and windows. `note` is the
+// owner's own words for a rejection coded 'other' — sent only then, and
+// harmless to a server that does not read it yet (it then simply drops it).
+export function setOrderStatus(orderId: string, status: OrderStatus, reason = '', note = '') {
   return api<{ ok: boolean; status: OrderStatus }>(`/shopbook/my-shop/orders/${orderId}/status`, {
-    method: 'POST', json: { status, reason },
+    method: 'POST', json: note ? { status, reason, note } : { status, reason },
   });
 }
 
@@ -949,6 +954,12 @@ export function sendReminder(customerId: string) {
 // owner's own request.
 export function setPlan(plan: 'free') {
   return api<{ ok: boolean; plan: string }>(`/shopbook/my-shop/plan`, { method: 'POST', json: { plan } });
+}
+// Ask for Pro. This GRANTS NOTHING: the team switches the entitlement on once
+// the subscription is paid. Idempotent server-side — asking again keeps (and
+// returns) the first request time, so a double tap is not two requests.
+export function requestPro() {
+  return api<{ ok: boolean; requestedAt: string }>(`/shopbook/my-shop/plan/request-pro`, { method: 'POST' });
 }
 
 // The plan the shop is ENTITLED to — what every server gate checks. Shop.plan

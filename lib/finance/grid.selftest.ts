@@ -13,13 +13,22 @@
 //    pinning their outputs here means changing a breakpoint in code without
 //    reopening the design file fails loudly instead of silently drifting.
 
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import {
   contentWidth, tileColumns, quickActionColumns, heroStacks, columnWidth,
   FIN_GUTTER, FIN_GAP, QA_MIN_DP, QA_MIN_COLS, QA_MAX_COLS,
   FIN_CONTENT_MAX_DP, HERO_STACK_BELOW_DP,
 } from './grid';
+
+// Shop Book's screens moved out of app/shop-book.tsx into components/shopbook/
+// (2026-10-04 split). Read the route shell plus every moved file, in a fixed
+// order, so these source checks follow the code rather than its old address.
+const shopBookSource = (root: string): string => [
+  join(root, 'app', 'shop-book.tsx'),
+  ...readdirSync(join(root, 'components', 'shopbook')).filter((f) => /\.tsx?$/.test(f)).sort()
+    .map((f) => join(root, 'components', 'shopbook', f)),
+].map((p) => readFileSync(p, 'utf8')).join('\n');
 
 let failed = 0;
 function A(ok: boolean, what: string): void {
@@ -249,7 +258,7 @@ const SCREENS: [number, string][] = [
 // link row — both of which stayed put on a tablet. Guard the swap.
 {
   const ROOT = join(__dirname, '..', '..');
-  const src = readFileSync(join(ROOT, 'app/shop-book.tsx'), 'utf8');
+  const src = shopBookSource(ROOT);
   // Strip JSX `{/* … */}` blocks as well as `//` lines. Without the first of
   // these the scan reads the comment that DOCUMENTS the removed value and
   // reports the value as still present — which it did, on the first run.
@@ -290,10 +299,12 @@ const SCREENS: [number, string][] = [
   // took 25 call sites down to one legitimate use: the cross-shop loyalty
   // total, which has no single shop and therefore no single currency — the
   // hint beside it says "every ₹100 spent" in so many words.
+  // 2026-10-04: the last one went too. The cross-shop loyalty total has no
+  // single currency, so it now prints as a bare figure instead of in rupees.
   const inrCalls = (code.match(/formatINR\(/g) ?? []).length;
-  A(inrCalls <= 1, `10n. at most one hardcoded-₹ call remains (found ${inrCalls})`);
-  A(/formatINR\(loyalty\?\.totalSpent/.test(code),
-    '10o. the one that remains is still the cross-shop loyalty total');
+  A(inrCalls === 0, `10n. no hardcoded-₹ formatINR call remains (found ${inrCalls})`);
+  A(/formatMoney\(loyalty\.totalSpent, ''\)/.test(code),
+    '10o. the cross-shop loyalty total carries no currency symbol');
 
   // AUTO-RESPONSIVE ON EVERY DEVICE, not on a list of devices. The layout may
   // only ever key off the MEASURED window, so a phone nobody owns yet is
@@ -313,8 +324,8 @@ const SCREENS: [number, string][] = [
   // compiling.
   A(/const makeC = \(P: Palette\)/.test(code), '10r. the palette is a factory over a scheme');
   A(/const makeStyles = /.test(code), '10s. the stylesheet is a factory over the palette');
-  A(/^let C = /m.test(code), '10t. C is re-pointable (let, not const)');
-  A(/^let s = /m.test(code), '10u. s is re-pointable (let, not const)');
+  A(/^(export )?let C = /m.test(code), '10t. C is re-pointable (let, not const)');
+  A(/^(export )?let s = /m.test(code), '10u. s is re-pointable (let, not const)');
   A(/function applyScheme\(/.test(code), '10v. applyScheme exists');
   A(/applyScheme\(scheme === 'dark'/.test(code), '10w. the screen installs the active scheme');
   // NOT keyed: a key remounts the subtree and device testing showed that drops

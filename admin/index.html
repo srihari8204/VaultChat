@@ -6,7 +6,7 @@
      After editing that script, recompute the hash, e.g.
      python3 -c "import re,hashlib,base64,sys;s=open(sys.argv[1]).read();print(base64.b64encode(hashlib.sha256(re.findall(r'<script>(.*?)</script>',s,re.S)[-1].encode()).digest()).decode())" FILE
      The page refuses to run its script until the hash matches. frame-ancestors cannot be set from a meta tag: send it as a header. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-rROVdpwwPtluSPuSQg4ec4CpKjZU+6iBJQmZ+FlFOw0='; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https: http://localhost:* http://127.0.0.1:*; img-src data:; base-uri 'none'; form-action 'none'" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-cW3rzRw/7/TIzy1Hw82bZrfBLNjH0xAfw1yiOP8NeAM='; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https: http://localhost:* http://127.0.0.1:*; img-src data:; base-uri 'none'; form-action 'none'" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="dark" />
 <title>crazzychat · Admin Console</title>
@@ -17,7 +17,7 @@
   :root{
     --bg:#070B14; --panel:#0D1322; --panel2:#111A2E; --line:rgba(232,182,76,.14);
     --line2:rgba(255,255,255,.07); --gold:#E8B64C; --gold-dim:rgba(232,182,76,.12);
-    --txt:#EAF0FB; --sub:rgba(234,240,251,.55); --faint:rgba(234,240,251,.3);
+    --txt:#EAF0FB; --sub:rgba(234,240,251,.62); --faint:rgba(234,240,251,.5);  /* .3 / .55 were under 4.5:1 on --bg */
     --ok:#3ECf8E; --warn:#E8B64C; --err:#FF5C72; --info:#5AA9FF;
     --mono:'JetBrains Mono',ui-monospace,monospace; --head:'Sora',sans-serif; --body:'Nunito Sans',sans-serif;
   }
@@ -27,8 +27,13 @@
   h1,h2,h3,.h{font-family:var(--head);letter-spacing:.2px}
   .mono{font-family:var(--mono)}
   button{font-family:var(--body);cursor:pointer;border:none}
-  input,select,textarea{font-family:var(--body);color:var(--txt);background:var(--panel2);border:1px solid var(--line2);border-radius:10px;padding:11px 13px;font-size:14px;width:100%;outline:none}
-  input:focus,select,textarea:focus{border-color:var(--gold)}
+  input,select,textarea{font-family:var(--body);color:var(--txt);background:var(--panel2);border:1px solid var(--line2);border-radius:10px;padding:11px 13px;font-size:14px;width:100%}
+  input:focus,select:focus,textarea:focus{border-color:var(--gold)}
+  /* Keyboard focus is always visible: outline:none used to remove it from every field. */
+  :focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+  .pages{display:flex;gap:10px;font-size:12px;white-space:nowrap}
+  .pages a{color:var(--gold)}
+  .rowerr{color:var(--err);font-size:12px;margin-left:8px}
   ::placeholder{color:var(--faint)}
   .hide{display:none!important}
 
@@ -134,21 +139,22 @@
 <!-- ───────── APP ───────── -->
 <div id="app" class="hide">
   <div class="topbar">
-    <span id="statusPill" class="pill off"><span class="led"></span><span id="statusTxt">Offline</span></span>
+    <span id="statusPill" class="pill off" role="status" aria-live="polite"><span class="led" aria-hidden="true"></span><span id="statusTxt">Offline</span></span>
     <span id="srvLabel" class="srv mono"></span>
+    <nav class="pages" aria-label="Admin pages"><a href="/logs.html">Server logs</a><a href="/shopbook.html">Shop Book admin</a></nav>
     <button class="btn ghost sm" id="logoutBtn">Disconnect</button>
   </div>
-  <div class="tabs" id="tabs"></div>
+  <div class="tabs" id="tabs" role="tablist" aria-label="Admin sections"></div>
   <main>
     <!-- Dashboard -->
-    <section class="panel active" data-panel="dashboard">
+    <section class="panel active" data-panel="dashboard" id="panel-dashboard" role="tabpanel" aria-labelledby="tab-dashboard">
       <h2 class="sec-h">Overview</h2>
       <div class="grid" id="statGrid"><div class="empty">Loading…</div></div>
       <div class="health" id="healthPanel"><div class="empty">Loading health…</div></div>
     </section>
 
     <!-- Users -->
-    <section class="panel" data-panel="users">
+    <section class="panel" data-panel="users" id="panel-users" role="tabpanel" aria-labelledby="tab-users">
       <h2 class="sec-h">Users</h2>
       <div class="toolbar">
         <input id="userSearch" placeholder="Search name / email / phone…" aria-label="Search users by name, email or phone" />
@@ -164,7 +170,7 @@
     </section>
 
     <!-- Messages -->
-    <section class="panel" data-panel="messages">
+    <section class="panel" data-panel="messages" id="panel-messages" role="tabpanel" aria-labelledby="tab-messages">
       <h2 class="sec-h">Messages · metadata only (no content / E2EE)</h2>
       <div class="toolbar">
         <select id="msgLimit" aria-label="Number of messages to show"><option>50</option><option>100</option><option>200</option></select>
@@ -176,7 +182,7 @@
     </section>
 
     <!-- Sessions -->
-    <section class="panel" data-panel="sessions">
+    <section class="panel" data-panel="sessions" id="panel-sessions" role="tabpanel" aria-labelledby="tab-sessions">
       <h2 class="sec-h">Active sessions</h2>
       <div class="toolbar"><button class="btn sm" id="sessRefresh">Refresh</button></div>
       <div class="tablewrap"><table id="sessTable"><thead><tr>
@@ -185,7 +191,7 @@
     </section>
 
     <!-- Broadcast -->
-    <section class="panel" data-panel="broadcast">
+    <section class="panel" data-panel="broadcast" id="panel-broadcast" role="tabpanel" aria-labelledby="tab-broadcast">
       <h2 class="sec-h">Broadcast announcement</h2>
       <div class="card" style="max-width:520px">
         <div class="field"><label for="bcType">Type</label>
@@ -195,23 +201,26 @@
           <textarea id="bcText" rows="4" placeholder="Sent to every connected client via system:announcement"></textarea>
         </div>
         <button class="btn" id="bcSend">Send to all online</button>
-        <div id="bcResult" class="muted" style="margin-top:12px"></div>
+        <div id="bcResult" class="muted" style="margin-top:12px" role="status" aria-live="polite"></div>
       </div>
     </section>
 
     <!-- Live log -->
-    <section class="panel" data-panel="log">
+    <section class="panel" data-panel="log" id="panel-log" role="tabpanel" aria-labelledby="tab-log">
       <h2 class="sec-h">Live event log · socket firehose</h2>
       <div class="logbar">
         <button class="btn sm" id="logPause">Pause</button>
         <button class="btn sm" id="logClear">Clear</button>
         <span class="muted" id="logCount">0 events</span>
       </div>
-      <div class="logwrap" id="logWrap"></div>
+      <!-- A log landmark, but NOT announced: this is a firehose of every socket
+           event, and reading each one aloud would make the page unusable with
+           a screen reader. The status pill above is the live region. -->
+      <div class="logwrap" id="logWrap" role="log" aria-live="off" aria-label="Live event log"></div>
     </section>
 
     <!-- API Explorer -->
-    <section class="panel" data-panel="api">
+    <section class="panel" data-panel="api" id="panel-api" role="tabpanel" aria-labelledby="tab-api">
       <h2 class="sec-h">API explorer · GET</h2>
       <div class="toolbar">
         <input id="apiPath" class="mono" value="/api/admin/stats" aria-label="API path to GET" />
@@ -293,15 +302,29 @@
     ['dashboard','Dashboard'],['users','Users'],['messages','Messages'],
     ['sessions','Sessions'],['broadcast','Broadcast'],['log','Live Log'],['api','API']
   ];
+  // WAI-ARIA tabs: one tab stop for the strip (roving tabindex), arrows /
+  // Home / End move between tabs, and aria-selected says which is showing.
   function buildTabs(){
     const t=$('#tabs'); t.innerHTML='';
     TABS.forEach(([id,label],i)=>{
       const b=el('button','tab'+(i===0?' active':''),label); b.dataset.tab=id;
+      b.id='tab-'+id; b.setAttribute('role','tab'); b.setAttribute('aria-controls','panel-'+id);
+      b.setAttribute('aria-selected',i===0?'true':'false'); b.tabIndex=i===0?0:-1;
       b.onclick=()=>selectTab(id); t.appendChild(b);
     });
   }
+  $('#tabs').addEventListener('keydown',e=>{
+    const tabs=[...document.querySelectorAll('.tab')]; const i=tabs.indexOf(document.activeElement);
+    if(i<0) return;
+    const j={ArrowRight:i+1,ArrowLeft:i-1,Home:0,End:tabs.length-1}[e.key];
+    if(j==null) return;
+    e.preventDefault(); const b=tabs[(j+tabs.length)%tabs.length]; b.focus(); selectTab(b.dataset.tab);
+  });
   function selectTab(id){
-    document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active',b.dataset.tab===id));
+    document.querySelectorAll('.tab').forEach(b=>{
+      const on=b.dataset.tab===id; b.classList.toggle('active',on);
+      b.setAttribute('aria-selected',on?'true':'false'); b.tabIndex=on?0:-1;
+    });
     document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('active',p.dataset.panel===id));
     if(id==='dashboard') loadDashboard();
     if(id==='users') loadUsers();
@@ -438,8 +461,13 @@
   async function revokeSession(id,btn){
     if(!confirm('Revoke this session? The user will be signed out on next refresh.')) return;
     btn.disabled=true; btn.textContent='…';
+    const old=btn.parentNode.querySelector('.rowerr'); if(old) old.remove();
     try{ await api('/api/admin/sessions/'+encodeURIComponent(id),{method:'DELETE'}); loadSessions(); }
-    catch(e){ alert(e.message); btn.disabled=false; btn.textContent='Revoke'; }
+    catch(e){
+      // Said beside the row it belongs to, not in a blocking alert().
+      const m=el('span','rowerr',e.message); m.setAttribute('role','alert'); btn.after(m);
+      btn.disabled=false; btn.textContent='Revoke';
+    }
   }
   $('#sessRefresh').onclick=loadSessions;
 

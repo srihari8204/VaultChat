@@ -8,7 +8,8 @@
 
 import {
   ORDER_STEPS, orderProgress, nextOrderStatus, orderStatusLabel,
-  normalizeOrderStatus, canCustomerCancel, canOwnerCancel, REJECT_REASONS,
+  normalizeOrderStatus, canCustomerCancel, canOwnerCancel, REJECT_REASONS, REJECT_NOTE_MAX, rejectPayload,
+  couponLabel,
   formatMoney, shopOpenState, cartTotal, isNum, isBlankOrNum, isBlankOrNonNegative, num,
   canCustomerCollect, notCollectedGate, NOT_COLLECTED_AFTER_HOURS,
   isStalePrice, PRICE_STALE_DAYS, dateLocale, orderStamp,
@@ -18,8 +19,23 @@ import {
 // financeFormat is where the comma rule came from. Assert the two screens
 // agree rather than trusting that a copied rule stayed copied.
 import { num as financeNum } from './financeFormat';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+
+// Shop Book's screens moved out of app/shop-book.tsx into components/shopbook/
+// (2026-10-04 split). Read the route shell plus every moved file, from the repo
+// root (or one level below it, as before); null when neither is reachable.
+function shopBookSource(): string | null {
+  for (const root of [process.cwd(), join(process.cwd(), '..'), join(__dirname, '..')]) {
+    try {
+      const dir = join(root, 'components', 'shopbook');
+      return [join(root, 'app', 'shop-book.tsx'),
+        ...readdirSync(dir).filter((f) => /\.tsx?$/.test(f)).sort().map((f) => join(dir, f))]
+        .map((p) => readFileSync(p, 'utf8')).join('\n');
+    } catch { /* try the next root */ }
+  }
+  return null;
+}
 
 let failures = 0;
 function check(name: string, actual: unknown, expected: unknown) {
@@ -248,11 +264,7 @@ check('isBlankOrNum can',
 // ponytail: source scan, not a render test. If this screen ever grows a
 // testable seam (or RNTL lands in the project), assert on behaviour instead.
 {
-  const screen = [
-    join(process.cwd(), 'app', 'shop-book.tsx'),
-    join(process.cwd(), '..', 'app', 'shop-book.tsx'),
-  ].map((p) => { try { return readFileSync(p, 'utf8'); } catch { return null; } })
-   .find((x) => x != null);
+  const screen = shopBookSource();
 
   check('app/shop-book.tsx is readable from the repo root', screen != null, true);
 
@@ -333,11 +345,7 @@ check('the helper is named for what it actually accepts',
 // that were still ungated, and gates calling the wrong predicate so a negative
 // walked through a check that looked like it was there.
 {
-  const screen = [
-    join(process.cwd(), 'app', 'shop-book.tsx'),
-    join(process.cwd(), '..', 'app', 'shop-book.tsx'),
-  ].map((p) => { try { return readFileSync(p, 'utf8'); } catch { return null; } })
-   .find((x) => x != null) ?? '';
+  const screen = shopBookSource() ?? '';
 
   // A discount of -200 raised the bill by ₹200. The bare write is the bug.
   check('the bill discount is no longer written straight from num()',
@@ -364,6 +372,22 @@ check('the helper is named for what it actually accepts',
     /if \(raw\.trim\(\)\) \{\s*Alert\.alert\('Check the quantity',/.test(screen), true);
 }
 
+// ── rejection note (reason 'other' only, ≤ REJECT_NOTE_MAX) ────────
+check('an "other" rejection carries the owner\'s words',
+  rejectPayload('other', '  Supplier strike  '), { reason: 'other', note: 'Supplier strike' });
+check('a coded rejection sends no note (server: note_not_allowed)',
+  rejectPayload('out_of_stock', 'ignored'), { reason: 'out_of_stock', note: '' });
+check('no code reads as other', rejectPayload(undefined, 'x').reason, 'other');
+check('the note is clipped to the server maximum (note_too_long)',
+  rejectPayload('other', 'a'.repeat(REJECT_NOTE_MAX + 50)).note.length, REJECT_NOTE_MAX);
+
+// ── coupon labels speak the shop's currency ───────────────────────
+check('a flat coupon is labelled in the shop currency',
+  couponLabel({ kind: 'flat', value: 50, minOrder: 500 }, '$'), '$50 off over $500');
+check('a percent coupon still reads as a percent', couponLabel({ kind: 'percent', value: 10, minOrder: 0 }, '$'), '10% off');
+check('callers that pass no symbol keep the old ₹ label',
+  couponLabel({ kind: 'flat', value: 20, minOrder: 0 }), '₹20 off');
+
 // ── carts are per shop (cross-shop cart bug) ─────────────────────
 {
   const line = (key: string, name: string): CartItem => ({ key, name, brand: '', qty: 1, price: 10, note: '' });
@@ -380,7 +404,7 @@ check('the helper is named for what it actually accepts',
   check('… and leaves B untouched', cartFor(carts, 'B').map((l) => l.name), ['Milk']);
   check('the previous state is not mutated', cartFor(before, 'A').map((l) => l.name), ['Atta']);
   // the screen must read the cart through the shop id, never one shared array
-  const screen = readFileSync(join(__dirname, '..', 'app', 'shop-book.tsx'), 'utf8');
+  const screen = shopBookSource() ?? '';
   check('the screen keys its cart by the open shop', /cart=\{cartFor\(carts, selShop\.id\)\}/.test(screen), true);
   check('no single shared cart state is left', /useState<CartItem\[\]>\(\[\]\)/.test(screen), false);
 }

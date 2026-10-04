@@ -25,13 +25,21 @@
 //
 //   npx tsx services/khataWalkin.selftest.ts
 
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 
 const ROOT = join(__dirname, '..');
 const read = (...p: string[]) => readFileSync(join(ROOT, ...p), 'utf8');
 const SVC = read('services', 'shopBookService.ts');
-const UI = read('app', 'shop-book.tsx');
+// Shop Book's screens moved out of app/shop-book.tsx into components/shopbook/
+// (2026-10-04 split). Read the route shell plus every moved file, in a fixed
+// order, so these source checks follow the code rather than its old address.
+const shopBookSource = (root: string): string => [
+  join(root, 'app', 'shop-book.tsx'),
+  ...readdirSync(join(root, 'components', 'shopbook')).filter((f) => /\.tsx?$/.test(f)).sort()
+    .map((f) => join(root, 'components', 'shopbook', f)),
+].map((p) => readFileSync(p, 'utf8')).join('\n');
+const UI = shopBookSource(ROOT);
 const GO = read('vaultchat-backend-go', 'internal', 'routes', 'shopbook.go');
 const GOK = read('vaultchat-backend-go', 'internal', 'routes', 'shopbook_khata.go');
 

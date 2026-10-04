@@ -6,7 +6,7 @@
      After editing that script, recompute the hash, e.g.
      python3 -c "import re,hashlib,base64,sys;s=open(sys.argv[1]).read();print(base64.b64encode(hashlib.sha256(re.findall(r'<script>(.*?)</script>',s,re.S)[-1].encode()).digest()).decode())" FILE
      The page refuses to run its script until the hash matches. frame-ancestors cannot be set from a meta tag: send it as a header. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-K1cdc/PRnVAqfP+0IrnK3+SqisG9gkRhrSujfJlRQiA='; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-THG/u0WI4UH0qiQe72hvEWfzI/JlGhUnju9nxTzL5oY='; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'" />
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>crazzychat Server Logs</title>
 <style>
@@ -22,6 +22,11 @@
   header h1 { font-size:15px; font-weight:800; letter-spacing:.3px; }
   header h1 span { color:var(--accent); }
   header h1 a { color:var(--dim); text-decoration:none; font-size:12px; margin-right:8px; }
+  .pages { display:flex; gap:10px; font-size:12px; }
+  .pages a { color:var(--accent); }
+  /* A visible keyboard focus on every control (the browser default is lost on
+     the dark custom-styled buttons and selects). */
+  :focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
   #status { display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--dim); }
   #dot { width:9px; height:9px; border-radius:50%; background:var(--red); box-shadow:0 0 6px var(--red); }
   #dot.on { background:var(--green); box-shadow:0 0 6px var(--green); }
@@ -71,8 +76,9 @@
 <body>
 
 <header>
-  <h1><a href="/" title="back to dashboard">←</a> crazzychat <span>server logs</span></h1>
-  <div id="status"><div id="dot"></div><span id="statustxt">connecting…</span></div>
+  <h1><a href="/" title="back to dashboard" aria-label="Back to the admin console">←</a> crazzychat <span>server logs</span></h1>
+  <nav class="pages" aria-label="Admin pages"><a href="/">Admin console</a><a href="/shopbook.html">Shop Book admin</a></nav>
+  <div id="status" role="status" aria-live="polite"><div id="dot" aria-hidden="true"></div><span id="statustxt">connecting…</span></div>
   <input id="token" type="password" placeholder="admin log token" spellcheck="false" aria-label="Log token" title="LOG_TOKEN from the server (kept only in this tab)">
   <button class="btn" id="forgetBtn" title="forget the token in this tab">forget token</button>
   <div class="spacer"></div>
@@ -97,7 +103,9 @@
 <main>
   <nav id="nav" aria-label="Log sources"></nav>
   <div id="logwrap">
-    <div id="log"></div>
+    <!-- Only APPENDED lines are added to the DOM on a refresh (see renderLog), so
+         a polite log region announces new lines, not the whole tail again. -->
+    <div id="log" role="log" aria-live="polite" aria-relevant="additions" aria-label="Log lines"></div>
     <div id="empty">
       <div id="setup">
         <h2>Enter the log token</h2>
@@ -128,6 +136,10 @@
     stick: true,          // stay glued to the bottom unless the user scrolls up
     connected: false,
     lastLines: [],
+    shown: [],            // the (filtered) lines currently in #log, in order
+    shownKey: '',         // source + filter they were rendered for
+    loading: false,       // a load() is in flight — timer ticks skip, never overlap
+    sourcing: false,      // a loadSources() is in flight
   };
   // Same-origin API (nginx proxies /logapi/ → 127.0.0.1:9999).
   const EP = '/logapi';
@@ -172,22 +184,50 @@
     return '';
   }
 
+  function lineHtml(raw, q) {
+    const line = stripAnsi(raw);
+    let h = esc(line);
+    if (q) {
+      const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+      h = h.replace(rx, (m) => `<mark>${m}</mark>`);
+    }
+    const cls = classify(line);
+    return `<span class="ln${cls ? ' ' + cls : ''}">${h || ' '}</span>`;
+  }
+
+  // How many leading lines of `next` are already on screen as the tail of
+  // `prev`, or -1 when they do not continue it. A refresh of a tail is the old
+  // window slid down: drop from the top, append at the bottom.
+  function overlap(prev, next) {
+    if (!prev.length) return -1;
+    const last = prev[prev.length - 1];
+    for (let j = next.length - 1; j >= 0; j--) {
+      if (next[j] !== last || j + 1 > prev.length) continue;
+      let ok = true;
+      for (let k = 0; k <= j && ok; k++) ok = next[j - k] === prev[prev.length - 1 - k];
+      if (ok) return j + 1;
+    }
+    return -1;
+  }
+
   function renderLog() {
     const q = $('filter').value.trim().toLowerCase();
     const wrapEl = $('logwrap');
+    const logEl = $('log');
     let lines = state.lastLines;
     if (q) lines = lines.filter((l) => l.toLowerCase().includes(q));
-    const html = lines.map((raw) => {
-      const line = stripAnsi(raw);
-      let h = esc(line);
-      if (q) {
-        const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-        h = h.replace(rx, (m) => `<mark>${m}</mark>`);
-      }
-      const cls = classify(line);
-      return `<span class="ln${cls ? ' ' + cls : ''}">${h || ' '}</span>`;
-    }).join('');
-    $('log').innerHTML = html;
+    const key = state.src + '\u0000' + q;
+    const keep = key === state.shownKey ? overlap(state.shown, lines) : -1;
+    if (keep < 0) {
+      logEl.innerHTML = lines.map((raw) => lineHtml(raw, q)).join('');
+    } else {
+      // Append only what is new, then trim the top to the same window.
+      const tpl = document.createElement('template');
+      tpl.innerHTML = lines.slice(keep).map((raw) => lineHtml(raw, q)).join('');
+      logEl.append(tpl.content);
+      while (logEl.childElementCount > lines.length) logEl.firstElementChild.remove();
+    }
+    state.shown = lines; state.shownKey = key;
     $('empty').style.display = state.connected ? 'none' : 'flex';
     $('meta').textContent = `${state.src} · ${lines.length}${q ? ' matching' : ''} lines · ${new Date().toLocaleTimeString()}`;
     if (state.stick) wrapEl.scrollTop = wrapEl.scrollHeight;
@@ -195,12 +235,17 @@
 
   const token = () => $('token').value.trim();
 
+  // Never parses blindly: a 502 from nginx is an HTML page, not JSON. A non-2xx
+  // comes back as { ok:false, error, status } so callers say what happened.
   async function api(path) {
     const r = await fetch(`${EP}${path}`, {
       cache: 'no-store',
       headers: { 'X-Log-Token': token() },
     });
-    return r.json();
+    const d = await r.json().catch(() => null);
+    if (!r.ok) return { ok: false, status: r.status, error: (d && d.error) || `HTTP ${r.status}` };
+    if (!d) return { ok: false, status: r.status, error: 'unreadable response' };
+    return d;
   }
 
   function setConnected(on, msg) {
@@ -211,6 +256,8 @@
   }
 
   async function loadSources() {
+    if (state.sourcing) return false;     // one request at a time
+    state.sourcing = true;
     try {
       const d = await api('/sources');
       if (!token()) return false;   // token forgotten while this was in flight
@@ -221,24 +268,32 @@
       setConnected(true, 'connected');
       return true;
     } catch {
-      setConnected(false, 'no connection');
+      // A rejection that lands after "forget token" must not overwrite it.
+      if (token()) setConnected(false, 'no connection');
       return false;
-    }
+    } finally { state.sourcing = false; }
   }
 
+  // The interval, the reconnect loop and the controls all call this; while one
+  // is in flight the others skip instead of stacking overlapping requests.
   async function load() {
-    if (!state.sources.length && !(await loadSources())) return;
+    if (state.loading) return;
+    state.loading = true;
     try {
+      if (!state.sources.length && !(await loadSources())) return;
       const p = new URLSearchParams({ src: state.src, lines: $('lines').value, since: $('since').value });
       const d = await api(`/logs?${p}`);
       if (!token()) return;          // token forgotten while this was in flight
       if (d.error === 'bad token') { setConnected(false, 'bad token'); return; }
+      // A 5xx (proxy up, log service down) is a connection problem, not log
+      // text. A 4xx such as an unknown source still shows as a ⚠ line below.
+      if (d.status >= 500) { setConnected(false, d.error); return; }
       state.lastLines = d.ok ? d.lines : [`⚠  ${d.error || 'command failed'}`, ...(d.lines || [])];
       setConnected(true, 'connected');
       renderLog();
     } catch {
-      setConnected(false, 'no connection');
-    }
+      if (token()) setConnected(false, 'no connection');
+    } finally { state.loading = false; }
   }
 
   function schedule() {
@@ -271,7 +326,8 @@
   $('forgetBtn').onclick = () => {
     stopTimers();
     sessionStorage.removeItem('lv_tok'); $('token').value = '';
-    state.sources = []; state.lastLines = []; $('log').innerHTML = ''; $('nav').innerHTML = '';
+    state.sources = []; state.lastLines = []; state.shown = []; state.shownKey = '';
+    $('log').innerHTML = ''; $('nav').innerHTML = '';
     setConnected(false, 'token cleared');
   };
   $('wrapBtn').onclick = () => { $('log').classList.toggle('wrap'); $('wrapBtn').classList.toggle('active'); };

@@ -309,6 +309,15 @@ export const REJECT_REASONS: { code: string; label: string }[] = [
   { code: 'other',         label: 'Other' },
 ];
 
+// The owner's own words behind a rejection. The server accepts a note ONLY
+// with reason 'other' (400 note_not_allowed otherwise) and at most 200
+// characters (400 note_too_long), so the payload is shaped here, once.
+export const REJECT_NOTE_MAX = 200;
+export function rejectPayload(code: string | undefined, text: string): { reason: string; note: string } {
+  const reason = code || 'other';
+  return { reason, note: reason === 'other' ? (text ?? '').trim().slice(0, REJECT_NOTE_MAX) : '' };
+}
+
 // ── order timeline ────────────────────────────────────────────────
 export interface TimelineEvent { status: OrderStatus; note: string; at: string }
 
@@ -360,9 +369,11 @@ export function couponDiscount(subtotal: number, coupon?: CouponLike | null): nu
   return Math.round(Math.min(d, subtotal) * 100) / 100;
 }
 
-export function couponLabel(c: CouponLike & { code?: string }): string {
-  const off = c.kind === 'percent' ? `${c.value}% off` : `${formatINR(c.value)} off`;
-  const min = c.minOrder > 0 ? ` over ${formatINR(c.minOrder)}` : '';
+// `symbol` is the SHOP's currency. It defaulted to a hard-coded ₹ (formatINR),
+// which labelled every non-Indian shop's coupon in rupees.
+export function couponLabel(c: CouponLike & { code?: string }, symbol = '₹'): string {
+  const off = c.kind === 'percent' ? `${c.value}% off` : `${formatMoney(c.value, symbol)} off`;
+  const min = c.minOrder > 0 ? ` over ${formatMoney(c.minOrder, symbol)}` : '';
   return `${off}${min}`;
 }
 

@@ -22,12 +22,20 @@
 //
 //   npx tsx utils/units.selftest.ts
 
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { UNIT_PRESETS, normalizeUnit, formatQtyUnit } from './shopbook';
 
 const ROOT = join(__dirname, '..');
-const UI = readFileSync(join(ROOT, 'app', 'shop-book.tsx'), 'utf8');
+// Shop Book's screens moved out of app/shop-book.tsx into components/shopbook/
+// (2026-10-04 split). Read the route shell plus every moved file, in a fixed
+// order, so these source checks follow the code rather than its old address.
+const shopBookSource = (root: string): string => [
+  join(root, 'app', 'shop-book.tsx'),
+  ...readdirSync(join(root, 'components', 'shopbook')).filter((f) => /\.tsx?$/.test(f)).sort()
+    .map((f) => join(root, 'components', 'shopbook', f)),
+].map((p) => readFileSync(p, 'utf8')).join('\n');
+const UI = shopBookSource(ROOT);
 
 let failures = 0;
 const A = (ok: boolean, what: string): void => {

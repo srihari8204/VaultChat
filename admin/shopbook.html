@@ -6,7 +6,7 @@
      After editing that script, recompute the hash, e.g.
      python3 -c "import re,hashlib,base64,sys;s=open(sys.argv[1]).read();print(base64.b64encode(hashlib.sha256(re.findall(r'<script>(.*?)</script>',s,re.S)[-1].encode()).digest()).decode())" FILE
      The page refuses to run its script until the hash matches. frame-ancestors cannot be set from a meta tag: send it as a header. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-9cWK+CU9tx7jxDlzzHUki83uxEno8mlNuFWyygUkzJs='; style-src 'unsafe-inline'; connect-src https: http://localhost:* http://127.0.0.1:*; img-src data:; base-uri 'none'; form-action 'none'" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-eYjOjo8H/sgMf/CSo+jK37h8dLLhxmn1+t3dqpa8kT4='; style-src 'unsafe-inline'; connect-src https: http://localhost:* http://127.0.0.1:*; img-src data:; base-uri 'none'; form-action 'none'" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="dark" />
 <title>Shop Book · Admin</title>
@@ -21,8 +21,14 @@
   body{background:var(--bg);color:var(--txt);font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;padding:20px}
   h1{font-size:20px;margin:0 0 4px} h2{font-size:15px;margin:22px 0 10px;color:var(--green)}
   .sub{color:var(--sub);font-size:13px}
-  input,select,textarea{color:var(--txt);background:var(--panel2);border:1px solid var(--line2);border-radius:9px;padding:9px 11px;font-size:13px;outline:none}
-  input:focus,textarea:focus{border-color:var(--green)}
+  input,select,textarea{color:var(--txt);background:var(--panel2);border:1px solid var(--line2);border-radius:9px;padding:9px 11px;font-size:13px}
+  input:focus,select:focus,textarea:focus{border-color:var(--green)}
+  /* Keyboard focus is always visible: outline:none used to remove it from every field. */
+  :focus-visible{outline:2px solid var(--green);outline-offset:2px}
+  textarea[aria-invalid="true"]{border-color:var(--err)}
+  button:disabled{opacity:.55;cursor:progress}
+  .pages{display:flex;gap:12px;font-size:13px;margin-bottom:6px}
+  .pages a{color:var(--green)}
   button{cursor:pointer;border:none;border-radius:9px;padding:9px 14px;font-weight:700;font-size:13px;background:var(--green);color:#052e12}
   button.ghost{background:var(--panel2);color:var(--txt);border:1px solid var(--line2)}
   button.danger{background:var(--err);color:#fff}
@@ -46,6 +52,7 @@
 </style>
 </head>
 <body>
+<nav class="pages" aria-label="Admin pages"><a href="/">← Admin console</a><a href="/logs.html">Server logs</a></nav>
 <h1>🛍️ Shop Book · Admin</h1>
 <p class="sub">Approvals, verification, location moves, entitlements, country tax engine, categories &amp; starter catalogs,
 and read-only windows onto orders, returns and the shop audit trail. Every action is audit-logged server-side.
@@ -260,9 +267,68 @@ function loadCategories(){
   });
 }
 
+// The shapes the server stores (sbAdminSaveCountry / sbAdminSaveCategory) and
+// the app reads (CountryConfig). The server checks only the required keys; a
+// wrong TYPE elsewhere (a string where the app expects a list) is saved as-is
+// and breaks every shop's settings screen for that country. So check here.
+const isStr = (v) => typeof v === 'string';
+const isOptInt = (v) => v === undefined || Number.isInteger(v);
+const isOptBool = (v) => v === undefined || typeof v === 'boolean';
+const isStrList = (v) => v === undefined || (Array.isArray(v) && v.every(isStr));
+function countryProblems(c){
+  const p = [];
+  if (!c || typeof c !== 'object' || Array.isArray(c)) return ['must be one JSON object'];
+  if (!isStr(c.code) || !/^[A-Za-z]{2}$/.test(c.code)) p.push('code must be two letters, e.g. "IN"');
+  if (!isStr(c.name) || !c.name.trim()) p.push('name is required');
+  if (!isStr(c.currencySymbol) || !c.currencySymbol.trim()) p.push('currencySymbol is required');
+  if (c.currencyCode !== undefined && !(isStr(c.currencyCode) && /^[A-Za-z]{3}$/.test(c.currencyCode))) p.push('currencyCode must be three letters, e.g. "INR"');
+  if (c.taxType !== undefined && !isStr(c.taxType)) p.push('taxType must be text');
+  if (!isStrList(c.taxSplit)) p.push('taxSplit must be a list of names, e.g. ["CGST","SGST"]');
+  if (!isStrList(c.documents)) p.push('documents must be a list of names');
+  if (c.taxFields !== undefined) {
+    if (!Array.isArray(c.taxFields)) p.push('taxFields must be a list');
+    else c.taxFields.forEach((f, i) => {
+      if (!f || !isStr(f.id) || !/^[a-z0-9_]+$/.test(f.id)) p.push(`taxFields[${i}].id must be lower_snake_case`);
+      if (!f || !isStr(f.label) || !f.label.trim()) p.push(`taxFields[${i}].label is required`);
+      if (f && f.type !== undefined && f.type !== 'bool') p.push(`taxFields[${i}].type may only be "bool"`);
+    });
+  }
+  if (c.dateFormat !== undefined && !isStr(c.dateFormat)) p.push('dateFormat must be text');
+  if (!isOptInt(c.sort)) p.push('sort must be a whole number');
+  if (!isOptBool(c.enabled)) p.push('enabled must be true or false');
+  return p;
+}
+function categoryProblems(c){
+  const p = [];
+  if (!c || typeof c !== 'object' || Array.isArray(c)) return ['must be one JSON object'];
+  if (!isStr(c.id) || !/^[a-z0-9_-]+$/.test(c.id)) p.push('id must be lower-case letters, digits, - or _');
+  if (!isStr(c.label) || !c.label.trim()) p.push('label is required');
+  if (c.icon !== undefined && !isStr(c.icon)) p.push('icon must be text');
+  if (!isOptInt(c.sort)) p.push('sort must be a whole number');
+  if (!isOptBool(c.enabled)) p.push('enabled must be true or false');
+  if (c.items !== undefined && c.items !== null) {
+    if (!Array.isArray(c.items)) p.push('items must be a list');
+    else c.items.forEach((it, i) => {
+      if (!it || !isStr(it.name) || !it.name.trim()) p.push(`items[${i}].name is required`);
+      if (it && it.unit !== undefined && !isStr(it.unit)) p.push(`items[${i}].unit must be text`);
+    });
+  }
+  return p;
+}
+
 async function saveJson(srcId, kind){
+  const box = $(srcId);
+  let body;
+  try { body = JSON.parse(box.value); }
+  catch (e) { box.setAttribute('aria-invalid', 'true'); box.focus(); toast('❌ Not valid JSON: ' + e.message); return; }
+  const problems = kind === 'countries' ? countryProblems(body) : categoryProblems(body);
+  if (problems.length) {
+    box.setAttribute('aria-invalid', 'true'); box.focus();
+    toast('❌ Not saved — ' + problems.slice(0, 3).join('; ') + (problems.length > 3 ? ` (+${problems.length - 3} more)` : ''));
+    return;
+  }
+  box.removeAttribute('aria-invalid');
   try {
-    const body = JSON.parse($(srcId).value);
     await api('/api/admin/shopbook/' + kind, { method:'POST', body: JSON.stringify(body) });
     toast('Saved');
     kind === 'countries' ? loadCountries() : loadCategories();
@@ -466,18 +532,20 @@ function loadOrders(){
 function loadReturns(){
   return section('support', async () => {
     const shopId = $('auditShop').value.trim();
-    // ponytail: the admin returns endpoint has no shop filter and its rows carry
-    // no shop id, so a shop id cannot be applied here. Say so rather than show
-    // every shop's returns as if they were filtered. Replace once the backend
-    // accepts ?shopId= (sbAdminReturns).
+    // sbAdminReturns takes ?shopId= and returns each row's shopId (backend
+    // change written 2026-10-04, deploy pending). Until that server is live it
+    // ignores the filter and rows carry no shopId — so the page checks the
+    // rows rather than trusting the request, and says so if they are unfiltered.
     const { returns } = await api('/api/admin/shopbook/returns?shopId=' + encodeURIComponent(shopId));
-    const notice = shopId ? '<p class="err">Returns cannot be filtered by shop yet — showing the latest returns across EVERY shop.</p>' : '';
+    const filtered = returns.every((r) => r.shopId === shopId);
+    const notice = shopId && !filtered ? '<p class="err">This server does not filter returns by shop yet — showing the latest returns across EVERY shop.</p>' : '';
     $('support').innerHTML = notice + (returns.length ? returns.map((r) => `
     <div class="card">
       <div class="row"><b>${esc(r.shopName)}</b>
         <span class="tag ${r.status === 'approved' || r.status === 'completed' ? 'ok':'pend'}">${esc(r.status).toUpperCase()}</span>
         <span class="muted">${esc(r.customerName)} · ${esc(r.currency)}${num(r.refundTotal)} · ${esc(r.settlement)} · ${esc(r.requestedAt)}</span>
       </div>
+      ${r.shopId ? `<div class="muted">Shop ${esc(r.shopId)}</div>` : ''}
       <div class="muted">Reason: ${esc(r.reason)}${r.decisionNote ? ' · Decision: ' + esc(r.decisionNote) : ''}</div>
       ${r.creditNoteId ? `<div class="muted">Credit note ${esc(r.creditNoteId)}</div>` : ''}
     </div>`).join('') : '<p class="muted">No returns.</p>');
@@ -501,26 +569,30 @@ function loadAudit(){
 // ── one delegated click handler ─────────────────────────────────
 document.addEventListener('click', (ev) => {
   const b = ev.target.closest('[data-act]');
-  if (!b || b.tagName !== 'BUTTON') return;
+  if (!b || b.tagName !== 'BUTTON' || b.disabled) return;
   const d = b.dataset;
-  switch (d.act) {
-    case 'connect': loadAll(); break;
-    case 'shops': loadShops(d.filter); break;
-    case 'verifications': loadVerifications(d.filter); break;
-    case 'locations': loadLocations(d.filter); break;
-    case 'new-country': newCountry(); break;
-    case 'save-json': saveJson(d.src, d.kind); break;
-    case 'orders': loadOrders(); break;
-    case 'returns': loadReturns(); break;
-    case 'audit': loadAudit(); break;
-    case 'approve': approve(d.id, d.verified === 'true', d.mode === 'badge'); break;
-    case 'reject-shop': rejectShop(d.id); break;
-    case 'documents': loadDocuments(d.id); break;
-    case 'set-verify': setVerify(d.id, d.state); break;
-    case 'review-doc': reviewDoc(d.id, d.status, d.shop); break;
-    case 'decide-location': decideLocation(d.id, d.approve === 'true'); break;
-    case 'entitlement': setEntitlement(d.id, d.plan, d.state); break;
-  }
+  // Every action is async. The button stays disabled until its request
+  // settles, so a second click cannot send the same approve/verify/save twice.
+  const busy = (p) => { b.disabled = true; b.setAttribute('aria-busy', 'true');
+    Promise.resolve(p).finally(() => { b.disabled = false; b.removeAttribute('aria-busy'); }); };
+  busy((() => { switch (d.act) {
+    case 'connect': return loadAll();
+    case 'shops': return loadShops(d.filter);
+    case 'verifications': return loadVerifications(d.filter);
+    case 'locations': return loadLocations(d.filter);
+    case 'new-country': return newCountry();
+    case 'save-json': return saveJson(d.src, d.kind);
+    case 'orders': return loadOrders();
+    case 'returns': return loadReturns();
+    case 'audit': return loadAudit();
+    case 'approve': return approve(d.id, d.verified === 'true', d.mode === 'badge');
+    case 'reject-shop': return rejectShop(d.id);
+    case 'documents': return loadDocuments(d.id);
+    case 'set-verify': return setVerify(d.id, d.state);
+    case 'review-doc': return reviewDoc(d.id, d.status, d.shop);
+    case 'decide-location': return decideLocation(d.id, d.approve === 'true');
+    case 'entitlement': return setEntitlement(d.id, d.plan, d.state);
+  } })());
 });
 $('key').addEventListener('keydown', (e) => { if (e.key === 'Enter') loadAll(); });
 
