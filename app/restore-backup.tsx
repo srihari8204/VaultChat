@@ -104,8 +104,11 @@ export default function RestoreBackupScreen() {
       .catch(() => { if (alive.current) setMeta({ exists: false, unavailable: true }); });
   }, []);
   // Marked before the lookup, so its "no backup" answer is what clears it.
+  // A failed write is retried once; if storage still refuses, uploads stay
+  // gated anyway: restoreDecisionPending asks the server for any install that
+  // has not settled the decision, and fails closed when storage can't be read.
   useEffect(() => {
-    markRestoreDecisionPending().catch(() => {}).finally(lookUp);
+    markRestoreDecisionPending().catch(() => markRestoreDecisionPending()).catch(() => {}).finally(lookUp);
   }, [lookUp]);
   const lookupFailed = !!meta?.unavailable;
 
@@ -154,7 +157,7 @@ export default function RestoreBackupScreen() {
       if (!alive.current) return;
       setStillPaused(paused);
       setRestored(n);
-    } catch (e: any) {
+    } catch (e) {
       inFlight.current = false;
       if (!alive.current) return;
       setBusy(null);
@@ -171,7 +174,7 @@ export default function RestoreBackupScreen() {
       // Named plainly: the two real causes are "there isn't one" and "the
       // network went away mid-download", and the user can act on both.
       // Mapped, not the raw error text.
-      const msg = String(e?.message ?? '');
+      const msg = String((e as { message?: unknown } | null)?.message ?? '');
       Alert.alert(
         'Could not restore',
         msg.includes('No backup')

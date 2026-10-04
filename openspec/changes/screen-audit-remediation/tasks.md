@@ -12,8 +12,12 @@ updated ratings it links. Rounds 1–2 changed no backend file. Round 3 wrote th
 changes the app was blocked on (commit `3353236`, `vaultchat-backend-go` plus migrations
 140 and 141). Rounds 4–5 added contracts C1–C19, the visitor-pass revoke route,
 `GET /stories/audience?base=1` and the `order_status` side tag (commits `730e5b9`, `433030b`,
-`4910069`, `db1d68b`, `2a05e46`; migrations 142, 143 and 144). All of it is **written, not
-deployed**; the copy list and order are in `2026-10-04_fix_status.md` §4.
+`4910069`, `db1d68b`, `2a05e46`; migrations 142, 143 and 144). Rounds 7–8 added the notes and
+tasks op index (migration 145, `GET /chats/{id}/ops`), Ghost Mode on REST reads, single-use sync
+codes, a user-context read for Message Info, and driver SOS de-duplication with a press time
+(migration 146) (commits `159ab92`, `8cff645`, `147a66c`, `b94d9a5`). All of it is **written, not
+deployed**; the copy list and order are in `2026-10-04_fix_status.md` §4. The round-7 native
+plugin methods (`isSecure`, `cancelSampling`) are written but not compiled.
 
 ## 0. Baseline
 
@@ -134,7 +138,26 @@ deployed**; the copy list and order are in `2026-10-04_fix_status.md` §4.
       re-wrap; scan key never replaced silently; hidden and locked chats masked in search and
       every cross-chat list; a new phone cannot overwrite the online backup and E2EE restores
       stay E2EE; saved family places never overwritten after a failed read; per-mount launch
-      gate — **written**, **not re-scored**; items marked 📱 **device-verified: no**
+      gate — **written**; scored by the round-7 re-raters; items marked 📱 **device-verified: no**
+- [x] 3.17 Round 7 (`aeafff0` … `b4b2d8a`, 16 packages and three coordinator commits): the
+      performance items (server op index for group notes and tasks, migration 145; a virtualised
+      Doc View sheet pane; native AES-GCM for vault chunks, measured in Node at about 27–29 MB/s
+      for @noble and 840–1,425 MB/s native), UI debt to zero (hex literals into documented
+      palette modules with AA selftests, roles on every counted touchable, no `as any` in `app/`
+      or `components/`), every remaining round-5 "Still needed for 10/10" item that can be done
+      here, Ghost Mode on REST reads and single-use sync codes in the server, and native
+      `isSecure`/`cancelSampling` — **written** (server **not deployed**, native **not
+      compiled**); scored by the round-7 re-raters (`b4b2d8a`); op index on a server, Doc View
+      pane and phone cipher speed **device-verified: no**
+- [x] 3.18 Round 8 (`36c2723` … `8c041c5`, 8 packages and coordinator `a041de0`): fixes for what
+      the round-7 re-raters found — driver SOS never reports an undelivered alert as sent, keeps
+      its queue on a read failure, de-duplicates repeat presses and carries the press time
+      (migration 146, not run on any database); restore decision derived and settled only by the
+      account copy, transfer deadline waits for the work, export fails on a cache read error;
+      op-index gap check, the `opKind` tag sent only once the index exists (recorded in
+      `groups-circles`); Doc View pane as a root list; staged vault-key copy used by the next
+      PIN change; no route parameter can delete a ledger; Shop Book hardware Back — **written**,
+      **not re-scored**; items marked 📱 **device-verified: no**
 
 ## 4. Phase 3–4 — partially in scope
 
@@ -145,17 +168,18 @@ deployed**; the copy list and order are in `2026-10-04_fix_status.md` §4.
       touchables with no `accessibilityRole` and hex colour literals, and fails when a file's
       count goes up against `lib/uiDebtRatchet.baseline.json`. It only stops new debt; it does
       not require roles everywhere. The totals went from 45 / 955 when it was added to 5 / 281
-      at `166d207`. The games boards had a screen-reader pass in round 4, still 📱. The
-      app-wide pass is not complete (5 unroled touchables remain, in
-      `components/WritingAssistant.tsx`, `components/ChainLinkIcon.tsx` and
-      `app/videocall.tsx`), so this stays open for `interaction-integrity` — ratchet **written**
+      at `166d207` and to 0 / 0 in round 7; the baseline was committed at zero in `b4b2d8a`, so
+      a new unroled touchable or hex literal in any counted file now fails. The ratchet checks
+      roles statically; labels, state and screen-reader behaviour are not proven by it (the games
+      boards had a screen-reader pass in round 4, still 📱). The full app-wide pass stays with
+      `interaction-integrity` — ratchet **written**, counts at zero; **device-verified: no**
 - [x] 4.3 Split `app/chat.tsx` and `app/shop-book.tsx`. `app/chat.tsx` went from 4,674 to 2,500
       lines, with the moved parts in `components/chat/` (header, search bar, banners, rows,
       composer, modals, lock gate and six hooks). `app/shop-book.tsx` went from about 5,800 lines
       to a 344-line shell plus 12 files in `components/shopbook/`. The round-3 re-raters found
-      no behaviour lost in either split. Rounds 4–6 split more files (see 3.13); `app/chat.tsx`
-      is now 2,576 lines, with its socket effect kept in place because four selftests read it
-      there — **written**
+      no behaviour lost in either split. Rounds 4–7 split more files (see 3.13 and 3.17);
+      round 7 moved the chat socket effect into `components/chat/useChatSocket.ts` (the
+      selftests read both files), and `app/chat.tsx` is now 2,260 lines — **written**
 - [ ] 4.4 Remove the legacy call bodies behind `CALL_ENGINE_V2` — deferred: `constants/flags.ts`
       keeps them as the rollback until the hardware test pass in `CALLS_README.md`
 - [x] 4.5 https intent filter for `vaultchat.app/add` and `/join` (`autoVerify: false`) — **written**;
@@ -165,18 +189,22 @@ deployed**; the copy list and order are in `2026-10-04_fix_status.md` §4.
 
 ## 5. Validation
 
-- [x] 5.1 At `166d207`: `tsc` 0 errors; `expo lint` 0 errors / 27 warnings; `npm test` 471/475,
-      where the four failures are the environmental baseline (`lib/call/minimize`,
-      `lib/layoutMetrics`, `services/securityEmulatorFlag`, `utils/moneySeam`); `openspec
-      validate --all --strict` 49/51 (the same two no-delta changes). Earlier: 158 warnings and
-      386/390 after round 2; 55 and 413/417 after round 3 (`a72296b`); 26 and 441/445 at
-      `4910069`; 30 and 460/464 at `2a05e46` — **written**
-- [x] 5.2 Independent re-rating, in five rounds: 147 screens, then 36, then all 174 remaining
-      screens in 13 batches three times (rounds 3, 4 and 5; round 5 scored `2a05e46`). Mean of
-      the 174 remaining screens: 6.2 → 7.1 after round 2 → 7.8 after round 3 → 8.2 after
-      round 4 → 8.4 after round 5. Against the baseline: 174 up, 0 unchanged, 0 down; against
-      round 3: 150 up, 24 unchanged, 0 down; 169 screens at 8 or above, 12 at 9 or above; none
-      below 5; highest real screen 9 (10 screens). The fixes after `2a05e46` (133 screens) are
-      not re-scored. Results in `2026-10-04_fix_status.md` — **written**
+- [x] 5.1 At `8c041c5` (after round 8): `tsc` 0 errors; `expo lint` 0 errors / 16 warnings;
+      `npm test` 518/522, where the four failures are the environmental baseline
+      (`lib/call/minimize`, `lib/layoutMetrics`, `services/securityEmulatorFlag`,
+      `utils/moneySeam`); `openspec validate --all --strict` 49/51 (the same two no-delta
+      changes); `go build` and `go vet` in `vaultchat-backend-go` OK; uiDebtRatchet 0 unroled
+      touchables and 0 hex literals. Earlier: 158 warnings and 386/390 after round 2; 55 and
+      413/417 after round 3 (`a72296b`); 26 and 441/445 at `4910069`; 30 and 460/464 at
+      `2a05e46`; 27 and 471/475 at `166d207` — **written**
+- [x] 5.2 Independent re-rating, in six rounds: 147 screens, then 36, then all 174 remaining
+      screens in 13 batches four times (rounds 3, 4, 5 and 7; round 7 scored `b4b2d8a`, covering
+      the round-6 and round-7 fixes). Mean of the 174 remaining screens: 6.2 → 7.1 after round 2
+      → 7.8 after round 3 → 8.2 after round 4 → 8.4 after round 5 → 8.5 (8.49) after round 7.
+      Against the baseline: 174 up, 0 unchanged, 0 down; against round 3: 155 up, 19 unchanged,
+      0 down; against round 5: 39 up, 135 unchanged, 0 down; 170 screens at 8 or above, 30 at 9
+      or above; none below 5; highest real screen 9 (28 screens). The round-8 fixes after
+      `b4b2d8a` (95 screens) are not re-scored. Results in `2026-10-04_fix_status.md` —
+      **written**
 - [ ] 5.3 Device pass on Android and iOS for the items marked above
 - [ ] 5.4 Ship in an app release; sync `screen-integrity` to `openspec/specs` only after 5.3
