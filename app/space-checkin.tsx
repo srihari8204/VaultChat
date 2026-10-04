@@ -30,6 +30,7 @@ import {
 import { getCurrentUserAsync } from './(constants)/authService';
 import { AuroraBackground } from '../components/ui';
 import LoadError from '../components/spaces/LoadError';
+import { errMsg } from '../lib/spaces/errors';
 
 
 export default function SpaceCheckinScreen() {
@@ -51,6 +52,8 @@ export default function SpaceCheckinScreen() {
   // and never hides the check-in hero.
   const [leaveError, setLeaveError] = useState(false);
   const [me, setMe] = useState<string>('');
+  // The manager's Today list starts capped at TEAM_PREVIEW rows.
+  const [showAll, setShowAll] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -72,10 +75,10 @@ export default function SpaceCheckinScreen() {
       setLeave(l ?? []);
       setLeaveError(l == null);
       setLoadError(null);
-    } catch (e: any) {
+    } catch (e) {
       // "Not checked in" and "No leave requested" after a failed read would be
       // statements about today that nobody made.
-      setLoadError(e?.message ?? 'Could not load today’s record.');
+      setLoadError(errMsg(e) ?? 'Could not load today’s record.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -91,17 +94,17 @@ export default function SpaceCheckinScreen() {
   const doCheckIn = useCallback(async () => {
     setBusy(true);
     try { await checkIn(spaceId); await load(); }
-    catch (e: any) { Alert.alert('Could not check in', e?.message ?? 'Try again.'); }
+    catch (e) { Alert.alert('Could not check in', errMsg(e) ?? 'Try again.'); }
     finally { setBusy(false); }
   }, [spaceId, load]);
 
   const checkOutNow = useCallback(async () => {
     setBusy(true);
     try { await checkOut(spaceId); await load(); }
-    catch (e: any) {
+    catch (e) {
       // The server refuses a check-out with no check-in rather than inventing a
       // record with an exit and no arrival. Pass its wording through.
-      Alert.alert('Could not check out', e?.message ?? 'Try again.');
+      Alert.alert('Could not check out', errMsg(e) ?? 'Try again.');
     } finally { setBusy(false); }
   }, [spaceId, load]);
   // Checking out closes the day and cannot be undone (checking in again would
@@ -212,7 +215,7 @@ export default function SpaceCheckinScreen() {
           {loadError && (
             <Text style={s.muted}>This list is from the last successful refresh and may be out of date.</Text>
           )}
-          {records.map((r) => (
+          {(showAll ? records : records.slice(0, TEAM_PREVIEW)).map((r) => (
             <View
               key={r.userId} style={s.leaveRow}
               // One element: the dot's colour alone is not a status.
@@ -230,6 +233,14 @@ export default function SpaceCheckinScreen() {
               </Text>
             </View>
           ))}
+          {/* Capped for a large workplace: the list sits in this ScrollView, so
+              every row is drawn at once. */}
+          {!showAll && records.length > TEAM_PREVIEW && (
+            <TouchableOpacity onPress={() => setShowAll(true)} accessibilityRole="button" style={{ minHeight: 44, justifyContent: 'center' }}
+              accessibilityLabel={`Show all ${records.length} people`}>
+              <Text style={{ color: colors.primary, fontWeight: '700' }}>Show all {records.length}</Text>
+            </TouchableOpacity>
+          )}
         </View>
       )}
 
@@ -242,6 +253,9 @@ export default function SpaceCheckinScreen() {
     </View>
   );
 }
+
+/** Rows of the Today list drawn before "Show all". */
+const TEAM_PREVIEW = 30;
 
 const clock = (d: Date) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 

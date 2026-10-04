@@ -16,7 +16,7 @@
 
 import React, { useCallback, useState } from 'react';
 import {
-  View, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, ScrollView, AccessibilityInfo,
+  View, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, ScrollView, AccessibilityInfo, Platform,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,7 +25,7 @@ import { AuroraBackground } from '../components/ui/AuroraBackground';
 import { AppText as Text } from '../components/ui/Text';
 import { brandAlpha } from '../constants/theme';
 import { requestToJoin, myInvitations } from '../lib/chatService';
-import { groupTypeInfo, hexColorOr, inkOn } from '../lib/groups/catalog';
+import { glyphOn, groupTypeInfo, hexColorOr, inkOn } from '../lib/groups/catalog';
 import { joinRefusal } from '../lib/groups/serverContracts';
 import { GroupNotFound } from '../components/groups/GroupNotFound';
 import { tint } from '../lib/tintColor';
@@ -51,6 +51,9 @@ export default function GroupJoinScreen() {
   // a known glyph and a #RRGGBB colour, else the type's own.
   const accent = hexColorOr(params.color ? String(params.color) : null, type.color);
   const ink = inkOn(accent);
+  // The accent as a glyph on the page (its tint is faint): the text ink when a
+  // light accent would not be visible on this theme's ground.
+  const glyph = glyphOn(accent, colors.bg, colors.text);
   const rawIcon = String(params.icon || '');
   const icon = (rawIcon && rawIcon in Ionicons.glyphMap ? rawIcon : type.icon) as keyof typeof Ionicons.glyphMap;
 
@@ -82,9 +85,11 @@ export default function GroupJoinScreen() {
   // "Done" from a cold-start deep link has nothing to go back to.
   const done = () => (router.canGoBack() ? router.back() : router.replace('/(tabs)/chats'));
 
-  // The note that replaces the button after a tap is announced (Android reads
-  // the live region; iOS needs the announcement).
+  // The note that replaces the button after a tap is announced on iOS only:
+  // Android's TalkBack already reads the note's polite live region, and the
+  // announcement as well made it speak twice. VoiceOver ignores live regions.
   const announce = (next: State) => {
+    if (Platform.OS !== 'ios') return;
     const say: Partial<Record<State, string>> = {
       asked: 'Request sent. The admins will decide.',
       member: `You are already in ${name}.`,
@@ -121,7 +126,7 @@ export default function GroupJoinScreen() {
 
         <View style={st.hero}>
           <View style={[st.icon, { backgroundColor: tint(accent, 0.13), borderColor: accent }]}>
-            <Ionicons name={icon} size={34} color={accent} />
+            <Ionicons name={icon} size={34} color={glyph} />
           </View>
           <Text numberOfLines={1} accessibilityRole="header" style={{ color: colors.text, fontWeight: '800', fontSize: 21, marginTop: 14, textAlign: 'center' }}>
             {name}
@@ -141,7 +146,7 @@ export default function GroupJoinScreen() {
         ) : state === 'invited' ? (
           <>
             <View accessibilityLiveRegion="polite" style={[st.note, { borderColor: accent, backgroundColor: tint(accent, 0.07) }]}>
-              <Ionicons name="mail-unread-outline" size={19} color={accent} />
+              <Ionicons name="mail-unread-outline" size={19} color={glyph} />
               <Text style={{ color: colors.text, fontSize: 13.5, flex: 1, lineHeight: 19 }}>
                 You already have an invitation to {name}. Answer it in your invitations.
               </Text>
@@ -154,7 +159,7 @@ export default function GroupJoinScreen() {
           </>
         ) : state === 'accepted' ? (
           <View accessibilityLiveRegion="polite" style={[st.note, { borderColor: accent, backgroundColor: tint(accent, 0.07) }]}>
-            <Ionicons name="hourglass-outline" size={19} color={accent} />
+            <Ionicons name="hourglass-outline" size={19} color={glyph} />
             <Text style={{ color: colors.text, fontSize: 13.5, flex: 1, lineHeight: 19 }}>
               You accepted an invitation to {name}. An admin still has to approve you — you will be
               added when they do.
@@ -162,7 +167,7 @@ export default function GroupJoinScreen() {
           </View>
         ) : state === 'asked' ? (
           <View accessibilityLiveRegion="polite" style={[st.note, { borderColor: accent, backgroundColor: tint(accent, 0.07) }]}>
-            <Ionicons name="hourglass-outline" size={19} color={accent} />
+            <Ionicons name="hourglass-outline" size={19} color={glyph} />
             <Text style={{ color: colors.text, fontSize: 13.5, flex: 1, lineHeight: 19 }}>
               Your request is with the admins. You will be added if they approve it — nothing
               else is needed from you.

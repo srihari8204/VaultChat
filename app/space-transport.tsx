@@ -37,6 +37,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import { getRunsWithManifest } from '../lib/spaces/api';
+import { previousForTimerRead } from '../lib/spaces/runPlan';
 import LoadError from '../components/spaces/LoadError';
 import { createDirectChat } from '../lib/chatService';
 import type { Run, RunStop, RunRider } from '../lib/spaces/runs';
@@ -44,6 +45,7 @@ import { nextStop } from '../lib/spaces/runs';
 import { familyOf } from '../lib/spaces/layout';
 import { initialOf } from '../lib/format';
 import { circleMembers } from '../lib/family/circle';
+import { errMsg } from '../lib/spaces/errors';
 
 interface Loaded {
   run: Run;
@@ -123,8 +125,8 @@ export default function SpaceTransportScreen() {
         pathname: '/voicecall',
         params: { chatId: chat.id, peerUid: driverId, peerName: names[driverId] ?? 'Driver' },
       });
-    } catch (e: any) {
-      Alert.alert('Could not call the driver', e?.message ?? 'Check your connection and try again.');
+    } catch (e) {
+      Alert.alert('Could not call the driver', errMsg(e) ?? 'Check your connection and try again.');
     } finally {
       setCallingDriver(null);
     }
@@ -141,21 +143,29 @@ export default function SpaceTransportScreen() {
   );
 
   // The last list read, so a timer re-read against a server without
-  // `include=` re-reads only the runs on the road (lib/spaces/api previous).
+  // `include=` re-reads only the runs on the road (lib/spaces/api previous),
+  // and every run once the last full read is a few minutes old
+  // (lib/spaces/runPlan previousForTimerRead).
   const lastLoaded = useRef<Loaded[] | undefined>(undefined);
+  const lastFullRead = useRef(0);
   const load = useCallback(async (timer = false) => {
     if (!spaceId) { setErr('No space was given.'); setLoaded([]); return; }
     try {
-      setErr(null);
       // The manifest carries the rider states, and the server has already cut it
       // down to the children this caller is linked to. One call where the server
       // supports it, else one read per run; a failure on one run must not blank
       // the whole screen, and is marked on that run.
-      const list = await getRunsWithManifest(spaceId, { stops: true, previous: timer ? lastLoaded.current : undefined });
+      const now = Date.now();
+      const previous = timer ? previousForTimerRead(lastLoaded.current, lastFullRead.current, now) : undefined;
+      const list = await getRunsWithManifest(spaceId, { stops: true, previous });
+      if (!previous) lastFullRead.current = now;
       lastLoaded.current = list;
       setLoaded(list);
-    } catch (e: any) {
-      setErr(e?.message || 'Could not load transport.');
+      // Cleared only on success: clearing it before the read made the error and
+      // its stale note vanish for the length of every offline timer read.
+      setErr(null);
+    } catch (e) {
+      setErr(errMsg(e) || 'Could not load transport.');
       // Keep what was last shown (the timer re-reads while a run is out); the
       // note under the error says it may be old.
       setLoaded((prev) => prev ?? []);
@@ -333,7 +343,7 @@ export default function SpaceTransportScreen() {
                   disabled={callingDriver === run.driverId}
                   accessibilityRole="button"
                   accessibilityLabel={`Call the driver${names[run.driverId] ? `, ${names[run.driverId]}` : ''}`}
-                  accessibilityState={{ busy: callingDriver === run.driverId }}
+                  accessibilityState={{ busy: callingDriver === run.driverId, disabled: callingDriver === run.driverId }}
                   style={[s.btn, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke, borderWidth: 1 },
                           callingDriver === run.driverId && { opacity: 0.6 }]}
                 >

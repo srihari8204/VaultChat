@@ -221,6 +221,15 @@ export const getVisitorPasses = (spaceId: string) =>
 export const issueVisitorPass = (spaceId: string, body: { visitorName: string; validTo?: string; hostId?: string }) =>
   api<{ id: string; code: string; validTo: string }>(`/chats/${spaceId}/visitor-passes`, { method: 'POST', json: body });
 
+/**
+ * Withdraw a pass nobody has used yet (R5HO backend #12, written but NOT
+ * deployed): 404 unknown or already withdrawn, 409 already used. A server
+ * without the route answers 404 or 405, which the screen reads as "not
+ * available yet" alongside "already gone".
+ */
+export const revokeVisitorPass = (spaceId: string, passId: string) =>
+  api<{ ok?: boolean }>(`/chats/${spaceId}/visitor-passes/${encodeURIComponent(passId)}`, { method: 'DELETE' });
+
 export const redeemVisitorPass = (spaceId: string, code: string, exit = false) =>
   api<{ ok: boolean; visitorName?: string }>(`/chats/${spaceId}/visitor-passes/redeem`, {
     method: 'POST', json: { code, exit },

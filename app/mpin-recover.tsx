@@ -40,12 +40,17 @@ export default function MpinRecover() {
   const [ticket, setTicket] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // 403 otp_required on any step: the SMS proof expired; only a fresh code
-  // (the number step) helps, so "Try again" would only repeat the refusal.
+  // 403 otp_required on the question load or the answer check (the two
+  // possession-gated calls; /auth/mpin/recover is not gated): the SMS proof
+  // expired; only a fresh code (the number step) helps, so "Try again" would
+  // only repeat the refusal.
   const [otpExpired, setOtpExpired] = useState(false);
   // onConfirm's latch: the MPIN input can complete twice in one tick, and the
   // second recoverMpin would spend the recovery ticket's only use.
   const inFlight = useRef(false);
+  // verify's latch: `busy` is state, so two taps in one frame both passed it
+  // and sent the answers twice, spending two attempts.
+  const verifying = useRef(false);
 
   // set-mpin phase
   const [mpinPhase, setMpinPhase] = useState<'set' | 'confirm'>('set');
@@ -80,7 +85,8 @@ export default function MpinRecover() {
   const filled = questions.filter(q => (answers[q] ?? '').trim().length >= 2).length;
 
   const verify = async () => {
-    if (busy) return;
+    if (verifying.current) return;
+    verifying.current = true;
     setBusy(true); setError(null);
     try {
       const payload = questions
@@ -93,7 +99,7 @@ export default function MpinRecover() {
     } catch (e: any) {
       if (needsFreshOtp(e)) { setOtpExpired(true); setError(FRESH_OTP_MESSAGE); setPhase('loadError'); return; }
       setError(onboardingError(e, 'Answers don’t match'));
-    } finally { setBusy(false); }
+    } finally { verifying.current = false; setBusy(false); }
   };
 
   const onSet = (v: string) => { if (isWeakPin(v)) { setError('That MPIN is too easy to guess.'); setFirst(''); doShake(); return; } setError(null); setMpinPhase('confirm'); };

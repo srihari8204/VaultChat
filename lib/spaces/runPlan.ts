@@ -105,7 +105,8 @@ export function splitListedRun(
  * changed since the previous read is kept instead of read again: its rider
  * states are not moving. Started runs, runs that changed status, and runs whose
  * last read failed are always re-read. Focus and pull-to-refresh pass no
- * previous list, so they re-read everything.
+ * previous list, so they re-read everything, and so does a timer read once the
+ * last full read is MANIFEST_MAX_AGE_MS old (previousForTimerRead).
  */
 export function reusableManifest<T extends { run: Pick<Run, 'id' | 'status'>; failed: boolean }>(
   previous: readonly T[] | undefined, run: Pick<Run, 'id' | 'status'>,
@@ -113,6 +114,20 @@ export function reusableManifest<T extends { run: Pick<Run, 'id' | 'status'>; fa
   if (!previous || run.status === 'started') return null;
   const p = previous.find((x) => x.run.id === run.id);
   return p && !p.failed && p.run.status === run.status ? p : null;
+}
+
+/**
+ * How long a timer re-read may keep a not-started run's manifest
+ * (reusableManifest). After this, the next timer read passes no previous list
+ * and re-reads every run, so a board left open catches riders added to or
+ * removed from a SCHEDULED run elsewhere within a few minutes, not only on the
+ * next focus or pull.
+ */
+export const MANIFEST_MAX_AGE_MS = 5 * 60_000;
+
+/** The `previous` list for a timer re-read: none once the last full read is MANIFEST_MAX_AGE_MS old. */
+export function previousForTimerRead<T>(previous: T | undefined, lastFullReadAt: number, now: number): T | undefined {
+  return now - lastFullReadAt >= MANIFEST_MAX_AGE_MS ? undefined : previous;
 }
 
 /**

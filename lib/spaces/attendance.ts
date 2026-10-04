@@ -219,6 +219,15 @@ export function calendarDaysAgo(nowMs: number, daysAgo: number): number {
   return d.getTime();
 }
 
+/** Where the track read for a `days`-column week starts: the local midnight
+ *  `days` calendar days back — the whole day before the oldest column, so the
+ *  samples leading into that column's midnight are read too. Calendar days,
+ *  like the columns, not days × 24 h. */
+export function sampleWindowStart(nowMs: number, days: number): number {
+  const d = new Date(calendarDaysAgo(nowMs, days));
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
 export interface Summary {
   present: number;
   late: number;

@@ -13,6 +13,7 @@ import { AppState, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, Vie
 import { canUseFullScreenIntent, openFullScreenIntentSettings } from "../lib/CallService";
 import { permissionDenied } from "../lib/permissionDenied";
 import { tint } from "../lib/tintColor";
+import { Ionicons } from "@expo/vector-icons";
 
 // App permissions, opened from Settings ("App permissions"). One place to see
 // what is granted and to ask again, ONE permission at a time: each row asks
@@ -24,34 +25,36 @@ import { tint } from "../lib/tintColor";
 // step dots, "Step 7 of 8", the auto-advance and "Skip" are gone with it.
 type Grant = { granted: boolean; canAskAgain?: boolean };
 // `get` reads the current grant without prompting; `request` asks.
-const PERMS: { key: string; icon: string; label: string; sub: string; get: () => Promise<Grant>; request: () => Promise<Grant> }[] = [
-  {key:"camera",   icon:"📷",label:"Camera",       sub:"Face scan and photo sharing",
+// Ionicons, not emoji: emoji glyphs draw differently on every platform and
+// OEM font, and some Android skins showed them as boxes.
+const PERMS: { key: string; icon: keyof typeof Ionicons.glyphMap; label: string; sub: string; get: () => Promise<Grant>; request: () => Promise<Grant> }[] = [
+  {key:"camera",   icon:"camera-outline",label:"Camera",       sub:"Face scan and photo sharing",
     get: () => Camera.getCameraPermissionsAsync(),
     request: () => Camera.requestCameraPermissionsAsync()},
-  {key:"mic",      icon:"🎙️",label:"Microphone",   sub:"Voice and video calls",
+  {key:"mic",      icon:"mic-outline",label:"Microphone",   sub:"Voice and video calls",
     get: () => Camera.getMicrophonePermissionsAsync(),
     request: () => Camera.requestMicrophonePermissionsAsync()},
-  {key:"contacts", icon:"👥",label:"Contacts",     sub:"Find friends on crazzychat",
+  {key:"contacts", icon:"people-outline",label:"Contacts",     sub:"Find friends on crazzychat",
     get: () => Platform.OS === 'web' ? Promise.resolve({ granted: true }) : Contacts.getPermissionsAsync(),
     request: () => Platform.OS === 'web' ? Promise.resolve({ granted: true }) : Contacts.requestPermissionsAsync()},
-  {key:"location", icon:"📍",label:"Location",     sub:"Secure location sharing",
+  {key:"location", icon:"location-outline",label:"Location",     sub:"Secure location sharing",
     get: () => Location.getForegroundPermissionsAsync(),
     request: () => Location.requestForegroundPermissionsAsync()},
   // Background location MUST follow a granted foreground grant — both
   // platforms reject the always-on prompt otherwise. Family Space only keeps
   // sharing while the app is closed if this one lands. Never asked as part of
   // "Grant missing": it is the most sensitive grant here, so only its own row.
-  {key:"background",icon:"🛰️",label:"Background Access",sub:"Keep Family Space sharing when the app is closed",
+  {key:"background",icon:"navigate-circle-outline",label:"Background Access",sub:"Keep Family Space sharing when the app is closed",
     get: () => Location.getBackgroundPermissionsAsync(),
     request: async () => {
       const fg = await Location.requestForegroundPermissionsAsync();
       return fg.granted ? Location.requestBackgroundPermissionsAsync() : fg;
     }},
   // Motion is an iOS-only prompt; Android resolves granted with no dialog.
-  {key:"motion",   icon:"🏃",label:"Motion & Fitness",sub:"Detect driving so location updates adapt",
+  {key:"motion",   icon:"walk-outline",label:"Motion & Fitness",sub:"Detect driving so location updates adapt",
     get: () => Pedometer.getPermissionsAsync(),
     request: () => Pedometer.requestPermissionsAsync()},
-  {key:"notifs",   icon:"🔔",label:"Notifications",sub:"New messages and calls",
+  {key:"notifs",   icon:"notifications-outline",label:"Notifications",sub:"New messages and calls",
     get: () => Notifications.getPermissionsAsync(),
     request: () => Notifications.requestPermissionsAsync()},
 ];
@@ -152,7 +155,7 @@ export default function PermissionsScreen() {
           <Text style={S.backTxt}>‹ Back</Text>
         </TouchableOpacity>
         <View style={S.header}>
-          <View style={S.badge} accessibilityElementsHidden importantForAccessibility="no"><Text style={{fontSize:36}}>🔑</Text></View>
+          <View style={S.badge} accessibilityElementsHidden importantForAccessibility="no"><Ionicons name="key-outline" size={36} color={c.primary} /></View>
           <Text style={S.title} accessibilityRole="header">App Permissions</Text>
           <Text style={S.sub}>Tap a permission to allow it. Each one is only used for the reason shown.</Text>
         </View>
@@ -172,14 +175,14 @@ export default function PermissionsScreen() {
                 accessibilityHint={on ? undefined : 'Asks for this permission'}
                 accessibilityState={{ disabled: on || !!busy, busy: asking, checked: on }}
               >
-                <Text style={{fontSize:22,width:34}} accessibilityElementsHidden importantForAccessibility="no">{p.icon}</Text>
+                <Ionicons name={p.icon} size={22} color={c.primary} style={{width:34}} accessibilityElementsHidden importantForAccessibility="no" />
                 <View style={{flex:1}}>
                   <Text style={S.label}>{p.label}</Text>
                   <Text style={S.psub}>{p.sub}</Text>
                 </View>
                 {on ? (
                   <View style={[S.status,S.statusOk]}>
-                    <Text style={{fontSize:12,color:c.success}}>✓</Text>
+                    <Ionicons name="checkmark" size={14} color={c.success} />
                   </View>
                 ) : (
                   <Text style={S.allow}>{asking ? 'Asking…' : 'Allow'}</Text>
@@ -197,7 +200,7 @@ export default function PermissionsScreen() {
             accessibilityLabel="Full-screen calls, not allowed"
             accessibilityHint="Opens Android settings so calls can ring on a locked screen"
           >
-            <Text style={{fontSize:22,width:34}} accessibilityElementsHidden importantForAccessibility="no">📱</Text>
+            <Ionicons name="phone-portrait-outline" size={22} color={c.primary} style={{width:34}} accessibilityElementsHidden importantForAccessibility="no" />
             <View style={{flex:1}}>
               <Text style={S.label}>Full-screen calls</Text>
               <Text style={S.psub}>Android needs one extra tap for calls to ring on a locked screen</Text>

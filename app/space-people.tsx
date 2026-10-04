@@ -32,6 +32,7 @@ import PermissionMatrix from '../components/spaces/PermissionMatrix';
 import { AuroraBackground } from '../components/ui';
 import LoadError from '../components/spaces/LoadError';
 import { initialOf } from '../lib/format';
+import { errMsg, errStatus } from '../lib/spaces/errors';
 
 const LABEL: Record<Person['status'], string> = {
   in: 'In',
@@ -56,6 +57,7 @@ export default function SpacePeopleScreen() {
   // in a URL is a copy that can go stale against the one the server enforces.
   const [catalog, setCatalog] = useState<RoleDef[] | null>(null);
   const [viewer, setViewer] = useState<{ id: string; role: string } | null>(null);
+  const [meId, setMeId] = useState<string | null>(null);
   // The member whose role is being changed, the role chosen, and whether the
   // confirmation step is showing. One at a time, deliberately: two concurrent
   // role mutations are never something a person meant to do.
@@ -72,8 +74,8 @@ export default function SpacePeopleScreen() {
     try {
       setPeople(await getPeople(spaceId));
       setLoadError(null);
-    } catch (e: any) {
-      setLoadError(e?.message ?? 'Could not load people.');
+    } catch (e) {
+      setLoadError(errMsg(e) ?? 'Could not load people.');
     } finally {
       setLoading(false); setRefreshing(false);
     }
@@ -82,21 +84,22 @@ export default function SpacePeopleScreen() {
   // Catalog + who I am. Failure here is not fatal: the list still renders, the
   // role action simply is not offered.
   const loadMeta = useCallback(async () => {
+    const meP = getCurrentUserAsync().catch(() => null) as Promise<{ id?: string | number } | null>;
+    // Who I am, even when the space detail fails: the catalog error is shown
+    // only to someone who could change a role (see mayChangeRoles).
+    void meP.then((me) => { if (me?.id) setMeId(String(me.id)); });
     try {
-      const [chat, me] = await Promise.all([
-        getChat(spaceId),
-        getCurrentUserAsync().catch(() => null) as Promise<{ id?: string | number } | null>,
-      ]);
+      const [chat, me] = await Promise.all([getChat(spaceId), meP]);
       // The space detail carries the caller's role and the role catalog; the
       // shared ChatDetail type does not declare them.
       const detail = chat as typeof chat & { roleCatalog?: RoleDef[] | null; role?: string };
       setCatalog(detail?.roleCatalog ?? null);
       setCatalogErr(null);
       if (me?.id) setViewer({ id: String(me.id), role: String(detail?.role ?? 'member') });
-    } catch (e: any) {
+    } catch (e) {
       // Stated, not swallowed. Without the catalog the matrix must say so
       // rather than render an invented permission list.
-      setCatalogErr(e?.message || 'The space’s role list could not be loaded.');
+      setCatalogErr(errMsg(e) || 'The space’s role list could not be loaded.');
     }
   }, [spaceId]);
 
@@ -134,15 +137,26 @@ export default function SpacePeopleScreen() {
       // attempt to avoid assuming gender, but the fix for that is to use the
       // name — not to make the sentence ungrammatical.
       Alert.alert('Role updated', `${editing.name || 'That member'} is now ${chosen.label}.`);
-    } catch (e: any) {
-      const status = Number(e?.status ?? e?.statusCode ?? 0);
+    } catch (e) {
+      const status = errStatus(e);
+      const said = errMsg(e);
       // The server's own words for 409 — it explains which rank is needed.
-      setRoleErr(status === 409 && e?.message ? String(e.message) : roleErrorText(status, e?.message));
+      setRoleErr(status === 409 && said ? said : roleErrorText(status, said));
       setConfirming(false);
     } finally {
       setSaving(false);
     }
   };
+
+  // Could this viewer change anyone's role, catalog permitting? By the space
+  // detail's role, else by their own row in the list (the detail is what
+  // failed when the catalog error shows). A plain member is never told that
+  // roles "cannot be changed right now" — they never could.
+  const mayChangeRoles = useMemo(() => {
+    const id = viewer?.id ?? meId;
+    const rank = viewer?.role ?? people.find((p) => p.userId === id)?.role;
+    return !!id && !!rank && people.some((p) => canChangeRole(rank, id, p.role, p.userId));
+  }, [viewer, meId, people]);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -208,7 +222,7 @@ export default function SpacePeopleScreen() {
             )}
             {/* Without the catalog no row offers a role change and roles show
                 by rank only: say so, with a way to try again. */}
-            {catalogErr && (
+            {catalogErr && mayChangeRoles && (
               <View style={s.errBox}>
                 <Ionicons name="alert-circle" size={16} color={colors.danger} />
                 <Text style={[s.muted, { color: colors.danger, flex: 1 }]}>
@@ -280,7 +294,7 @@ export default function SpacePeopleScreen() {
       <Modal visible={!!editing} transparent animationType="slide" onRequestClose={() => setEditing(null)}>
         <View style={s.sheetWrap}>
           <View style={[s.sheet, { paddingBottom: 18 + insets.bottom }]}>
-            <Text style={s.sheetTitle}>Change role</Text>
+            <Text style={s.sheetTitle} accessibilityRole="header">Change role</Text>
 
             {editing && (
               <View style={s.who}>
@@ -312,6 +326,7 @@ export default function SpacePeopleScreen() {
             )}
 
             <ScrollView style={{ maxHeight: 340 }}>
+              <View accessibilityRole="radiogroup" accessibilityLabel="Role">
               {options.map((o) => (
                 <View key={o.key} style={[s.roleCard, chosen?.key === o.key && { borderColor: colors.primary }]}>
                   <TouchableOpacity
@@ -347,6 +362,7 @@ export default function SpacePeopleScreen() {
                   )}
                 </View>
               ))}
+              </View>
             </ScrollView>
 
             {confirming && editing && chosen ? (

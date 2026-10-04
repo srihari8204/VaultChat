@@ -40,6 +40,7 @@ import { ymd, dayOffset, allowanceBody, ALLOWANCE_KINDS, type AllowanceKind } fr
 import { parseDay } from '../lib/spaces/runPlan';
 // The app's one cross-platform date picker (shared with finance).
 import { useDatePicker } from '../components/ui/useDatePicker';
+import { errMsg } from '../lib/spaces/errors';
 
 const KINDS = ['casual', 'sick', 'privilege', 'unpaid', 'other'];
 
@@ -105,8 +106,8 @@ export default function SpaceLeaveScreen() {
       setRows(l);
       setBalance(b);
       setBalanceFailed(b == null);
-    } catch (e: any) {
-      setErr(e?.message || 'Could not load leave.');
+    } catch (e) {
+      setErr(errMsg(e) || 'Could not load leave.');
       // Keep what was last shown; the note under the error says it may be old.
       setRows((prev) => prev ?? []);
     }
@@ -124,8 +125,8 @@ export default function SpaceLeaveScreen() {
     try {
       await decideLeave(spaceId, r.id, status);
       await load();
-    } catch (e: any) {
-      Alert.alert('Could not update the request', e?.message ?? 'Please try again.');
+    } catch (e) {
+      Alert.alert('Could not update the request', errMsg(e) ?? 'Please try again.');
     } finally {
       setBusy(null);
     }
@@ -161,8 +162,8 @@ export default function SpaceLeaveScreen() {
       await setLeaveAllowance(spaceId, r.body);
       setAllowanceOpen(false);
       await load();
-    } catch (e: any) {
-      Alert.alert('Could not save the allowance', e?.message ?? 'Please try again.');
+    } catch (e) {
+      Alert.alert('Could not save the allowance', errMsg(e) ?? 'Please try again.');
     } finally { setSaving(false); }
   };
 
@@ -180,8 +181,8 @@ export default function SpaceLeaveScreen() {
       await requestLeave(spaceId, { kind, fromDay: from, toDay: to, reason: reason.trim() || undefined });
       setReason(''); setCompose(false);
       await load();
-    } catch (e: any) {
-      Alert.alert('Could not request leave', e?.message ?? 'Please try again.');
+    } catch (e) {
+      Alert.alert('Could not request leave', errMsg(e) ?? 'Please try again.');
     } finally {
       setSaving(false);
     }
@@ -375,7 +376,7 @@ export default function SpaceLeaveScreen() {
         <KeyboardSafe keyboardOnly>
         <View style={s.sheetWrap}>
           <View style={[s.sheet, { paddingBottom: 18 + insets.bottom }]}>
-            <Text style={s.cardTitle}>Request leave</Text>
+            <Text style={s.cardTitle} accessibilityRole="header">Request leave</Text>
             <View style={s.kindRow} accessibilityRole="radiogroup" accessibilityLabel="Kind of leave">
               {KINDS.map((k) => (
                 <TouchableOpacity
@@ -450,7 +451,7 @@ export default function SpaceLeaveScreen() {
         <KeyboardSafe keyboardOnly>
         <View style={s.sheetWrap}>
           <View style={[s.sheet, { paddingBottom: 18 + insets.bottom }]}>
-            <Text style={s.cardTitle}>Leave allowance</Text>
+            <Text style={s.cardTitle} accessibilityRole="header">Leave allowance</Text>
             <Text style={s.muted}>
               Days per type for everyone in {spaceName}. Leave a type empty for no allowance (shown as
               “not set”, never as zero). Saving replaces the whole allowance.

@@ -88,7 +88,7 @@ import '../lib/family/background'; // registers the bg-location task — a headl
 import '../lib/lock/background';   // registers the Location Lock geofence task — same
                                    // rule: headless wakes need it defined at load
 import { getAccessToken, getLaunchSessionState } from '../lib/api';
-import { launchAllowed, settleLaunchGate } from '../lib/launchGate';
+import { beginLaunchGate, launchAllowed, settleLaunchGate } from '../lib/launchGate';
 import { hrefWithQuery, noteAuthEdge, onDeliveredTap, openWhenUnlocked, stashLaunchLink } from '../lib/pendingLink';
 import { holdSecurityVerdict } from '../lib/securityVerdict';
 import { isMfaEnabled } from '../lib/mfa';
@@ -250,6 +250,10 @@ function RootLayoutInner() {
   const pathRef = useRef(pathname);
   pathRef.current = pathname;
   const [launchGate, setLaunchGate] = useState<'checking' | 'allow' | '/onboard' | '/app-lock'>('checking');
+  // Each mount re-decides below, so each mount re-arms the decision that
+  // app/index.tsx waits on — in this first render, before any child renders
+  // (lib/launchGate "Per root mount").
+  useState(beginLaunchGate);
   const [PdfHost, setPdfHost] = useState<ComponentType | null>(null);
 
   // The root owns authentication because an initial deep link bypasses `/` and

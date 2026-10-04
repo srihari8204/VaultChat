@@ -15,6 +15,7 @@ import { permissionDenied } from '../../lib/permissionDenied';
 import type { SpacePalette as Palette } from '../../lib/spaces/theme';
 import type { RunsAdminStyles } from './runsAdminStyles';
 import { whenLabel } from './NewRunModal';
+import { errMsg } from '../../lib/spaces/errors';
 
 export interface StopFormInitial {
   /** Index into the ordered stops, or null for a new stop. */
@@ -65,8 +66,8 @@ export default function StopFormModal({ initial, colors, s, busy, pickStart, sch
       }
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
       setWhere(`${loc.coords.latitude.toFixed(6)}, ${loc.coords.longitude.toFixed(6)}`);
-    } catch (e: any) {
-      Alert.alert('Could not read your location', e?.message ?? 'Try again.');
+    } catch (e) {
+      Alert.alert('Could not read your location', errMsg(e) ?? 'Try again.');
     }
   };
 

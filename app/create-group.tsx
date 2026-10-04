@@ -264,7 +264,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     marginHorizontal: 16, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 13,
     borderWidth: 1, borderColor: c.glassStroke,
   },
-  // danger is #RRGGBB in both palettes, so a hex alpha suffix is valid.
   errorBar: { backgroundColor: tint(c.danger, 0.12), borderColor: tint(c.danger, 0.4), borderWidth: 1, marginHorizontal: 16, marginTop: 10, padding: 10, borderRadius: 10 },
   errorTxt: { color: c.danger, fontSize: 12 },
   label: { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 4 },

@@ -13,7 +13,7 @@
 // rendered rather than logged.
 
 import { AppText as Text } from '../components/ui/Text';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   View, StyleSheet, FlatList, ActivityIndicator, TouchableOpacity, Alert,
   TextInput, Modal, RefreshControl,
@@ -32,6 +32,7 @@ import LoadError from '../components/spaces/LoadError';
 import SpaceLinksSheet from '../components/spaces/SpaceLinksSheet';
 import ChatDoorButton from '../components/spaces/ChatDoorButton';
 import { familyOf } from '../lib/spaces/layout';
+import { errMsg } from '../lib/spaces/errors';
 
 /** Roster kinds the server counts apart ('child' feeds the school's student
  *  total in space_ops_summary). Anything else is stored as given. */
@@ -77,8 +78,8 @@ export default function SpaceRosterScreen() {
         // Links are only visible from the subject end, so this comes back small
         // for a parent and complete for ops — same call either way. A failure
         // is kept for the links sheet rather than shown there as "No links yet".
-        getLinks(spaceId).catch((e: any) => {
-          linkErr = e?.message ?? 'Check your connection and try again.';
+        getLinks(spaceId).catch((e: unknown) => {
+          linkErr = errMsg(e) ?? 'Check your connection and try again.';
           return [] as SpaceLink[];
         }),
       ]);
@@ -88,8 +89,8 @@ export default function SpaceRosterScreen() {
       setLinks(l || []);
       setLinksError(linkErr);
       setLoadError(null);
-    } catch (e: any) {
-      setLoadError(e?.message ?? 'Could not load the roster.');
+    } catch (e) {
+      setLoadError(errMsg(e) ?? 'Could not load the roster.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -111,8 +112,8 @@ export default function SpaceRosterScreen() {
       setNewName(''); setNewRef(''); setNewKind(defaultKind);
       setAdding(false);
       await load();
-    } catch (e: any) {
-      Alert.alert('Could not add', e?.message ?? 'Try again.');
+    } catch (e) {
+      Alert.alert('Could not add', errMsg(e) ?? 'Try again.');
     } finally {
       setBusy(false);
     }
@@ -121,13 +122,19 @@ export default function SpaceRosterScreen() {
   // The entry being removed: one at a time, so a double tap on Remove (or on
   // two rows) cannot send overlapping archive calls.
   const [archiving, setArchiving] = useState<string | null>(null);
+  // Taken when the confirmation OPENS, not when Remove is pressed: two quick
+  // taps before the first dialog appeared used to open two dialogs. Released
+  // by Cancel, an Android outside-tap dismiss, or when the call settles.
+  const archiveOpen = useRef(false);
   const onArchive = useCallback((entry: RosterEntry) => {
-    if (archiving) return;
+    if (archiveOpen.current) return;
+    archiveOpen.current = true;
+    const release = () => { archiveOpen.current = false; };
     Alert.alert(
       `Remove ${entry.displayName}?`,
       'They stop appearing everywhere in this space. Their past run records stay, so history remains readable.',
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: 'Cancel', style: 'cancel', onPress: release },
         {
           text: 'Remove',
           style: 'destructive',
@@ -136,16 +143,18 @@ export default function SpaceRosterScreen() {
             try {
               await updateRosterEntry(spaceId, entry.id, { archived: true });
               await load();
-            } catch (e: any) {
-              Alert.alert('Could not remove', e?.message ?? 'Try again.');
+            } catch (e) {
+              Alert.alert('Could not remove', errMsg(e) ?? 'Try again.');
             } finally {
               setArchiving(null);
+              release();
             }
           },
         },
       ],
+      { cancelable: true, onDismiss: release },
     );
-  }, [spaceId, load, archiving]);
+  }, [spaceId, load]);
 
   const s = useMemo(() => styles(colors), [colors]);
 
@@ -285,7 +294,7 @@ export default function SpaceRosterScreen() {
         <KeyboardSafe keyboardOnly>
         <View style={s.modalWrap}>
           <View style={s.modal}>
-            <Text style={s.modalTitle}>Add to the roster</Text>
+            <Text style={s.modalTitle} accessibilityRole="header">Add to the roster</Text>
             <Text style={s.muted}>
               A roster entry does not need an account — a young child usually has none.
             </Text>

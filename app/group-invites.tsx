@@ -70,7 +70,8 @@ const SEARCH_DEBOUNCE_MS = 300;
 export default function GroupInvitesScreen() {
   const { colors } = useTheme();
   const authHeader = useAuthHeader();
-  // `fresh`: opened straight after "Create & add people" (app/create-group.tsx).
+  // `fresh`: opened straight after creating the group (app/create-group.tsx's
+  // "Create & add people", or app/group-create.tsx).
   const params = useLocalSearchParams<{ chatId?: string; name?: string; fresh?: string }>();
   const chatId = String(params.chatId || '');
   const groupName = String(params.name || 'this group');

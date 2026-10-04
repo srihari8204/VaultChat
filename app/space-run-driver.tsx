@@ -46,6 +46,7 @@ import { AuroraBackground } from '../components/ui';
 import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 import LoadError from '../components/spaces/LoadError';
 import { useRunBroadcast } from '../components/spaces/useRunBroadcast';
+import { errMsg } from '../lib/spaces/errors';
 
 const INCIDENTS: { key: string; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { key: 'breakdown', label: 'Breakdown', icon: 'construct-outline' },
@@ -88,8 +89,8 @@ export default function SpaceRunDriverScreen() {
       setStops(data.stops || []);
       setRiders(data.riders || []);
       setLoadError(null);
-    } catch (e: any) {
-      setLoadError(e?.message ?? 'Could not load the run.');
+    } catch (e) {
+      setLoadError(errMsg(e) ?? 'Could not load the run.');
     } finally {
       setLoading(false);
     }
@@ -114,8 +115,8 @@ export default function SpaceRunDriverScreen() {
       // Reflect it locally rather than refetching the whole run: a driver at a
       // kerb should see this land immediately, not after a round trip.
       setStops((ss) => ss.map((x) => (x.id === stop.id ? { ...x, arrivedAt: res.arrivedAt } : x)));
-    } catch (e: any) {
-      Alert.alert('Could not record arrival', e?.message ?? 'Please try again.');
+    } catch (e) {
+      Alert.alert('Could not record arrival', errMsg(e) ?? 'Please try again.');
     } finally {
       setArriving(false);
     }
@@ -134,9 +135,9 @@ export default function SpaceRunDriverScreen() {
       ? { ...r, state, stateAt: new Date().toISOString() } : r)));
     try {
       await setRiderState(spaceId, runId, rider.riderId, { state, transitionId, code: verifyCode });
-    } catch (e: any) {
+    } catch (e) {
       setRiders(before); // put it back — a wrong manifest is worse than a slow one
-      Alert.alert('Not recorded', e?.message ?? 'Try again.');
+      Alert.alert('Not recorded', errMsg(e) ?? 'Try again.');
     } finally {
       setBusy(null);
     }
@@ -164,8 +165,8 @@ export default function SpaceRunDriverScreen() {
     try {
       const chat = await createDirectChat({ userId: g.userId });
       router.push({ pathname: '/voicecall', params: { chatId: chat.id, peerUid: g.userId, peerName: g.displayName } });
-    } catch (e: any) {
-      Alert.alert('Could not start the call', e?.message ?? 'Check your connection and try again.');
+    } catch (e) {
+      Alert.alert('Could not start the call', errMsg(e) ?? 'Check your connection and try again.');
     } finally { setCalling(null); }
   }, [calling, router]);
   const callParent = useCallback((rider: RunRider) => {
@@ -239,12 +240,20 @@ export default function SpaceRunDriverScreen() {
     try {
       await fileIncident(spaceId, { category, runId });
       Alert.alert('Reported', 'The transport office has been notified.');
-    } catch (e: any) {
-      Alert.alert('Could not report', e?.message ?? 'Try again.');
+    } catch (e) {
+      Alert.alert('Could not report', errMsg(e) ?? 'Try again.');
     }
   }, [spaceId, runId]);
 
+  // Start/Finish in flight: a ref decides (two taps in one frame both passed
+  // a state check and sent two status changes, the second answered 409), the
+  // state draws the busy button.
+  const statusRef = useRef(false);
+  const [statusBusy, setStatusBusy] = useState(false);
   const doStatus = useCallback(async (next: 'started' | 'completed') => {
+    if (statusRef.current) return;
+    statusRef.current = true;
+    setStatusBusy(true);
     try {
       await setRunStatus(spaceId, runId, next);
       if (next === 'completed') {
@@ -253,16 +262,19 @@ export default function SpaceRunDriverScreen() {
         setBackgroundRun(null).catch(() => {});
       }
       await load();
-    } catch (e: any) {
+    } catch (e) {
       // The server owns the lifecycle (trigger in migration 086), so an invalid
       // transition comes back as a 409 with a reason rather than being guessed
       // at here.
-      Alert.alert('Could not update the run', e?.message ?? 'Try again.');
+      Alert.alert('Could not update the run', errMsg(e) ?? 'Try again.');
+    } finally {
+      statusRef.current = false;
+      setStatusBusy(false);
     }
   }, [spaceId, runId, load]);
 
   const onStartStop = useCallback(async () => {
-    if (!run) return;
+    if (!run || statusRef.current) return;
     const next = started ? 'completed' : 'started';
     // Finishing with people unmarked is allowed — a driver must be able to end a
     // run — but it is said out loud, because "unmarked" is what a missing child
@@ -318,12 +330,16 @@ export default function SpaceRunDriverScreen() {
         <TouchableOpacity
           style={[s.runBtn, started ? s.runBtnStop : s.runBtnGo]}
           onPress={onStartStop}
+          disabled={statusBusy}
           accessibilityRole="button"
           accessibilityLabel={started ? 'Finish run' : 'Start run'}
+          accessibilityState={{ busy: statusBusy, disabled: statusBusy }}
         >
           {/* Finish: on-danger ink. Start: white on the solid brandOnLight fill
               (deep blue in both schemes, 6.3:1). */}
-          <Text style={[s.runBtnText, started && { color: colors.onDanger }]}>{started ? 'Finish' : 'Start'}</Text>
+          {statusBusy
+            ? <ActivityIndicator size="small" color={started ? colors.onDanger : s.runBtnText.color} />
+            : <Text style={[s.runBtnText, started && { color: colors.onDanger }]}>{started ? 'Finish' : 'Start'}</Text>}
         </TouchableOpacity>
       </View>
 
@@ -346,7 +362,7 @@ export default function SpaceRunDriverScreen() {
           <View style={s.notice}>
             <Ionicons name="location-outline" size={18} color={colors.warning} />
             <Text style={s.noticeText}>
-              Location is off for VaultChat, so guardians and the office cannot see this vehicle.
+              Location is off for crazzychat, so guardians and the office cannot see this vehicle.
               Allow location in Settings to share it.
             </Text>
           </View>

@@ -43,12 +43,21 @@ import {
   type Message,
 } from '../lib/chatService';
 import { unionWithLocalHistory } from '../lib/messageHistory';
+import { recentServerMedia } from '../lib/groups/mediaPageCache';
 import { AuroraBackground, KeyboardSafe, AppText as Text } from '../components/ui';
 import { permissionDenied } from '../lib/permissionDenied';
 import { memberActions } from '../lib/groups/permissions';
 import { GroupNotFound } from '../components/groups/GroupNotFound';
 import { GroupInfoTools, MemberRow } from '../components/groups/GroupInfoSections';
 import { useGroupInfoStyles as useS } from '../components/groups/groupInfoStyles';
+
+// The paint-first cache is plain AsyncStorage (lib/localCache), so members'
+// email addresses are left out of it: a cached member with no name shows a
+// short id until the refresh lands. Names and photos stay, as the chat list's
+// own cache keeps them.
+function forCache(c: ChatDetail): ChatDetail {
+  return { ...c, members: c.members.map(({ email: _email, ...m }) => m) };
+}
 
 export default function GroupInfoScreen() {
   const { colors } = useTheme();
@@ -129,7 +138,7 @@ export default function GroupInfoScreen() {
       setNameDraft(c.name ?? '');
       setLoadError(null);
       setStale(false);
-      if (chatId) writeCache<ChatDetail>(cacheKey, c);
+      if (chatId) writeCache<ChatDetail>(cacheKey, forCache(c));
     } catch (e: any) {
       // Keep painted cache on error; only surface failure when nothing is shown.
       // Rendered as a screen (not an Alert) so there is a Back and a Retry —
@@ -156,8 +165,9 @@ export default function GroupInfoScreen() {
   // paints first (no network, and delete-on-delivery nulls a delivered body
   // server-side, so the server list alone drops media this phone can still
   // render); then one server page is merged in the background, so media this
-  // phone has not synced yet still shows. Best-effort: if the server page
-  // fails, the local strip stays as it is.
+  // phone has not synced yet still shows. That page is read at most once per
+  // few minutes per group (lib/groups/mediaPageCache), not on every visit.
+  // Best-effort: if the server page fails, the local strip stays as it is.
   useEffect(() => {
     if (!chatId) return;
     let active = true;
@@ -166,7 +176,7 @@ export default function GroupInfoScreen() {
     (async () => {
       const local = pick(await unionWithLocalHistory(chatId, [], 400).catch(() => [] as Message[]));
       if (active && local.length) setMedia(local);
-      const server = await getMessages(chatId, { limit: 200 }).catch(() => null);
+      const server = await recentServerMedia(chatId, () => getMessages(chatId, { limit: 200 }));
       if (!server) return;
       const merged = await unionWithLocalHistory(chatId, server, 400).catch(() => null);
       if (active && merged) setMedia(pick(merged));
@@ -179,7 +189,7 @@ export default function GroupInfoScreen() {
     setChat(prev => {
       if (!prev) return prev;
       const next = fn(prev);
-      if (chatId) writeCache<ChatDetail>('group-info:' + chatId, next);
+      if (chatId) writeCache<ChatDetail>('group-info:' + chatId, forCache(next));
       return next;
     });
   }, [chatId]);
@@ -243,14 +253,20 @@ export default function GroupInfoScreen() {
     }
   }, [chat, isAdmin, photoBusy, patchChat]);
 
+  // Leave and Remove: one at a time, taken when the confirmation OPENS (two
+  // taps opened two dialogs and sent two requests); released by Cancel, an
+  // Android outside-tap dismiss, or when the request settles.
+  const memberActionOpen = useRef(false);
   const onRemoveMember = useCallback((m: ChatMember) => {
     // Gated where the button is drawn (memberActions); the server re-checks.
-    if (!chat) return;
+    if (!chat || memberActionOpen.current) return;
+    memberActionOpen.current = true;
+    const release = () => { memberActionOpen.current = false; };
     Alert.alert(
       'Remove from group?',
       `${m.name || m.email || 'This user'} will no longer be a member.`,
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: 'Cancel', style: 'cancel', onPress: release },
         { text: 'Remove', style: 'destructive', onPress: async () => {
             try {
               await removeChatMember(chat.id, m.userId);
@@ -260,27 +276,38 @@ export default function GroupInfoScreen() {
               }));
             } catch (e: any) {
               Alert.alert('Remove failed', e?.message ?? 'Try again');
-            }
+            } finally { release(); }
           }
         },
       ],
+      { cancelable: true, onDismiss: release },
     );
   }, [chat, patchChat]);
 
+  const [leaving, setLeaving] = useState(false);
+  // Opened from a cold-start link there is nothing underneath to go back to.
+  const goBack = useCallback(() => {
+    if (router.canGoBack()) router.back(); else router.replace('/(tabs)/chats');
+  }, [router]);
   const onLeave = useCallback(() => {
-    if (!chat || !meId) return;
+    if (!chat || !meId || memberActionOpen.current) return;
+    memberActionOpen.current = true;
+    const release = () => { memberActionOpen.current = false; };
     Alert.alert('Leave group?', 'You will lose access to future messages.', [
-      { text: 'Cancel', style: 'cancel' },
+      { text: 'Cancel', style: 'cancel', onPress: release },
       { text: 'Leave', style: 'destructive', onPress: async () => {
+          setLeaving(true);
           try {
             await removeChatMember(chat.id, meId);
             router.replace('/(tabs)/chats');
           } catch (e: any) {
+            setLeaving(false);
+            release();
             Alert.alert('Leave failed', e?.message ?? 'Try again');
           }
         }
       },
-    ]);
+    ], { cancelable: true, onDismiss: release });
   }, [chat, meId, router]);
 
   // Pick from contacts → send an INVITATION (the person accepts or declines in
@@ -314,7 +341,7 @@ export default function GroupInfoScreen() {
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry loading the group" onPress={() => { setLoadError(null); load(); }} style={S.saveBtn}>
           <Text style={S.saveBtnTxt}>Retry</Text>
         </TouchableOpacity>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} activeOpacity={0.8} style={{ marginTop: 16, padding: 8 }}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={goBack} activeOpacity={0.8} style={{ marginTop: 16, padding: 8 }}>
           <Text style={{ color: colors.primary, fontSize: 15, fontWeight: '700' }}>Go back</Text>
         </TouchableOpacity>
       </View>
@@ -326,7 +353,7 @@ export default function GroupInfoScreen() {
       <View style={[S.screen, S.center]}>
         <AuroraBackground />
         <View style={[S.header, { position: 'absolute', top: 0, left: 0, right: 0 }]}>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={goBack} hitSlop={10} style={S.backBtn}>
             <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
         </View>
@@ -347,7 +374,7 @@ export default function GroupInfoScreen() {
   const header = (
     <>
       <View style={S.header}>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={goBack} hitSlop={10} style={S.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.titleBar} accessibilityRole="header">Group info</Text>
@@ -439,7 +466,7 @@ export default function GroupInfoScreen() {
             accessibilityHint={isAdmin ? 'Edit the group description' : undefined}
             onPress={() => { setDescDraft(chat.description ?? ''); setEditingDesc(true); }}
           >
-            <Text style={S.label}>DESCRIPTION</Text>
+            <Text style={S.label} accessibilityRole="header">DESCRIPTION</Text>
             <Text style={chat.description ? S.descText : S.descPlaceholder}>
               {chat.description || (isAdmin ? 'Add a group description' : 'No description')}
             </Text>
@@ -458,7 +485,7 @@ export default function GroupInfoScreen() {
         authHeader={authHeader} shareViewing={shareViewing} onShareViewing={toggleShareViewing} />
 
       <View style={S.section}>
-        <Text style={S.label}>{activeMembers.length} MEMBERS</Text>
+        <Text style={S.label} accessibilityRole="header">{activeMembers.length} MEMBERS</Text>
         {activeMembers.length > 8 && (
           <View style={S.memberSearch}>
             <Ionicons name="search" size={16} color={colors.textDim} />
@@ -506,8 +533,11 @@ export default function GroupInfoScreen() {
         )}
         ListEmptyComponent={mq ? <Text style={[S.descPlaceholder, S.memberItem]}>No members match “{memberQuery.trim()}”.</Text> : null}
         ListFooterComponent={
-          <TouchableOpacity style={S.leaveBtn} onPress={onLeave} activeOpacity={0.85} accessibilityRole="button">
-            <Text style={S.leaveTxt}>Leave group</Text>
+          <TouchableOpacity style={S.leaveBtn} onPress={onLeave} activeOpacity={0.85} accessibilityRole="button"
+            disabled={leaving} accessibilityState={{ busy: leaving, disabled: leaving }}>
+            {leaving
+              ? <ActivityIndicator size="small" color={colors.danger} />
+              : <Text style={S.leaveTxt}>Leave group</Text>}
           </TouchableOpacity>
         }
       />

@@ -23,7 +23,7 @@ import { unlockMode } from '../lib/resumeLockPolicy';
 import { hasPin, pinBackoffMs, verifyPin } from '../services/security/pinStore';
 import { AppText as Text, AuroraBackground, KeyboardSafe } from '../components/ui';
 import { resetTo } from '../lib/authNav';
-import { consumeLaunchLink } from '../lib/pendingLink';
+import { consumeLaunchLink, noteAuthEdge } from '../lib/pendingLink';
 
 export default function AppLock() {
   const { colors } = useTheme();
@@ -46,8 +46,15 @@ export default function AppLock() {
   const shake = useRef(new Animated.Value(0)).current;
   const doShake = () => { shake.setValue(0); Animated.sequence([12, -12, 8, -8, 0].map(t => Animated.timing(shake, { toValue: t, duration: 55, useNativeDriver: true }))).start(); };
 
+  // However this lock was raised — the root gate, ResumeLock's push, or the
+  // sealed relock in lib/api — the user now stands at it, so a later visit to
+  // '/' must come back here rather than route into Chats (lib/pendingLink
+  // splashNext). Only the gate and resetTo recorded it before.
+  useEffect(() => { noteAuthEdge('/app-lock'); }, []);
+
   const enter = () => {
     if (resume === '1' && router.canGoBack()) {
+      noteAuthEdge(null); // back inside; resetTo records it on the other branch
       router.back();
       // A notification tapped while this lock was up was held, not opened over
       // it (lib/pendingLink.openWhenUnlocked) — open it now, above the screen

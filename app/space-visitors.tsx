@@ -25,7 +25,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import {
-  getVisitorPasses, issueVisitorPass, redeemVisitorPass, type VisitorPass,
+  getVisitorPasses, issueVisitorPass, redeemVisitorPass, revokeVisitorPass, type VisitorPass,
 } from '../lib/spaces/api';
 import { AuroraBackground } from '../components/ui';
 import { KeyboardSafe } from '../components/ui/KeyboardSafe';
@@ -33,6 +33,7 @@ import LoadError from '../components/spaces/LoadError';
 import { circleMembers } from '../lib/family/circle';
 import type { CircleMember } from '../lib/family/types';
 import ChatDoorButton from '../components/spaces/ChatDoorButton';
+import { errMsg, errStatus } from '../lib/spaces/errors';
 
 /** A pass code in the list: only its last two characters, until revealed. A
  *  code opens a door, and this list is read on screens other people can see. */
@@ -68,8 +69,8 @@ export default function SpaceVisitorsScreen() {
     try {
       setPasses(await getVisitorPasses(spaceId));
       setLoadError(null);
-    } catch (e: any) {
-      setLoadError(e?.message ?? 'Could not load passes.');
+    } catch (e) {
+      setLoadError(errMsg(e) ?? 'Could not load passes.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -125,8 +126,8 @@ export default function SpaceVisitorsScreen() {
           { text: 'Done', style: 'cancel' },
         ],
       );
-    } catch (e: any) {
-      Alert.alert('Could not issue', e?.message ?? 'Try again.');
+    } catch (e) {
+      Alert.alert('Could not issue', errMsg(e) ?? 'Try again.');
     } finally {
       setBusy(false);
     }
@@ -141,11 +142,11 @@ export default function SpaceVisitorsScreen() {
       setRedeeming(false); setCode('');
       await load();
       Alert.alert(exit ? 'Signed out' : 'Admitted', res.visitorName ? `${res.visitorName}.` : 'Done.');
-    } catch (e: any) {
+    } catch (e) {
       // The server answers expired, already-used and never-existed with ONE
       // message on purpose — distinguishing them turns the gate into an oracle
       // for guessing codes. Repeat it rather than inventing a more specific one.
-      Alert.alert('Not valid', e?.message ?? 'That pass is not valid.');
+      Alert.alert('Not valid', errMsg(e) ?? 'That pass is not valid.');
     } finally {
       setBusy(false); setRedeemExit(null);
     }
@@ -163,13 +164,42 @@ export default function SpaceVisitorsScreen() {
           try {
             await redeemVisitorPass(spaceId, p.code, true);
             await load();
-          } catch (e: any) {
-            Alert.alert('Could not sign out', e?.message ?? 'Try again.');
+          } catch (e) {
+            Alert.alert('Could not sign out', errMsg(e) ?? 'Try again.');
           } finally { setSigningOut(null); }
         },
       },
     ]);
   }, [spaceId, load]);
+
+  // Cancel an issued, unused pass. The route is written but not deployed:
+  // today's server answers 404/405, said as "not available yet", never as a
+  // cancel that happened.
+  const [cancelling, setCancelling] = useState<string | null>(null);
+  const cancelPass = useCallback((p: VisitorPass) => {
+    if (cancelling) return;
+    Alert.alert(`Cancel ${p.visitorName}’s pass?`, 'The code stops working. Issue a new pass if they still need one.', [
+      { text: 'Keep it', style: 'cancel' },
+      {
+        text: 'Cancel pass', style: 'destructive',
+        onPress: async () => {
+          setCancelling(p.id);
+          try {
+            await revokeVisitorPass(spaceId, p.id);
+            await load();
+          } catch (e) {
+            const status = errStatus(e);
+            if (status === 404 || status === 405) {
+              await load();
+              Alert.alert('Not cancelled', 'This pass could not be cancelled here: it may already be gone, or cancelling passes needs a server update that has not been released yet. An unused pass still expires at its end time.');
+            } else {
+              Alert.alert('Could not cancel', errMsg(e) ?? 'Try again.');
+            }
+          } finally { setCancelling(null); }
+        },
+      },
+    ]);
+  }, [cancelling, spaceId, load]);
 
   const s = useMemo(() => styles(colors), [colors]);
 
@@ -271,6 +301,18 @@ export default function SpaceVisitorsScreen() {
                     <Text style={s.code}>{revealed === p.id ? p.code : masked(p.code)}</Text>
                   </TouchableOpacity>
                 )}
+                {!p.redeemedAt && !expired && (
+                  <TouchableOpacity
+                    onPress={() => cancelPass(p)} disabled={cancelling === p.id}
+                    style={[s.hit, cancelling === p.id && s.off]}
+                    accessibilityRole="button" accessibilityLabel={`Cancel ${p.visitorName}’s pass`}
+                    accessibilityState={{ disabled: cancelling === p.id, busy: cancelling === p.id }}
+                  >
+                    {cancelling === p.id
+                      ? <ActivityIndicator size="small" color={colors.danger} />
+                      : <Ionicons name="close-circle-outline" size={20} color={colors.danger} />}
+                  </TouchableOpacity>
+                )}
                 {inside && (
                   <TouchableOpacity
                     onPress={() => signOut(p)} disabled={signingOut === p.id}
@@ -300,7 +342,7 @@ export default function SpaceVisitorsScreen() {
         <KeyboardSafe keyboardOnly>
         <View style={s.modalWrap}>
           <View style={s.modal}>
-            <Text style={s.modalTitle}>Issue a pass</Text>
+            <Text style={s.modalTitle} accessibilityRole="header">Issue a pass</Text>
             <TextInput
               style={s.input} value={name} onChangeText={setName} autoFocus
               accessibilityLabel="Visitor's name"
@@ -359,7 +401,7 @@ export default function SpaceVisitorsScreen() {
         <KeyboardSafe keyboardOnly>
         <View style={s.modalWrap}>
           <View style={s.modal}>
-            <Text style={s.modalTitle}>Visitor code</Text>
+            <Text style={s.modalTitle} accessibilityRole="header">Visitor code</Text>
             <TextInput
               style={[s.input, s.codeInput]} value={code} onChangeText={setCode} autoFocus
               placeholder="ABC234" placeholderTextColor={colors.textDim}

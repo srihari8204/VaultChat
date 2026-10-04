@@ -5,8 +5,9 @@ import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 // for a new account and /auth/mpin/verify + recovery need for an existing one.
 // Then: existing account → /mpin-entry, new → /onboard-profile
 // (lib/otpFirstRoute); a number the server will not take ("conflict") stops
-// here with the code cleared and only "Use a different number". 6 visible digits. Was app/email-verify.tsx; renamed with
-// lib/onboardNav.selftest.ts, which pins its navigation.
+// here with the code cleared and only "Use a different number". 6 visible
+// digits. Was app/email-verify.tsx; renamed with lib/onboardNav.selftest.ts,
+// which pins its navigation.
 //
 // Auth appearance follows the selected app theme.
 

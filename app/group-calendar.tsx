@@ -255,9 +255,16 @@ export default function GroupCalendarScreen() {
     } finally { setBusy(false); }
   };
 
+  // One delete at a time, taken when the confirmation OPENS (two taps used to
+  // open two dialogs and send two deletes); released by Cancel, an Android
+  // outside-tap dismiss, or when the call settles. `deletingId` draws it.
+  const deleteOpen = useRef(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const remove = (o: Occurrence) => {
     const rowId = rowIds[o.event.id];
-    if (!rowId) return;
+    if (!rowId || deleteOpen.current) return;
+    deleteOpen.current = true;
+    const release = () => { deleteOpen.current = false; };
     const repeating = o.event.recurrence !== 'none';
     Alert.alert(
       repeating ? 'Delete repeating event?' : 'Delete event?',
@@ -265,16 +272,19 @@ export default function GroupCalendarScreen() {
         ? `"${o.event.title}" and all of its repeats will be removed.`
         : `"${o.event.title}" will be removed for everyone.`,
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: 'Cancel', style: 'cancel', onPress: release },
         { text: 'Delete', style: 'destructive', onPress: async () => {
+          setDeletingId(o.event.id);
           try {
             await deleteGroupEvent(groupId, rowId); await load();
             if (me) syncReminders(groupId, me, memo).catch(() => {});
             if (editing?.id === o.event.id) { setComposing(false); setEditing(null); }
           }
           catch (e: any) { Alert.alert('Could not delete', e?.message ?? 'Try again.'); }
+          finally { setDeletingId(null); release(); }
         } },
       ],
+      { cancelable: true, onDismiss: release },
     );
   };
 
@@ -358,6 +368,7 @@ export default function GroupCalendarScreen() {
                   actions={actionsFor(o.event)}
                   onEdit={() => openEdit(o.event)}
                   onDelete={() => remove(o)}
+                  deleting={deletingId === o.event.id}
                 />
               ))}
             </View>
@@ -504,11 +515,13 @@ const st = StyleSheet.create({
 });
 
 /** One occurrence. Tapping edits it (your own events only); delete is a visible button. */
-function EventRow({ o, actions, onEdit, onDelete }: {
+function EventRow({ o, actions, onEdit, onDelete, deleting }: {
   o: Occurrence;
   actions: { canEdit: boolean; canDelete: boolean };
   onEdit: () => void;
   onDelete: () => void;
+  /** Its delete is in flight. */
+  deleting: boolean;
 }) {
   const { colors } = useTheme();
   const when = o.event.allDay ? 'All day' : timeLabel(o.startsAt);
@@ -545,9 +558,12 @@ function EventRow({ o, actions, onEdit, onDelete }: {
         {!!repeats && <Ionicons name="repeat" size={15} color={colors.textFaint} />}
       </TouchableOpacity>
       {actions.canDelete && (
-        <TouchableOpacity onPress={onDelete} hitSlop={6} style={st.rowBtn}
-          accessibilityRole="button" accessibilityLabel={`Delete the event ${o.event.title}`}>
-          <Ionicons name="trash-outline" size={17} color={colors.textFaint} />
+        <TouchableOpacity onPress={onDelete} hitSlop={6} style={st.rowBtn} disabled={deleting}
+          accessibilityRole="button" accessibilityLabel={`Delete the event ${o.event.title}`}
+          accessibilityState={{ busy: deleting, disabled: deleting }}>
+          {deleting
+            ? <ActivityIndicator size="small" color={colors.textFaint} />
+            : <Ionicons name="trash-outline" size={17} color={colors.textFaint} />}
         </TouchableOpacity>
       )}
     </View>

@@ -211,21 +211,21 @@ export function onDeliveredTap(sink: (href: string) => void): () => void {
 // was nothing to go back to, and it replaced onto '/'.
 //
 // The root gate records where it sent the launch (null when it let it through),
-// and lib/authNav.resetTo records each later crossing of the sign-in boundary.
+// lib/authNav.resetTo records each later crossing of the sign-in boundary, and
+// app/app-lock records itself however it was raised (ResumeLock's push, the
+// sealed relock) and clears it on a resume unlock.
+
+// Whether THIS root mount's gate has decided is lib/launchGate's
+// launchGatePending (re-armed on each root mount), not a flag here: a process
+// flag outlived a root remount and routed index by the previous mount's edge.
 
 /** The lock or sign-in route this process was last sent to; null once inside the app. */
 let edge: string | null = null;
-let gateDecided = false;
 
-/** Root gate (every branch) and resetTo: where the user now stands. */
-export function noteAuthEdge(next: string | null): void {
-  edge = next;
-  gateDecided = true;
-}
+/** Root gate (every branch), resetTo and app-lock: where the user now stands. */
+export function noteAuthEdge(next: string | null): void { edge = next; }
 /** The lock or sign-in route to return to, or null when the user is inside the app. */
 export function authEdge(): string | null { return edge; }
-/** False until the root gate has decided; read by index on its first render. */
-export function launchGateDecided(): boolean { return gateDecided; }
 
 /** The edge after a resetTo(href): a lock or sign-in route is one, anything else is inside. */
 export function edgeAfterReset(href: string): string | null {

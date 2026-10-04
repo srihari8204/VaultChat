@@ -45,6 +45,7 @@ import ChatDoorButton from '../components/spaces/ChatDoorButton';
 import { runsAdminStyles } from '../components/spaces/runsAdminStyles';
 import NewRunModal, { type NewRunBody, whenLabel } from '../components/spaces/NewRunModal';
 import StopFormModal, { type StopFormInitial, type StopFormResult } from '../components/spaces/StopFormModal';
+import { errCode, errMsg } from '../lib/spaces/errors';
 
 /** One stop as the editor holds it: its OLD server id (null when new) plus the
  *  fields the server stores. See lib/spaces/runPlan.ts for why the old id matters. */
@@ -89,8 +90,8 @@ export default function SpaceRunsAdminScreen() {
       setMembers(mem);
       setRoster(ros.roster);
       setLoadError(null);
-    } catch (e: any) {
-      setLoadError(e?.message ?? 'Could not load the runs.');
+    } catch (e) {
+      setLoadError(errMsg(e) ?? 'Could not load the runs.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -104,8 +105,8 @@ export default function SpaceRunsAdminScreen() {
     try {
       setEditing(await getRun(spaceId, r.id));
       setOpenError(null);
-    } catch (e: any) {
-      setOpenError({ run: r, message: e?.message ?? 'Check your connection and try again.' });
+    } catch (e) {
+      setOpenError({ run: r, message: errMsg(e) ?? 'Check your connection and try again.' });
     }
   }, [spaceId]);
 
@@ -114,8 +115,8 @@ export default function SpaceRunsAdminScreen() {
     let id: string;
     try {
       ({ id } = await createRun(spaceId, body));
-    } catch (e: any) {
-      Alert.alert('Could not create the run', e?.message ?? 'Try again.');
+    } catch (e) {
+      Alert.alert('Could not create the run', errMsg(e) ?? 'Try again.');
       return false;
     } finally {
       setBusy(false);
@@ -153,21 +154,21 @@ export default function SpaceRunsAdminScreen() {
         try {
           await setRunRiders(spaceId, editing.run.id,
             remapRiders(editing.riders, prevIds, saved.stops));
-        } catch (e: any) {
+        } catch (e) {
           Alert.alert('Stops saved, rider stops were not',
-            `${e?.message ?? 'The manifest could not be saved.'} Check each rider’s stop below.`);
+            `${errMsg(e) ?? 'The manifest could not be saved.'} Check each rider’s stop below.`);
         }
       }
       setEditing(await getRun(spaceId, editing.run.id));
       return true;
-    } catch (e: any) {
+    } catch (e) {
       // unknown_stop: the list changed elsewhere since this editor loaded it.
       // Re-read rather than let the admin retry against stale ids.
-      if (e?.body?.code === 'unknown_stop') {
+      if (errCode(e) === 'unknown_stop') {
         Alert.alert('The stops changed', 'Someone else edited this run’s stops. The latest list is shown now — make your change again.');
         getRun(spaceId, editing.run.id).then(setEditing).catch(() => {});
       } else {
-        Alert.alert('Could not save the stops', e?.message ?? 'Try again.');
+        Alert.alert('Could not save the stops', errMsg(e) ?? 'Try again.');
       }
       return false;
     } finally {
@@ -249,8 +250,8 @@ export default function SpaceRunsAdminScreen() {
     try {
       await setRunRiders(spaceId, editing.run.id, next);
       setEditing(await getRun(spaceId, editing.run.id));
-    } catch (e: any) {
-      Alert.alert('Could not save the manifest', e?.message ?? 'Try again.');
+    } catch (e) {
+      Alert.alert('Could not save the manifest', errMsg(e) ?? 'Try again.');
     } finally { setBusy(false); }
   }, [editing, spaceId]);
 
@@ -278,10 +279,10 @@ export default function SpaceRunsAdminScreen() {
       await setRunDriver(spaceId, editing.run.id, userId);
       setEditing(await getRun(spaceId, editing.run.id));
       await load();
-    } catch (e: any) {
+    } catch (e) {
       // The server refuses a driver who already has a run in progress; say so
       // rather than leaving the picker looking broken.
-      Alert.alert('Could not assign', e?.message ?? 'Try again.');
+      Alert.alert('Could not assign', errMsg(e) ?? 'Try again.');
     } finally { setBusy(false); }
   }, [editing, spaceId, load]);
 
@@ -306,7 +307,7 @@ export default function SpaceRunsAdminScreen() {
           style: 'destructive',
           onPress: async () => {
             try { await setRunStatus(spaceId, r.id, 'cancelled'); setEditing(null); await load(); }
-            catch (e: any) { Alert.alert('Could not cancel', e?.message ?? 'Try again.'); }
+            catch (e) { Alert.alert('Could not cancel', errMsg(e) ?? 'Try again.'); }
           },
         },
       ],
@@ -361,6 +362,9 @@ export default function SpaceRunsAdminScreen() {
         {loadError && (
           <LoadError colors={colors} title="Could not load the runs" message={loadError} onRetry={() => { setLoading(true); void load(); }} />
         )}
+        {loadError && runs.length > 0 && (
+          <Text style={s.muted}>The list below is from the last successful refresh and may be out of date.</Text>
+        )}
         {openError && (
           <LoadError
             colors={colors} title={`Could not open ${openError.run.vehicleLabel || openError.run.name}`}
@@ -413,7 +417,7 @@ export default function SpaceRunsAdminScreen() {
         <View style={[s.screen, { backgroundColor: colors.bg }]}>
           <View style={[s.sheetHeader, { paddingTop: insets.top + 12 }]}>
             <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close" onPress={() => setEditing(null)} style={s.hit}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
-            <Text style={s.sheetTitle} numberOfLines={1}>
+            <Text style={s.sheetTitle} numberOfLines={1} accessibilityRole="header">
               {editing?.run.vehicleLabel || editing?.run.name}
             </Text>
             {busy && <ActivityIndicator size="small" color={colors.primary} />}

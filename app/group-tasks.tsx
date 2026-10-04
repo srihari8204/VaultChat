@@ -110,6 +110,10 @@ export default function GroupTasksScreen() {
       await sendMessage(groupId, encodeOp(op));
       return true;
     } catch (e: any) {
+      // Take the unsent op back out first, so an offline re-read below does
+      // not leave a change on screen that nobody received.
+      opsRef.current = opsRef.current.filter((x) => x !== op);
+      setTasks(foldTasks(opsRef.current));
       Alert.alert('Not saved', e?.message ?? 'Could not reach the group. Try again.');
       rebuild();
       return false;

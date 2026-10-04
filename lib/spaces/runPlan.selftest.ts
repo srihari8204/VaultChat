@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import {
   parseCoords, parseClock, plannedAtOn, clockOf, stopPayload, remapRiders, idsPreserved,
   parseDay, dayOf, stopDay, plannedPickStart, splitListedRun, reusableManifest, stopWhenText,
+  previousForTimerRead, MANIFEST_MAX_AGE_MS,
 } from './runPlan';
 import { driverView, nextStop, type Run, type RunStop, type RunRider, type RiderState } from './runs';
 
@@ -174,6 +175,11 @@ assert.equal(driverView([], []), null);
   assert.equal(reusableManifest(prev, { id: 'b', status: 'completed' }), null, 'just finished → re-read once');
   assert.equal(reusableManifest(prev, { id: 'z', status: 'scheduled' }), null, 'new run → read');
   assert.equal(reusableManifest(undefined, { id: 'a', status: 'scheduled' }), null, 'focus/pull pass nothing → read all');
+  // …but not for ever: a timer read re-reads everything once the last full read is old
+  const t0 = 1_000_000;
+  assert.equal(previousForTimerRead(prev, t0, t0 + MANIFEST_MAX_AGE_MS - 1), prev, 'recent full read → keep');
+  assert.equal(previousForTimerRead(prev, t0, t0 + MANIFEST_MAX_AGE_MS), undefined, 'old full read → read all');
+  assert.equal(previousForTimerRead(prev, 0, t0), undefined, 'never fully read → read all');
 }
 
 // ── a stop row says the day when it is not the run's day ──

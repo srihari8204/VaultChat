@@ -13,7 +13,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, StyleSheet, TouchableOpacity, ScrollView, Switch, ActivityIndicator, Alert,
+  View, StyleSheet, TouchableOpacity, ScrollView, Switch, ActivityIndicator, Alert, AccessibilityInfo, Platform,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -120,6 +120,9 @@ export default function GroupPrivacyScreen() {
       return;
     }
     setP(saved);
+    // The "Saving…" line below is an Android live region; VoiceOver ignores
+    // those, so iOS hears the saved result here (failures are Alerts).
+    if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(`Saved. ${describePrivacy(saved, Date.now())}`);
     try { await reloadPrivacy(groupId); }
     catch {
       // Saved, but the running publisher could not re-read it: say so rather

@@ -115,19 +115,22 @@ export default function SpaceAdminScreen() {
       // Runs come with their riders in one call where the server supports it,
       // else one read per run (getRunsWithManifest).
       const [rs, ros, incidents] = await Promise.all([
-        getRunsWithManifest(spaceId, { activeOnly: true }).catch(() => { failed.push('runs'); return []; }),
+        getRunsWithManifest(spaceId, { activeOnly: true }).catch(() => { failed.push('runs'); return null; }),
         getRoster(spaceId).catch(() => { failed.push('roster'); return null; }),
-        getIncidents(spaceId).catch(() => { failed.push('incidents'); return [] as Incident[]; }),
+        getIncidents(spaceId).catch(() => { failed.push('incidents'); return null; }),
       ]);
       // A run whose riders could not be read would undercount the tiles: say so.
-      const noManifest = rs.filter((x) => x.failed).length;
+      const noManifest = (rs ?? []).filter((x) => x.failed).length;
       if (noManifest) failed.push(`riders for ${noManifest} ${noManifest === 1 ? 'run' : 'runs'} (the figures below may be low)`);
       setLoadError(failed.length ? `Could not load ${failed.join(', ')}.` : null);
-      setRuns(rs.map((x) => x.run));
-      setRosterCount(ros ? ros.roster.length : null);
-      setRoster(ros?.roster ?? []);
-      setOpenIncidents(incidents.filter((i) => i.status !== 'resolved'));
-      setManifests(Object.fromEntries(rs.map((x) => [x.run.id, x.riders])));
+      // A part that failed keeps what the last refresh showed (said by the
+      // note under the error) rather than drawing zeros as if they were read.
+      if (rs) {
+        setRuns(rs.map((x) => x.run));
+        setManifests(Object.fromEntries(rs.map((x) => [x.run.id, x.riders])));
+      }
+      if (ros) { setRosterCount(ros.roster.length); setRoster(ros.roster); }
+      if (incidents) setOpenIncidents(incidents.filter((i) => i.status !== 'resolved'));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -203,6 +206,9 @@ export default function SpaceAdminScreen() {
 
       {loadError && !loading && (
         <LoadError colors={colors} message={loadError} onRetry={() => { setLoading(true); void load(); }} />
+      )}
+      {loadError && !loading && tiles.length > 0 && (
+        <Text style={s.muted}>The figures below are from the last successful refresh, or incomplete, and may be out of date.</Text>
       )}
 
       {loading ? (

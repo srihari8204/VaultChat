@@ -27,6 +27,7 @@ import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import FamilyMap, { type FamilyMarker } from '../components/family/FamilyMap';
 import { getRunsWithManifest, type RunWithManifest } from '../lib/spaces/api';
+import { previousForTimerRead } from '../lib/spaces/runPlan';
 import { subscribeRun, type RunPing } from '../lib/spaces/runSession';
 import { progress, type Run, type RunRider } from '../lib/spaces/runs';
 import { tilesForType, type RunSet } from '../lib/spaces/dashboard';
@@ -35,6 +36,7 @@ import { getCurrentUserAsync } from './(constants)/authService';
 import { AuroraBackground } from '../components/ui';
 import LoadError from '../components/spaces/LoadError';
 import { KeyboardSafe } from '../components/ui/KeyboardSafe';
+import { errMsg } from '../lib/spaces/errors';
 
 /** A fix older than this is drawn faded — the map must not imply freshness. */
 const STALE_MS = 90_000;
@@ -61,14 +63,21 @@ export default function SpaceOpsMapScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   // The last list read, so a timer re-read against a server without
-  // `include=` re-reads only the runs on the road (lib/spaces/api previous).
+  // `include=` re-reads only the runs on the road (lib/spaces/api previous) —
+  // and every run again once the last full read is a few minutes old
+  // (lib/spaces/runPlan previousForTimerRead), so a scheduled run's riders
+  // edited elsewhere do not stay stale for as long as this board is open.
   const lastList = useRef<RunWithManifest[] | undefined>(undefined);
+  const lastFullRead = useRef(0);
   const load = useCallback(async (timer = false) => {
     try {
       // Manifests come with the runs (one call where the server supports it,
       // else per run) so the office sees "22 of 40 aboard" rather than just a
       // dot. Failures are per-run and non-fatal — and marked, not drawn as 0/0.
-      const list = await getRunsWithManifest(spaceId, { activeOnly: true, previous: timer ? lastList.current : undefined });
+      const now = Date.now();
+      const previous = timer ? previousForTimerRead(lastList.current, lastFullRead.current, now) : undefined;
+      const list = await getRunsWithManifest(spaceId, { activeOnly: true, previous });
+      if (!previous) lastFullRead.current = now;
       lastList.current = list;
       setRuns(list.map((x) => x.run));
       // A run that finished or vanished since: the composer must not keep
@@ -77,10 +86,10 @@ export default function SpaceOpsMapScreen() {
       setManifests(Object.fromEntries(list.map((x) => [x.run.id, x.riders])));
       setNoManifest(list.filter((x) => x.failed).map((x) => x.run.id));
       setLoadError(null);
-    } catch (e: any) {
+    } catch (e) {
       // Not "No runs are scheduled": an empty map after a failed read is a
       // false all-clear for an operator.
-      setLoadError(e?.message ?? 'Could not load runs.');
+      setLoadError(errMsg(e) ?? 'Could not load runs.');
     } finally {
       setLoading(false);
       setRefreshing(false);

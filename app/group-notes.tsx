@@ -93,6 +93,10 @@ export default function GroupNotesScreen() {
       await sendMessage(groupId, encodeNoteOp(op));
       return true;
     } catch (e: any) {
+      // Take the unsent op back out first: if the re-read below also fails
+      // (offline), the list must not keep showing a change nobody received.
+      opsRef.current = opsRef.current.filter((x) => x !== op);
+      setNotes(foldNotes(opsRef.current));
       Alert.alert('Not saved', e?.message ?? 'Could not reach the group.');
       rebuild();
       return false;

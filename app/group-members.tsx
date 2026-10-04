@@ -246,7 +246,8 @@ export default function GroupMembersScreen() {
         accessibilityRole={actionable ? 'button' : 'text'}
         accessibilityLabel={`${m.name ?? 'crazzychat user'}${isMe ? ' (you)' : ''}, ${ROLE_LABELS[role] ?? m.role}`}
         accessibilityHint={actionable ? 'Opens role and member actions' : undefined}
-        accessibilityState={{ disabled: !actionable, busy: busy === m.userId }}
+        // A text row is not a disabled control: no `disabled`, or it reads as dimmed.
+        accessibilityState={actionable ? { disabled: busy === m.userId, busy: busy === m.userId } : undefined}
         style={[st.row, { borderColor: colors.glassStroke }]}
       >
         {avatar(m)}

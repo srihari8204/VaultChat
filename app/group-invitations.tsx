@@ -18,7 +18,7 @@
 // again. So an accepted invitation stays here, visibly waiting, until it turns
 // into membership or somebody ends it.
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   View, StyleSheet, TouchableOpacity, FlatList, Alert,
   ActivityIndicator, RefreshControl,
@@ -30,7 +30,8 @@ import { AuroraBackground } from '../components/ui/AuroraBackground';
 import { AppText as Text } from '../components/ui/Text';
 import { brandAlpha } from '../constants/theme';
 import { myInvitations, acceptInvitation, rejectInvitation, type MyInvitation } from '../lib/chatService';
-import { groupTypeInfo, hexColorOr, inkOn } from '../lib/groups/catalog';
+import { glyphOn, groupTypeInfo, hexColorOr, inkOn } from '../lib/groups/catalog';
+import { tint } from '../lib/tintColor';
 
 /** How long until it lapses, in words. Precision here would be false comfort. */
 const expiresIn = (iso: string) => {
@@ -61,8 +62,13 @@ export default function GroupInvitationsScreen() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
+  // One answer at a time, decided synchronously: `acting` is state, so two taps
+  // in one frame (or Decline's Alert callback, which captured the value from
+  // when the Alert opened) both passed it (the group-invites pattern).
+  const actingRef = useRef(false);
   const accept = async (inv: MyInvitation) => {
-    if (acting) return;
+    if (actingRef.current) return;
+    actingRef.current = true;
     setActing(inv.id);
     try {
       const res = await acceptInvitation(inv.id);
@@ -92,7 +98,7 @@ export default function GroupInvitationsScreen() {
     } catch (e: any) {
       Alert.alert('Could not accept', e?.message ?? 'Try again.');
       load();
-    } finally { setActing(null); }
+    } finally { actingRef.current = false; setActing(null); }
   };
 
   const decline = (inv: MyInvitation) => {
@@ -104,11 +110,12 @@ export default function GroupInvitationsScreen() {
       [
         { text: 'Keep it', style: 'cancel' },
         { text: 'Decline', style: 'destructive', onPress: async () => {
-          if (acting) return;
+          if (actingRef.current) return;
+          actingRef.current = true;
           setActing(inv.id);
           try { await rejectInvitation(inv.id); await load(); }
           catch (e: any) { Alert.alert('Could not decline', e?.message ?? 'Try again.'); }
-          finally { setActing(null); }
+          finally { actingRef.current = false; setActing(null); }
         } },
       ],
     );
@@ -140,8 +147,9 @@ export default function GroupInvitationsScreen() {
         {/* One element for the screen reader: the facts, then the buttons. */}
         <View accessible accessibilityLabel={`${inv.name ?? 'A group'}, ${type.label}, ${members}. ${status} ${expiresIn(inv.expiresAt)}.`}>
         <View style={st.cardTop}>
-          <View style={[st.icon, { backgroundColor: accent + '22' }]}>
-            <Ionicons name={icon} size={22} color={accent} />
+          <View style={[st.icon, { backgroundColor: tint(accent, 0.13) }]}>
+            {/* A light server colour falls back to the text ink (lib/groups/catalog glyphOn). */}
+            <Ionicons name={icon} size={22} color={glyphOn(accent, colors.bg, colors.text)} />
           </View>
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15.5 }} numberOfLines={1}>

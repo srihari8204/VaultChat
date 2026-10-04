@@ -188,6 +188,26 @@ export function arrivalWindow(
   };
 }
 
+/** What a rider card last told a screen reader about the arrival window. */
+export type SaidWindow = { latest: number; between: number };
+
+/** Minutes the window's end must move before it is announced again. */
+export const WINDOW_SHIFT_MIN = 3;
+
+/**
+ * Whether a recomputed arrival window is worth announcing (iOS has no live
+ * regions, so the rider card announces). The window is recomputed every 30 s
+ * and on every vehicle ping, and its clock text moves almost every minute, so
+ * announcing every new text spoke about once a minute per child. Say it when
+ * the vehicle reaches the stop, when a stop is passed, or when the end of the
+ * window moves by WINDOW_SHIFT_MIN minutes or more; never on first sight.
+ */
+export function windowWorthSaying(prev: SaidWindow | null, next: SaidWindow): boolean {
+  if (!prev) return false;
+  if (next.between !== prev.between) return true;
+  return Math.abs(next.latest - prev.latest) >= WINDOW_SHIFT_MIN * 60_000;
+}
+
 /** How many stops sit between the vehicle's current stop and a rider's stop. */
 export function stopsBetween(stops: RunStop[], fromStopId: string | null, toStopId: string | null): number {
   const ordered = [...stops].sort((a, b) => a.seq - b.seq);
@@ -371,6 +391,18 @@ if (require.main === module) {
   const t3 = newTransitionId('run', 'kid', 'boarded', now + 1500);
   if (t1 !== t2) throw new Error('a retry within the same second must reuse the transition id');
   if (t1 === t3) throw new Error('a genuinely later action must be a new transition');
+
+  // the rider card's announcement: meaningful moves only
+  {
+    const at = (min: number, between: number) => ({ latest: min * 60_000, between });
+    if (windowWorthSaying(null, at(10, 2))) throw new Error('first sight is not announced');
+    if (windowWorthSaying(at(10, 2), at(11, 2))) throw new Error('a 1-minute drift is not announced');
+    if (windowWorthSaying(at(10, 2), at(12.9, 2))) throw new Error('under the threshold is not announced');
+    if (!windowWorthSaying(at(10, 2), at(13, 2))) throw new Error('a 3-minute slip is announced');
+    if (!windowWorthSaying(at(10, 2), at(7, 2))) throw new Error('a 3-minute gain is announced');
+    if (!windowWorthSaying(at(10, 2), at(10, 1))) throw new Error('a passed stop is announced');
+    if (!windowWorthSaying(at(10, 1), at(10, 0))) throw new Error('"arriving now" is announced');
+  }
 
   console.log('spaces/runs self-check OK');
 }

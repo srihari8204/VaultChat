@@ -30,6 +30,7 @@ import { getIncidents, setIncidentStatus, getRuns, type Incident } from '../lib/
 import type { Run } from '../lib/spaces/runs';
 import { AuroraBackground } from '../components/ui';
 import LoadError from '../components/spaces/LoadError';
+import { errMsg } from '../lib/spaces/errors';
 
 const CATEGORY: Record<string, { label: string; icon: keyof typeof Ionicons.glyphMap }> = {
   sos: { label: 'Emergency alert', icon: 'warning' },
@@ -69,8 +70,8 @@ export default function SpaceIncidentsScreen() {
       setRuns(rs ?? []);
       setRunsFailed(rs == null);
       setLoadError(null);
-    } catch (e: any) {
-      setLoadError(e?.message ?? 'Could not load incidents.');
+    } catch (e) {
+      setLoadError(errMsg(e) ?? 'Could not load incidents.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -101,8 +102,8 @@ export default function SpaceIncidentsScreen() {
     try {
       await setIncidentStatus(spaceId, i.id, status);
       await load();
-    } catch (e: any) {
-      Alert.alert('Could not update', e?.message ?? 'Try again.');
+    } catch (e) {
+      Alert.alert('Could not update', errMsg(e) ?? 'Try again.');
     } finally {
       setBusy(null);
     }
@@ -170,7 +171,8 @@ export default function SpaceIncidentsScreen() {
             {/* One element for the summary; the buttons below stay separate. */}
             <View
               style={s.row} accessible
-              accessibilityLabel={[meta.label, vehicle, when(i.createdAt), done ? 'resolved' : i.status === 'ack' ? 'acknowledged' : 'open'].filter(Boolean).join(', ')}
+              accessibilityLabel={[meta.label, vehicle, when(i.createdAt), done ? 'resolved' : i.status === 'ack' ? 'acknowledged' : 'open',
+                i.note ? 'note attached, readable in the space chat' : null].filter(Boolean).join(', ')}
             >
               {/* Resolved cards fade only the icon: fading the card took its
                   text below readable contrast. */}
@@ -191,7 +193,8 @@ export default function SpaceIncidentsScreen() {
             {/* The note is ciphertext. Saying so is more useful than an empty
                 space where an explanation should be. */}
             {i.note && (
-              <Text style={s.footnote}>
+              // Said in the summary's label already; hidden here so it is not read twice.
+              <Text style={s.footnote} accessibilityElementsHidden importantForAccessibility="no">
                 The reporter attached a note. It is end-to-end encrypted and readable only
                 in the space’s chat, not from this list.
               </Text>

@@ -67,7 +67,7 @@ export default function PermissionMatrix({
   const s = useMemo(() => styles(colors), [colors]);
 
   const granted = useMemo(
-    () => new Set(role?.permissions ?? []),
+    () => new Set<string>(role?.permissions ?? []),
     [role?.permissions],
   );
 
@@ -151,7 +151,7 @@ export default function PermissionMatrix({
       </Text>
 
       {rows.map((p) => {
-        const on = granted.has(p as any);
+        const on = granted.has(p);
         return (
           <View key={p} style={s.line}>
             {/* An icon AND a word. A tick that differs from a dash only by

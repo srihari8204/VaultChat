@@ -255,6 +255,9 @@ export default function SpaceDevicesScreen() {
         {loadError && (
           <LoadError colors={colors} title="Could not load devices" message={loadError} onRetry={() => { setLoading(true); void load(); }} />
         )}
+        {loadError && devices.length > 0 && (
+          <Text style={s.muted}>The list below is from the last successful refresh and may be out of date.</Text>
+        )}
         {!loadError && devices.length === 0 && (
           <View style={s.card}>
             <Text style={s.cardTitle}>No devices yet</Text>
@@ -272,7 +275,13 @@ export default function SpaceDevicesScreen() {
             <TouchableOpacity
               key={d.id} style={s.card} onPress={() => openDevice(d)}
               accessibilityRole="button"
-              accessibilityLabel={`${d.label}, ${meta.label}${d.stale ? ', silent' : ''}`}
+              accessibilityLabel={[
+                d.label, meta.label, d.identifier,
+                d.battery != null ? `battery ${d.battery}%` : null,
+                d.lastSeenAt ? `last reported ${ago(d.lastSeenAt)}` : 'never reported',
+                d.stale ? 'silent' : null,
+                d.events24h > 0 ? `${d.events24h} ${d.events24h === 1 ? 'event' : 'events'} in the last 24 hours` : null,
+              ].filter(Boolean).join(', ')}
             >
               <View style={s.row}>
                 <View style={[s.icon, { backgroundColor: colors.primary + '1e' }]}>
@@ -331,7 +340,7 @@ export default function SpaceDevicesScreen() {
         <KeyboardSafe keyboardOnly>
         <View style={s.modalWrap}>
           <View style={s.modal}>
-            <Text style={s.modalTitle}>Add a device</Text>
+            <Text style={s.modalTitle} accessibilityRole="header">Add a device</Text>
             <TextInput style={s.input} value={label} onChangeText={setLabel} autoFocus
               accessibilityLabel="Device name"
               placeholder="Name, e.g. Honda City" placeholderTextColor={colors.textDim} maxLength={80} />

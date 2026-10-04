@@ -60,6 +60,10 @@ export default function GroupCallsScreen() {
   const [startBusy, setStartBusy] = useState(false);
   const setStarting = useCallback((on: boolean) => { starting.current = on; setStartBusy(on); }, []);
   useFocusEffect(useCallback(() => { setStarting(false); }, [setStarting]));
+  // The 3 s re-enable after a start, cleared on unmount (no state set on a
+  // screen that is gone).
+  const releaseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (releaseTimer.current) clearTimeout(releaseTimer.current); }, []);
 
   useEffect(() => {
     let active = true;
@@ -134,7 +138,8 @@ export default function GroupCallsScreen() {
       Alert.alert('Could not start the call', e?.message ?? 'Try again.');
       return;
     }
-    setTimeout(() => setStarting(false), 3000);
+    if (releaseTimer.current) clearTimeout(releaseTimer.current);
+    releaseTimer.current = setTimeout(() => setStarting(false), 3000);
     if (!rang) {
       // The call room opened, but nobody was told it exists.
       Alert.alert('Members were not rung', 'Could not reach the server to ring the group. They can still join from the group chat.');

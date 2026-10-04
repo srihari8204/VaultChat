@@ -12,7 +12,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { authEdge, edgeAfterReset, launchGateDecided, noteAuthEdge, splashNext } from './pendingLink';
+import { authEdge, edgeAfterReset, noteAuthEdge, splashNext } from './pendingLink';
 
 let failures = 0;
 function ok(label: string, cond: boolean, detail?: string) {
@@ -47,12 +47,12 @@ ok('a sign-in step with a query is still the edge',
   edgeAfterReset('/mpin-entry?userId=u1') === '/mpin-entry?userId=u1');
 
 console.log('\nThe recorded state:');
-ok('undecided at load', !launchGateDecided() && authEdge() === null);
+ok('no edge at load', authEdge() === null);
 noteAuthEdge('/app-lock');
-ok('the gate\'s redirect is recorded and marks the gate decided',
-  launchGateDecided() && authEdge() === '/app-lock');
+ok('the gate\'s redirect is recorded', authEdge() === '/app-lock');
 noteAuthEdge(null);
-ok('a crossing into the app clears it', authEdge() === null && launchGateDecided());
+ok('a crossing into the app clears it', authEdge() === null);
+// "Has the gate decided" is per root mount: lib/launchGateRemount.selftest.ts.
 
 console.log('\nThe wiring:');
 const read = (...p: string[]) => readFileSync(join(__dirname, '..', ...p), 'utf8');
@@ -64,10 +64,14 @@ ok('…and clears it on the allow branch, before settling', /noteAuthEdge\(null\
 const nav = read('lib', 'authNav.ts');
 ok('resetTo records every crossing', /noteAuthEdge\(edgeAfterReset\(href\)\)/.test(nav));
 const index = read('app', 'index.tsx');
-ok('index reads "cold" once, on its first render', /useState\(\(\) => !launchGateDecided\(\)\)/.test(index));
+ok('index reads "cold" once, on its first render', /useState\(launchGatePending\)/.test(index));
 ok('index routes by splashNext instead of returning on false',
-  /splashNext\(await launchAllowed, coldVisit, authEdge\(\)\)/.test(index)
-  && !/if \(!\(await launchAllowed\)\) return;/.test(index));
+  /splashNext\(await decision, coldVisit, authEdge\(\)\)/.test(index)
+  && !/if \(!\(await (launchAllowed|decision)\)\) return;/.test(index));
+const lock = read('app', 'app-lock.tsx');
+ok('the lock records itself however it was raised (ResumeLock, the sealed relock)',
+  /useEffect\(\(\) => \{ noteAuthEdge\('\/app-lock'\); \}, \[\]\);/.test(lock));
+ok('…and a resume unlock clears it before going back', /noteAuthEdge\(null\);[^\n]*\n\s*router\.back\(\);/.test(lock));
 const blocked = read('app', 'blocked.tsx');
 ok('blocked leaves to the edge, not to "/", when nothing is underneath',
   /router\.replace\(\(authEdge\(\) \?\? '\/'\) as Href\)/.test(blocked)

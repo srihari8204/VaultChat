@@ -14,6 +14,7 @@ import { KeyboardSafe } from '../ui/KeyboardSafe';
 import type { SpacePalette } from '../../lib/spaces/theme';
 import { setShift } from '../../lib/spaces/api';
 import { shiftBody, loadShift, rememberShift, type ShiftForm } from '../../lib/spaces/shift';
+import { errMsg } from '../../lib/spaces/errors';
 
 export default function ShiftSheet({ visible, onClose, colors, spaceId }: {
   visible: boolean; onClose: () => void; colors: SpacePalette; spaceId: string;
@@ -46,8 +47,8 @@ export default function ShiftSheet({ visible, onClose, colors, spaceId }: {
       await setShift(spaceId, r.body);
       await rememberShift(spaceId, r.body);
       onClose();
-    } catch (e: any) {
-      Alert.alert('Could not save the shift', e?.message ?? 'Try again.');
+    } catch (e) {
+      Alert.alert('Could not save the shift', errMsg(e) ?? 'Try again.');
     } finally { setBusy(false); }
   };
 

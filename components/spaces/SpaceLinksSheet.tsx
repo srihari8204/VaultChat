@@ -19,6 +19,7 @@ import type { SpacePalette } from '../../lib/spaces/theme';
 import {
   addLink, removeLink, type RosterEntry, type SpaceLink, type LinkRelation,
 } from '../../lib/spaces/api';
+import { errMsg } from '../../lib/spaces/errors';
 
 const RELATIONS: { key: LinkRelation; label: string }[] = [
   { key: 'guardian_of', label: 'is guardian of' },
@@ -74,8 +75,8 @@ export default function SpaceLinksSheet({
       await addLink(spaceId, { subjectId: subject.id, objectId: object.id, relation });
       setSubject(null); setObject(null);
       await onChanged();
-    } catch (e: any) {
-      Alert.alert('Could not add the link', e?.message ?? 'Try again.');
+    } catch (e) {
+      Alert.alert('Could not add the link', errMsg(e) ?? 'Try again.');
     } finally { setBusy(false); }
   };
 
@@ -91,7 +92,7 @@ export default function SpaceLinksSheet({
           onPress: async () => {
             setBusy(true);
             try { await removeLink(spaceId, l); await onChanged(); }
-            catch (e: any) { Alert.alert('Could not remove the link', e?.message ?? 'Try again.'); }
+            catch (e) { Alert.alert('Could not remove the link', errMsg(e) ?? 'Try again.'); }
             finally { setBusy(false); }
           },
         },

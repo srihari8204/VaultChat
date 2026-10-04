@@ -14,8 +14,8 @@ import { ActivityIndicator, Image, StyleSheet, TouchableOpacity, View } from "re
 import { AppText as Text } from "../components/ui/Text";
 import { AuroraDark, BRAND_NIGHT } from "../constants/theme";
 import { t } from "../lib/i18n";
-import { launchAllowed } from "../lib/launchGate";
-import { authEdge, consumeLaunchLink, launchGateDecided, markLaunchRouted, splashNext } from "../lib/pendingLink";
+import { currentLaunchDecision, launchGatePending } from "../lib/launchGate";
+import { authEdge, consumeLaunchLink, markLaunchRouted, splashNext } from "../lib/pendingLink";
 import { shouldCheckRestore } from "../lib/restoreGate";
 import { securityVerdict } from "../lib/securityVerdict";
 
@@ -28,10 +28,14 @@ export default function IndexScreen() {
   // One routing run at a time: a double tap on Retry ran two replaces and
   // could push a held link twice. Released only by a failure.
   const inFlight = useRef(false);
-  // Read once, on the first render: before the root gate has decided, this is
-  // the cold-start visit. Any later visit to '/' (/blocked's exit, a bare app
-  // link) comes after the decision and must route itself (lib/pendingLink).
-  const [coldVisit] = useState(() => !launchGateDecided());
+  // Read once, on the first render: before THIS root mount's gate has decided,
+  // this is the cold-start visit, and it waits for that mount's decision. Any
+  // later visit to '/' (/blocked's exit, a bare app link) comes after the
+  // decision and must route itself (lib/pendingLink). Per mount, not per
+  // process: after a root remount (lib/launchGate "Per root mount") a process
+  // flag said "decided" and this screen routed by the previous mount's answer.
+  const [coldVisit] = useState(launchGatePending);
+  const [decision] = useState(currentLaunchDecision);
 
   const route = useCallback(async () => {
     if (inFlight.current) return;
@@ -55,10 +59,10 @@ export default function IndexScreen() {
       // fourth outcome.
       //
       // A LATER visit gets the same `false` (the gate settles once per
-      // process), and returning then left the user on this logo with nothing
+      // mount), and returning then left the user on this logo with nothing
       // to press. It goes to the lock or sign-in screen the user still stands
       // at, or on into the app once a sign-in or unlock has crossed them in.
-      const next = splashNext(await launchAllowed, coldVisit, authEdge());
+      const next = splashNext(await decision, coldVisit, authEdge());
       if (next === "wait") return;
       if (next !== "route") { router.replace(next as Href); return; }
       // The launch scan found a threat and is routing to /blocked: don't race it.
@@ -92,7 +96,7 @@ export default function IndexScreen() {
       inFlight.current = false;
       setFailed(true);
     }
-  }, [coldVisit]);
+  }, [coldVisit, decision]);
 
   useEffect(() => { void route(); }, [route]);
 

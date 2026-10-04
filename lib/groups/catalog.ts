@@ -143,6 +143,20 @@ export function inkOn(fill: string): string {
   return vsWhite >= vsDark ? INK_LIGHT : INK_DARK;
 }
 
+/**
+ * An icon colour for a group colour drawn as a GLYPH on the screen's ground
+ * (e.g. on a faint tint of itself): the colour when it reaches WCAG's 3:1 for
+ * non-text graphics against `ground`, otherwise `fallback` (the theme's text
+ * ink). Group colours are data, so amber on the light ground (1.7:1) is not
+ * always visible. A ground that is not #RRGGBB cannot be measured, so the
+ * colour is kept.
+ */
+export function glyphOn(color: string, ground: string, fallback: string): string {
+  if (!/^#[0-9a-fA-F]{6}$/.test(ground)) return color;
+  const [a, b] = [luminance(hexColorOr(color, '#000000')), luminance(ground)].sort((m, n) => n - m);
+  return (a + 0.05) / (b + 0.05) >= 3 ? color : fallback;
+}
+
 // ── self-check ──
 if (require.main === module) {
   // The client list is checked against the migrations that actually seed
@@ -224,6 +238,12 @@ if (require.main === module) {
     const r = ratio(c.hex, inkOn(c.hex));
     if (r < 4.5) throw new Error(`ink on ${c.name} ${c.hex} is only ${r.toFixed(2)}:1`);
   }
+
+  // a group colour as a glyph: kept when visible (3:1), else the fallback ink
+  if (glyphOn('#F59E0B', '#D4E1F2', '#000') !== '#000') throw new Error('amber on the light ground falls back');
+  if (glyphOn('#F59E0B', '#0A0810', '#fff') !== '#F59E0B') throw new Error('amber on the dark ground stays');
+  if (glyphOn('#1552E0', '#D4E1F2', '#000') !== '#1552E0') throw new Error('deep blue on light stays');
+  if (glyphOn('#123456', 'rgba(0,0,0,0.5)', '#000') !== '#123456') throw new Error('unmeasurable ground keeps the colour');
 
   console.log('groups/catalog self-check OK');
 }

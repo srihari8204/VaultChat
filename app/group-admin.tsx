@@ -42,6 +42,7 @@ import { memberActions, ROLE_LABELS as GROUP_ROLE_LABELS, type GroupRole } from 
 import { GroupNotFound } from '../components/groups/GroupNotFound';
 import { makeLatestSaver } from '../lib/groups/latestSave';
 import { approvalQueue, isLinkRow, queueMerged } from '../lib/groups/serverContracts';
+import { tint } from '../lib/tintColor';
 
 type Policy = 'everyone' | 'admins';
 
@@ -67,6 +68,11 @@ function useS() {
 }
 
 /** Everyone / Admins only — a pair of radios. */
+// The control labels are drawn above each radiogroup, which carries the same
+// label (and each radio repeats it), so the drawn text is hidden from screen
+// readers: as headers they made the label be read twice.
+const VISUAL_ONLY = { accessibilityElementsHidden: true, importantForAccessibility: 'no-hide-descendants' } as const;
+
 function PolicyToggle({ label, value, onChange }: { label: string; value: Policy; onChange: (p: Policy) => void }) {
   const s = useS();
   return (
@@ -293,7 +299,7 @@ export default function GroupAdminScreen() {
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" style={s.backBtn} hitSlop={10}>
+        <TouchableOpacity onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/chats'))} accessibilityRole="button" accessibilityLabel="Go back" style={s.backBtn} hitSlop={10}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.headerTitle} accessibilityRole="header">Group Admin</Text>
@@ -349,11 +355,11 @@ export default function GroupAdminScreen() {
           <View style={s.section}>
             <Text style={s.sectionTitle} accessibilityRole="header">Group Controls</Text>
 
-            <Text style={s.ctrlLabel} accessibilityRole="header">Who can send messages</Text>
+            <Text style={s.ctrlLabel} {...VISUAL_ONLY}>Who can send messages</Text>
             <PolicyToggle label="Who can send messages" value={sendPolicy} onChange={changeSendPolicy} />
 
-            <Text style={[s.ctrlLabel, { marginTop: 14 }]} accessibilityRole="header">Slow mode (between messages)</Text>
-            <View style={s.slowRow} accessibilityRole="radiogroup" accessibilityLabel="Slow mode">
+            <Text style={[s.ctrlLabel, { marginTop: 14 }]} {...VISUAL_ONLY}>Slow mode (between messages)</Text>
+            <View style={s.slowRow} accessibilityRole="radiogroup" accessibilityLabel="Slow mode between messages">
               {SLOW_OPTS.map(opt => (
                 <TouchableOpacity
                   key={opt.value}
@@ -367,10 +373,10 @@ export default function GroupAdminScreen() {
                 </TouchableOpacity>
               ))}
             </View>
-            <Text style={[s.ctrlLabel, { marginTop: 14 }]} accessibilityRole="header">Who can send media</Text>
+            <Text style={[s.ctrlLabel, { marginTop: 14 }]} {...VISUAL_ONLY}>Who can send media</Text>
             <PolicyToggle label="Who can send media" value={mediaPolicy} onChange={changeMediaPolicy} />
 
-            <Text style={[s.ctrlLabel, { marginTop: 14 }]} accessibilityRole="header">Who can add members</Text>
+            <Text style={[s.ctrlLabel, { marginTop: 14 }]} {...VISUAL_ONLY}>Who can add members</Text>
             <PolicyToggle label="Who can add members" value={addPolicy} onChange={changeAddPolicy} />
 
             <View style={s.switchRow}>
@@ -495,7 +501,7 @@ export default function GroupAdminScreen() {
                 </View>
 
                 {roleMenuUid === item.userId && canEditRole && (
-                  <View style={s.roleMenu}>
+                  <View style={s.roleMenu} accessibilityRole="radiogroup" accessibilityLabel={`Role for ${label}`}>
                     {roleOptions.map(r => (
                       <TouchableOpacity
                         key={r}
@@ -541,7 +547,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   banner: { marginHorizontal: 16, marginBottom: 8, padding: 10, borderRadius: 10, borderWidth: 1 },
   bannerOk: { backgroundColor: brandAlpha(0.12), borderColor: brandAlpha(0.4) },
   // danger is a #RRGGBB token in both palettes, so a hex alpha suffix is valid.
-  bannerErr: { backgroundColor: c.danger + '1F', borderColor: c.danger + '66' },
+  bannerErr: { backgroundColor: tint(c.danger, 0.12), borderColor: tint(c.danger, 0.4) },
   bannerTxt: { color: c.text, fontSize: 12 },
 
   section: {

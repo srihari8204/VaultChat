@@ -72,6 +72,9 @@ export default function GroupInsightsScreen() {
    *  "Nothing recorded yet" with no way back — the load only ever re-ran on a
    *  fresh focus, so the user had to know to leave and come back (2026-09-17). */
   const [reload, setReload] = useState(0);
+  // A Retry under a note re-reads in place: the figures stay on screen (the
+  // full spinner is only for the whole-screen failure, when nothing is shown).
+  const [retrying, setRetrying] = useState(false);
 
   const range: Range = useMemo(() => {
     const now = Date.now();
@@ -166,7 +169,7 @@ export default function GroupInsightsScreen() {
         // Nothing loaded. Say so with Retry; the empty state would read as a quiet week.
         if (live) setFailed(true);
       }
-      finally { if (live) setLoading(false); }
+      finally { if (live) { setLoading(false); setRetrying(false); } }
     })();
     return () => { live = false; };
     // reload is a deliberate trigger (Retry), not a value read inside.
@@ -184,6 +187,7 @@ export default function GroupInsightsScreen() {
     [trips],
   );
   const retry = () => { setLoading(true); setReload((n) => n + 1); };
+  const retryInPlace = () => { if (retrying) return; setRetrying(true); setReload((n) => n + 1); };
 
   const stat = (label: string, value: string) => (
     <View style={st.stat} accessible accessibilityLabel={`${label}: ${value}`}>
@@ -286,10 +290,11 @@ export default function GroupInsightsScreen() {
 
           <Text style={[st.h, { color: colors.text }]} accessibilityRole="header">By member</Text>
           {namesFailed && (
-            <TouchableOpacity accessibilityRole="button" onPress={retry}
+            <TouchableOpacity accessibilityRole="button" onPress={retryInPlace} disabled={retrying}
+              accessibilityState={{ busy: retrying, disabled: retrying }}
               accessibilityLabel="Couldn't load member names. Retry">
               <Text style={{ color: colors.danger, fontSize: 12.5, marginBottom: 10 }}>
-                Couldn’t load member names, so they show as “Member”. Tap to retry.
+                Couldn’t load member names, so they show as “Member”. {retrying ? 'Retrying…' : 'Tap to retry.'}
               </Text>
             </TouchableOpacity>
           )}
@@ -331,15 +336,21 @@ export default function GroupInsightsScreen() {
           ))}
 
           <Text style={[st.h, { color: colors.text }]} accessibilityRole="header">Trips</Text>
-          {tripsState !== 'ok' && (
-            <TouchableOpacity accessibilityRole="button" onPress={retry}
-              accessibilityLabel={tripsState === 'failed' ? "Couldn't read this group's trips. Retry" : 'Some older trips could not be read. Retry'}>
+          {tripsState === 'failed' && (
+            <TouchableOpacity accessibilityRole="button" onPress={retryInPlace} disabled={retrying}
+              accessibilityState={{ busy: retrying, disabled: retrying }}
+              accessibilityLabel="Couldn't read this group's trips. Retry">
               <Text style={{ color: colors.danger, fontSize: 12.5, marginBottom: 10 }}>
-                {tripsState === 'failed'
-                  ? 'Couldn’t read this group’s trips. Tap to retry.'
-                  : 'Some older trips this ' + span + ' could not be read. Tap to retry.'}
+                Couldn’t read this group’s trips. {retrying ? 'Retrying…' : 'Tap to retry.'}
               </Text>
             </TouchableOpacity>
+          )}
+          {/* 'partial': the paged read stopped at its cap before the start of
+              the range. Retrying re-runs the same capped read, so no Retry. */}
+          {tripsState === 'partial' && (
+            <Text style={{ color: colors.textDim, fontSize: 12.5, marginBottom: 10 }}>
+              Older trips this {span} are further back than this screen can read, so the list below may be incomplete.
+            </Text>
           )}
           {tripsState === 'failed' ? null : trips.length === 0 ? (
             <Text style={{ color: colors.textDim, fontSize: 13.5 }}>

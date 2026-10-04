@@ -34,6 +34,7 @@ import { useTheme } from '../lib/theme';
 import { AuroraBackground } from '../components/ui';
 import LoadError from '../components/spaces/LoadError';
 import { familyOf } from '../lib/spaces/layout';
+import { errMsg } from '../lib/spaces/errors';
 
 interface Tile {
   key: string;
@@ -87,8 +88,8 @@ export default function SpaceOverviewScreen() {
       // of a wall of zeros that looks like an empty school.
       if (s?.error) { setError('You no longer have access to this space’s operations.'); setSum(null); }
       else { setSum(s); setError(null); }
-    } catch (e: any) {
-      setError(e?.message ?? 'Could not load the dashboard.');
+    } catch (e) {
+      setError(errMsg(e) ?? 'Could not load the dashboard.');
     } finally {
       setLoading(false); setRefreshing(false);
     }
@@ -338,7 +339,9 @@ export default function SpaceOverviewScreen() {
                 {!sum.tasks && (
                   <View style={s.card}>
                     <Text style={s.sectionTitle}>TASKS</Text>
-                    <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8 }}>
+                    {/* One element: "3 open tasks", not "3" and "open". */}
+                    <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8 }}
+                      accessible accessibilityLabel={`${sum.open.tasks} open ${sum.open.tasks === 1 ? 'task' : 'tasks'}`}>
                       <Text style={s.bigValue}>{sum.open.tasks}</Text>
                       <Text style={[s.muted, { marginBottom: 6 }]}>open</Text>
                     </View>

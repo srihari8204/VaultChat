@@ -35,13 +35,14 @@ import { haversine, type LatLng } from '../lib/nav/geo';
 import { useRoadEta } from '../lib/nav/useRoadEta';
 import { getCurrentUserAsync } from './(constants)/authService';
 import {
-  arrivalWindow, stopsBetween, foldReplay, canDrawPath, isDelayed,
+  arrivalWindow, stopsBetween, foldReplay, canDrawPath, isDelayed, windowWorthSaying, type SaidWindow,
   type Run, type RunStop, type RunRider, type RunEvent, type RiderState, type ReplayEntry,
 } from '../lib/spaces/runs';
 import { AuroraBackground } from '../components/ui';
 import LoadError from '../components/spaces/LoadError';
 import FamilyMap from '../components/family/FamilyMap';
 import { circleMembers } from '../lib/family/circle';
+import { errMsg } from '../lib/spaces/errors';
 
 /** How often rider and stop states are re-read while a started run is open.
  *  The vehicle's position arrives live on the socket; boarded/dropped marks
@@ -114,8 +115,8 @@ export default function SpaceRunScreen() {
       setRiders(data.riders || []);
       setDelayThresholdMin(data.delayThresholdMinutes);
       setLoadError(null);
-    } catch (e: any) {
-      setLoadError(e?.message ?? 'Could not load the run.');
+    } catch (e) {
+      setLoadError(errMsg(e) ?? 'Could not load the run.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -151,9 +152,9 @@ export default function SpaceRunScreen() {
     let stop: (() => void) | null = null;
     let live = true;
     (async () => {
-      const me = await getCurrentUserAsync().catch(() => null);
+      const me: { id?: string | number } | null = await getCurrentUserAsync().catch(() => null);
       if (!live) return;
-      stop = await subscribeRun(spaceId, runId, String((me as any)?.id ?? ''), (e) => {
+      stop = await subscribeRun(spaceId, runId, String(me?.id ?? ''), (e) => {
         if (!e.ping) { setVehicle(null); return; }
         setVehicle(e.ping);
         // Bounded: a two-hour run at one fix per ten seconds is 720 points, and
@@ -169,9 +170,9 @@ export default function SpaceRunScreen() {
     try {
       setEvents(await getRunEvents(spaceId, runId));
       setHistoryError(null);
-    } catch (e: any) {
+    } catch (e) {
       // Said in place, not as an Alert over an empty "Nothing recorded yet".
-      setHistoryError(e?.message ?? 'Check your connection and try again.');
+      setHistoryError(errMsg(e) ?? 'Check your connection and try again.');
     } finally {
       setHistoryLoading(false);
     }
@@ -435,15 +436,20 @@ function RiderCard({ rider, run, stops, reachedStopId, vehicle, colors, s, delay
 
   // The window is recomputed every 30s, and a screen-reader user should hear
   // it move without re-reading. Android: the card's polite live region below.
-  // iOS ignores live regions, so announce a CHANGED window there.
-  const lastWindow = useRef<string | null>(null);
+  // iOS ignores live regions, so announce there — but only a MEANINGFUL change
+  // (a stop passed, arriving now, or the end moving by minutes:
+  // lib/spaces/runs windowWorthSaying), not every minute's new clock text.
+  const lastSaid = useRef<SaidWindow | null>(null);
   useEffect(() => {
-    const said = waiting ? windowText : null;
-    if (Platform.OS === 'ios' && said && lastWindow.current && said !== lastWindow.current) {
-      AccessibilityInfo.announceForAccessibility(said);
+    if (Platform.OS !== 'ios') return;
+    if (!waiting) { lastSaid.current = null; return; }
+    const next = { latest: win.latest, between };
+    if (!lastSaid.current) { lastSaid.current = next; return; }
+    if (windowWorthSaying(lastSaid.current, next)) {
+      AccessibilityInfo.announceForAccessibility(windowText);
+      lastSaid.current = next;
     }
-    lastWindow.current = said;
-  }, [waiting, windowText]);
+  }, [waiting, win.latest, between, windowText]);
 
   return (
     <View

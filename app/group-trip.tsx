@@ -6,7 +6,7 @@
 // of everyone's location — presence already governs that, and duplicating it
 // would bypass a member's per-group privacy setting.
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { KeyboardSafe } from '../components/ui';
 import {
   View, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
@@ -66,11 +66,14 @@ export default function GroupTripScreen() {
   const [tick, setTick] = useState(0);
   // circleMembers failed: participants show as "Member"; a note says why, with Retry.
   const [namesFailed, setNamesFailed] = useState(false);
+  // Retry's read can land after the screen is gone: no state set then.
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const loadNames = useCallback(() => {
     if (!groupId) return;
     circleMembers(groupId)
-      .then((m) => { setMembers(m); setNamesFailed(false); })
-      .catch(() => setNamesFailed(true));
+      .then((m) => { if (mounted.current) { setMembers(m); setNamesFailed(false); } })
+      .catch(() => { if (mounted.current) setNamesFailed(true); });
   }, [groupId]);
 
   useFocusEffect(useCallback(() => {

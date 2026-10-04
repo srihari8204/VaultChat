@@ -2,7 +2,7 @@
 // The attendance week is built from CALENDAR days, so a daylight-saving change
 // cannot put a day near midnight in the wrong column.
 import assert from 'node:assert/strict';
-import { calendarDaysAgo, crossingsForDay } from './attendance';
+import { calendarDaysAgo, crossingsForDay, sampleWindowStart } from './attendance';
 
 // A zone with daylight saving, set before any Date is made (Node re-reads TZ
 // when it changes, so this works after the imports too).
@@ -26,5 +26,15 @@ const lateOn25th = new Date(2026, 9, 25, 23, 30).getTime();
 const cr = [{ kind: 'enter' as const, at: lateOn25th }];
 assert.equal(crossingsForDay(cr, new Date(2026, 9, 25, 12).getTime()).length, 1, 'last hour of a 25-hour day belongs to it');
 assert.equal(crossingsForDay(cr, new Date(2026, 9, 26, 12).getTime()).length, 0, 'and not to the next day');
+
+// The track read starts at a calendar midnight a whole day before the oldest
+// of the 7 columns (6 days back), whatever daylight saving did in between.
+{
+  const start = new Date(sampleWindowStart(now, 7));
+  assert.equal(start.getDate(), 23, '7 calendar days before 30 Mar is 23 Mar');
+  assert.equal(start.getHours() + start.getMinutes(), 0, 'at local midnight');
+  assert.ok(sampleWindowStart(now, 7) < new Date(2026, 2, 24).getTime(), 'before the oldest column starts');
+  assert.equal(new Date(sampleWindowStart(now, 7)).getDate(), new Date(calendarDaysAgo(now, 7)).getDate(), 'the same calendar day as the columns use');
+}
 
 console.log('spaces/attendanceDays self-check OK');

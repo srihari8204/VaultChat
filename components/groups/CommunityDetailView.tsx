@@ -124,6 +124,15 @@ export function CommunityDetailView({
             {canManage && (detail.isOwner
               ? actionRow('delete', 'trash-outline', 'Delete community', true)
               : actionRow('leave', 'exit-outline', 'Leave community', true))}
+            {manage === 'probing' && (
+              // The management rows wait for the one-per-session support check;
+              // say so instead of leaving a silent gap that later fills in.
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 24, marginTop: 12 }}
+                accessible accessibilityLabel="Checking which community actions are available">
+                <ActivityIndicator size="small" color={colors.textDim} />
+                <Text style={[S.emptySub, { textAlign: 'left', flex: 1 }]}>Checking what you can change here…</Text>
+              </View>
+            )}
             {manage === 'no' && (
               <Text style={[S.emptySub, { marginHorizontal: 24, marginTop: 12, textAlign: 'left' }]}>
                 {detail.isOwner

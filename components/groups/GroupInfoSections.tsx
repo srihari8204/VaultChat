@@ -84,7 +84,7 @@ export function GroupInfoTools({
         group, not just a Family Space. Location tools (trip, insights,
         location privacy) stay in Family Space, where location is shared. */}
     <View style={S.section}>
-      <Text style={S.label}>SHARED</Text>
+      <Text style={S.label} accessibilityRole="header">SHARED</Text>
       {([
         { path: '/group-calendar', icon: 'calendar-outline', title: 'Shared calendar', sub: 'Events everyone in the group can see' },
         { path: '/group-notes', icon: 'document-text-outline', title: 'Shared notes', sub: 'Lists and notes, encrypted end to end' },
@@ -111,7 +111,7 @@ export function GroupInfoTools({
 
     {/* Live Chat Viewers (#58) — share whether you're currently viewing this chat */}
     <View style={S.section}>
-      <Text style={S.label}>PRIVACY</Text>
+      <Text style={S.label} accessibilityRole="header">PRIVACY</Text>
       <View style={S.navRow}>
         <Ionicons name="eye-outline" size={22} color={colors.text} style={S.navIcon} />
         <View style={{ flex: 1 }}>
@@ -130,7 +130,7 @@ export function GroupInfoTools({
 
     {isAdmin && (
       <View style={S.section}>
-        <Text style={S.label}>ADMIN</Text>
+        <Text style={S.label} accessibilityRole="header">ADMIN</Text>
         <TouchableOpacity
           style={S.navRow}
           activeOpacity={0.7}

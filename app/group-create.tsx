@@ -28,6 +28,7 @@ import { brandAlpha } from '../constants/theme';
 import { GROUP_COLORS, GROUP_TYPES, groupTypeInfo, inkOn, type GroupType } from '../lib/groups/catalog';
 import { saveGroup, setActiveGroupId } from '../lib/groups/store';
 import { createGroupChat } from '../lib/chatService';
+import { tint } from '../lib/tintColor';
 
 // Group identity colours (data, not theme): GROUP_COLORS in lib/groups/catalog.ts.
 const PALETTE = GROUP_COLORS;
@@ -91,7 +92,9 @@ export default function GroupCreateScreen() {
     // Replace: Back should not return to a half-filled create form. `busy`
     // stays set: this screen is leaving, and re-enabling Create first would
     // leave a frame where a second tap could start a second group.
-    router.replace({ pathname: '/group-invites', params: { chatId: id, name: n } });
+    // `fresh` makes Add people say the group already exists with just you in it,
+    // as create-group's "Create & add people" does.
+    router.replace({ pathname: '/group-invites', params: { chatId: id, name: n, fresh: '1' } });
     if (!savedHere) {
       Alert.alert('Group created', `${n} was created, but this phone could not make it your active space. You can switch to it from Family.`);
     }
@@ -105,7 +108,7 @@ export default function GroupCreateScreen() {
 
         {/* live preview — the identity the group will actually have */}
         <View style={[st.preview, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
-          <View style={[st.previewIcon, { backgroundColor: shownColor + '22' }]}>
+          <View style={[st.previewIcon, { backgroundColor: tint(shownColor, 0.13) }]}>
             <Ionicons name={shownIcon} size={28} color={shownColor} />
           </View>
           <Text style={{ color: colors.text, fontSize: 17, fontWeight: '800' }} numberOfLines={1}>
@@ -123,7 +126,7 @@ export default function GroupCreateScreen() {
                 key={g.type}
                 onPress={() => { setType(g.type); setIcon(null); setColor(null); }}
                 accessibilityRole="radio" accessibilityLabel={`${g.label}. ${g.blurb}`} accessibilityState={{ selected: on, checked: on }}
-                style={[st.typeCell, { borderColor: on ? g.color : colors.border, backgroundColor: on ? g.color + '1a' : colors.card }]}
+                style={[st.typeCell, { borderColor: on ? g.color : colors.border, backgroundColor: on ? tint(g.color, 0.1) : colors.card }]}
               >
                 <Ionicons name={g.icon} size={19} color={on ? g.color : colors.textDim} />
                 <Text style={{ color: on ? colors.text : colors.textDim, fontSize: 11.5, fontWeight: on ? '700' : '500' }} numberOfLines={1}>
@@ -169,7 +172,7 @@ export default function GroupCreateScreen() {
           {ICONS.map((ic) => (
             <TouchableOpacity accessibilityRole="radio" accessibilityLabel={`Icon ${ic.replace(/-/g, ' ')}`} key={ic} onPress={() => setIcon(ic)}
               accessibilityState={{ selected: shownIcon === ic, checked: shownIcon === ic }}
-              style={[st.iconCell, { borderColor: shownIcon === ic ? shownColor : colors.border, backgroundColor: shownIcon === ic ? shownColor + '1a' : colors.card }]}>
+              style={[st.iconCell, { borderColor: shownIcon === ic ? shownColor : colors.border, backgroundColor: shownIcon === ic ? tint(shownColor, 0.1) : colors.card }]}>
               <Ionicons name={ic} size={18} color={shownIcon === ic ? shownColor : colors.textDim} />
             </TouchableOpacity>
           ))}

@@ -35,6 +35,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // The app's one cross-platform date picker (shared with finance).
 import { useDatePicker } from '../components/ui/useDatePicker';
 import type { CircleMember } from '../lib/family/types';
+import { errMsg } from '../lib/spaces/errors';
 
 /** Due choices, as whole local days from today. The due instant is the END of
  *  that local day, so "Today" is not overdue until tonight. */
@@ -116,11 +117,11 @@ export default function SpaceTasksScreen() {
     try {
       setErr(null);
       setTasks(await getWorkTasks(spaceId));
-    } catch (e: any) {
+    } catch (e) {
       // A plain member with nothing assigned gets an EMPTY list from the
       // server, not an error — so anything that throws here is a real failure
       // and is shown as one.
-      setErr(e?.message || 'Could not load tasks.');
+      setErr(errMsg(e) || 'Could not load tasks.');
       // Keep what was last shown; the note under the error says it may be old.
       setTasks((prev) => prev ?? []);
     }
@@ -142,9 +143,9 @@ export default function SpaceTasksScreen() {
       x.id === t.id ? { ...x, doneAt: next ? new Date().toISOString() : null } : x));
     try {
       await setWorkTaskDone(spaceId, t.id, next);
-    } catch (e: any) {
+    } catch (e) {
       setTasks((ts) => (ts ?? []).map((x) => (x.id === t.id ? t : x))); // put it back
-      Alert.alert('Could not update the task', e?.message ?? 'Please try again.');
+      Alert.alert('Could not update the task', errMsg(e) ?? 'Please try again.');
     } finally {
       setBusy(null);
     }
@@ -162,8 +163,8 @@ export default function SpaceTasksScreen() {
       });
       setTitle(''); setPriority('medium'); setAssignee(null); setDueDays(null); setDueCustom(null); setCompose(false);
       await load();
-    } catch (e: any) {
-      Alert.alert('Could not create the task', e?.message ?? 'Please try again.');
+    } catch (e) {
+      Alert.alert('Could not create the task', errMsg(e) ?? 'Please try again.');
     } finally {
       setSaving(false);
     }
@@ -303,7 +304,7 @@ export default function SpaceTasksScreen() {
         <KeyboardSafe keyboardOnly>
         <View style={s.sheetWrap}>
           <View style={[s.sheet, { paddingBottom: 18 + insets.bottom }]}>
-            <Text style={s.cardTitle}>New task</Text>
+            <Text style={s.cardTitle} accessibilityRole="header">New task</Text>
             <TextInput
               style={s.input}
               placeholder="What needs doing?"

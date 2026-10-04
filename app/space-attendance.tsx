@@ -28,7 +28,7 @@ import { getPlaces } from '../lib/family/store';
 import { circleMembers } from '../lib/family/circle';
 import { attendanceTiles } from '../lib/spaces/dashboard';
 import {
-  crossingsFromSamples, crossingsForDay, projectDay, summarise, makeShift, pickWorkZone, liveZones, calendarDaysAgo,
+  crossingsFromSamples, crossingsForDay, projectDay, summarise, makeShift, pickWorkZone, liveZones, calendarDaysAgo, sampleWindowStart,
   STATE_LABELS, type AttendanceState, type DayAttendance,
 } from '../lib/spaces/attendance';
 import type { Geofence } from '../lib/family/geofence';
@@ -105,7 +105,7 @@ export default function SpaceAttendanceScreen() {
       // per-member loop awaited one read per person, and caught each failure
       // to [] — which drew a member whose read failed as "No data". A failed
       // read now fails the screen, and says so.
-      const from = Date.now() - DAYS * 24 * 3600_000;
+      const from = sampleWindowStart(Date.now(), DAYS);
       const samples = await getTrack(spaceId, { from });
       const byUser = new Map<string, typeof samples>();
       for (const smp of samples) {

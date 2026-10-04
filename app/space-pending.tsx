@@ -10,9 +10,9 @@
 // guardian sees only riders they are linked to. There is no filter here.
 
 import { AppText as Text } from '../components/ui/Text';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
-  View, StyleSheet, SectionList, ActivityIndicator, TouchableOpacity,
+  View, StyleSheet, SectionList, ActivityIndicator, TouchableOpacity, AccessibilityInfo,
   RefreshControl,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
@@ -22,6 +22,7 @@ import { getPendingPickups, type PendingPickup } from '../lib/spaces/api';
 import { AuroraBackground } from '../components/ui';
 import LoadError from '../components/spaces/LoadError';
 import { initialOf } from '../lib/format';
+import { errMsg } from '../lib/spaces/errors';
 
 /** How often the list is re-read while the screen is focused. */
 const RELOAD_MS = 60_000;
@@ -43,14 +44,24 @@ export default function SpacePendingScreen() {
     return () => clearInterval(t);
   }, []));
 
+  // The total from the last read, so a drop (a rider picked up while a parent
+  // is on the phone) is said aloud rather than changing silently.
+  const lastCount = useRef<number | null>(null);
   const load = useCallback(async () => {
     try {
-      setRows(await getPendingPickups(spaceId));
+      const next = await getPendingPickups(spaceId);
+      const before = lastCount.current;
+      lastCount.current = next.length;
+      if (before !== null && next.length < before) {
+        AccessibilityInfo.announceForAccessibility(
+          next.length === 0 ? 'Nobody is waiting now.' : `${next.length} still waiting.`);
+      }
+      setRows(next);
       setLoadError(null);
-    } catch (e: any) {
+    } catch (e) {
       // Never fall through to "Nobody is waiting": on the screen used when a
       // parent rings, that would be a false all-clear.
-      setLoadError(e?.message ?? 'Could not load pending pickups.');
+      setLoadError(errMsg(e) ?? 'Could not load pending pickups.');
     } finally {
       setLoading(false); setRefreshing(false);
     }
