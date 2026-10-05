@@ -256,6 +256,30 @@ Socket.IO uses a Redis adapter (`@socket.io/redis-adapter`) so
 | `/api/admin` | admin.js | Admin dashboard API (`admin/index.html`) | 245 |
 | `/communities` `/call` `/link` `/gif` `/ai` | communities · calls · link · gif · ai | Communities, call wake/signaling, link preview, GIF, AI | 82–132 |
 
+### Backend module layout: hexagonal (openspec: `hexagonal-architecture`)
+
+Modules are moving out of `internal/routes` one at a time and into ports and
+adapters, with the domain at the core and the application layer around it:
+
+```
+internal/<module>/
+  domain/            entities, value objects, pure rules — standard library only
+  app/               use cases + ports (interfaces) — stdlib + domain only
+  adapters/<name>/   inbound (HTTP handlers) and outbound (engines, DB, cache) — implement/drive the ports
+  <module>.go        composition root: build adapters from env, mount the inbound adapter
+```
+
+Dependencies point inward: adapters → app → domain. `internal/archcheck` fails
+`go test` if a `domain` package imports anything outside the standard library,
+or an `app` package imports anything but the standard library and `domain`.
+Rate limits, auth and status-code mapping belong to the inbound adapter. Engine
+wire formats stop in the outbound adapter.
+
+| Module | Status |
+|---|---|
+| Maps (`/nav/*`) → `internal/maps` | Converted. `RoutingEngine` (Valhalla) and `Geocoder` (Photon) ports |
+| Games, Calls, Go Live, Family Space, ShopBook, core | Still in `internal/routes`; converting in that order |
+
 ---
 
 ## 04 · Message send flow (1:1, E2EE)

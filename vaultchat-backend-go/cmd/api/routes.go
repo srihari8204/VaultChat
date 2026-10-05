@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 
+	"vaultchat/backend-go/internal/maps"
 	"vaultchat/backend-go/internal/routes"
 	"vaultchat/backend-go/internal/services"
 )
@@ -48,7 +49,7 @@ func registerRoutes(mux *http.ServeMux) {
 	}
 
 	if services.Enabled(services.Maps) {
-		routes.RegisterNav(mux)
+		maps.Register(mux) // hexagonal: internal/maps (openspec: hexagonal-architecture)
 	}
 
 	if services.Enabled(services.Games) {
