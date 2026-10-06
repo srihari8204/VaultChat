@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 
+	"vaultchat/backend-go/internal/games"
 	"vaultchat/backend-go/internal/maps"
 	"vaultchat/backend-go/internal/routes"
 	"vaultchat/backend-go/internal/services"
@@ -53,7 +54,7 @@ func registerRoutes(mux *http.ServeMux) {
 	}
 
 	if services.Enabled(services.Games) {
-		routes.RegisterGames(mux) // VaultGames mini-app launch token
+		games.Register(mux) // hexagonal: internal/games (openspec: hexagonal-architecture)
 	}
 
 	if services.Enabled(services.Calls) {

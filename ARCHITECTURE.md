@@ -278,7 +278,12 @@ wire formats stop in the outbound adapter.
 | Module | Status |
 |---|---|
 | Maps (`/nav/*`) → `internal/maps` | Converted. `RoutingEngine` (Valhalla) and `Geocoder` (Photon) ports |
-| Games, Calls, Go Live, Family Space, ShopBook, core | Still in `internal/routes`; converting in that order |
+| Games (`/games/*`) → `internal/games` | Converted. Storage, launch signer, notify verifier, voice and push ports; DB contract test in `internal/games/contract_test.go` |
+| Calls, Go Live, Family Space, ShopBook, core | Still in `internal/routes`; converting in that order |
+
+Code that several modules need and that is not one module's business lives in
+its own small package (e.g. `internal/devices`, push-device registration), so an
+adapter never has to import `internal/routes`.
 
 ---
 

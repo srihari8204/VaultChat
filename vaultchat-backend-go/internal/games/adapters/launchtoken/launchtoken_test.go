@@ -1,4 +1,4 @@
-package routes
+package launchtoken
 
 import (
 	"crypto/ed25519"
@@ -30,7 +30,9 @@ func testKey(t *testing.T) (ed25519.PrivateKey, ed25519.PublicKey) {
 func TestMintGamesTokenVerifiesLikeGamesServer(t *testing.T) {
 	priv, pub := testKey(t)
 
-	tok, nonce, exp, err := mintGamesToken(priv, "@srihari", "Srihari", time.Now())
+	now := time.Now()
+	tok, nonce, err := Mint(priv, "@srihari", "Srihari", now, now.Add(15*time.Minute))
+	exp := now.Add(15 * time.Minute).Unix()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,8 +40,8 @@ func TestMintGamesTokenVerifiesLikeGamesServer(t *testing.T) {
 	claims := jwt.MapClaims{}
 	if _, err := jwt.ParseWithClaims(tok, claims, func(*jwt.Token) (any, error) { return pub, nil },
 		jwt.WithValidMethods([]string{"EdDSA"}),
-		jwt.WithIssuer(gamesIssuer),
-		jwt.WithAudience(gamesAudience),
+		jwt.WithIssuer(Issuer),
+		jwt.WithAudience(Audience),
 		jwt.WithExpirationRequired(),
 	); err != nil {
 		t.Fatalf("games server would reject this token: %v", err)
@@ -68,7 +70,7 @@ func TestMintGamesTokenRejectedByWrongKey(t *testing.T) {
 	priv, _ := testKey(t)
 	_, otherPub := testKey(t)
 
-	tok, _, _, err := mintGamesToken(priv, "@a", "A", time.Now())
+	tok, _, err := Mint(priv, "@a", "A", time.Now(), time.Now().Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,14 +88,14 @@ func TestParseGamesKeyRoundTrip(t *testing.T) {
 	}
 	pemStr := string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
 
-	got, err := parseGamesKey(pemStr)
+	got, err := ParseKey(pemStr)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !got.Equal(priv) {
 		t.Fatal("parsed key differs from the original")
 	}
-	if _, err := parseGamesKey("not a pem"); err == nil {
+	if _, err := ParseKey("not a pem"); err == nil {
 		t.Fatal("expected an error for non-PEM input")
 	}
 }

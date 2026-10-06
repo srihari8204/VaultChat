@@ -1,0 +1,47 @@
+launch/ok 200 {"exp":"*","expiresIn":900,"nonce":"*","token":"*"}
+launch/claims sub=vgctA name=Alice n=7
+launch/no-vault 409 {"error":"User has no VaultID"}
+launch/no-user 404 {"error":"User not found"}
+launch/no-auth 401 {"error":"Missing Bearer token"}
+voice/player 200 {"identity":"vgctA","ok":true,"role":"speaker","room":"gametable-rummy-gct-t1","token":"*","url":"wss://lk.gct.test"}
+voice/spectator 200 {"identity":"vgctC","ok":true,"role":"audience","room":"gametable-ludo-gct-t1","token":"*","url":"wss://lk.gct.test"}
+voice/unknown-game 400 {"error":"Unknown game"}
+voice/bad-slug 400 {"error":"game and room required"}
+voice/bad-body 400 {"error":"Invalid request body"}
+voice/no-vault 409 {"error":"User has no VaultID"}
+notify/no-event 400 {"error":"event required"}
+notify/bad-sig 401 {"error":"bad event signature"}
+notify/no-exp 401 {"error":"bad event signature"}
+notify/no-jti 400 {"error":"sub and jti required"}
+notify/no-device 200 {"delivered":false,"ok":true,"reason":"no_device_token"}
+notify/dedupe 200 {"deduped":true,"ok":true}
+notify/friend 200 {"delivered":false,"ok":true,"reason":"no_device_token"}
+notify/unknown 200 {"delivered":false,"ok":true,"reason":"unknown_recipient"}
+notify/push-fails 502 {"error":"push delivery failed"}
+notify/push-fails-again 502 {"error":"push delivery failed"}
+tables/A 200 {"ok":true,"tables":[{"body":"Alice played","game":"rummy","room":"gct-t1","title":"Your turn","updatedAt":"*","yourTurn":true}]}
+tables/C 200 {"ok":true,"tables":[{"body":"Alice played","game":"rummy","room":"gct-t1","title":"Your turn","updatedAt":"*","yourTurn":false}]}
+tables/forget-bad 400 {"error":"game and room required"}
+tables/forget 200 {"ok":true}
+tables/A-after 200 {"ok":true,"tables":[]}
+device/missing 400 {"error":"fcmToken required"}
+device/register 200 {"ok":true,"registered":true}
+device/unregister 200 {"ok":true,"registered":false}
+device/live-after-unregister 0
+match/not-practice 400 {"error":"Pool and Deals matches run on practice tables only"}
+match/bad-variant 400 {"error":"A table and a known variant are required"}
+match/bad-body 400 {"error":"Invalid body"}
+match/no-vault 409 {"error":"User has no VaultID"}
+match/create 200 {"match":{"dealsPlayed":0,"dealsTotal":0,"id":"*","poolLimit":101,"scores":{},"status":"running","tableId":"gct-m1","variant":"pool101"},"ok":true}
+match/create-again 200 {"match":{"dealsPlayed":0,"dealsTotal":0,"id":"*","poolLimit":101,"scores":{},"status":"running","tableId":"gct-m1","variant":"pool101"},"ok":true}
+match/same-id true
+match/get 200 {"match":{"dealsPlayed":0,"dealsTotal":0,"id":"*","poolLimit":101,"scores":{},"status":"running","tableId":"gct-m1","variant":"pool101"},"ok":true}
+match/get-none 200 {"match":null,"ok":true}
+match/get-missing 400 {"error":"tableId is required"}
+match/deal-missing 400 {"error":"A match and its deal results are required"}
+match/deal-unknown 404 {"error":"No such match"}
+match/deal-no-vault 409 {"error":"User has no VaultID"}
+match/deal-0 200 {"match":{"dealsPlayed":1,"dealsTotal":0,"id":"*","poolLimit":101,"scores":{"vgctA":{"name":"Alice","points":0,"chips":0,"status":"playing"},"vgctC":{"name":"Cee","points":80,"chips":0,"status":"playing"}},"status":"running","tableId":"gct-m1","variant":"pool101"},"ok":true}
+match/deal-0-again 200 {"match":{"dealsPlayed":1,"dealsTotal":0,"id":"*","poolLimit":101,"scores":{"vgctA":{"name":"Alice","points":0,"chips":0,"status":"playing"},"vgctC":{"name":"Cee","points":80,"chips":0,"status":"playing"}},"status":"running","tableId":"gct-m1","variant":"pool101"},"ok":true}
+match/deal-1-out 200 {"match":{"dealsPlayed":2,"dealsTotal":0,"id":"*","poolLimit":101,"scores":{"vgctA":{"name":"Alice","points":2,"chips":0,"status":"playing"},"vgctC":{"name":"Cee","points":110,"chips":0,"status":"out"}},"status":"finished","tableId":"gct-m1","variant":"pool101"},"ok":true}
+match/deal-after-end 200 {"match":{"dealsPlayed":2,"dealsTotal":0,"id":"*","poolLimit":101,"scores":{"vgctA":{"name":"Alice","points":2,"chips":0,"status":"playing"},"vgctC":{"name":"Cee","points":110,"chips":0,"status":"out"}},"status":"finished","tableId":"gct-m1","variant":"pool101"},"ok":true}

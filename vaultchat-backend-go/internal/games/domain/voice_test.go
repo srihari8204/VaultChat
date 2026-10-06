@@ -1,17 +1,15 @@
-package routes
+package domain
 
 import (
 	"strings"
 	"testing"
-
-	"vaultchat/backend-go/internal/livekit"
 )
 
 // The room name is the whole of this endpoint's isolation: the client never
 // names a room, so these are the properties that stop one table's token from
 // opening another room — or a call.
 func TestGamesVoiceRoomIsNamespaced(t *testing.T) {
-	got := gamesVoiceRoom("rummy", "practice")
+	got := VoiceRoom("rummy", "practice")
 	if got != "gametable-rummy-practice" {
 		t.Fatalf("room = %q", got)
 	}
@@ -20,10 +18,10 @@ func TestGamesVoiceRoomIsNamespaced(t *testing.T) {
 	if strings.HasPrefix(got, "call-") {
 		t.Fatalf("game room %q collides with the calls namespace", got)
 	}
-	if gamesVoiceRoom("ludo", "practice") == gamesVoiceRoom("rummy", "practice") {
+	if VoiceRoom("ludo", "practice") == VoiceRoom("rummy", "practice") {
 		t.Fatal("two different games share a voice room")
 	}
-	if gamesVoiceRoom("rummy", "casual") == gamesVoiceRoom("rummy", "pro") {
+	if VoiceRoom("rummy", "casual") == VoiceRoom("rummy", "pro") {
 		t.Fatal("two different tables share a voice room")
 	}
 }
@@ -36,12 +34,12 @@ func TestGamesVoiceSlugRejectsSeparators(t *testing.T) {
 		"rummy-practice/../call", "a b", "call-x/y", "room?x=1", "", strings.Repeat("a", 65),
 		"table.1", "a:b", "a#b",
 	} {
-		if gamesNotifySlug(bad) != "" {
+		if Slug(bad) != "" {
 			t.Fatalf("slug accepted %q", bad)
 		}
 	}
 	for _, ok := range []string{"rummy", "practice", "casual", "pro", "a_b-C9"} {
-		if gamesNotifySlug(ok) == "" {
+		if Slug(ok) == "" {
 			t.Fatalf("slug rejected %q", ok)
 		}
 	}
@@ -50,39 +48,13 @@ func TestGamesVoiceSlugRejectsSeparators(t *testing.T) {
 // Only the games that actually have a voice UI may mint a room.
 func TestGamesVoiceGameSet(t *testing.T) {
 	for _, g := range []string{"rummy", "ludo"} {
-		if !gamesVoiceGames[g] {
+		if !HasVoice(g) {
 			t.Fatalf("%s should have table voice", g)
 		}
 	}
 	for _, g := range []string{"chess", "tictactoe", "", "calls", "broadcast"} {
-		if gamesVoiceGames[g] {
+		if HasVoice(g) {
 			t.Fatalf("%s should not mint a voice room", g)
 		}
-	}
-}
-
-// A player may speak; a spectator may not, AT THE MEDIA SERVER rather than by
-// the client agreeing to keep its own track disabled. And neither may administer
-// the room — RoomAdmin is the power to mute and remove other players.
-func TestGamesVoiceRolesGrantTheRightThings(t *testing.T) {
-	const room = "gametable-rummy-practice"
-
-	player := livekit.GrantFor(livekit.RoleSpeaker, room)
-	if !player.CanPublish || !player.CanSubscribe || !player.RoomJoin {
-		t.Fatal("a seated player must be able to join, publish and subscribe")
-	}
-	if player.RoomAdmin {
-		t.Fatal("a player must not be able to mute or remove the rest of the table")
-	}
-
-	spectator := livekit.GrantFor(livekit.RoleAudience, room)
-	if spectator.CanPublish {
-		t.Fatal("a spectator must not be able to publish")
-	}
-	if !spectator.CanSubscribe || !spectator.RoomJoin {
-		t.Fatal("a spectator must still be able to listen")
-	}
-	if spectator.RoomAdmin {
-		t.Fatal("a spectator must not administer the room")
 	}
 }

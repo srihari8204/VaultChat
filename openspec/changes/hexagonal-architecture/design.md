@@ -83,6 +83,26 @@ order, so each module gets its hexagon before it gets its container. ShopBook
 waits until after Maps so its road-distance code can call Maps'
 `RoutingEngine` port instead of duplicating Valhalla calls.
 
+### D8. Shared infrastructure leaves `routes` as its own package
+
+An adapter must not import `internal/routes`: that would drag every handler
+into each module and recreate the coupling. When a converted module needs a
+helper that `routes` still uses, the helper moves to a small package of its
+own, such as `internal/devices` (FCM token lookup, registration and cleanup,
+shared by Calls, chat and Games). Callers in `routes` switch to it in the same
+change.
+
+### D9. DB-backed contract tests for modules with storage
+
+When a module reads and writes Postgres, stub engines are not enough to prove
+the behavior is unchanged. Its contract test runs every endpoint against a
+scratch database with all migrations applied (`CALL_TEST_DB=1`, as the
+existing route tests do). It masks volatile values and compares the result
+with a golden file recorded from the pre-change handlers. Games' test found a
+real bug on its first run (task 4.1a). That bug is fixed in its own commit, and
+the golden was re-recorded from the fixed old code, so the refactor commit
+still changes no behavior.
+
 ## Risks / Trade-offs
 
 - [Duplicate Valhalla matrix decoding in `routes/shared_valhalla.go` (ShopBook)

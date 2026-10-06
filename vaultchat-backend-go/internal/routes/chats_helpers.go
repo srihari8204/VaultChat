@@ -292,7 +292,7 @@ var (
 	chatsGameKinds = map[string]bool{"chess": true, "rummy": true, "ludo": true, "tictactoe": true}
 	// A room id the games server would mint. It ends up inside a URL other
 	// people open, so a slash, a quote, a '?' or a '#' would REWRITE the link
-	// rather than fill it in. Same shape gamesNotifySlug enforces on the
+	// rather than fill it in. Same shape games domain.Slug enforces on the
 	// notification path — the two must not disagree about what an id is.
 	chatsGameRoomRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 )

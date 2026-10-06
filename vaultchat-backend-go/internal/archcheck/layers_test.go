@@ -43,7 +43,9 @@ func imports(t *testing.T, dir string) map[string]string {
 }
 
 // Standard-library paths have no dot in their first element.
-func stdlib(p string) bool { return !strings.Contains(strings.SplitN(p, "/", 2)[0], ".") && !strings.HasPrefix(p, module) }
+func stdlib(p string) bool {
+	return !strings.Contains(strings.SplitN(p, "/", 2)[0], ".") && !strings.HasPrefix(p, module)
+}
 
 func TestHexagonalLayers(t *testing.T) {
 	modules, _ := filepath.Glob("../*")

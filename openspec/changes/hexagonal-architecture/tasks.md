@@ -33,7 +33,10 @@ its Postgres/Redis/engine use, pass `archcheck`, keep its existing route tests
 green, add contract tests for any endpoint whose handler is rewritten, then
 deploy and device-verify as in group 3.
 
-- [ ] 4.1 Games (`routes/games*.go`)
+- [x] 4.1 Games, written: `routes/games*.go` → `internal/games` (domain: slugs, text bounds, display name, table kinds, voice rooms, Pool/Deals scoring; app: launch token, voice token, notify, live tables, device token, matches behind `Players`/`LaunchSigner`/`NotifyVerifier`/`VoiceTokens`/`Tables`/`Dedupe`/`Devices`/`Pusher`/`Matches`; adapters: `httpapi`, `postgres`, `launchtoken`, `notifykey`, `livekitvoice`, `push`). Push-device helpers moved from `routes/devices_push.go` to `internal/devices` so Calls and Games share them without importing `routes`. Verify: unit tests per layer; DB-backed `internal/games/contract_test.go` (50 steps, `CALL_TEST_DB=1`) matches `testdata/games_contract.golden`, recorded from the pre-change handlers; DB-backed `internal/routes` failures identical before and after (5, all needing fixtures this change does not touch)
+- [x] 4.1a Fix found by 4.1's contract test, shipped as its own commit: `POST /games/matches/deal` always answered 500 because the scores were bound as `[]byte` (sent as bytea in exec mode) to a JSONB column; now bound as a string. Verify: contract steps `match/deal-*` answer 200 with scores
+- [ ] 4.1b Deploy (deployed): ship the Go tree with `scripts/deploy.sh` to the box only, NOT via the `hetzner-deploy` branch until the user says so; no migration (125/126 already applied), no config change. Through Caddy: `/games/launch-token` 401 without a token
+- [ ] 4.1c Device-verified: open a game (launch token), table voice as player and spectator, a turn push arrives and the live-tables row opens the table, a Pool 101 match scores two deals on two phones
 - [ ] 4.2 Calls (`routes/calls.go`, `routes/call_sessions.go`; LiveKit token port)
 - [ ] 4.3 Go Live (`routes/golive*.go`, `routes/broadcast*.go`; its own LiveKit stays isolated)
 - [ ] 4.4 Family Space (`routes/spaces_*.go`, `space_*.go`, `family_relations.go`)

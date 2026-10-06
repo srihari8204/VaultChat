@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"vaultchat/backend-go/internal/devices"
 )
 
 func TestRegisterFcmDeviceRequiresPersistedToken(t *testing.T) {
@@ -34,7 +36,7 @@ func TestRegisterFcmDeviceRequiresPersistedToken(t *testing.T) {
 				}
 				return pgconn.NewCommandTag(tc.updateTag), tc.updateErr
 			}
-			err := registerFcmDeviceWithExec(context.Background(), exec, "user", "token", "android")
+			err := devices.RegisterWithExec(context.Background(), exec, "user", "token", "android")
 			if tc.wantErr && !errors.Is(err, insertErr) {
 				t.Fatalf("want original insert error, got %v", err)
 			}

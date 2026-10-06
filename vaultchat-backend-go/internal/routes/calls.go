@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-
 	"vaultchat/backend-go/internal/db"
+	"vaultchat/backend-go/internal/devices"
 	"vaultchat/backend-go/internal/fcm"
 	"vaultchat/backend-go/internal/httpx"
 	"vaultchat/backend-go/internal/vault"
@@ -74,7 +74,7 @@ func callToken(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 400, "fcmToken required")
 		return
 	}
-	if err := registerFcmDevice(ctx, user.ID, fcmToken, platform); err != nil {
+	if err := devices.Register(ctx, user.ID, fcmToken, platform); err != nil {
 		httpx.Err(w, 500, "Failed to register token")
 		return
 	}
@@ -98,7 +98,7 @@ func callInitiate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tokens := fcmTokensFor(ctx, calleeID)
+	tokens := devices.FCMTokens(ctx, calleeID)
 	if len(tokens) == 0 {
 		httpx.JSON(w, 200, map[string]any{"ok": true, "delivered": false, "reason": "no_device_token"})
 		return
@@ -147,7 +147,7 @@ func callCancel(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 400, "calleeId and callId required")
 		return
 	}
-	if tokens := fcmTokensFor(ctx, calleeID); len(tokens) > 0 {
+	if tokens := devices.FCMTokens(ctx, calleeID); len(tokens) > 0 {
 		fcm.SendCallMessage(tokens, map[string]string{
 			"type":   "call_cancelled",
 			"callId": callID,

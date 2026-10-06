@@ -38,14 +38,15 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"vaultchat/backend-go/internal/db"
-	"vaultchat/backend-go/internal/fcm"
+	"vaultchat/backend-go/internal/devices"
 	"vaultchat/backend-go/internal/emitx"
+	"vaultchat/backend-go/internal/fcm"
 	"vaultchat/backend-go/internal/httpx"
 	"vaultchat/backend-go/internal/livekit"
 	"vaultchat/backend-go/internal/metrics"
 	"vaultchat/backend-go/internal/redisx"
-	"vaultchat/backend-go/internal/workx"
 	"vaultchat/backend-go/internal/vault"
+	"vaultchat/backend-go/internal/workx"
 )
 
 func RegisterCallSessions(mux *http.ServeMux) {
@@ -266,11 +267,12 @@ var errNotAllowed = errors.New("not allowed on this call")
 // hear the conversation.
 //
 // Two ways in, and only two:
-//   MEMBER   in chat_members for this chat, not left.
-//   INVITED  someone already on the call vouched for them (call_invites).
-//            That is what lets a 1:1 call gain a third person without adding
-//            anyone to the chat — the invite is scoped to ONE call and dies
-//            with it.
+//
+//	MEMBER   in chat_members for this chat, not left.
+//	INVITED  someone already on the call vouched for them (call_invites).
+//	         That is what lets a 1:1 call gain a third person without adding
+//	         anyone to the chat — the invite is scoped to ONE call and dies
+//	         with it.
 func mayJoinCall(ctx context.Context, tx pgx.Tx, uid, chatID, callID string) (bool, error) {
 	var one int
 	err := tx.QueryRow(ctx,
@@ -300,7 +302,7 @@ const (
 
 // callMaxParticipants is the product ceiling on ONE group call.
 //
-// WHY IT IS ENFORCED HERE AND NOT BY THE ROOM
+// # WHY IT IS ENFORCED HERE AND NOT BY THE ROOM
 //
 // livekit.yaml has a max_participants, and it is the wrong instrument twice
 // over. It counts every identity in the room, and it refuses by DISCONNECTING —
@@ -918,7 +920,7 @@ func callSessionHistory(w http.ResponseWriter, r *http.Request) {
 
 // ── POST /calls/{id}/ring — ring a group into a call, socket AND push ──
 //
-// WHY THIS EXISTS AT ALL
+// # WHY THIS EXISTS AT ALL
 //
 // A group call used to ring by having the CLIENT loop and emit one
 // `call_incoming` per member. Three things break at 64, and every one of them
@@ -1139,7 +1141,7 @@ func groupNameFor(ctx context.Context, uid, chatID string) string {
 func ringGroupPush(targets []string, chatID, from, name, dp, video string) {
 	ctx := context.Background()
 	for _, to := range targets {
-		tokens := fcmTokensFor(ctx, to)
+		tokens := devices.FCMTokens(ctx, to)
 		if len(tokens) == 0 {
 			continue
 		}
