@@ -434,7 +434,10 @@ func gamesAdvanceMatch(w http.ResponseWriter, r *http.Request) {
 		   SET scores = $1, deals_played = $2, status = $3, updated_at = now()
 		 WHERE id = $4 AND deals_played = $5 AND status = 'running'
 		RETURNING TRUE`,
-		encoded, nextDeals, nextStatus, body.MatchID, dealsPlayed,
+		// string, not []byte: in exec mode pgx sends []byte as bytea, which a
+		// JSONB column refuses ("invalid input syntax for type json"), so every
+		// advance answered 500 (see jsonbparam_test.go).
+		string(encoded), nextDeals, nextStatus, body.MatchID, dealsPlayed,
 	).Scan(&okWrite)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Lost the race. Re-read and return what the winner wrote.
