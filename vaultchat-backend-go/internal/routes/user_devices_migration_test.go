@@ -11,8 +11,6 @@
 package routes
 
 import (
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -66,29 +64,30 @@ func TestUserDevicesMigrationIsAdditive(t *testing.T) {
 	}
 }
 
-// user_devices is schema-only until the access JWT carries a device claim
-// (LINKED_DEVICES_PLAN §6, Phase 1). Until then no handler may key anything on
-// it: X-Device-Id is still self-asserted, so a read here would be a security
-// guard built on an unauthenticated header. Delete this test in the same change
-// that adds the claim.
-func TestUserDevicesTableIsUnreferenced(t *testing.T) {
-	err := filepath.Walk("../..", func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") {
-			return err
-		}
-		if strings.HasSuffix(path, "user_devices_migration_test.go") {
-			return nil
-		}
-		b, rerr := os.ReadFile(path)
-		if rerr != nil {
-			return rerr
-		}
-		if strings.Contains(string(b), "user_devices") {
-			t.Errorf("%s references user_devices, but the device claim does not exist yet", path)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-}
+// TestUserDevicesTableIsUnreferenced was RETIRED 2026-10-11, on its own terms.
+//
+// It read: "user_devices is schema-only until the access JWT carries a device
+// claim (LINKED_DEVICES_PLAN §6, Phase 1). Until then no handler may key
+// anything on it: X-Device-Id is still self-asserted, so a read here would be a
+// security guard built on an unauthenticated header. Delete this test in the
+// same change that adds the claim."
+//
+// This is that change. authSignAccess now binds a validated device id into the
+// token as `dev`, VerifyAccess returns it, and httpx.User.DeviceID carries it —
+// so a handler keying on the device id is reading a SIGNED claim, not a header
+// anyone can set. The precondition the guard protected no longer exists.
+//
+// Worth recording how it failed, because the mechanism recurs: it matched
+// strings.Contains on RAW FILE BYTES, so it fired on a COMMENT in auth.go that
+// explains why refresh_tokens.device_id is deliberately NOT written yet. A guard
+// that flags documentation about not-doing-a-thing is miscalibrated — the same
+// false positive lib/statusBarOwner.selftest.ts hit, and the same fix applies
+// (strip comments before matching) if a successor is ever written.
+//
+// A successor is NOT written here, deliberately. The honest remaining constraint
+// is different and narrower: user_devices has no rows, so a handler that keys on
+// it would find nothing. That is a correctness question for the change which
+// starts POPULATING the table, and it belongs with that work rather than as a
+// repo-wide string ban kept alive past its reason.
+//
+// TestUserDevicesMigrationIsAdditive above still runs and still matters.

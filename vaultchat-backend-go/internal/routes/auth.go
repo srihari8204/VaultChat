@@ -293,16 +293,56 @@ func authEnvTTL(name string, def int64) int64 {
 	return def
 }
 
-// authSignAccess mints the same {sub, email, iat, exp} token jwt.js does:
-// EdDSA when core holds an Ed25519 key (so feature services can verify it with
-// the public key alone), HS256 over JWT_SECRET otherwise.
-func authSignAccess(userID string, email *string) (string, error) {
+// authDeviceIDRe bounds a client-supplied device id before it is SIGNED.
+//
+// services/deviceService.ts generates it as a SHA-256 hex digest, so the shape
+// is known and narrow. Validating against it matters more than it looks: the id
+// arrives in an X-Device-Id header, which is attacker-controlled, and
+// authSignAccess is about to bind it into a token the whole system then TRUSTS.
+// An unbounded claim is a place to smuggle length (token bloat on every request)
+// or confusable characters into logs and SQL that read the claim back. Anything
+// not matching is dropped rather than rejected — see authDeviceID.
+var authDeviceIDRe = regexp.MustCompile(`^[0-9a-f]{16,64}$`)
+
+// authDeviceID reads the install id this login is for, or "" when there is none
+// we are willing to sign.
+//
+// DROPS rather than 401s on a malformed value, deliberately. A bad device id is
+// not an authentication failure — the credentials were fine — and refusing the
+// login would break every older client the moment this shipped. Dropping gives
+// exactly the legacy behaviour: no `dev` claim, so User.DeviceID is "" and the
+// handlers use migration 140's legacy `device_id = ''` row, which is what they
+// did before this existed.
+func authDeviceID(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	id := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Device-Id")))
+	if !authDeviceIDRe.MatchString(id) {
+		return ""
+	}
+	return id
+}
+
+// authSignAccess mints the {sub, email, iat, exp} token jwt.js does, plus `dev`
+// when this login named an install: EdDSA when core holds an Ed25519 key (so
+// feature services can verify it with the public key alone), HS256 over
+// JWT_SECRET otherwise.
+//
+// `dev` is OMITTED, not set empty, when there is no device id. An absent claim
+// is indistinguishable from a token minted before the claim existed, so old and
+// new tokens take exactly the same path through VerifyAccess, and nothing has to
+// special-case an empty string on the wire.
+func authSignAccess(userID string, email *string, deviceID string) (string, error) {
 	now := time.Now().Unix()
 	claims := jwt.MapClaims{
 		"sub":   userID,
 		"email": email,
 		"iat":   now,
 		"exp":   now + httpx.AccessTTLSeconds(),
+	}
+	if deviceID != "" {
+		claims["dev"] = deviceID
 	}
 	if key := httpx.AccessSigningKey(); key != nil {
 		return jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims).SignedString(key)
@@ -347,7 +387,15 @@ func authCompareRefresh(token, hash string) bool {
 
 // authIssueTokens mirrors auth.js issueTokens: access JWT + stored refresh row.
 func authIssueTokens(ctx context.Context, r *http.Request, userID string, email *string) (string, string, error) {
-	access, err := authSignAccess(userID, email)
+	// The device id is bound in HERE, at issue time, and never read from a header
+	// again. r is already on hand, so no caller changes.
+	//
+	// NOT written to refresh_tokens.device_id yet, though migration 132 added the
+	// column: its composite FK points at user_devices, nothing populates that
+	// table, and an insert naming an absent device would violate the constraint
+	// and fail every login. That write belongs to the change that starts creating
+	// user_devices rows.
+	access, err := authSignAccess(userID, email, authDeviceID(r))
 	if err != nil {
 		return "", "", err
 	}
@@ -1105,7 +1153,7 @@ func authVerifyOtpPhone(w http.ResponseWriter, r *http.Request) {
 	authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
 	actingUserID := ""
 	if strings.HasPrefix(authHeader, "Bearer ") {
-		if sub, _, err := httpx.VerifyAccess(authHeader[7:]); err == nil {
+		if sub, _, _, err := httpx.VerifyAccess(authHeader[7:]); err == nil {
 			actingUserID = sub // bad token → fall through to signup mode
 		}
 	}

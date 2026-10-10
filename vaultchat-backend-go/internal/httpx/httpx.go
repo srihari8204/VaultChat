@@ -62,6 +62,23 @@ const userKey ctxKey = 1
 type User struct {
 	ID    string
 	Email string
+	// DeviceID is the install this token was issued TO, taken from the signed
+	// `dev` claim — never from the X-Device-Id header.
+	//
+	// That distinction is the whole point. The header is client-asserted on every
+	// request, so a guard keyed on it is no guard: anyone can send someone else's
+	// device id. The token is different — the device id is bound into it AT LOGIN,
+	// when the client is legitimately identifying its own install, and is signed
+	// from then on. docs/LINKED_DEVICES_PLAN.md states the rule it enforces: "a
+	// guard keyed on an unauthenticated header is worse than no guard."
+	//
+	// EMPTY for every token minted before this existed, and for a client that
+	// sends no device id at login. That is deliberate and matches migration 140's
+	// `device_id TEXT NOT NULL DEFAULT ''` — the empty string is the legacy
+	// single-device row, so an old token keeps reading and writing exactly the
+	// keys it always did. Handlers must treat "" as "legacy", never reject it,
+	// until every client in the field sends one.
+	DeviceID string
 }
 
 func UserFrom(r *http.Request) User {
@@ -106,10 +123,13 @@ var bearerRe = regexp.MustCompile(`(?i)^Bearer\s+(.+)$`)
 
 func jwtSecret() []byte { return []byte(os.Getenv("JWT_SECRET")) }
 
-// VerifyAccess validates an access token and returns (sub, email). EdDSA
-// tokens verify against the Ed25519 public key; HS256 tokens only while
+// VerifyAccess validates an access token and returns (sub, email, deviceID).
+// EdDSA tokens verify against the Ed25519 public key; HS256 tokens only while
 // hs256Accepted (accesskeys.go), which is always in legacy mode.
-func VerifyAccess(token string) (string, string, error) {
+//
+// deviceID comes from the signed `dev` claim and is "" for any token minted
+// before that claim existed — see User.DeviceID for why "" must stay valid.
+func VerifyAccess(token string) (string, string, string, error) {
 	parsed, err := jwt.Parse(token, func(t *jwt.Token) (any, error) {
 		switch t.Method.Alg() {
 		case jwt.SigningMethodEdDSA.Alg():
@@ -127,20 +147,23 @@ func VerifyAccess(token string) (string, string, error) {
 	}, jwt.WithValidMethods([]string{"EdDSA", "HS256"}))
 	if err != nil || !parsed.Valid {
 		if err != nil && strings.Contains(err.Error(), "expired") {
-			return "", "", errors.New("token_expired")
+			return "", "", "", errors.New("token_expired")
 		}
-		return "", "", errors.New("invalid_token")
+		return "", "", "", errors.New("invalid_token")
 	}
 	claims, ok := parsed.Claims.(jwt.MapClaims)
 	if !ok {
-		return "", "", errors.New("invalid_token")
+		return "", "", "", errors.New("invalid_token")
 	}
 	sub, _ := claims["sub"].(string)
 	email, _ := claims["email"].(string)
+	// Absent on every token issued before the claim existed, which is why the
+	// zero value is "" and not an error.
+	dev, _ := claims["dev"].(string)
 	if sub == "" {
-		return "", "", errors.New("invalid_token")
+		return "", "", "", errors.New("invalid_token")
 	}
-	return sub, email, nil
+	return sub, email, dev, nil
 }
 
 // RequireAuth mirrors jwt.js requireAuth: exact 401 error strings.
@@ -151,12 +174,12 @@ func RequireAuth(next http.HandlerFunc) http.HandlerFunc {
 			Err(w, http.StatusUnauthorized, "Missing Bearer token")
 			return
 		}
-		sub, email, err := VerifyAccess(m[1])
+		sub, email, dev, err := VerifyAccess(m[1])
 		if err != nil {
 			Err(w, http.StatusUnauthorized, err.Error()) // token_expired | invalid_token
 			return
 		}
-		ctx := context.WithValue(r.Context(), userKey, User{ID: sub, Email: email})
+		ctx := context.WithValue(r.Context(), userKey, User{ID: sub, Email: email, DeviceID: dev})
 		next(w, r.WithContext(ctx))
 	}
 }

@@ -50,7 +50,7 @@ func edToken(t *testing.T, key ed25519.PrivateKey) string {
 }
 
 func accepts(tok string) bool {
-	sub, _, err := VerifyAccess(tok)
+	sub, _, _, err := VerifyAccess(tok)
 	return err == nil && sub == "u1"
 }
 
