@@ -1071,11 +1071,27 @@ func userContactVerificationsPost(w http.ResponseWriter, r *http.Request) {
 }
 
 // GET /user/:id/identity (via userSubtreeGet)
+//
+// MUST pick the same device as userKeybundleGet, or the two disagree.
+//
+// Under migration 140 an account can hold several identity rows. This endpoint
+// feeds the safety-number / verification surface, so if it returned a different
+// device's key than the bundle the client just built its session from, the client
+// would compare the two, find them different and report an identity-key CHANGE —
+// a security warning raised by nothing but server-side row order. The ordering
+// below is copied verbatim from userKeybundleGet for that reason; change them
+// together or not at all.
+//
+// Returning EVERY device's key, so a user can verify each one, is the honest end
+// state and a wire change (VC-069's next step).
 func userIdentityGet(w http.ResponseWriter, r *http.Request, targetID string) {
 	ctx := r.Context()
 	var key string
 	err := db.Pool.QueryRow(ctx,
-		`SELECT public_key_b64 FROM identity_keys WHERE user_id = $1`, targetID).Scan(&key)
+		`SELECT public_key_b64 FROM identity_keys
+		  WHERE user_id = $1
+		  ORDER BY updated_at DESC, device_id
+		  LIMIT 1`, targetID).Scan(&key)
 	if err != nil {
 		if db.NoRows(err) {
 			httpx.Err(w, 404, "User has no identity key")
@@ -2530,8 +2546,33 @@ func userKeybundleGet(w http.ResponseWriter, r *http.Request, targetID string) {
 	remaining := 0
 
 	err := authTx(ctx, func(tx pgx.Tx) error {
+		// ONE DEVICE, AND ALL THREE PARTS FROM IT.
+		//
+		// These three reads used to be scoped to the account only, which was fine
+		// while an account had exactly one of each. Under migration 140 it becomes
+		// a silent correctness bug the moment a second device publishes: the
+		// identity key could come from device A, the signed prekey from device B
+		// and the one-time prekey from device C. X3DH would then derive a shared
+		// secret against a bundle that never existed on any device, AND the signed
+		// prekey's signature — made by its own device's identity key — would fail
+		// verification against A's. Every first message would break, with nothing
+		// in the bundle looking wrong.
+		//
+		// So the device is chosen FIRST and the other two reads are scoped to it.
+		//
+		// Chosen by most-recently-updated identity: for a single-device account
+		// that is the only row and behaviour is unchanged; for several it means
+		// "the device that most recently re-published", which is the best proxy
+		// for "most likely to be awake" that this schema carries. Returning EVERY
+		// device's bundle so the sender can fan out to all of them is the right
+		// end state and a wire change — VC-069's next step, not this one.
+		var deviceID string
 		err := tx.QueryRow(ctx,
-			`SELECT public_key_b64 FROM identity_keys WHERE user_id = $1`, targetID).Scan(&identityKey)
+			`SELECT device_id, public_key_b64
+	           FROM identity_keys
+	          WHERE user_id = $1
+	          ORDER BY updated_at DESC, device_id
+	          LIMIT 1`, targetID).Scan(&deviceID, &identityKey)
 		if err != nil {
 			if db.NoRows(err) {
 				missing = true
@@ -2545,9 +2586,9 @@ func userKeybundleGet(w http.ResponseWriter, r *http.Request, targetID string) {
 		err = tx.QueryRow(ctx,
 			`SELECT key_id, public_key_b64, signature_b64
 	           FROM signed_prekeys
-	          WHERE user_id = $1 AND retired_at IS NULL
+	          WHERE user_id = $1 AND device_id = $2 AND retired_at IS NULL
 	          ORDER BY created_at DESC
-	          LIMIT 1`, targetID).Scan(&spKeyID, &spPub, &spSig)
+	          LIMIT 1`, targetID, deviceID).Scan(&spKeyID, &spPub, &spSig)
 		if err == nil {
 			signedPreKey = map[string]any{"keyId": spKeyID, "publicKey": spPub, "signature": spSig}
 		} else if !db.NoRows(err) {
@@ -2560,10 +2601,10 @@ func userKeybundleGet(w http.ResponseWriter, r *http.Request, targetID string) {
 		err = tx.QueryRow(ctx,
 			`SELECT id, key_id, public_key_b64
 	           FROM one_time_prekeys
-	          WHERE user_id = $1 AND used_at IS NULL
+	          WHERE user_id = $1 AND device_id = $2 AND used_at IS NULL
 	          ORDER BY id
 	          FOR UPDATE SKIP LOCKED
-	          LIMIT 1`, targetID).Scan(&otpID, &otpKeyID, &otpPub)
+	          LIMIT 1`, targetID, deviceID).Scan(&otpID, &otpKeyID, &otpPub)
 		if err == nil {
 			if _, err := tx.Exec(ctx,
 				`UPDATE one_time_prekeys SET used_at = NOW() WHERE id = $1`, otpID); err != nil {
@@ -2574,9 +2615,14 @@ func userKeybundleGet(w http.ResponseWriter, r *http.Request, targetID string) {
 			return err
 		}
 
+		// Scoped to the device whose bundle we just handed out, since that is the
+		// pool this fetch drained. An account-wide count would let a healthy
+		// sibling device mask an exhausted one, and the exhausted device is the
+		// one whose next first-contact silently loses forward secrecy.
 		return tx.QueryRow(ctx,
-			`SELECT COUNT(*)::int AS n FROM one_time_prekeys WHERE user_id = $1 AND used_at IS NULL`,
-			targetID).Scan(&remaining)
+			`SELECT COUNT(*)::int AS n FROM one_time_prekeys
+			  WHERE user_id = $1 AND device_id = $2 AND used_at IS NULL`,
+			targetID, deviceID).Scan(&remaining)
 	})
 	if err != nil {
 		httpx.Err(w, 500, "Failed to load key bundle")
@@ -2597,6 +2643,25 @@ func userKeybundleGet(w http.ResponseWriter, r *http.Request, targetID string) {
 func userKeybundlePost(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := httpx.UserFrom(r).ID
+	// EVERY statement below is scoped to this device, and that is the whole fix.
+	//
+	// It used to be scoped to the ACCOUNT, so a second install by the same person
+	// — new phone, reinstall after a crash, cleared app data — overwrote their own
+	// identity key, deleted EVERY one-time prekey including the other device's,
+	// and retired the other device's signed prekey. Peers holding a session kept
+	// working until they re-keyed; new senders fetched the new bundle and the old
+	// device became unreachable. The user saw conversations stop decrypting with
+	// nothing explaining why. "One phone per user" was enforced here, not chosen.
+	//
+	// deviceID is the SIGNED `dev` claim (httpx.User.DeviceID), never the
+	// X-Device-Id header — a purge keyed on a header anyone can set would let one
+	// account delete another's prekeys.
+	//
+	// "" IS A VALID DEVICE, not an error: it is migration 140's legacy row, used
+	// by every client that predates the claim. Those clients keep hitting exactly
+	// the row they always did, so this change is invisible to them. Two devices
+	// only stop colliding once both send a real id.
+	deviceID := httpx.UserFrom(r).DeviceID
 	var b struct {
 		IdentityKey    any `json:"identityKey"`
 		SignedPreKey   any `json:"signedPreKey"`
@@ -2628,7 +2693,8 @@ func userKeybundlePost(w http.ResponseWriter, r *http.Request) {
 			var prevKey string
 			identityChanged := false
 			err := tx.QueryRow(ctx,
-				`SELECT public_key_b64 FROM identity_keys WHERE user_id = $1`, userID).Scan(&prevKey)
+				`SELECT public_key_b64 FROM identity_keys WHERE user_id = $1 AND device_id = $2`,
+				userID, deviceID).Scan(&prevKey)
 			if err == nil {
 				identityChanged = prevKey != ik
 			} else if !db.NoRows(err) {
@@ -2636,21 +2702,27 @@ func userKeybundlePost(w http.ResponseWriter, r *http.Request) {
 			}
 
 			if _, err := tx.Exec(ctx,
-				`INSERT INTO identity_keys (user_id, public_key_b64)
-	             VALUES ($1, $2)
-	             ON CONFLICT (user_id) DO UPDATE SET public_key_b64 = EXCLUDED.public_key_b64, updated_at = NOW()`,
-				userID, ik); err != nil {
+				`INSERT INTO identity_keys (user_id, device_id, public_key_b64)
+	             VALUES ($1, $2, $3)
+	             ON CONFLICT (user_id, device_id) DO UPDATE
+	               SET public_key_b64 = EXCLUDED.public_key_b64, updated_at = NOW()`,
+				userID, deviceID, ik); err != nil {
 				return err
 			}
 
 			if identityChanged {
+				// THIS DEVICE ONLY. Without the device_id clause these two lines are
+				// the bug: a reinstall wiped the sibling device's prekey pool and
+				// retired its signed prekey, leaving it unreachable to new senders.
 				if _, err := tx.Exec(ctx,
-					`DELETE FROM one_time_prekeys WHERE user_id = $1`, userID); err != nil {
+					`DELETE FROM one_time_prekeys WHERE user_id = $1 AND device_id = $2`,
+					userID, deviceID); err != nil {
 					return err
 				}
 				if _, err := tx.Exec(ctx,
-					`UPDATE signed_prekeys SET retired_at = NOW() WHERE user_id = $1 AND retired_at IS NULL`,
-					userID); err != nil {
+					`UPDATE signed_prekeys SET retired_at = NOW()
+	                  WHERE user_id = $1 AND device_id = $2 AND retired_at IS NULL`,
+					userID, deviceID); err != nil {
 					return err
 				}
 			}
@@ -2667,17 +2739,18 @@ func userKeybundlePost(w http.ResponseWriter, r *http.Request) {
 				}
 				if _, err := tx.Exec(ctx,
 					`UPDATE signed_prekeys SET retired_at = NOW()
-	                  WHERE user_id = $1 AND retired_at IS NULL`, userID); err != nil {
+	                  WHERE user_id = $1 AND device_id = $2 AND retired_at IS NULL`,
+					userID, deviceID); err != nil {
 					return err
 				}
 				if _, err := tx.Exec(ctx,
-					`INSERT INTO signed_prekeys (user_id, key_id, public_key_b64, signature_b64)
-	                 VALUES ($1, $2, $3, $4)
-	                 ON CONFLICT (user_id, key_id) DO UPDATE
+					`INSERT INTO signed_prekeys (user_id, device_id, key_id, public_key_b64, signature_b64)
+	                 VALUES ($1, $2, $3, $4, $5)
+	                 ON CONFLICT (user_id, device_id, key_id) DO UPDATE
 	                   SET public_key_b64 = EXCLUDED.public_key_b64,
 	                       signature_b64  = EXCLUDED.signature_b64,
 	                       retired_at     = NULL`,
-					userID, keyID, truncRunes(pub, 8192), truncRunes(sig, 8192)); err != nil {
+					userID, deviceID, keyID, truncRunes(pub, 8192), truncRunes(sig, 8192)); err != nil {
 					return err
 				}
 			}
@@ -2698,10 +2771,10 @@ func userKeybundlePost(w http.ResponseWriter, r *http.Request) {
 				return fmt.Errorf("fractional keyId")
 			}
 			if _, err := tx.Exec(ctx,
-				`INSERT INTO one_time_prekeys (user_id, key_id, public_key_b64)
-	             VALUES ($1, $2, $3)
-	             ON CONFLICT (user_id, key_id) DO NOTHING`,
-				userID, keyID, truncRunes(pub, 8192)); err != nil {
+				`INSERT INTO one_time_prekeys (user_id, device_id, key_id, public_key_b64)
+	             VALUES ($1, $2, $3, $4)
+	             ON CONFLICT (user_id, device_id, key_id) DO NOTHING`,
+				userID, deviceID, keyID, truncRunes(pub, 8192)); err != nil {
 				return err
 			}
 		}
@@ -2714,8 +2787,11 @@ func userKeybundlePost(w http.ResponseWriter, r *http.Request) {
 
 	var remaining int
 	if err := db.Pool.QueryRow(ctx,
-		`SELECT COUNT(*)::int AS n FROM one_time_prekeys WHERE user_id = $1 AND used_at IS NULL`,
-		userID).Scan(&remaining); err != nil {
+		// Per device: the client tops up ITS OWN pool, and an account-wide count
+		// would hide an exhausted device behind a healthy sibling.
+		`SELECT COUNT(*)::int AS n FROM one_time_prekeys
+		  WHERE user_id = $1 AND device_id = $2 AND used_at IS NULL`,
+		userID, deviceID).Scan(&remaining); err != nil {
 		httpx.Err(w, 500, "Failed to save key bundle")
 		return
 	}
