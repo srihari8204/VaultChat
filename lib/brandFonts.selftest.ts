@@ -111,7 +111,55 @@ check('Text.tsx still sets fontWeight only on the system fallback, never beside 
   /\.\.\.\(ready \? \{ fontFamily: t\.family \} : \{ fontWeight: t\.fontWeight \}\)/.test(textSrc),
   'the base style changed shape — re-read the 2026-09-17 comment in that file before "fixing" this');
 
+// ── 5. no CALLER style pairs a family with a weight ──────────────────────────
+// The ladder above only fires when the caller's style has no fontFamily of its
+// own (`merged.fontFamily == null`). A style that sets BOTH is therefore the one
+// shape it cannot rescue: Android gets a brand family plus a weight, hunts for a
+// weighted variant nobody registered, and falls back to Roboto — the brand face
+// lost exactly where emphasis was asked for.
+//
+// Deliberate non-brand families are fine and are what the allowlist is for:
+// monospace for things that must align in columns (coordinates, invite and sync
+// codes, chess notation) and the reader's user-chosen face. Those are choices,
+// not accidents — but they have to be NAMED here, so a new pairing has to argue
+// for itself in a diff instead of appearing silently.
+//
+// openspec: global-device-support task 4.2. That task named 22 sites and
+// components/ui/ChatRow.tsx, the tab bar and components/ui/Avatar.tsx in
+// particular; all three route through AppText with a bare fontWeight, so task
+// 4.1's weight ladder closed every one of them when it landed. This assertion is
+// what keeps them closed.
+const INTENTIONAL_NON_BRAND = /monospace|Menlo|Courier|fontFamily\s*,|fontFamily:\s*[a-z]/;
+const familyWeightPairs: string[] = [];
+for (const dir of ['app', 'components']) {
+  const walk = (d: string): string[] => readdirSync(join(ROOT, d), { withFileTypes: true })
+    .flatMap((e) => (e.isDirectory() ? walk(join(d, e.name))
+      : /\.tsx?$/.test(e.name) && !e.name.includes('selftest') ? [join(d, e.name)] : []));
+  for (const rel of walk(dir)) {
+    // Text.tsx is the ladder, not a caller of it: its `merged.fontWeight != null
+    // && merged.fontFamily == null` guards name both properties on one line by
+    // necessity. It has its own two assertions above, which are stricter.
+    if (rel.replace(/\\/g, '/').endsWith('components/ui/Text.tsx')) continue;
+    const src = readFileSync(join(ROOT, rel), 'utf8');
+    src.split(/\r?\n/).forEach((line, i) => {
+      if (!line.includes('fontFamily') || !line.includes('fontWeight')) return;
+      if (INTENTIONAL_NON_BRAND.test(line)) return;
+      familyWeightPairs.push(`${rel}:${i + 1}`);
+    });
+  }
+}
+check('no style pairs fontFamily with fontWeight (the one shape the ladder cannot rescue)',
+  familyWeightPairs.length === 0,
+  familyWeightPairs.length
+    ? `${familyWeightPairs.join(', ')} — drop the fontWeight and let AppText's ladder pick `
+      + `the face that IS that weight, or name the family in INTENTIONAL_NON_BRAND if it is `
+      + `deliberately not the brand face`
+    : '');
+
 // A guard that cannot fail is decoration.
+check('the family+weight matcher would notice a real pairing',
+  INTENTIONAL_NON_BRAND.test(`fontFamily: 'monospace', fontWeight: '700'`)
+  && !INTENTIONAL_NON_BRAND.test(`fontFamily: FONT.heading, fontWeight: '700'`));
 check('the disk matcher would notice a missing file', !onDisk.has('ThisFaceDoesNotExist_900Black'));
 check('the registration matcher would notice an unembedded family',
   !registered.has('ThisFaceDoesNotExist_900Black'));

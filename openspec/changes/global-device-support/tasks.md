@@ -101,7 +101,29 @@
       `body`, with weights below 600 simply dropping the weight). Closed by a commit that never
       updated this file; see `docs/BACKLOG_REBASELINE.md`. Task 4.4 below now proves the
       mapping can only resolve to faces that exist.
-- [ ] 4.2 Fix the 22 sites that currently defeat the brand face, starting with `components/ui/ChatRow.tsx` (the chat list changes typeface between read and unread), the tab bar, and `components/ui/Avatar.tsx`.
+- [x] 4.2 ~~Fix the 22 sites that currently defeat the brand face~~ — **CLOSED BY TASK 4.1,
+      verified site-by-site 2026-10-11.** All three sites this task names in particular route
+      through `AppText` with a *bare* `fontWeight` and no `fontFamily` of their own
+      (`ChatRow.tsx:149-152,167`, `(tabs)/_layout.tsx:185,204,209`, `Avatar.tsx:83`), which is
+      exactly the shape 4.1's weight ladder resolves. So the moment 4.1 landed, every one of
+      them began getting the brand face that IS the requested weight.
+
+      **The named symptom was also mis-diagnosed.** "The chat list changes typeface between
+      read and unread" is not what happens: `name` is `fontWeight: '600'` → `NunitoSans_600SemiBold`
+      and `nameUnread` is `'700'` → `NunitoSans_700Bold`. Same family, two weights — which is
+      what WhatsApp does, and is the intended design rather than a defect.
+
+      A full sweep of `app/` and `components/` for the one shape the ladder *cannot* rescue — a
+      style setting `fontFamily` AND `fontWeight` together, where the caller's own family
+      suppresses the ladder — found 6 sites and **all 6 are deliberate**: monospace for things
+      that must align in columns (`current-location.tsx` coordinates, `invite-link.tsx` and
+      `sync-contact.tsx` codes, `Chess.tsx` notation) and `reader.tsx`'s user-chosen face.
+
+      Closed with a guard rather than a claim: `lib/brandFonts.selftest.ts` section 5 now fails
+      on any new `fontFamily`+`fontWeight` pairing outside a named allowlist. Proven to fail —
+      a probe style `{ fontFamily: FONT.heading, fontWeight: '700' }` in `components/ui/` was
+      reported, and removing it returned the guard to green. `components/ui/Text.tsx` is
+      exempt because it is the ladder itself and carries two stricter assertions already.
 - [ ] 4.3 Reference bundled faces by names that resolve on both platforms; the current names resolve on Android only and would fall back to the system font on iOS. See design.md Open Questions on whether the iOS scenario can be exercised.
 - [x] 4.4 **DONE 2026-10-02** — `lib/brandFonts.selftest.ts`, widened from "the type scale" to
       the whole chain, because every link in it fails the same silent way:
