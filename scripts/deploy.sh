@@ -260,11 +260,26 @@ ok "box tree fingerprints $FP_SYNCED — matches local"
 # ───────────────────────────────────────────────────────────────────────────
 say "5/8  migrations (BEFORE the binary: the API queries columns these create)"
 # ───────────────────────────────────────────────────────────────────────────
-# Ordering is not stylistic. Every migration in this repo is additive — a new
-# nullable column or a new table — so the OLD binary tolerates the NEW schema
+# Ordering is not stylistic. Almost every migration in this repo is additive — a
+# new nullable column or a new table — so the OLD binary tolerates the NEW schema
 # and simply ignores what it does not know. The reverse is not true: a new
 # binary against an old schema queries a column that does not exist and 500s
 # every request that touches it. Schema first, always.
+#
+# 140 IS THE EXCEPTION, AND IT IS WORTH KNOWING ABOUT BEFORE THE NEXT ONE.
+# "Additive" held for every migration up to 139 and stopped holding at
+# 140_per_device_identity.sql, because a migration can add only columns and still
+# be non-additive at the CONSTRAINT level: 140 repoints the identity_keys primary
+# key to (user_id, device_id), so the pre-140 handler's `ON CONFLICT (user_id)`
+# matches no constraint and 500s. Measured 2026-10-11, not reasoned — the pre-fix
+# binary against a post-140 schema returned "500 Failed to save key bundle" on
+# the first publish.
+#
+# So for a migration like that the window is unavoidable in BOTH directions and
+# the only question is which one is shorter. Schema-first is still the right
+# default (its undo is a down file; code-first's undo is a second deploy), but do
+# not read the sentence above as a guarantee that the old binary is safe. Check
+# whether the migration touches a PK or a UNIQUE a live statement names.
 #
 # THERE IS NO AUTOMATIC DOWN, and pretending otherwise would be worse than
 # saying so. Each file runs in its OWN transaction with ON_ERROR_STOP, so a bad
