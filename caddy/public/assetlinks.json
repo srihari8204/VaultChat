@@ -5,7 +5,8 @@
       "namespace": "android_app",
       "package_name": "com.vaultchat.app",
       "sha256_cert_fingerprints": [
-        "5F:C1:97:FC:3F:09:F6:84:C6:86:1B:7E:58:76:BE:58:24:D4:AA:CB:BC:26:CC:30:9F:D6:4A:97:DC:79:1A:59"
+        "5F:C1:97:FC:3F:09:F6:84:C6:86:1B:7E:58:76:BE:58:24:D4:AA:CB:BC:26:CC:30:9F:D6:4A:97:DC:79:1A:59",
+        "69:03:8D:5F:C7:70:1B:55:E3:D0:0F:2E:9E:CE:4B:0C:6C:88:8C:29:FB:E8:CF:2C:5B:DB:F4:5B:D1:1A:60:08"
       ]
     }
   }

@@ -12,6 +12,31 @@
 # host nginx and took the site down. Hence backup, validate, recreate, verify
 # seven things, and roll the whole lot back on any failure.
 #
+# DO NOT RUN THIS UNTIL THE TWO THINGS BELOW ARE CHECKED (noted 2026-10-13).
+# Both predate the discovery that the live stack moved, and either one can take
+# the site down. Verified facts, not suspicions:
+#
+#  1. DEST BELOW IS PROBABLY THE WRONG TREE. The live stack is deployed from
+#     /home/srihari/vaultchat-clean under compose project "vaultchat" —
+#     scripts/deploy.sh's header documents this and says /home/srihari/vaultchat
+#     is a STALE checkout (git HEAD 2026-08-11). Staging files into the stale
+#     tree writes a file nothing serves, and the verify step below would then
+#     fail against the UNCHANGED endpoint and roll back. Confirm which tree the
+#     running caddy actually mounts /srv/public from before trusting DEST:
+#       docker inspect vaultchat-caddy-1 --format '{{json .Mounts}}'
+#
+#  2. THE COMPOSE INVOCATIONS ARE MISSING -f docker-compose.box.yml. Every
+#     `up -d caddy` here passes only docker-compose.yml and .prod.yml, and omits
+#     the box overlay — the same omission that, for go-api, would have dropped
+#     MSG91_AUTH_KEY and caused a total login outage. For caddy the risk is
+#     recreating it from a partial config, and this script's own header records
+#     that a previous `up -d caddy` could not bind :80 against the host nginx
+#     and TOOK THE SITE DOWN. Add the third -f, or do not recreate caddy.
+#
+# assetlinks.json is a STATIC FILE served by file_server, so changing it needs
+# no reload at all — scp it to the path caddy really mounts and it is live.
+# Recreating caddy to publish a JSON edit is the risky way to do a safe thing.
+#
 # Usage:  bash scripts/deploy-caddy-assetlinks.sh
 set -euo pipefail
 HOST="${VAULTCHAT_PROD_HOST:-root@65.21.229.167}"
@@ -59,8 +84,19 @@ i=$(code "$BASE/internal/emit");               [ "$i" = 404 ] && ok "/internal/*
 m=$(code "$BASE/vaultchat-media/");            [ "$m" = 403 ] && ok "media reaches MinIO"         || { bad "/media=$m";      fail=1; }
 a=$(code "$BASE/.well-known/assetlinks.json"); [ "$a" = 200 ] && ok "assetlinks served from file" || { bad "/assetlinks=$a"; fail=1; }
 
-curl -s --max-time 10 "$BASE/.well-known/assetlinks.json" | grep -q "5F:C1:97" \
-  && ok "assetlinks carries the fingerprint" || { bad "assetlinks body is wrong"; fail=1; }
+_al=$(curl -s --max-time 10 "$BASE/.well-known/assetlinks.json")
+printf '%s' "$_al" | grep -q "5F:C1:97" \
+  && ok "assetlinks carries the debug fingerprint" || { bad "assetlinks body is wrong"; fail=1; }
+# The RELEASE cert, and it is the one that matters. Checking only the debug
+# fingerprint is how this endpoint stayed green while being wrong for the
+# artifact people actually install: the manifest marks
+# https://api.corefinite.com/live/join autoVerify="true", so a cert that is not
+# listed here fails App Links verification SILENTLY and every Private Live
+# invitation opens a browser instead of the app. Nothing logs it.
+#   CN=VaultChat upload key, from:
+#   apksigner verify --print-certs android/app/build/outputs/apk/release/app-release.apk
+printf '%s' "$_al" | grep -q "69:03:8D:5F" \
+  && ok "assetlinks carries the RELEASE fingerprint" || { bad "assetlinks is missing the release cert — deep links will open a browser"; fail=1; }
 
 w=$(curl -s -o /dev/null -w '%{http_code}' --http1.1 --max-time 8 \
      -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
