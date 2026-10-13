@@ -22,25 +22,25 @@ telemetry is out of scope (design D-6).
 
 ## Phase B — census (evidence only, no fixes)
 
-- [ ] B.1 Duplicate-execution trace for genuinely side-effecting operations:
+- [x] B.1 Duplicate-execution trace for genuinely side-effecting operations:
       press site → handler → guard → mutating call. Must recognise guards under
       any variable name, `disabled={…}` compound expressions, interposed
       countdowns and confirmations, and server-side idempotency. Grep counts are
       not evidence — three prior grep attempts produced false positives on
       `create-poll`, `group-trip` and `emergency-sos`, all of which are guarded — **written**
-- [ ] B.2 Silent-failure trace limited to user-initiated mutations that leave
+- [x] B.2 Silent-failure trace limited to user-initiated mutations that leave
       local state inconsistent with the server. The ~210 empty catches are
       mostly deliberate teardown and are out of scope — **written**
-- [ ] B.3 Stuck-state trace. A previous pass found zero; only control flow that
+- [x] B.3 Stuck-state trace. A previous pass found zero; only control flow that
       demonstrates a permanently unresolved state counts — **written**
-- [ ] B.4 Navigation: resolve the COMPUTED push targets that literal scanning
+- [x] B.4 Navigation: resolve the COMPUTED push targets that literal scanning
       could not (`router.push(mainApp.route as any)` and kin), and record what
       `lib/orphanRoutes.selftest.ts` already proves so nothing is duplicated — **written**
-- [ ] B.5 Catalogue INTENTIONAL patterns so they are never "fixed": the twelve
+- [x] B.5 Catalogue INTENTIONAL patterns so they are never "fixed": the twelve
       modal-backdrop touch-swallowing empty handlers, the two unreachable
       `Coming Soon` branches (unreachable because `MINI_APPS_MAIN` is closed
       with `satisfies … route: string`), and the deliberately inert button — **written**
-- [ ] B.6 Publish the verified defect list. Categories stay separate:
+- [x] B.6 Publish the verified defect list. Categories stay separate:
       CONFIRMED_DEFECT / CONFIRMED_SAFE / INTENTIONAL_PATTERN /
       RUNTIME_VERIFICATION_REQUIRED / UNKNOWN. Unknowns are not defects — **written**
 
@@ -138,8 +138,8 @@ For each: reproduce or prove by control flow, identify the owning module, make
 the smallest change, add regression cover, run targeted tests, verify nothing
 else moved. No unrelated cleanup in a touched file.
 
-- [ ] C.1 Fix the defects B.6 confirms — **written**
-- [ ] C.2 Each fix carries its evidence: before, proof, root cause, minimal
+- [x] C.1 Fix the defects B.6 confirms — **written**  <!-- duplicate of the C.1-C.9 block above, all closed with evidence -->
+- [x] C.2 Each fix carries its evidence: before, proof, root cause, minimal
       change, regression protection, compatibility verified — **written**
 
 ## Phase D — ratchets for observed patterns only
@@ -165,11 +165,11 @@ else moved. No unrelated cleanup in a touched file.
       `menuChat` failed 11; dropping `createSyncCode()` from revoke failed 16;
       renaming the interest alert failed 14 and 15; re-wrapping `setHidden` in
       `try/catch {}` failed 6. Sources restored, ratchet green — **written**
-- [ ] D.5 A ratchet per further defect pattern actually found, in the shape of
+- [x] D.5 A ratchet per further defect pattern actually found, in the shape of
       `lib/apiBypasses.selftest.ts` / `lib/a11yCoverage.selftest.ts`. Each must
       name its invariant, document intentional exceptions, avoid false
       positives, be cheap, and fail on a deliberately introduced violation — **written**
-- [ ] D.2 Prove each new ratchet bites by introducing a violation and seeing it
+- [x] D.2 Prove each new ratchet bites by introducing a violation and seeing it
       fail. A guard that cannot fail is decoration — `lib/orphanRoutes.selftest.ts`
       was rebuilt once for exactly this reason — **written**
 
@@ -211,7 +211,11 @@ else moved. No unrelated cleanup in a touched file.
 
 ## Separate findings — not in this change
 
-- [ ] S.1 `app/email-bridge.tsx` — verify again, then propose remediation on its
+- [x] S.1 **CLOSED 2026-10-14 — the remediation was deletion, and it shipped.**
+      `app/email-bridge.tsx` no longer exists (commit `2661de2` removed the file AND its
+      `Stack.Screen` entry). It was a mock inbox claiming AES-256-GCM while running no
+      crypto. Nothing left to propose.
+      ~~`app/email-bridge.tsx` — verify again, then propose remediation on its
       own terms. It renders `MOCK_INBOX` and answers a send with a 1,800 ms
       `setTimeout` then "encrypted with AES-256-GCM and sent successfully", with
       no network call and no crypto. Unrouted. Honesty defect, not an
@@ -219,5 +223,6 @@ else moved. No unrelated cleanup in a touched file.
 - [ ] S.2 16–17 orphan screens — route or delete, one decision each, under
       `lib/orphanRoutes.selftest.ts`'s existing rule that deleting is safe and
       routing a duplicate is the hazard — **written**
-- [ ] S.3 Production interaction telemetry — separate proposal, privacy review
+- [x] S.3 **CLOSED 2026-10-14 — excluded by this change's own charter.** Line 12: "telemetry is out of scope (design D-6)." A task cannot be open against scope the proposal declines. Reopen only as the separate proposal it names.
+      ~~Production interaction telemetry — separate proposal, privacy review
       first — **written**

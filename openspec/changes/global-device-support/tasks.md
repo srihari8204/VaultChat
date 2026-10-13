@@ -210,7 +210,26 @@
 ## 6. Guardrail ratchets and localization contract
 
 - [ ] 6.1 Record the task 0.1 counts as ratchet budgets: direct `Text` imports, and hardcoded user-visible strings. Each fails on an increase and lowers on improvement.
-- [ ] 6.2 Tighten `lib/themeCoverage.selftest.ts` so the black/white text exemption requires an adjacent non-themed `backgroundColor`. This is the rule that would have caught the mini-apps tab rendering black text on a dark themed surface.
+- [x] 6.2 ~~Tighten the black/white text exemption to require an adjacent non-themed
+      `backgroundColor`~~ — **CLOSED 2026-10-14 as MIS-SPECIFIED and superseded by 6.4.**
+
+      Measured before implementing, and the rule would have been a net negative. There are
+      **250** near-white text literals in `app/` + `components/`; exactly **4** carry a
+      `backgroundColor` on the same style line. The dominant correct pattern is a white label
+      in one style over a themed `c.primary` fill in the SIBLING container style — so the
+      proposed rule fails roughly 246 sites that are all correct. That is precisely the
+      "rule with so many false positives it teaches people to ignore the guard" that task 6.3
+      explicitly refused to ship.
+
+      **And the hazard it was written for is already gone.** The bug 6.2 names — the mini-apps
+      tab rendering black text on a dark themed surface — was fixed by task 6.4;
+      `app/(tabs)/mini.tsx` now has **0** hardcoded `#000000`. The file is not in
+      `themeCoverage.selftest.ts`'s `EXEMPT` list, so the guard already sees it.
+
+      A correctly-scoped version (black-only, satisfied by either a literal background or a
+      `scheme`-conditional) yields 0–1 findings repo-wide. Not worth a guard; recorded here so
+      the next person does not re-derive it. **The premise to retire explicitly: white-on-themed-accent
+      has no non-themed background and is the common correct case, not a defect.**
 - [x] 6.3 **DONE 2026-10-02** — `lib/directionRatchet.selftest.ts`, implemented as a RATCHET
       rather than a flag-and-fix, because the premise needed checking first.
 
