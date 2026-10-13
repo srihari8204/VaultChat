@@ -31,7 +31,25 @@ import type { SecuritySignal, SecuritySignalType } from './riskEngine';
 // Debug builds are signed with debug.keystore and so will NOT match this. That
 // is correct and intended: the check answers "is this the build we shipped?",
 // and a developer's local build is not.
-export const EXPECTED_SIGNING_SHA256 = '5fc197fc3f09f684c6861b7e5876be5824d4aacbbc26cc309fd64a97dc791a59';
+//
+// ROTATED 2026-10-13, and the previous value shipped a BRICKED release build.
+// The keystore was regenerated on 2026-10-10 and this constant was not rotated
+// with it, so the release APK's own tamper check did not recognise the app:
+//
+//   APK_RESIGNED (weight 70, confidence 1.0) -> critical -> `wipe`
+//     -> wipeAllKeys() -> router.replace('/blocked'), back button disabled
+//
+// On EVERY launch including the first, for EVERY user — not just a dev handset.
+// Caught on a physical device 2026-10-13: the release build wiped its own keys
+// and showed "Security Alert / crazzychat Blocked — Unofficial Build".
+//
+// Verify this value against the artifact, never against the keystore alone —
+// the keystore is what you MEANT to sign with, the APK is what you DID:
+//   apksigner verify --print-certs android/app/build/outputs/apk/release/app-release.apk
+// then lowercase the SHA-256 digest and strip the colons.
+// lib/signingBaseline.selftest.ts asserts exactly that whenever a built APK is
+// present, so this cannot silently go stale again.
+export const EXPECTED_SIGNING_SHA256 = '69038d5fc7701b55e3d00f2e9ece4b0c6c888c29fbe8cf2c5bdbf45bd11a6008';
 
 // Accessibility services considered legitimate (prefix match on the flattened
 // "pkg/.Service" component name). Extend for OEM assistive tools you trust.
