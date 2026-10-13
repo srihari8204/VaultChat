@@ -873,7 +873,11 @@ const ChatRow = memo(function ChatRow({
       : t === 'sticker' ? 'Sticker'
       : textFallback;
     const mine = !!meId && lastMsg.senderId === meId;
-    return (mine ? 'You: ' : '') + label;
+    // No label means there is nothing to preview, so there is nothing to
+    // attribute either — a bare "You: " with empty space after it reads as a
+    // half-rendered row. Seen on the handset once the lock fallback above became
+    // a blank: the row said "You: " and stopped.
+    return label ? (mine ? 'You: ' : '') + label : '';
   })();
   const preview = draftText || previewBody;
 
