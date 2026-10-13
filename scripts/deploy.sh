@@ -392,6 +392,10 @@ DEPLOYED.  $FP_BOX
     tar xzf $BAK/vaultchat-backend-go.tgz -C $ROOT
     cd $ROOT && $DC build go-api && $DC up -d --no-deps go-api
 
-  Migrations applied in step 5 are NOT undone by that. They are additive, so the
-  previous binary tolerates them — which is exactly why they run first.
+  Migrations applied in step 5 are NOT undone by that, and do not assume the old
+  binary tolerates them. That held for every migration up to 139 and stopped at
+  140, which repoints the identity_keys primary key — so rolling the binary back
+  onto a post-140 schema 500s /user/keybundle. Measured, see step 5's comment.
+  Check whether the migrations you just applied touch a PK or a UNIQUE that a
+  live statement names; if they do, rolling back the binary alone is not safe.
 NOTE
