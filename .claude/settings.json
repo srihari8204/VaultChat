@@ -4,10 +4,10 @@
       "Read(//c/Users/ADMIN/AppData/Local/Temp/claude/c--Users-ADMIN-Desktop-Vaultchat-backup/94f8610e-ba70-4540-9989-ec8d1e6a10ce/tasks/**)",
       "Bash(bash scripts/deploy-nginx-keepalive.sh:*)",
       "Bash(bash scripts/deploy-caddy-assetlinks.sh:*)",
-      "Bash(bash scripts/deploy-backup-offsite.sh:*)"
-
-
-
+      "Bash(bash scripts/deploy-backup-offsite.sh:*)",
+      "Bash(bash scripts/deploy.sh:*)",
+      "Bash(ssh root@65.21.229.167 bash /tmp/apply140.sh)",
+      "Bash(SKIP_MIGRATIONS=1 bash scripts/deploy.sh:*)"
     ]
   }
 }
