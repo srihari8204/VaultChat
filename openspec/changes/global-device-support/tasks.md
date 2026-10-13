@@ -145,7 +145,28 @@
       "has no NunitoSans_500Medium.ttf", and dropping Sora_800ExtraBold from the embed list
       produced "on disk but never embedded". Current state: 5 declared faces, 5 files, 5
       embedded, 4 used by the type scale.
-- [ ] 4.5 Point `components/chat/chatStyles.ts` at the type scale — highest screens-fixed per line-touched in the repo. Do not migrate the remaining direct-`Text` files in this change; the ratchet in task 6 governs them.
+- [x] 4.5 **DONE 2026-10-14** — and the task understated it. It framed this as a type-scale
+      alignment; in fact `chatStyles.ts` had **no `fontFamily` at all** and 54 bare
+      `fontWeight`s, while its only two consumers (`app/chat.tsx:64`,
+      `components/chat/MessageBubble.tsx:33`) import `Text` from react-native — so task 4.1's
+      weight ladder never ran for any of it. The most-used surface in the app was rendering
+      in **Roboto**, both read and unread.
+
+      Each weight now resolves to the family that IS that weight, using 4.1's ladder
+      (>=700 bold, >=600 semibold, else regular) so chat matches the rest of the app instead
+      of inventing a second rule. 54 weights mapped, 45 sized-but-unweighted entries given
+      the regular face.
+
+      **Deliberately NOT done by swapping the import to `AppText`**, which is the obvious
+      two-line fix and is wrong here: `chatStyles` already multiplies every `fontSize` and
+      `lineHeight` by `v.textScale`/`v.lineScale` itself (`:173`, `:237`, `:324`), and
+      `AppText` layers `useVisionComfort` on top — the swap would double-scale text for
+      exactly the users who enlarged it to be able to read it. The scaling maths is untouched.
+
+      Nine icon/emoji styles keep the system font on purpose (`headerIcon`, `emojiGlyph`,
+      `audioPlayIcon`, `stickerEmoji`, `videoPlayIcon`, `viewOnceShieldIcon`, `fileIconTxt`,
+      `reactionChipEmoji`, `reactSheetEmoji`): Nunito Sans has no emoji coverage, so a text
+      family there risks tofu where a colour emoji belongs. A glyph is not text.
 - [~] 4.6 Remove the stale typography surface. **THREE OF FOUR DONE 2026-10-02.**
       - [x] The unused `@expo-google-fonts/{nunito-sans,sora}` dependencies — removed from
         `package.json`. Nothing imported them; the five `.ttf` files are committed under
