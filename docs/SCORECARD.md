@@ -53,8 +53,13 @@ paperwork and a 14-day tester clock, neither of which is engineering.
 | Multi-device | 6.5 | ↑ | The self-destruction bug is **closed and proven**: schema, claim and both keybundle endpoints are device-scoped, with two negative controls that fail on the old code. Cap is now the *feature*, not safety — `/user/{id}/keybundle` still returns ONE device, so a second install can register keys without being destroyed but nobody can send to it. Needs the all-devices fan-out (wire change) and client sessions keyed by (peer, device) — the long pole |
 | Distribution | 5.5 | ↑ | A real signed APK exists, is audited from the artifact, and is now **proven to run on a physical handset** (Nothing Phone A001, Android 16, cold start **1607 ms**): `CN=VaultChat`, v2, `allowBackup=false`, no debuggable, arm64-v8a, `libvaultcrypto.so` 2.4 MB present, 0 selftests, 0 sourcemaps (95.2 MB, v1.2.15/31). The first install revealed the signing-baseline brick, now fixed and guarded. Cap: no Play listing — registration plus 12 testers × 14 continuous days is 4–8 weeks of calendar nobody can compress; `eas.json`'s `production` profile still has no `android` block or `credentialsSource` and `submit.production` is `{}`; arm64-only, so a Play AAB needs the all-ABI build. The cutover cost is measured: a differently-signed APK is refused (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`, reproduced 2026-10-02), so uninstall is forced and app data is lost — survivable now that the server no longer destroys the account identity |
 
-Spec backlog: **949 done / 227 open** across 35 OpenSpec changes (81%) — but see `docs/BACKLOG_REBASELINE.md`: only ~100–110 of the 227 are genuine coding work. Roughly 60 of the
-227 are device-, vendor- or authorization-gated rather than coding work.
+Spec backlog: **204 open** across 35 OpenSpec changes (was 227). Re-baselined against the
+CODE, not the task text — see `docs/BACKLOG_REBASELINE.md`. Only ~100–110 are genuine coding
+work; roughly 60 are device-, vendor- or authorization-gated. The re-baseline keeps finding
+the same two things, so assume both of any unexamined task: **it may already be done**
+(`interaction-integrity` went 15 open → 3; 4.1, 4.2, VC-009, F03 were all already shipped),
+and **its stated symptom may be wrong** (4.2's "chat list changes typeface" was one family at
+two weights, i.e. correct; 6.2's rule would have failed ~246 correct sites).
 
 ---
 
