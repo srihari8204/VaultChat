@@ -7,7 +7,8 @@
       "Bash(bash scripts/deploy-backup-offsite.sh:*)",
       "Bash(bash scripts/deploy.sh:*)",
       "Bash(ssh root@65.21.229.167 bash /tmp/apply140.sh)",
-      "Bash(SKIP_MIGRATIONS=1 bash scripts/deploy.sh:*)"
+      "Bash(SKIP_MIGRATIONS=1 bash scripts/deploy.sh:*)",
+      "Bash(scp:*)"
     ]
   }
 }
