@@ -158,6 +158,44 @@ await B.runScheduledBackupIfDue();
 check('local + Drive still attempted after a cloud failure',
   H.calls.includes('local') && H.calls.includes('drive'), `called: [${H.calls}]`);
 
+// ── 3b. Wi-Fi-only must not mean "never" ──────────────────────────────────
+// The DEFAULT is frequency:'daily' + network:'wifi'. On a handset with Wi-Fi
+// switched off — the norm in this app's market, and measured on a real device
+// 2026-10-14 — that combination returned early on every run, forever, silently.
+// The account's backup read "Never" and the reinstall forced by the signing
+// cutover destroyed the whole local history with nothing to restore from.
+// So the FIRST backup ignores the policy and every later one honours it.
+console.log('\nWi-Fi-only never blocks the FIRST backup:');
+reset(settings({ frequency: 'daily', network: 'wifi', includeVideos: false, lastBackupAt: 0 }));
+H.net = { isConnected: true, type: 'cellular' };
+await B.runScheduledBackupIfDue();
+check('never-backed-up + Wi-Fi-only + cellular still reaches the server',
+  H.calls.includes('cloud'), `called: [${H.calls}]`);
+
+// …and the policy still bites once there IS something to lose.
+console.log('\nWi-Fi-only is honoured once a backup exists:');
+reset(settings({ frequency: 'daily', network: 'wifi', includeVideos: false,
+                 lastBackupAt: Date.now() - 3 * 24 * 60 * 60 * 1000 }));
+H.net = { isConnected: true, type: 'cellular' };
+await B.runScheduledBackupIfDue();
+check('already-backed-up + Wi-Fi-only + cellular waits for Wi-Fi',
+  H.calls.length === 0, `called: [${H.calls}]`);
+
+// A guard that cannot fail is decoration: the same due backup on Wi-Fi must run.
+reset(settings({ frequency: 'daily', network: 'wifi', includeVideos: false,
+                 lastBackupAt: Date.now() - 3 * 24 * 60 * 60 * 1000 }));
+H.net = { isConnected: true, type: 'wifi' };
+await B.runScheduledBackupIfDue();
+check('…but the same backup DOES run once on Wi-Fi',
+  H.calls.includes('cloud'), `called: [${H.calls}]`);
+
+// Offline is still offline, first backup or not.
+reset(settings({ frequency: 'daily', network: 'wifi', includeVideos: false, lastBackupAt: 0 }));
+H.net = { isConnected: false, type: 'none' };
+await B.runScheduledBackupIfDue();
+check('offline still skips, even for the first backup',
+  H.calls.length === 0, `called: [${H.calls}]`);
+
 // ── 4. the timer ──────────────────────────────────────────────────────────
 console.log('\nThe due-timer only advances on a backup that happened:');
 reset();
@@ -187,10 +225,19 @@ check('an off schedule uploads nothing', H.calls.length === 0, `called: [${H.cal
 // The bundle is the user's whole history; pushing it over cellular by default
 // would be a real bill. Wi-Fi-only must survive this change.
 console.log('\nWi-Fi-only is honoured (the bundle is the whole history):');
-reset();
+// UPDATED 2026-10-14. This case used to call reset() — i.e. lastBackupAt: 0 —
+// and assert that Wi-Fi-only blocks a cellular run. That assertion was correct
+// about the code and wrong about the product: with Wi-Fi off it blocked EVERY
+// run forever, so the account never had a backup at all and a reinstall lost
+// the entire history. See section 3b. The policy is still asserted here, but on
+// the only state where "wait for Wi-Fi" is a delay rather than a permanent
+// silent failure — a device that already HAS a backup to fall back on.
+reset(settings({ frequency: 'daily', network: 'wifi', includeVideos: false,
+                 lastBackupAt: Date.now() - 3 * 24 * 60 * 60 * 1000 }));
 H.net = { isConnected: true, type: 'cellular' };
 await B.runScheduledBackupIfDue();
-check('wifi-only + cellular uploads nothing', H.calls.length === 0, `called: [${H.calls}]`);
+check('wifi-only + cellular uploads nothing (when a backup already exists)',
+  H.calls.length === 0, `called: [${H.calls}]`);
 
 reset(settings({ frequency: 'daily', network: 'any', includeVideos: false, lastBackupAt: 0 }));
 H.net = { isConnected: true, type: 'cellular' };

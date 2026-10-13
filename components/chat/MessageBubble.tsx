@@ -1642,8 +1642,17 @@ function MessageBubble({
             // Scoped to text/poll on purpose. A media message legitimately has a
             // null body when it carries no caption; its bubble is the attachment,
             // which renders above this and must not be labelled unavailable.
+            // The wording is still only what is locally true — see above — but it
+            // no longer reads as an error report. "⧗ Message not available on this
+            // device" is a diagnostic: it names a device, implies a fault, and
+            // invites the user to wonder which device and whose fault. After a
+            // reinstall with no backup it rendered on EVERY message in the chat,
+            // so the screen looked broken rather than empty (handset, 2026-10-14).
+            // "Message unavailable" says the same thing and asks nothing of the
+            // reader. The real fix is upstream — a backup that exists, so this
+            // branch is never reached; see lib/backupScheduler.ts.
             <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, { fontStyle: 'italic', opacity: 0.7 }]}>
-              ⧗ Message not available on this device
+              Message unavailable
             </Text>
           ) : null
         )}

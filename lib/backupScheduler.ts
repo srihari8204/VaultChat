@@ -119,7 +119,27 @@ export async function runScheduledBackupIfDue(): Promise<void> {
     const net = await NetInfo.fetch();
     if (!net.isConnected) return;
     const onWifi = net.type === 'wifi';
-    if (s.network === 'wifi' && !onWifi) return; // Wi-Fi-only and not on Wi-Fi → wait
+
+    // THE FIRST BACKUP IGNORES THE Wi-Fi POLICY. Every later one respects it.
+    //
+    // "Wi-Fi-only" plus "has never backed up" is not a delay, it is a permanent
+    // silent failure, and it is the DEFAULT configuration. Measured on a real
+    // handset 2026-10-14: Wi-Fi disabled, always on cellular — so this line
+    // returned on every single run, the account's backup read "Never", and the
+    // reinstall forced by the release-signing cutover destroyed the entire local
+    // history with nothing to restore from. The chat list came back as a wall of
+    // "🔒 Encrypted message" and the chat as "Message not available on this
+    // device". Both strings are correct; they were describing an unrecoverable
+    // account. Mobile-data-first handsets are the norm in this app's market, so
+    // this is the common case, not an edge case.
+    //
+    // Waiting for Wi-Fi is a reasonable way to spend someone's data allowance on
+    // the SECOND backup onward. It is not a reasonable way to decide whether the
+    // user has any recoverable history at all. `includeVideos` is false by
+    // default, so the first bundle is the SQLite DB, the plaintext cache and
+    // prefs — small enough that the trade is not close.
+    const neverBackedUp = !s.lastBackupAt;
+    if (s.network === 'wifi' && !onWifi && !neverBackedUp) return;
 
     // CLOUD FIRST, because it is the only destination that survives a reinstall.
     //

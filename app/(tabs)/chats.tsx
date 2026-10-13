@@ -850,9 +850,19 @@ const ChatRow = memo(function ChatRow({
       return 'Tap to open chat';
     }
     const t = lastMsg.type;
-    // content is null for a text message whose ciphertext couldn't be decrypted
-    // (the cache layer withholds raw envelopes) — show a lock, never blank/JSON.
-    const textFallback = lastMsg.content || (chat.lastMessageId ? '🔒 Encrypted message' : '');
+    // content is null for a text message whose plaintext is not on THIS device —
+    // after a reinstall with no backup to restore, that is every message in every
+    // chat. It used to render '🔒 Encrypted message', so the whole list came back
+    // as a wall of identical locks and the app read as broken rather than empty.
+    // Seen on a real handset 2026-10-14, including on the user's OWN sent messages.
+    //
+    // A blank preview is what the row looks like for a brand-new chat, which is
+    // the honest shape of "there is nothing here to show you". The name, avatar,
+    // time and unread badge all still render, so the row is not empty — it just
+    // stops announcing an internal state the user can do nothing about. The thing
+    // that actually prevents this is a backup existing at all; see
+    // lib/backupScheduler.ts, where Wi-Fi-only no longer blocks the FIRST backup.
+    const textFallback = lastMsg.content || '';
     const label = t === 'image' ? '📷 Photo'
       : t === 'video' ? '🎥 Video'
       : t === 'audio' ? '🎙️ Voice message'
